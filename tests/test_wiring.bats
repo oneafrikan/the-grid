@@ -49,11 +49,25 @@ teardown() {
   [ -L "$MOCK_SKILLS/external-skill" ]
 }
 
-@test "wires skills found inside repos/ submodules" {
+@test "wires skills found inside repos/ submodules (flat)" {
   make_skill "$MOCK_GRID/repos/gstack/skill-gstack" "skill-gstack"
   GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/wire.sh"
   [ -L "$MOCK_SKILLS/skill-gstack" ]
   [ -d "$MOCK_SKILLS/skill-gstack" ]
+}
+
+@test "wires skills nested under skills/ subdir (mattpocock/superpowers style)" {
+  make_skill "$MOCK_GRID/repos/mattpocock/skills/engineering/skill-deep" "skill-deep"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/wire.sh"
+  [ -L "$MOCK_SKILLS/skill-deep" ]
+  [ -d "$MOCK_SKILLS/skill-deep" ]
+}
+
+@test "skips repo-root SKILL.md (gstack style)" {
+  mkdir -p "$MOCK_GRID/repos/gstack"
+  printf -- "---\nname: gstack\ndescription: repo root\n---\n" > "$MOCK_GRID/repos/gstack/SKILL.md"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/wire.sh"
+  [ ! -L "$MOCK_SKILLS/gstack" ]
 }
 
 @test "does not create symlinks for repos/ dir itself or tests/ dir" {

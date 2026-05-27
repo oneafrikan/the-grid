@@ -1,30 +1,39 @@
 #!/usr/bin/env bats
-# Tests for skill directory structure and SKILL.md frontmatter validity
-# Runs against actual the-grid content (not mocks)
+# Tests for skill directory structure and SKILL.md frontmatter validity.
+# all_wired_skill_dirs mirrors wire.sh's discovery logic exactly.
 
 GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
-EXCLUDED=("repos" "tests")
+EXCLUDED=(repos tests .git)
 
-# Returns all skill dirs at grid root and inside repos/, skipping excluded dirs
-all_skill_dirs() {
-  # Root-level skills
+# Returns every skill dir that wire.sh would actually wire.
+all_wired_skill_dirs() {
+  # Root-level skills (wire.sh step 2)
   for d in "$GRID_ROOT"/*/; do
     local name; name=$(basename "$d")
     [[ " ${EXCLUDED[*]} " == *" $name "* ]] && continue
-    [ -d "$d" ] && echo "$d"
+    [ -f "${d}SKILL.md" ] || continue
+    echo "${d%/}"
   done
-  # Skills inside repos/ submodules (one level deep)
-  find "$GRID_ROOT/repos" -mindepth 2 -maxdepth 2 -type d 2>/dev/null
+  # Repo skills (wire.sh step 3) — find at any depth, skip repo root SKILL.md
+  for repo_dir in "$GRID_ROOT/repos"/*/; do
+    [ -d "$repo_dir" ] || continue
+    local rd="${repo_dir%/}"
+    while IFS= read -r skill_md; do
+      local skill_dir; skill_dir=$(dirname "$skill_md")
+      [ "$skill_dir" = "$rd" ] && continue
+      echo "$skill_dir"
+    done < <(find "$rd" -name "SKILL.md" -not -path "*/.git/*")
+  done
 }
 
-@test "every skill directory contains a SKILL.md" {
+@test "every wired skill dir contains a SKILL.md" {
   local failed=0
   while IFS= read -r skill_dir; do
     if [ ! -f "$skill_dir/SKILL.md" ]; then
       echo "Missing SKILL.md: $skill_dir" >&3
       failed=1
     fi
-  done < <(all_skill_dirs)
+  done < <(all_wired_skill_dirs)
   [ "$failed" -eq 0 ]
 }
 
@@ -35,7 +44,7 @@ all_skill_dirs() {
       echo "Missing 'name:' in $skill_md" >&3
       failed=1
     fi
-  done < <(find "$GRID_ROOT" -name "SKILL.md" -not -path "*/tests/*")
+  done < <(find "$GRID_ROOT" -name "SKILL.md" -not -path "*/.git/*")
   [ "$failed" -eq 0 ]
 }
 
@@ -46,17 +55,21 @@ all_skill_dirs() {
       echo "Missing 'description:' in $skill_md" >&3
       failed=1
     fi
-  done < <(find "$GRID_ROOT" -name "SKILL.md" -not -path "*/tests/*")
+  done < <(find "$GRID_ROOT" -name "SKILL.md" -not -path "*/.git/*")
   [ "$failed" -eq 0 ]
 }
 
-@test "no duplicate skill names across the-grid and repos/" {
+@test "no duplicate skill names in root-level skills (skills we own)" {
+  # Only check skills at the-grid root — external repos may overlap intentionally.
   local all unique
-  all=$(find "$GRID_ROOT" -name "SKILL.md" -not -path "*/tests/*" \
-    -exec grep "^name:" {} \; | awk '{print $2}' | sort)
+  all=$(for d in "$GRID_ROOT"/*/; do
+    local name; name=$(basename "$d")
+    [[ " ${EXCLUDED[*]} " == *" $name "* ]] && continue
+    [ -f "${d}SKILL.md" ] && grep "^name:" "${d}SKILL.md" | awk '{print $2}'
+  done | sort)
   unique=$(echo "$all" | uniq)
   if [ "$all" != "$unique" ]; then
-    echo "Duplicate skill names:" >&3
+    echo "Duplicate skill names in root:" >&3
     diff <(echo "$all") <(echo "$unique") >&3
     return 1
   fi

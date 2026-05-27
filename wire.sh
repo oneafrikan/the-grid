@@ -46,15 +46,18 @@ for skill_dir in "$GRID_DIR"/*/; do
   wire_skill "$skill_dir"
 done
 
-# --- 3. Wire skills from repos/ submodules (one level deep) ---
+# --- 3. Wire skills from repos/ submodules ---
+# Uses find so it handles any nesting depth (flat, skills/, skills/category/, etc.)
+# Skips SKILL.md files sitting directly at the repo root (e.g. gstack's root SKILL.md).
 if [ -d "$GRID_DIR/repos" ]; then
   for repo_dir in "$GRID_DIR/repos"/*/; do
     [ -d "$repo_dir" ] || continue
-    for skill_dir in "$repo_dir"*/; do
-      [ -d "$skill_dir" ] || continue
-      [ -f "$skill_dir/SKILL.md" ] || continue
+    repo_dir="${repo_dir%/}"  # strip trailing slash for comparison
+    while IFS= read -r skill_md; do
+      skill_dir=$(dirname "$skill_md")
+      [ "$skill_dir" = "$repo_dir" ] && continue  # skip repo-root SKILL.md
       wire_skill "$skill_dir"
-    done
+    done < <(find "$repo_dir" -name "SKILL.md" -not -path "*/.git/*")
   done
 fi
 
