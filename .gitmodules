@@ -1,3 +1,18 @@
 [submodule "tests/lib/bats-core"]
 	path = tests/lib/bats-core
 	url = https://github.com/bats-core/bats-core.git
+[submodule "repos/mattpocock"]
+	path = repos/mattpocock
+	url = https://github.com/mattpocock/skills.git
+[submodule "repos/superpowers"]
+	path = repos/superpowers
+	url = https://github.com/obra/superpowers.git
+[submodule "repos/gstack"]
+	path = repos/gstack
+	url = https://github.com/garrytan/gstack.git
+[submodule "repos/jeffallan"]
+	path = repos/jeffallan
+	url = https://github.com/jeffallan/claude-skills.git
+[submodule "repos/anthropic"]
+	path = repos/anthropic
+	url = https://github.com/anthropics/skills.git
