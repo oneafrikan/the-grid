@@ -1,9 +1,9 @@
 # the-grid TODO
 
 ## Immediate
-- [ ] Write README.md — explain the concept, directory structure, and how to bootstrap on a new machine
-- [ ] Write CLAUDE.md — context for future sessions picking this repo up
-- [ ] Push to GitHub (gkwilderness account)
+- [x] Write README.md — explain the concept, directory structure, and how to bootstrap on a new machine
+- [x] Write CLAUDE.md — context for future sessions picking this repo up
+- [ ] Create GitHub repo (gkwilderness) and push
 
 ## Bootstrap
 - [ ] Add bootstrap script (`bootstrap.sh`) — clone the-grid, init submodules, run wire.sh in one command
