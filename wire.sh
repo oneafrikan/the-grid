@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # wire.sh — link skills from the-grid into the Claude skills directory.
 #
+# Precedence: root-level skills (yours) override same-named repo skills.
+# Order: repos wired first, root-level wired second so they win.
+#
 # Override defaults via env vars (used by tests):
 #   GRID_DIR    — root of the-grid repo  (default: directory of this script)
 #   SKILLS_DIR  — Claude skills directory (default: ~/.claude/skills)
@@ -26,27 +29,24 @@ while IFS= read -r link; do
 done < <(find "$SKILLS_DIR" -maxdepth 1 -type l 2>/dev/null)
 
 # Wire a skill directory to SKILLS_DIR.
+# Skips real directories (not symlinks) — those are not managed by the-grid.
 wire_skill() {
   local skill_dir="$1"
   local name
   name=$(basename "$skill_dir")
   local target="$SKILLS_DIR/$name"
 
+  if [ -d "$target" ] && [ ! -L "$target" ]; then
+    echo "  skip (real dir, not managed): $name"
+    return
+  fi
+
   # ln -sfn: -s symlink, -f force-replace, -n treat existing symlink-to-dir as file
   ln -sfn "$skill_dir" "$target"
   echo "  wired: $name"
 }
 
-# --- 2. Wire root-level skills ---
-for skill_dir in "$GRID_DIR"/*/; do
-  [ -d "$skill_dir" ] || continue
-  name=$(basename "$skill_dir")
-  [[ " ${EXCLUDED[*]} " == *" $name "* ]] && continue  # skip non-skill dirs
-  [ -f "$skill_dir/SKILL.md" ] || continue              # must be a valid skill
-  wire_skill "$skill_dir"
-done
-
-# --- 3. Wire skills from repos/ submodules ---
+# --- 2. Wire repo skills first (lower precedence) ---
 # Uses find so it handles any nesting depth (flat, skills/, skills/category/, etc.)
 # Skips SKILL.md files sitting directly at the repo root (e.g. gstack's root SKILL.md).
 if [ -d "$GRID_DIR/repos" ]; then
@@ -60,5 +60,14 @@ if [ -d "$GRID_DIR/repos" ]; then
     done < <(find "$repo_dir" -name "SKILL.md" -not -path "*/.git/*")
   done
 fi
+
+# --- 3. Wire root-level skills last (higher precedence — overrides repos) ---
+for skill_dir in "$GRID_DIR"/*/; do
+  [ -d "$skill_dir" ] || continue
+  name=$(basename "$skill_dir")
+  [[ " ${EXCLUDED[*]} " == *" $name "* ]] && continue  # skip non-skill dirs
+  [ -f "$skill_dir/SKILL.md" ] || continue              # must be a valid skill
+  wire_skill "$skill_dir"
+done
 
 echo "Done."
