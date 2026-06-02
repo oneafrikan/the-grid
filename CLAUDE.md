@@ -23,6 +23,20 @@ git submodule update --init
 bash wire.sh
 ```
 
+## Reconciling a machine (removing stale shadows)
+
+`wire.sh` won't clobber a *real* directory that shadows a grid skill (safety).
+On a fresh machine those shadows are often stale, root-owned copies. `reconcile.sh`
+removes them so the-grid owns the slot, then re-wires. It parses wire.sh's own
+`skip (real dir, not managed)` output, so it never hardcodes names.
+
+```bash
+bash reconcile.sh          # dry run — list shadowing dirs
+bash reconcile.sh --force  # remove them (sudo only where needed) + re-wire
+```
+
+Idempotent: a fully-wired machine reports "Nothing to reconcile".
+
 ## Running tests
 
 ```bash
