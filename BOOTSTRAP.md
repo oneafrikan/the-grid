@@ -7,8 +7,8 @@ How to get the-grid running on any machine — new or existing.
 ## New machine (fresh Claude Code install)
 
 ```bash
-# 1. Clone the-grid
-git clone git@github.com:gkwilderness/the-grid.git ~/.the-grid
+# 1. Clone the-grid (personal account is the owner)
+git clone git@github-personal:oneafrikan/the-grid.git ~/.the-grid
 
 # 2. Pull all skill submodules
 cd ~/.the-grid && git submodule update --init --recursive
@@ -23,26 +23,29 @@ That's it. All skills are live immediately — no restart needed.
 
 ## Existing machine (already has skills in ~/.claude/skills/)
 
-You may have skills as real directories that pre-date the-grid. Run wire.sh once:
+You may have skills as real directories that pre-date the-grid. First wire, then reconcile:
 
 ```bash
-bash ~/.the-grid/wire.sh
+bash ~/.the-grid/wire.sh        # wire all grid skills (skips real-dir shadows — safe)
+bash ~/.the-grid/reconcile.sh   # dry run — lists real dirs shadowing a grid skill
 ```
 
-wire.sh will **skip** any real directories it finds — it only manages symlinks. So
-your existing skills are safe. After that, check what's left as real dirs:
+wire.sh will **skip** any real directory that shadows a grid skill — it only manages
+symlinks, so nothing is clobbered. `reconcile.sh` then shows exactly which shadows remain.
+
+To make the machine match the-grid exactly, remove those shadows and re-wire:
 
 ```bash
-find ~/.claude/skills -maxdepth 1 -type d -not -name "skills"
+bash ~/.the-grid/reconcile.sh --force   # removes shadows (sudo only where needed) + re-wires
 ```
 
-For each real directory:
-- **If it matches a repo skill (e.g. mattpocock)**: diff it against the submodule version.
-  If identical, delete it (the symlink will serve it). If modified, move it to `~/.the-grid/`
-  so your version takes precedence.
-- **If it's custom** (not in any repo): move it to `~/.the-grid/`.
+`reconcile.sh` only ever removes a path that is a **real dir** (never a symlink) and that
+wire.sh itself flagged as shadowing a grid skill — so it can't delete anything custom that
+the-grid doesn't already provide. It's idempotent: a clean machine reports "Nothing to reconcile".
 
-Then re-run `bash ~/.the-grid/wire.sh`.
+> If a shadow is a skill you customised and want to keep, move it into `~/.the-grid/` first
+> (`mv ~/.claude/skills/<name> ~/.the-grid/<name>`) so it becomes a grid-owned skill before
+> reconciling.
 
 ---
 
