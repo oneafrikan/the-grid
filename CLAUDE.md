@@ -38,6 +38,8 @@ All 15 tests must stay green. Tests use temp dirs — they never touch the real 
 - Only manages symlinks that point into `GRID_DIR` — never touches foreign symlinks.
 - Skills in `repos/*/` are wired one level deep (repo → skill-dir → SKILL.md).
 
-## GitHub
+## About
 
-Repo: `git@github.com:gkwilderness/the-grid.git` (Wilderness account, default SSH host).
+the-grid is Gareth's brainchild — a personal, evolving system for organising and
+wiring up his Claude skills. Intended to eventually be a public repo. Treat it as
+an extension of how Gareth thinks and works, and keep it tidy as it grows.
