@@ -15,16 +15,41 @@ SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 # Dirs inside GRID_DIR that are never skills
 EXCLUDED=(repos tests .git)
 
+# --- Wiring allowlist ---------------------------------------------------------
+# Only submodules listed in wired-submodules.txt have their skills wired into
+# SKILLS_DIR. Every other repo under repos/ is library-only (indexed by
+# catalog.sh, not symlinked). If the file is absent, all repos are wired (legacy).
+# catalog.sh reads the SAME file to label wired vs library in SKILLS.md.
+WIRE_ALLOWLIST_FILE="$GRID_DIR/wired-submodules.txt"
+WIRED_REPOS=()
+wire_all_repos=1
+if [ -f "$WIRE_ALLOWLIST_FILE" ]; then
+  wire_all_repos=0
+  while IFS= read -r line; do
+    line="${line%%#*}"                       # strip trailing comment
+    line="$(echo "$line" | tr -d '[:space:]')"
+    [ -n "$line" ] && WIRED_REPOS+=("$line")
+  done < "$WIRE_ALLOWLIST_FILE"
+fi
+
+# Is a given submodule dir name in the wired set?
+repo_is_wired() {
+  [ "$wire_all_repos" -eq 1 ] && return 0
+  local n="$1" r
+  for r in "${WIRED_REPOS[@]:-}"; do [ "$r" = "$n" ] && return 0; done
+  return 1
+}
+
 mkdir -p "$SKILLS_DIR"
 
-# --- 1. Remove stale grid-owned symlinks ---
-# A symlink is grid-owned if its absolute target starts with GRID_DIR.
-# If the target no longer exists, the symlink is stale — remove it.
+# --- 1. Tear down ALL grid-owned symlinks (rebuilt below) ---
+# A symlink is grid-owned if its target is under GRID_DIR. We remove every one
+# and recreate only the wired set, so moving a repo to library-only actually
+# drops its links — not just broken/stale ones (their targets still exist).
+# Foreign symlinks (target outside GRID_DIR) are never touched.
 while IFS= read -r link; do
   target=$(readlink "$link")
   [[ "$target" == "$GRID_DIR"* ]] || continue   # not ours, leave it alone
-  [ -e "$link" ] && continue                     # still valid, leave it
-  echo "  remove stale: $(basename "$link")"
   rm "$link"
 done < <(find "$SKILLS_DIR" -maxdepth 1 -type l 2>/dev/null)
 
@@ -53,6 +78,7 @@ if [ -d "$GRID_DIR/repos" ]; then
   for repo_dir in "$GRID_DIR/repos"/*/; do
     [ -d "$repo_dir" ] || continue
     repo_dir="${repo_dir%/}"  # strip trailing slash for comparison
+    repo_is_wired "$(basename "$repo_dir")" || continue   # library-only: don't wire
     while IFS= read -r skill_md; do
       skill_dir=$(dirname "$skill_md")
       [ "$skill_dir" = "$repo_dir" ] && continue  # skip repo-root SKILL.md

@@ -19,3 +19,69 @@
 [submodule "repos/voltagent"]
 	path = repos/voltagent
 	url = git@github.com:VoltAgent/awesome-openclaw-skills.git
+[submodule "repos/clawhub"]
+	path = repos/clawhub
+	url = git@github.com:openclaw/clawhub.git
+[submodule "repos/openclaw"]
+	path = repos/openclaw
+	url = git@github.com:openclaw/openclaw.git
+[submodule "repos/voltagent-agent-skills"]
+	path = repos/voltagent-agent-skills
+	url = git@github.com:VoltAgent/awesome-agent-skills.git
+[submodule "repos/leoyeai"]
+	path = repos/leoyeai
+	url = git@github.com:LeoYeAI/openclaw-master-skills.git
+[submodule "repos/sjkncs"]
+	path = repos/sjkncs
+	url = git@github.com:sjkncs/awesome-openclaw-skills.git
+[submodule "repos/hesamsheikh"]
+	path = repos/hesamsheikh
+	url = git@github.com:hesamsheikh/awesome-openclaw-usecases.git
+[submodule "repos/wordpress"]
+	path = repos/wordpress
+	url = git@github.com:WordPress/agent-skills.git
+[submodule "repos/automattic"]
+	path = repos/automattic
+	url = git@github.com:Automattic/agent-skills.git
+[submodule "repos/automattic-wordpress"]
+	path = repos/automattic-wordpress
+	url = git@github.com:Automattic/wordpress-agent-skills.git
+[submodule "repos/sarai-wp-openclaw"]
+	path = repos/sarai-wp-openclaw
+	url = git@github.com:Sarai-Chinwag/wp-openclaw.git
+[submodule "repos/jdevalk"]
+	path = repos/jdevalk
+	url = git@github.com:jdevalk/skills.git
+[submodule "repos/robertbstillwell"]
+	path = repos/robertbstillwell
+	url = git@github.com:robertbstillwell/marketing-skills.git
+[submodule "repos/sebclawops"]
+	path = repos/sebclawops
+	url = git@github.com:sebclawops/openclaw-google-ads.git
+[submodule "repos/nowork-toprank"]
+	path = repos/nowork-toprank
+	url = git@github.com:nowork-studio/toprank.git
+[submodule "repos/mattberman-google-ads"]
+	path = repos/mattberman-google-ads
+	url = git@github.com:TheMattBerman/google-ads-copilot.git
+[submodule "repos/mattberman-meta-ads"]
+	path = repos/mattberman-meta-ads
+	url = git@github.com:TheMattBerman/meta-ads-kit.git
+[submodule "repos/amekala-ads-mcp"]
+	path = repos/amekala-ads-mcp
+	url = git@github.com:amekala/ads-mcp.git
+[submodule "repos/deanpeters"]
+	path = repos/deanpeters
+	url = git@github.com:deanpeters/Product-Manager-Skills.git
+[submodule "repos/paperclip"]
+	path = repos/paperclip
+	url = git@github.com:paperclipai/paperclip.git
+[submodule "repos/spillwave-astro"]
+	path = repos/spillwave-astro
+	url = git@github.com:spillwavesolutions/publishing-astro-websites-agentic-skill.git
+[submodule "repos/alirezarezvani"]
+	path = repos/alirezarezvani
+	url = git@github.com:alirezarezvani/claude-skills.git
+[submodule "repos/mozilla-bq-etl"]
+	path = repos/mozilla-bq-etl
+	url = git@github.com:mozilla/bigquery-etl-skills.git

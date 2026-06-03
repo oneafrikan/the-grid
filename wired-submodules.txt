@@ -1,0 +1,17 @@
+# Submodules whose skills are wired live into ~/.claude/skills.
+#
+# Every OTHER repo under repos/ is LIBRARY-ONLY: indexed in SKILLS.md and
+# searchable by skill-scout, but NOT symlinked into your active skill set.
+# This keeps the active set small while the-grid still indexes the whole
+# ecosystem (OpenClaw / Paperclip / agent repos / etc.).
+#
+# To promote a library repo to wired, add its repos/<name> dir name below and
+# re-run `bash wire.sh`. One name per line; # comments and blank lines ignored.
+#
+# (If this file is deleted, wire.sh falls back to wiring ALL repos — legacy.)
+
+anthropic
+gstack
+jeffallan
+mattpocock
+superpowers

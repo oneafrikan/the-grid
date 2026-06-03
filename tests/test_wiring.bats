@@ -75,3 +75,22 @@ teardown() {
   [ ! -L "$MOCK_SKILLS/repos" ]
   [ ! -L "$MOCK_SKILLS/tests" ]
 }
+
+@test "wired-submodules.txt allowlist: only listed repos are wired" {
+  make_skill "$MOCK_GRID/repos/wiredrepo/skill-w" "skill-w"
+  make_skill "$MOCK_GRID/repos/libraryrepo/skill-l" "skill-l"
+  printf 'wiredrepo\n' > "$MOCK_GRID/wired-submodules.txt"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/wire.sh"
+  [ -L "$MOCK_SKILLS/skill-w" ]      # allowlisted repo → wired
+  [ ! -e "$MOCK_SKILLS/skill-l" ]    # library repo → not wired
+  [ -L "$MOCK_SKILLS/skill-alpha" ]  # root skills always wired
+}
+
+@test "moving a repo to library un-wires its skills on re-run" {
+  make_skill "$MOCK_GRID/repos/r1/skill-x" "skill-x"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/wire.sh"
+  [ -L "$MOCK_SKILLS/skill-x" ]
+  printf 'otherrepo\n' > "$MOCK_GRID/wired-submodules.txt"   # r1 now library
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/wire.sh"
+  [ ! -e "$MOCK_SKILLS/skill-x" ]    # teardown-rebuild drops the now-library link
+}

@@ -5,6 +5,23 @@
 GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 EXCLUDED=(repos tests .git)
 
+# Wiring allowlist (mirror wire.sh): only these submodules are wired; the rest
+# are library-only (upstream community content we neither wire nor validate).
+WIRED_REPOS=(); wire_all_repos=1
+if [ -f "$GRID_ROOT/wired-submodules.txt" ]; then
+  wire_all_repos=0
+  while IFS= read -r line; do
+    line="${line%%#*}"; line="$(echo "$line" | tr -d '[:space:]')"
+    [ -n "$line" ] && WIRED_REPOS+=("$line")
+  done < "$GRID_ROOT/wired-submodules.txt"
+fi
+repo_is_wired() {
+  [ "$wire_all_repos" -eq 1 ] && return 0
+  local n="$1" r
+  for r in "${WIRED_REPOS[@]:-}"; do [ "$r" = "$n" ] && return 0; done
+  return 1
+}
+
 # Returns every skill dir that wire.sh would actually wire.
 all_wired_skill_dirs() {
   # Root-level skills (wire.sh step 2)
@@ -14,10 +31,11 @@ all_wired_skill_dirs() {
     [ -f "${d}SKILL.md" ] || continue
     echo "${d%/}"
   done
-  # Repo skills (wire.sh step 3) — find at any depth, skip repo root SKILL.md
+  # Repo skills (wire.sh step 3) — only wired (allowlisted) submodules.
   for repo_dir in "$GRID_ROOT/repos"/*/; do
     [ -d "$repo_dir" ] || continue
     local rd="${repo_dir%/}"
+    repo_is_wired "$(basename "$rd")" || continue
     while IFS= read -r skill_md; do
       local skill_dir; skill_dir=$(dirname "$skill_md")
       [ "$skill_dir" = "$rd" ] && continue
@@ -37,25 +55,27 @@ all_wired_skill_dirs() {
   [ "$failed" -eq 0 ]
 }
 
-@test "every SKILL.md has a name field" {
+# Frontmatter checks cover WIRED skills only — library repos are upstream
+# community content (often imperfect) that we index but never load.
+@test "every wired SKILL.md has a name field" {
   local failed=0
-  while IFS= read -r skill_md; do
-    if ! grep -q "^name:" "$skill_md"; then
-      echo "Missing 'name:' in $skill_md" >&3
+  while IFS= read -r skill_dir; do
+    if ! grep -q "^name:" "$skill_dir/SKILL.md"; then
+      echo "Missing 'name:' in $skill_dir/SKILL.md" >&3
       failed=1
     fi
-  done < <(find "$GRID_ROOT" -name "SKILL.md" -not -path "*/.git/*")
+  done < <(all_wired_skill_dirs)
   [ "$failed" -eq 0 ]
 }
 
-@test "every SKILL.md has a description field" {
+@test "every wired SKILL.md has a description field" {
   local failed=0
-  while IFS= read -r skill_md; do
-    if ! grep -q "^description:" "$skill_md"; then
-      echo "Missing 'description:' in $skill_md" >&3
+  while IFS= read -r skill_dir; do
+    if ! grep -q "^description:" "$skill_dir/SKILL.md"; then
+      echo "Missing 'description:' in $skill_dir/SKILL.md" >&3
       failed=1
     fi
-  done < <(find "$GRID_ROOT" -name "SKILL.md" -not -path "*/.git/*")
+  done < <(all_wired_skill_dirs)
   [ "$failed" -eq 0 ]
 }
 
