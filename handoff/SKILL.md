@@ -4,6 +4,7 @@ description: Compact the current conversation into a handoff document for anothe
 argument-hint: "What will the next session be used for?"
 ---
 
+## Session Handoff file (Gareth's SOP)
 Write a handoff document summarising the current conversation so a fresh agent can continue the work.
 Save it to the following path: `context/YYYY-MM-DD-handoff.md` (read the file before you write to it; if there is no directory then create it).
 
@@ -14,9 +15,9 @@ Do not duplicate content already captured in other artifacts (PRDs, plans, ADRs,
 If the user passed arguments, treat them as a description of what the next session will focus on and tailor the doc accordingly.
 
 ## Session context file (Gareth's SOP)
+Also write a `YYYY-MM-DD-context.md` using today's actual date & context.
 
-Also write a `YYYY-MM-DD-context.md` using today's actual date.
-
+## Document locations reference
 Location by project (look at the current path):
 - `guide-build` → `Logs/`
 - `guide-core` → `Logs/` if it exists, otherwise project root
