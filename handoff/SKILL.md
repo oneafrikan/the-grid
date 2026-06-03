@@ -4,7 +4,8 @@ description: Compact the current conversation into a handoff document for anothe
 argument-hint: "What will the next session be used for?"
 ---
 
-Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save it to a path produced by `mktemp -t handoff-XXXXXX.md` (read the file before you write to it).
+Write a handoff document summarising the current conversation so a fresh agent can continue the work.
+Save it to the following path: `context/YYYY-MM-DD-handoff.md` (read the file before you write to it; if there is no directory then create it).
 
 Suggest the skills to be used, if any, by the next session.
 
@@ -16,10 +17,10 @@ If the user passed arguments, treat them as a description of what the next sessi
 
 Also write a `YYYY-MM-DD-context.md` using today's actual date.
 
-Location by project:
+Location by project (look at the current path):
 - `guide-build` → `Logs/`
 - `guide-core` → `Logs/` if it exists, otherwise project root
-- `guide-engine` → `__LOGS/`
-- All others → `__LOGS/` (ask before creating if it doesn't exist)
+- `guide-engine` → `context/`
+- All others → `LOGS/` (ask before creating if it doesn't exist)
 
 Include: what was investigated and why, every decision and reasoning, field conventions, known bugs, key findings, open questions, immediate next actions. Commit it with the session's changes.
