@@ -37,8 +37,10 @@ Create a directory at the repo root with a `SKILL.md` inside it. Frontmatter req
 bash catalog.sh        # rewrites SKILLS.md from every SKILL.md's frontmatter
 ```
 
-Run it after adding/editing skills or updating submodules. Output is sorted and
+`wire.sh` calls `catalog.sh` automatically as its final step, so wiring and
+`SKILLS.md` never drift — you rarely need to run it by hand. Output is sorted and
 timestamp-free, so an unchanged skill set yields an identical file (clean diffs).
+A repo-root `SKILL.md` (gstack marker) is excluded, matching wire.sh.
 
 ## Adding a sibling repo
 
@@ -68,7 +70,7 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 17 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/`.
+All 24 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/`.
 
 ## wire.sh contract
 
