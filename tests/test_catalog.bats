@@ -45,7 +45,17 @@ teardown() {
 @test "count excludes repo-root markers" {
   GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/catalog.sh" "$OUT"
   # 3 real skills (alpha, beta, deep-skill); the repo-root marker is excluded.
-  grep -q '\*\*3 skills\*\*' "$OUT"
+  grep -q '\*\*3 skills indexed\*\*' "$OUT"
+}
+
+@test "labels wired vs library submodules from the allowlist" {
+  make_skill "$MOCK_GRID/repos/wiredrepo/sk-w" "sk-w"
+  make_skill "$MOCK_GRID/repos/libraryrepo/sk-l" "sk-l"
+  printf 'wiredrepo\n' > "$MOCK_GRID/wired-submodules.txt"
+  GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/catalog.sh" "$OUT"
+  grep -q '^## repos/wiredrepo (wired)' "$OUT"        # wired → full section
+  grep -q '^## Library submodules' "$OUT"             # library → counts section
+  grep -q -- '- \*\*repos/libraryrepo\*\* — 1 skills' "$OUT"
 }
 
 @test "treats a submodule with no skills as a reference, not an empty section" {

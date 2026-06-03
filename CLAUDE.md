@@ -1,8 +1,20 @@
 # the-grid — Claude context
 
-Skill management repo for Claude Code. Owns skills directly and pulls others
-from sibling repos via git submodules. `wire.sh` creates symlinks into
-`~/.claude/skills/` so Claude picks them up.
+the-grid is Gareth's wiring hub for the AI-agent ecosystem — Claude / OpenClaw /
+Paperclip / Hermes / opencode and friends. **It is not skills-only**: skills are
+the first asset type it wires, but the remit is broader (commands, agents, MCP
+servers, plugins, configs may follow). It owns some assets directly and pulls many
+more from sibling repos via git submodules.
+
+Today, `wire.sh` symlinks **skills** into `~/.claude/skills/` so Claude picks them
+up. To keep the active set sane while still indexing the whole ecosystem, the-grid
+splits submodules into two tiers:
+
+- **Wired** — a small curated allowlist (`wired-submodules.txt`) whose skills are
+  symlinked live into `~/.claude/skills/`.
+- **Library** — everything else: indexed in `SKILLS.md` and searchable by
+  `skill-scout`, but **not** wired (so a session isn't drowned in thousands of
+  skills). Promote a library repo to wired by adding its name to the allowlist.
 
 ## What lives where (ownership principle)
 
@@ -19,10 +31,13 @@ from sibling repos via git submodules. `wire.sh` creates symlinks into
 
 ## Key files
 
-- `wire.sh` — the wiring script. Idempotent. Safe to re-run after any change.
-- `catalog.sh` — regenerates `SKILLS.md`, a human-readable catalogue of every
-  wired skill (name + summary, grouped by source). Deterministic output.
-- `SKILLS.md` — generated reference list of all skills. Never edit by hand.
+- `wire.sh` — the wiring script. Idempotent. Tears down all grid-owned symlinks
+  and rebuilds the wired set each run (so un-wiring a repo actually removes it).
+- `wired-submodules.txt` — the allowlist of submodules whose skills are wired live.
+  Anything not listed is library-only. Delete the file to wire everything (legacy).
+- `catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
+  repos as counts, reference (no-skill) repos in a footer. Deterministic output.
+- `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
 - `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
 - `TODO.md` — current outstanding work.
@@ -49,6 +64,11 @@ git submodule add <repo-url> repos/<name>
 git submodule update --init
 bash wire.sh
 ```
+
+A newly added submodule is **library by default** (indexed, not wired). To wire its
+skills live, add its `repos/<name>` dir name to `wired-submodules.txt` and re-run
+`bash wire.sh`. This keeps `~/.claude/skills/` small even as the-grid indexes
+thousands of ecosystem skills.
 
 ### Reference submodules (indexes, not skill collections)
 
@@ -80,7 +100,7 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 25 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/`.
+All 28 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/`.
 
 ## wire.sh contract
 
@@ -90,6 +110,9 @@ All 25 tests must stay green. Tests use temp dirs — they never touch the real 
 - Skills in `repos/*/` are discovered at **any depth** via `find` (flat, `skills/`,
   `skills/<category>/`, etc.) — wire.sh symlinks each dir containing a `SKILL.md`,
   skipping a `SKILL.md` sitting at a repo root.
+- Only submodules in `wired-submodules.txt` are wired; the rest are library-only.
+  If the file is absent, all repos are wired (legacy fallback). `catalog.sh` reads
+  the same file to label wired vs library.
 
 ## About
 
