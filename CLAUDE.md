@@ -4,6 +4,19 @@ Skill management repo for Claude Code. Owns skills directly and pulls others
 from sibling repos via git submodules. `wire.sh` creates symlinks into
 `~/.claude/skills/` so Claude picks them up.
 
+## What lives where (ownership principle)
+
+- **Root-level dirs are for skills Gareth owns or has edited for his own purposes.**
+  Only put a skill at the repo root if it's original to the-grid, or if it's an
+  upstream skill that's been deliberately forked/edited and must not track upstream.
+- **Everything else is managed upstream** in `repos/*` submodules and wired on
+  demand. Don't copy an upstream skill into the root just to use it — the submodule
+  copy gets wired automatically.
+- If a root skill is byte-identical to (or merely an older snapshot of) a submodule
+  copy, it's redundant: delete the root dir and let the submodule own the slot.
+- When root and submodule both provide the same skill name, **the root copy wins**
+  (wire.sh wires repos first, root last). That's the escape hatch for an edited fork.
+
 ## Key files
 
 - `wire.sh` — the wiring script. Idempotent. Safe to re-run after any change.
@@ -43,14 +56,16 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 15 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/`.
+All 17 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/`.
 
 ## wire.sh contract
 
 - `GRID_DIR` env var overrides the repo root (default: script's own directory).
 - `SKILLS_DIR` env var overrides the target (default: `~/.claude/skills/`).
 - Only manages symlinks that point into `GRID_DIR` — never touches foreign symlinks.
-- Skills in `repos/*/` are wired one level deep (repo → skill-dir → SKILL.md).
+- Skills in `repos/*/` are discovered at **any depth** via `find` (flat, `skills/`,
+  `skills/<category>/`, etc.) — wire.sh symlinks each dir containing a `SKILL.md`,
+  skipping a `SKILL.md` sitting at a repo root.
 
 ## About
 
