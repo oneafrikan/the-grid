@@ -70,4 +70,11 @@ for skill_dir in "$GRID_DIR"/*/; do
   wire_skill "$skill_dir"
 done
 
+# --- 4. Refresh the skill catalogue so wiring and SKILLS.md never drift ---
+# Coupled on purpose: any change to what's wired re-renders the catalogue.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/catalog.sh" ]; then
+  GRID_DIR="$GRID_DIR" bash "$SCRIPT_DIR/catalog.sh" "$GRID_DIR/SKILLS.md"
+fi
+
 echo "Done."
