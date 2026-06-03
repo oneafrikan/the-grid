@@ -16,3 +16,6 @@
 [submodule "repos/anthropic"]
 	path = repos/anthropic
 	url = https://github.com/anthropics/skills.git
+[submodule "repos/voltagent"]
+	path = repos/voltagent
+	url = git@github.com:VoltAgent/awesome-openclaw-skills.git

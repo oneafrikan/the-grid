@@ -211,3 +211,9 @@
 - **writing-plans** — Use when you have a spec or requirements for a multi-step task, before touching code
 - **writing-skills** — Use when creating new skills, editing existing skills, or verifying skills work before deployment
 
+## Reference submodules (no wired skills)
+
+Kept for reference — these are indexes/awesome-lists, not skill collections:
+
+- **repos/voltagent**
+

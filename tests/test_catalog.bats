@@ -48,6 +48,15 @@ teardown() {
   grep -q '\*\*3 skills\*\*' "$OUT"
 }
 
+@test "treats a submodule with no skills as a reference, not an empty section" {
+  mkdir -p "$MOCK_GRID/repos/refindex"
+  printf '# just an index\n' > "$MOCK_GRID/repos/refindex/README.md"
+  GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/catalog.sh" "$OUT"
+  ! grep -q '^## repos/refindex' "$OUT"            # no skill section
+  grep -q 'Reference submodules' "$OUT"            # listed under the footer
+  grep -q -- '- \*\*repos/refindex\*\*' "$OUT"
+}
+
 @test "generating twice is idempotent (byte-identical)" {
   GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/catalog.sh" "$OUT"
   cp "$OUT" "$MOCK_SKILLS/first.md"

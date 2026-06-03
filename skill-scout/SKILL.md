@@ -15,8 +15,8 @@ user adds skills via the-grid's normal flow (`git submodule add … && bash wire
 
 ## Sources
 
-These directories already rank skills by popularity, so we just read their
-ranked listing rather than calling any API.
+**Ranked directories** — already sorted by popularity, so we just read the
+listing rather than calling any API:
 
 - **skills.sh** — homepage leaderboard at <https://www.skills.sh/>. Shows skills
   ranked by installs (tabs: All Time / Trending (24h) / Hot). Use the **All Time**
@@ -27,6 +27,14 @@ ranked listing rather than calling any API.
   Top 50 skills ranked by combined installs + views, server-rendered (one fetch
   returns the ranked list). Each row gives skill name, owner, installs, and views.
   Rank on installs; treat views as a tiebreaker only.
+
+**Local index** — a submodule checked out under `repos/`, so no network is needed:
+
+- **repos/voltagent** — VoltAgent's `awesome-openclaw-skills`: a categorised index
+  of 5,000+ OpenClaw-ecosystem skills as markdown link lists in `categories/*.md`
+  (pointing at clawskills.sh). **Not install-ranked, and a different ecosystem** —
+  treat it as browse-by-topic, not a leaderboard. Keep it fresh with
+  `git submodule update --remote repos/voltagent` before scouting.
 
 <!-- Vetted but UNCONFIRMED candidates — verify each fetches cleanly (ranked list,
      not a JS-only shell or rate-limited stub) before promoting into the list above:
@@ -40,9 +48,13 @@ ranked listing rather than calling any API.
 
 ## How to run
 
-1. **Fetch the ranked listing.** WebFetch each source's listing page and pull out
-   the ranked rows: skill name, popularity number (installs/stars), and source
-   `owner/repo`. Normalise install counts ("1.8M" → 1_800_000) so they sort.
+1. **Gather candidates.**
+   - *Ranked web directories:* WebFetch each listing page and pull the ranked rows
+     — skill name, popularity number (installs), and source `owner/repo`. Normalise
+     install counts ("1.8M" → 1_800_000) so they sort.
+   - *Local index (`repos/voltagent`):* read `categories/*.md` directly and collect
+     the linked skills with their category and one-line blurb. These have no install
+     count — keep them in a separate, unranked pile.
 
 2. **Load what the-grid already has.** From the repo root (`GRID_DIR`, default the
    repo this skill lives in):
@@ -56,8 +68,8 @@ ranked listing rather than calling any API.
    carries. Matching is case-insensitive; compare on the bare skill name
    (ignore `owner/` prefixes) and on the `owner/repo` source.
 
-4. **Rank and propose.** Sort the survivors by install count, descending. Present
-   the top ~15 as a table:
+4. **Rank and propose.** Sort the ranked-directory survivors by install count,
+   descending. Present the top ~15 as a table:
 
    | Skill | Installs | Source (owner/repo) | Why it fits the-grid |
    |-------|---------:|---------------------|----------------------|
@@ -65,6 +77,11 @@ ranked listing rather than calling any API.
    For "Why it fits", write one honest line tying it to how Gareth works
    (dev workflow, debugging, git, planning, testing, infra/ops). If a candidate
    is a poor fit, say so plainly rather than inventing a reason — or omit it.
+
+   Then, **separately**, surface a handful of relevant picks from the local index
+   (`repos/voltagent`) grouped by category — no install column, since it isn't
+   ranked. Flag that these are OpenClaw-ecosystem skills worth a manual look, not
+   ranked recommendations.
 
 5. **Hand off, don't act.** End with the exact commands the user would run to add
    any they pick, but **do not run them**:

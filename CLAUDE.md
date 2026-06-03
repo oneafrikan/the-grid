@@ -50,6 +50,16 @@ git submodule update --init
 bash wire.sh
 ```
 
+### Reference submodules (indexes, not skill collections)
+
+Some submodules are awesome-lists / indexes with **no `SKILL.md` files** (e.g.
+`repos/voltagent` — VoltAgent's `awesome-openclaw-skills`, a categorised index of
+OpenClaw-ecosystem skills). These are kept for browsing and as a source for
+`skill-scout`, not for wiring. They need no special config: wire.sh wires nothing
+from them (no skills to find), and catalog.sh auto-detects the empty case and lists
+them under "Reference submodules" in `SKILLS.md` instead of an empty skill section.
+Refresh one with `git submodule update --remote repos/<name>`.
+
 ## Reconciling a machine (removing stale shadows)
 
 `wire.sh` won't clobber a *real* directory that shadows a grid skill (safety).
@@ -70,7 +80,7 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 24 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/`.
+All 25 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/`.
 
 ## wire.sh contract
 

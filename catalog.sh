@@ -130,12 +130,31 @@ total=$((all_md - repo_roots))
     done
   )
 
-  # Each submodule as its own section, alphabetical.
+  # Each submodule as its own section, alphabetical. A submodule with no
+  # SKILL.md (an awesome-list / index repo) isn't a skill source — it's kept
+  # for reference but listed separately, not catalogued as skills.
+  reference_repos=()
   for repo in "$GRID_DIR"/repos/*/; do
     [ -d "$repo" ] || continue
     name="$(basename "$repo")"
-    emit_section "repos/$name" < <(find_skills "$repo")
+    paths=()
+    while IFS= read -r p; do [ -n "$p" ] && paths+=("$p"); done < <(find_skills "$repo")
+    if [ "${#paths[@]}" -eq 0 ]; then
+      reference_repos+=("$name")
+      continue
+    fi
+    emit_section "repos/$name" < <(printf '%s\n' "${paths[@]}")
   done
+
+  # Footer: reference-only submodules (indexes with nothing to wire).
+  if [ "${#reference_repos[@]}" -gt 0 ]; then
+    printf '## Reference submodules (no wired skills)\n\n'
+    printf 'Kept for reference — these are indexes/awesome-lists, not skill collections:\n\n'
+    printf '%s\n' "${reference_repos[@]}" | sort -f | while IFS= read -r r; do
+      printf -- '- **repos/%s**\n' "$r"
+    done
+    printf '\n'
+  fi
 } > "$OUT"
 
 echo "Wrote $OUT ($total skills)."
