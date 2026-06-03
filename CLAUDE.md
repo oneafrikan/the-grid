@@ -20,6 +20,9 @@ from sibling repos via git submodules. `wire.sh` creates symlinks into
 ## Key files
 
 - `wire.sh` — the wiring script. Idempotent. Safe to re-run after any change.
+- `catalog.sh` — regenerates `SKILLS.md`, a human-readable catalogue of every
+  wired skill (name + summary, grouped by source). Deterministic output.
+- `SKILLS.md` — generated reference list of all skills. Never edit by hand.
 - `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
 - `TODO.md` — current outstanding work.
@@ -27,6 +30,15 @@ from sibling repos via git submodules. `wire.sh` creates symlinks into
 ## Adding a skill
 
 Create a directory at the repo root with a `SKILL.md` inside it. Frontmatter requires `name:` and `description:`. Then run `bash wire.sh`.
+
+## Regenerating the skill catalogue
+
+```bash
+bash catalog.sh        # rewrites SKILLS.md from every SKILL.md's frontmatter
+```
+
+Run it after adding/editing skills or updating submodules. Output is sorted and
+timestamp-free, so an unchanged skill set yields an identical file (clean diffs).
 
 ## Adding a sibling repo
 
