@@ -19,24 +19,51 @@ EXCLUDED=(repos tests .git)
 # Only submodules listed in wired-submodules.txt have their skills wired into
 # SKILLS_DIR. Every other repo under repos/ is library-only (indexed by
 # catalog.sh, not symlinked). If the file is absent, all repos are wired (legacy).
+#
+# Two entry formats are supported:
+#   repo-name          → wire ALL skills in that submodule (existing behaviour)
+#   repo-name/skill    → wire ONLY that specific skill (granular control)
+#
 # catalog.sh reads the SAME file to label wired vs library in SKILLS.md.
 WIRE_ALLOWLIST_FILE="$GRID_DIR/wired-submodules.txt"
-WIRED_REPOS=()
+WIRED_REPOS=()   # whole-repo entries
+WIRED_SKILLS=()  # repo/skill-name entries
 wire_all_repos=1
 if [ -f "$WIRE_ALLOWLIST_FILE" ]; then
   wire_all_repos=0
   while IFS= read -r line; do
     line="${line%%#*}"                       # strip trailing comment
     line="$(echo "$line" | tr -d '[:space:]')"
-    [ -n "$line" ] && WIRED_REPOS+=("$line")
+    [ -z "$line" ] && continue
+    if [[ "$line" == */* ]]; then
+      WIRED_SKILLS+=("$line")              # per-skill entry
+    else
+      WIRED_REPOS+=("$line")              # whole-repo entry
+    fi
   done < "$WIRE_ALLOWLIST_FILE"
 fi
 
-# Is a given submodule dir name in the wired set?
+# Is a given submodule dir name fully wired (whole-repo entry)?
 repo_is_wired() {
   [ "$wire_all_repos" -eq 1 ] && return 0
   local n="$1" r
   for r in "${WIRED_REPOS[@]:-}"; do [ "$r" = "$n" ] && return 0; done
+  return 1
+}
+
+# Is a specific skill (repo, skill-name) listed in WIRED_SKILLS?
+skill_is_wired() {
+  local entry="$1/$2" s
+  for s in "${WIRED_SKILLS[@]:-}"; do [ "$s" = "$entry" ] && return 0; done
+  return 1
+}
+
+# Does this repo have any per-skill entries in WIRED_SKILLS?
+repo_has_skill_entries() {
+  local repo="$1" s
+  for s in "${WIRED_SKILLS[@]:-}"; do
+    [[ "$s" == "$repo/"* ]] && return 0
+  done
   return 1
 }
 
@@ -74,16 +101,32 @@ wire_skill() {
 # --- 2. Wire repo skills first (lower precedence) ---
 # Uses find so it handles any nesting depth (flat, skills/, skills/category/, etc.)
 # Skips SKILL.md files sitting directly at the repo root (e.g. gstack's root SKILL.md).
+# Supports two wiring modes per repo:
+#   whole-repo  — repo_is_wired() true: wire every skill found
+#   per-skill   — repo_has_skill_entries() true: wire only the explicitly listed skills
 if [ -d "$GRID_DIR/repos" ]; then
   for repo_dir in "$GRID_DIR/repos"/*/; do
     [ -d "$repo_dir" ] || continue
-    repo_dir="${repo_dir%/}"  # strip trailing slash for comparison
-    repo_is_wired "$(basename "$repo_dir")" || continue   # library-only: don't wire
-    while IFS= read -r skill_md; do
-      skill_dir=$(dirname "$skill_md")
-      [ "$skill_dir" = "$repo_dir" ] && continue  # skip repo-root SKILL.md
-      wire_skill "$skill_dir"
-    done < <(find "$repo_dir" -name "SKILL.md" -not -path "*/.git/*")
+    repo_dir="${repo_dir%/}"
+    repo_name="$(basename "$repo_dir")"
+
+    if repo_is_wired "$repo_name"; then
+      # Wire all skills in this repo (whole-repo entry).
+      while IFS= read -r skill_md; do
+        skill_dir=$(dirname "$skill_md")
+        [ "$skill_dir" = "$repo_dir" ] && continue
+        wire_skill "$skill_dir"
+      done < <(find "$repo_dir" -name "SKILL.md" -not -path "*/.git/*")
+    elif repo_has_skill_entries "$repo_name"; then
+      # Wire only the skills explicitly listed (per-skill entries).
+      while IFS= read -r skill_md; do
+        skill_dir=$(dirname "$skill_md")
+        [ "$skill_dir" = "$repo_dir" ] && continue
+        skill_is_wired "$repo_name" "$(basename "$skill_dir")" || continue
+        wire_skill "$skill_dir"
+      done < <(find "$repo_dir" -name "SKILL.md" -not -path "*/.git/*")
+    fi
+    # else: library-only — don't wire anything
   done
 fi
 

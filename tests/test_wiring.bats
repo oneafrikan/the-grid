@@ -94,3 +94,23 @@ teardown() {
   GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/wire.sh"
   [ ! -e "$MOCK_SKILLS/skill-x" ]    # teardown-rebuild drops the now-library link
 }
+
+@test "per-skill entry wires only the named skill, not others in the same repo" {
+  make_skill "$MOCK_GRID/repos/myrepo/skill-one" "skill-one"
+  make_skill "$MOCK_GRID/repos/myrepo/skill-two" "skill-two"
+  printf 'myrepo/skill-one\n' > "$MOCK_GRID/wired-submodules.txt"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/wire.sh"
+  [ -L "$MOCK_SKILLS/skill-one" ]     # listed → wired
+  [ ! -e "$MOCK_SKILLS/skill-two" ]   # not listed → not wired
+}
+
+@test "per-skill entry coexists with whole-repo entry" {
+  make_skill "$MOCK_GRID/repos/fullrepo/skill-a" "skill-a"
+  make_skill "$MOCK_GRID/repos/partialrepo/skill-b" "skill-b"
+  make_skill "$MOCK_GRID/repos/partialrepo/skill-c" "skill-c"
+  printf 'fullrepo\npartialrepo/skill-b\n' > "$MOCK_GRID/wired-submodules.txt"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/wire.sh"
+  [ -L "$MOCK_SKILLS/skill-a" ]       # whole-repo → wired
+  [ -L "$MOCK_SKILLS/skill-b" ]       # listed per-skill → wired
+  [ ! -e "$MOCK_SKILLS/skill-c" ]     # unlisted per-skill → not wired
+}
