@@ -120,14 +120,23 @@ done
 total=$((all_md - repo_roots))
 
 # Wiring allowlist (same file wire.sh uses) — to label wired vs library repos.
+# Supports two entry formats:
+#   repo-name          → whole-repo wired
+#   repo-name/skill    → only that skill wired (partial)
 WIRE_ALLOWLIST_FILE="$GRID_DIR/wired-submodules.txt"
 WIRED_REPOS=()
+WIRED_SKILLS=()
 wire_all_repos=1
 if [ -f "$WIRE_ALLOWLIST_FILE" ]; then
   wire_all_repos=0
   while IFS= read -r line; do
     line="${line%%#*}"; line="$(echo "$line" | tr -d '[:space:]')"
-    [ -n "$line" ] && WIRED_REPOS+=("$line")
+    [ -z "$line" ] && continue
+    if [[ "$line" == */* ]]; then
+      WIRED_SKILLS+=("$line")
+    else
+      WIRED_REPOS+=("$line")
+    fi
   done < "$WIRE_ALLOWLIST_FILE"
 fi
 repo_is_wired() {
@@ -136,16 +145,39 @@ repo_is_wired() {
   for r in "${WIRED_REPOS[@]:-}"; do [ "$r" = "$n" ] && return 0; done
   return 1
 }
+skill_is_wired() {
+  local entry="$1/$2" s
+  for s in "${WIRED_SKILLS[@]:-}"; do [ "$s" = "$entry" ] && return 0; done
+  return 1
+}
+repo_has_skill_entries() {
+  local repo="$1" s
+  for s in "${WIRED_SKILLS[@]:-}"; do
+    [[ "$s" == "$repo/"* ]] && return 0
+  done
+  return 1
+}
 
 # Pre-pass: tally wired vs library skills for the header summary.
+# Partially-wired repos contribute some skills to each bucket.
 wired_skill_count=0; library_skill_count=0
 for repo in "$GRID_DIR"/repos/*/; do
   [ -d "$repo" ] || continue
-  c=$(find_skills "$repo" | wc -l | tr -d ' ')
-  [ "$c" -eq 0 ] && continue
-  if repo_is_wired "$(basename "$repo")"; then
+  name="$(basename "$repo")"
+  if repo_is_wired "$name"; then
+    c=$(find_skills "$repo" | wc -l | tr -d ' ')
     wired_skill_count=$((wired_skill_count + c))
+  elif repo_has_skill_entries "$name"; then
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      if skill_is_wired "$name" "$(basename "$(dirname "$p")")"; then
+        wired_skill_count=$((wired_skill_count + 1))
+      else
+        library_skill_count=$((library_skill_count + 1))
+      fi
+    done < <(find_skills "$repo")
   else
+    c=$(find_skills "$repo" | wc -l | tr -d ' ')
     library_skill_count=$((library_skill_count + c))
   fi
 done
@@ -166,25 +198,37 @@ wired_live=$((root_owned + wired_skill_count))
     done
   )
 
-  # WIRED submodules: full per-skill detail (these are the ~189 you load live).
+  # WIRED submodules: full per-skill detail.
+  # Whole-repo entries show all skills; per-skill entries show only the wired subset.
   reference_repos=()
   for repo in "$GRID_DIR"/repos/*/; do
     [ -d "$repo" ] || continue
     name="$(basename "$repo")"
-    repo_is_wired "$name" || continue
-    paths=()
-    while IFS= read -r p; do [ -n "$p" ] && paths+=("$p"); done < <(find_skills "$repo")
-    if [ "${#paths[@]}" -eq 0 ]; then reference_repos+=("$name"); continue; fi
-    emit_section "repos/$name (wired)" < <(printf '%s\n' "${paths[@]}")
+    if repo_is_wired "$name"; then
+      paths=()
+      while IFS= read -r p; do [ -n "$p" ] && paths+=("$p"); done < <(find_skills "$repo")
+      if [ "${#paths[@]}" -eq 0 ]; then reference_repos+=("$name"); continue; fi
+      emit_section "repos/$name (wired)" < <(printf '%s\n' "${paths[@]}")
+    elif repo_has_skill_entries "$name"; then
+      paths=()
+      while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        skill_is_wired "$name" "$(basename "$(dirname "$p")")" && paths+=("$p")
+      done < <(find_skills "$repo")
+      [ "${#paths[@]}" -eq 0 ] && continue
+      emit_section "repos/$name (partial)" < <(printf '%s\n' "${paths[@]}")
+    fi
   done
 
   # LIBRARY submodules: counts only — not enumerated per-skill (could be 1000s).
   # Browse the repo, or use skill-scout to search them on demand.
+  # Partially-wired repos are shown in the wired section above; skip them here.
   lib_lines=()
   for repo in "$GRID_DIR"/repos/*/; do
     [ -d "$repo" ] || continue
     name="$(basename "$repo")"
     repo_is_wired "$name" && continue
+    repo_has_skill_entries "$name" && continue
     c=$(find_skills "$repo" | wc -l | tr -d ' ')
     if [ "$c" -eq 0 ]; then reference_repos+=("$name"); continue; fi
     lib_lines+=("$(printf '%s\t- **repos/%s** — %s skills' "$name" "$name" "$c")")
