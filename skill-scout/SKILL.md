@@ -86,7 +86,7 @@ relying on it, and prefer ones exposing install/popularity counts:
    | Skill | Installs | Source (owner/repo) | Why it fits the-grid |
    |-------|---------:|---------------------|----------------------|
 
-   For "Why it fits", write one honest line tying it to how Gareth works
+   For "Why it fits", write one honest line covering fit for a developer workflow
    (dev workflow, debugging, git, planning, testing, infra/ops). If a candidate
    is a poor fit, say so plainly rather than inventing a reason — or omit it.
 

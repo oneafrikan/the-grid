@@ -26,7 +26,7 @@ Skills are directories containing a `SKILL.md`. This repo owns some directly and
 ## Bootstrap (new machine)
 
 ```bash
-git clone git@github.com:gkwilderness/the-grid.git ~/.the-grid
+git clone https://github.com/<your-username>/the-grid.git ~/.the-grid
 cd ~/.the-grid
 git submodule update --init --recursive
 bash wire.sh
@@ -54,12 +54,12 @@ bash ~/.the-grid/wire.sh
 
 ```bash
 cd ~/.the-grid
-git submodule add git@github.com:gkwilderness/some-skill-repo.git repos/some-skill-repo
+git submodule add <repo-url> repos/some-skill-repo
 git submodule update --init
 bash wire.sh
 ```
 
-Any skill directories (containing `SKILL.md`) found one level deep inside `repos/` are wired automatically.
+A newly added submodule is **library-only** by default (indexed in `SKILLS.md`, not symlinked). To wire its skills live, add its name to `wired-submodules.txt` and re-run `bash wire.sh`.
 
 ## Running tests
 
@@ -72,10 +72,18 @@ Tests cover: symlink creation, idempotency, stale cleanup, skill format validati
 
 ## How wire.sh works
 
-1. Removes symlinks in `~/.claude/skills/` that point into the-grid but whose source no longer exists.
-2. Creates symlinks for each skill at the root of this repo (skipping `repos/`, `tests/`, `.git`).
-3. Creates symlinks for each skill found inside `repos/*/`.
-4. Leaves symlinks pointing to other locations untouched.
+Skills are split into two tiers:
+
+- **Wired** — repos listed in `wired-submodules.txt`. Their skills are symlinked live into `~/.claude/skills/`.
+- **Library** — everything else: indexed in `SKILLS.md` and searchable, but not symlinked.
+
+On each run, wire.sh:
+
+1. Tears down all grid-owned symlinks (anything pointing into this repo).
+2. Re-wires skills from repos in `wired-submodules.txt`, discovered at any nesting depth.
+3. Wires root-level skills last — they override any same-named repo skill.
+4. Leaves symlinks pointing elsewhere untouched.
+5. Regenerates `SKILLS.md` via `catalog.sh`.
 
 Override paths via env vars (used by tests):
 

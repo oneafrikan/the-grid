@@ -7,8 +7,8 @@ How to get the-grid running on any machine — new or existing.
 ## New machine (fresh Claude Code install)
 
 ```bash
-# 1. Clone the-grid (personal account is the owner)
-git clone git@github-personal:oneafrikan/the-grid.git ~/.the-grid
+# 1. Clone the-grid
+git clone https://github.com/<your-username>/the-grid.git ~/.the-grid
 
 # 2. Pull all skill submodules
 cd ~/.the-grid && git submodule update --init --recursive
