@@ -5,11 +5,11 @@
 # Order: repos wired first, root-level wired second so they win.
 #
 # Override defaults via env vars (used by tests):
-#   GRID_DIR    — root of the-grid repo  (default: directory of this script)
+#   GRID_DIR    — root of the-grid repo  (default: parent of scripts/)
 #   SKILLS_DIR  — Claude skills directory (default: ~/.claude/skills)
 set -euo pipefail
 
-GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 
 # --- Wiring allowlist ---------------------------------------------------------
@@ -142,5 +142,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -f "$SCRIPT_DIR/catalog.sh" ]; then
   GRID_DIR="$GRID_DIR" bash "$SCRIPT_DIR/catalog.sh" "$GRID_DIR/SKILLS.md"
 fi
+
 
 echo "Done."

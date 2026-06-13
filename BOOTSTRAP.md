@@ -14,7 +14,7 @@ git clone https://github.com/<your-username>/the-grid.git ~/.the-grid
 cd ~/.the-grid && git submodule update --init --recursive
 
 # 3. Wire skills into Claude
-bash ~/.the-grid/wire.sh
+bash ~/.the-grid/scripts/wire.sh
 ```
 
 That's it. All skills are live immediately — no restart needed.
@@ -26,8 +26,8 @@ That's it. All skills are live immediately — no restart needed.
 You may have skills as real directories that pre-date the-grid. First wire, then reconcile:
 
 ```bash
-bash ~/.the-grid/wire.sh        # wire all grid skills (skips real-dir shadows — safe)
-bash ~/.the-grid/reconcile.sh   # dry run — lists real dirs shadowing a grid skill
+bash ~/.the-grid/scripts/wire.sh        # wire all grid skills (skips real-dir shadows — safe)
+bash ~/.the-grid/scripts/reconcile.sh   # dry run — lists real dirs shadowing a grid skill
 ```
 
 wire.sh will **skip** any real directory that shadows a grid skill — it only manages
@@ -36,7 +36,7 @@ symlinks, so nothing is clobbered. `reconcile.sh` then shows exactly which shado
 To make the machine match the-grid exactly, remove those shadows and re-wire:
 
 ```bash
-bash ~/.the-grid/reconcile.sh --force   # removes shadows (sudo only where needed) + re-wires
+bash ~/.the-grid/scripts/reconcile.sh --force   # removes shadows (sudo only where needed) + re-wires
 ```
 
 `reconcile.sh` only ever removes a path that is a **real dir** (never a symlink) and that
@@ -74,7 +74,7 @@ description: What it does and when to use it.
 # My Skill
 ...
 EOF
-bash ~/.the-grid/wire.sh
+bash ~/.the-grid/scripts/wire.sh
 ```
 
 ---
@@ -86,7 +86,7 @@ To customise e.g. mattpocock's `caveman`:
 ```bash
 cp -r ~/.the-grid/repos/mattpocock/skills/productivity/caveman ~/.the-grid/caveman
 # edit ~/.the-grid/caveman/SKILL.md
-bash ~/.the-grid/wire.sh   # your version now takes precedence
+bash ~/.the-grid/scripts/wire.sh   # your version now takes precedence
 ```
 
 ---
@@ -131,13 +131,13 @@ All 17 tests should be green. If they're not, something is misconfigured.
 
 **Symlink is broken:**
 ```bash
-bash ~/.the-grid/wire.sh   # re-running is always safe
+bash ~/.the-grid/scripts/wire.sh   # re-running is always safe
 ```
 
 **Skill not showing up in Claude:**
 - Check it has a `SKILL.md` with `name:` and `description:` fields
 - Check `~/.claude/skills/<skill-name>` exists and is a symlink (not a real dir)
-- Re-run `bash ~/.the-grid/wire.sh`
+- Re-run `bash ~/.the-grid/scripts/wire.sh`
 
 **Submodule directory is empty:**
 ```bash

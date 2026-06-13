@@ -21,11 +21,11 @@
 #   bash reconcile.sh --force    # remove shadows + re-wire
 #
 # Env (same contract as wire.sh):
-#   GRID_DIR    — root of the-grid repo   (default: directory of this script)
+#   GRID_DIR    — root of the-grid repo   (default: parent of scripts/)
 #   SKILLS_DIR  — Claude skills directory (default: ~/.claude/skills)
 set -euo pipefail
 
-GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
@@ -33,7 +33,7 @@ FORCE=0
 # Run wire.sh once and harvest the names it refused to manage.
 # Export the env so the child wire.sh targets the same dirs we do.
 export GRID_DIR SKILLS_DIR
-shadows=$(bash "$GRID_DIR/wire.sh" \
+shadows=$(bash "$GRID_DIR/scripts/wire.sh" \
   | sed -n 's/^  skip (real dir, not managed): //p' \
   | sort -u)
 
@@ -75,7 +75,7 @@ done <<< "$shadows"
 
 echo
 echo "Re-wiring…"
-bash "$GRID_DIR/wire.sh" >/dev/null
+bash "$GRID_DIR/scripts/wire.sh" >/dev/null
 
 # Verify: every previously-shadowed name should now be a grid symlink.
 echo

@@ -29,7 +29,7 @@ Skills are directories containing a `SKILL.md`. This repo owns some directly and
 git clone https://github.com/<your-username>/the-grid.git ~/.the-grid
 cd ~/.the-grid
 git submodule update --init --recursive
-bash wire.sh
+bash scripts/wire.sh
 ```
 
 That's it. Skills are live immediately.
@@ -56,10 +56,10 @@ bash ~/.the-grid/wire.sh
 cd ~/.the-grid
 git submodule add <repo-url> repos/some-skill-repo
 git submodule update --init
-bash wire.sh
+bash scripts/wire.sh
 ```
 
-A newly added submodule is **library-only** by default (indexed in `SKILLS.md`, not symlinked). To wire its skills live, add its name to `wired-submodules.txt` and re-run `bash wire.sh`.
+A newly added submodule is **library-only** by default (indexed in `SKILLS.md`, not symlinked). To wire its skills live, add its name to `wired-submodules.txt` and re-run `bash scripts/wire.sh`.
 
 ## Running tests
 
@@ -88,5 +88,5 @@ On each run, wire.sh:
 Override paths via env vars (used by tests):
 
 ```bash
-GRID_DIR=/path/to/grid SKILLS_DIR=/path/to/skills bash wire.sh
+GRID_DIR=/path/to/grid SKILLS_DIR=/path/to/skills bash scripts/wire.sh
 ```
