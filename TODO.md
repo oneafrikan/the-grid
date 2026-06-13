@@ -18,11 +18,12 @@
 
 ## Now / Next — build the factory
 
-- [ ] **1. Scaffold the factory** — create `agent-factory/` folder structure: `_core/`, `roles/`, `stacks/`, `skills/`, `projects/`; add stub `compose.py` and `factory.schema.yaml`. No agent content yet — get the mechanics in place.
-- [ ] **2. Clarify `agent-factory/` vs `skills-factory/`** — two empty dirs exist at root (`agent-factory/`, `skills-factory/`); docs describe a single `agent_factory/`. Decide: one factory or two? Merge or keep separate? (See Open Questions.)
-- [ ] **3. Port the Tech Lead role** — most complex and most reusable; once it works the other roles are variations. Add `roles/tech-lead/` with SOUL.md, IDENTITY.md, AGENTS.md, USER.md stubs.
-- [ ] **4. Add LAMP stack overlay** — `stacks/lamp/` with PHP/MySQL/Apache/WordPress constraints. Validate that compose output is valid for OpenClaw.
-- [ ] **5. Add agents iteratively** — one role at a time; test compose output before moving to the next.
+- [x] **1. Scaffold the factory** — `agent-factory/` structure (`_core/`, `roles/`, `stacks/`, `skills/`, `projects/`), `compose.py`, `factory.schema.yaml`. Done.
+- [x] **2. Clarify `agent-factory/` vs `skills-factory/`** — resolved: two separate factories. `skills-factory/` builds skills (Karpathy loop, elsewhere) → dropped into `agent-factory/skills/`; `agent-factory/` composes teams.
+- [x] **3. Port the Tech Lead role** — `roles/tech-lead/{SOUL,SKILL,MEMORY}.md`, stack-agnostic with `<!-- STACK: -->` injection points.
+- [x] **3b. Flesh `compose.py`** — engine renders/merges/writes a team idempotently; `_core` base templates filled; round-trip validated with `examples/tech-lead.yaml`. PyYAML in `.venv` (see `requirements.txt`).
+- [ ] **4. Port remaining roles** — one at a time (backend-dev, frontend-dev, qa-engineer, devops next). Only `role.yaml` metadata exists; add `SOUL.md` + `SKILL.md` + `MEMORY.md`. Use the sub-agent-reads-playbook pattern to keep context clean.
+- [ ] **5. Flesh stack overlays** — `stacks/*` are `stack.yaml` stubs with empty `fragments`. Add LAMP (PHP/MySQL/Apache/WordPress constraints) + others. Then add keyed inline injection at the `<!-- STACK: ... -->` markers (today overlays append as a trailing section).
 - [ ] **6. Pull skills from repos** — once factory structure is solid, pull skill files from GitHub repos in `docs/reference-repos.md` into `agent-factory/skills/`.
 - [ ] **7. Create `machines/wilderness.yaml`** — declare which agents are active on this machine (agree with Gareth which agent to build first).
 - [ ] **8. Stub first agent in `agents/`** — four soulspec files (SOUL.md, IDENTITY.md, AGENTS.md, USER.md) + `tools/` and `skills/` subdirs.
