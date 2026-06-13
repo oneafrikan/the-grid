@@ -1,29 +1,36 @@
 #!/usr/bin/env python3
 """compose.py — the agent-factory engine.
 
-Composes an AI dev team from three orthogonal inputs (role × stack × skills)
-described in a compose config (yaml), and writes one ready-to-run agent folder
-per team member under projects/<project>/.
+Composes an AI dev-team agent from three orthogonal inputs (role × stack ×
+skills) described in a compose config (yaml), and writes one ready-to-run agent
+folder per team member under projects/<project>/.
 
-Flow:
-    compose config (yaml)  ->  resolve + validate roles/stacks/skills
-    ->  render templates    ->  write projects/<project>/<role>/{SOUL,SKILL,MEMORY}.md
-                                + projects/<project>/agents.yaml
+The agent shape is the live OpenClaw 5-file identity model + a skill list:
+
+    SOUL.md      how it behaves        (personality, voice — stack-agnostic)
+    IDENTITY.md  who it is             (nameplate: name, role, model, machine)
+    AGENTS.md    how it operates       (boot sequence, roster, async handoff)
+    USER.md      who it serves         (operator + team)
+    MEMORY.md    what it carries       (durable knowledge; flat now, gbrain later)
+    + skills:    what it can do        (SKILL.md capability folders, by name)
 
 Render model:
-    SOUL.md   = _core/SOUL_base.md   merged with roles/<role>/SOUL.md
-    SKILL.md  = roles/<role>/SKILL.md + stacks/<stack>/ overlay(s) appended
-    MEMORY.md = _core/MEMORY_base.md merged with roles/<role>/MEMORY.md
-    agents.yaml = _core/agents_base.yaml + per-agent entries from the config
+    SOUL/AGENTS/USER/MEMORY = _core/<X>_base.md merged section-by-section with
+        roles/<role>/<X>.md. Shared level-2 (`## `) headings unify under one
+        heading (base body first, then role seed); unique sections kept in order.
+    IDENTITY = _core/IDENTITY_base.md token-substituted ({{name}}, {{role}},
+        {{model}}, {{cron_model}}) + roles/<role>/IDENTITY.md appended.
+    skills = the role's own operating skill (named after the role) + any bolt-on
+        skills from the config, listed by name in agents.yaml (OpenClaw wires
+        skills by name from a shared skills dir — they are not copied per agent).
+    agents.yaml = _core/agents_base.yaml + per-agent entries from the config.
 
-    "Merged" = section-aware: shared level-2 (`## `) headings unify under one
-    heading (base body first, then the role's seed); headings unique to either
-    side are kept in order (base sections first, then role-only sections). This
-    is why role templates reuse the base headings — so the merge reads as a
-    single clean document, not two concatenated ones.
+A role's procedural operating manual lives in roles/<role>/SKILL.md — that IS the
+role's skill (capability), distinct from the 5 identity files. It is required to
+exist (a role must DO something) but is referenced by name, not emitted here.
 
-Runtime target is Claude Code + ACP (swappable coding CLI); rendered content
-stays LCD. Memory is a flat-file seed for now (gbrain swap is a later phase).
+Runtime target is Claude Code + ACP (swappable CLI); content stays LCD. Handoff
+is async (signal files / PR+webhook), not live spawn.
 
 Usage:
     .venv/bin/python compose.py path/to/compose.yaml [--out projects/] [--dry-run]
@@ -55,11 +62,15 @@ SKILLS_DIR = HERE / "skills"
 CORE_DIR = HERE / "_core"
 PROJECTS_DIR = HERE / "projects"
 
-# Files a fully-populated role provides. SKILL.md is mandatory (it is the
-# operating manual); SOUL.md / MEMORY.md merge with the _core base if present.
-ROLE_SOUL = "SOUL.md"
-ROLE_SKILL = "SKILL.md"
-ROLE_MEMORY = "MEMORY.md"
+# The 5 identity files emitted per agent, each = a _core base merged/filled with
+# the role layer. (SKILL.md is the role's *skill*, referenced by name — not here.)
+IDENTITY_FILES = ["SOUL.md", "IDENTITY.md", "AGENTS.md", "USER.md", "MEMORY.md"]
+
+# Files a role MUST provide: a personality and something to do.
+REQUIRED_ROLE_FILES = ["SOUL.md", "SKILL.md"]
+
+DEFAULT_MODEL = "sonnet"
+DEFAULT_CRON_MODEL = "haiku"
 
 
 # ── markdown section-aware merge ──────────────────────────────────────────────
@@ -129,19 +140,51 @@ def merge_layered(base_md: str, role_md: str) -> str:
     return "\n\n".join(blocks) + "\n"
 
 
-# ── config loading + validation ───────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def role_meta(role: str) -> dict:
+    """Parse roles/<role>/role.yaml (defaults to {} if absent)."""
+    path = ROLES_DIR / role / "role.yaml"
+    if path.is_file():
+        return yaml.safe_load(_read(path)) or {}
+    return {}
+
+
+def resolve_model(agent: dict) -> str:
+    """Model precedence: compose config > role.yaml default_model > sonnet."""
+    return agent.get("model") or role_meta(agent["role"]).get("default_model") or DEFAULT_MODEL
+
+
+def resolve_cron_model(agent: dict) -> str:
+    """Cron model precedence: config > role.yaml cron_model > haiku."""
+    return agent.get("cron_model") or role_meta(agent["role"]).get("cron_model") or DEFAULT_CRON_MODEL
+
+
+def agent_skills(agent: dict) -> list[str]:
+    """The role's own operating skill (named after the role) + bolt-on skills,
+    deduped and order-preserving."""
+    ordered = [agent["role"], *(agent.get("skills") or [])]
+    seen: set[str] = set()
+    result: list[str] = []
+    for skill in ordered:
+        if skill not in seen:
+            seen.add(skill)
+            result.append(skill)
+    return result
+
+
+# ── config loading + validation ───────────────────────────────────────────────
+
 def load_config(path: Path) -> dict:
     """Parse a compose config and validate it against the factory contract.
 
-    Validates the shape documented in factory.schema.yaml: required top-level
-    keys, required per-agent keys, and that every referenced role / stack /
-    skill resolves to an existing directory. Raises ValueError on any problem,
-    accumulating all errors so the operator sees them in one pass.
+    Validates the shape in factory.schema.yaml: required keys, and that every
+    referenced role / stack / skill resolves to an existing directory (and that
+    each role provides its required files). Accumulates all errors in one pass.
     """
     if not path.is_file():
         raise ValueError(f"compose config not found: {path}")
@@ -151,8 +194,6 @@ def load_config(path: Path) -> dict:
         raise ValueError("compose config must be a YAML mapping at the top level")
 
     errors: list[str] = []
-
-    # Top-level required keys.
     for key in ("project", "agents"):
         if key not in config:
             errors.append(f"missing required top-level key: {key}")
@@ -175,11 +216,10 @@ def load_config(path: Path) -> dict:
             role_dir = ROLES_DIR / role
             if not role_dir.is_dir():
                 errors.append(f"{where}: role '{role}' has no dir at {role_dir}")
-            elif not (role_dir / ROLE_SKILL).is_file():
-                errors.append(
-                    f"{where}: role '{role}' has no {ROLE_SKILL} "
-                    f"(the operating manual is mandatory)"
-                )
+            else:
+                for required in REQUIRED_ROLE_FILES:
+                    if not (role_dir / required).is_file():
+                        errors.append(f"{where}: role '{role}' is missing {required}")
 
         for stack in agent.get("stacks", []) or []:
             if not (STACKS_DIR / stack).is_dir():
@@ -198,13 +238,11 @@ def load_config(path: Path) -> dict:
 # ── rendering ─────────────────────────────────────────────────────────────────
 
 def render_stack_overlay(stacks: list[str]) -> str:
-    """Build the stack overlay appended to a role's SKILL.md.
+    """Build a stack overlay appended to a role's AGENTS.md (operating rules).
 
-    Phase-1: append each stack's summary plus the contents of any fragment
-    files it declares (ordered). The inline `<!-- STACK: ... -->` markers in the
-    role SKILL.md are left in place as documentation; keyed inline injection at
-    those exact points is a later upgrade (TODO) — until then the overlay is a
-    clearly-labelled trailing section, which is honest about what is injected.
+    Phase-1: append each stack's summary plus the contents of any fragment files
+    it declares (ordered). Keyed inline injection at marker points is a later
+    upgrade (TODO); until then the overlay is a clearly-labelled trailing section.
     """
     if not stacks:
         return ""
@@ -212,56 +250,60 @@ def render_stack_overlay(stacks: list[str]) -> str:
     sections = ["", "---", "", "## Stack overlays", ""]
     for stack in stacks:
         meta = yaml.safe_load(_read(STACKS_DIR / stack / "stack.yaml")) or {}
-        summary = (meta.get("summary") or "").strip()
         sections.append(f"### {meta.get('name', stack)}")
+        summary = (meta.get("summary") or "").strip()
         if summary:
-            sections.append("")
-            sections.append(summary)
+            sections.extend(["", summary])
         for fragment in meta.get("fragments", []) or []:
             frag_path = STACKS_DIR / stack / fragment
             if frag_path.is_file():
-                sections.append("")
-                sections.append(_read(frag_path).rstrip())
+                sections.extend(["", _read(frag_path).rstrip()])
         sections.append("")
     return "\n".join(sections)
 
 
-def render_agent(agent: dict) -> dict[str, str]:
-    """Render one agent's files. Returns {filename: contents}."""
+def _layer(role: str, filename: str, base_path: Path) -> str:
+    """A _core base file, merged with the role's layer if the role provides one."""
+    base = _read(base_path)
+    role_file = ROLES_DIR / role / filename
+    return merge_layered(base, _read(role_file)) if role_file.is_file() else base
+
+
+def render_identity(agent: dict) -> str:
+    """Render IDENTITY.md: token-substitute the base nameplate, append role extras."""
     role = agent["role"]
-    role_dir = ROLES_DIR / role
-    stacks = agent.get("stacks", []) or []
+    meta = role_meta(role)
+    title = meta.get("title") or role
+    subs = {
+        "{{name}}": agent.get("name") or title,
+        "{{role}}": title,
+        "{{model}}": resolve_model(agent),
+        "{{cron_model}}": resolve_cron_model(agent),
+    }
 
-    rendered: dict[str, str] = {}
+    text = _read(CORE_DIR / "IDENTITY_base.md")
+    role_identity = ROLES_DIR / role / "IDENTITY.md"
+    if role_identity.is_file():
+        text = text.rstrip() + "\n\n" + _read(role_identity)
+    for token, value in subs.items():
+        text = text.replace(token, value)
+    return text if text.endswith("\n") else text + "\n"
 
-    # SOUL = base merged with role layer (role SOUL optional).
-    base_soul = _read(CORE_DIR / "SOUL_base.md")
-    role_soul_path = role_dir / ROLE_SOUL
-    role_soul = _read(role_soul_path) if role_soul_path.is_file() else ""
-    rendered[ROLE_SOUL] = merge_layered(base_soul, role_soul) if role_soul else base_soul
 
-    # SKILL = role operating manual + stack overlay(s). No base SKILL exists.
-    rendered[ROLE_SKILL] = _read(role_dir / ROLE_SKILL).rstrip() + "\n" + render_stack_overlay(stacks)
-
-    # MEMORY = base seed merged with role seed (role MEMORY optional).
-    base_memory = _read(CORE_DIR / "MEMORY_base.md")
-    role_memory_path = role_dir / ROLE_MEMORY
-    role_memory = _read(role_memory_path) if role_memory_path.is_file() else ""
-    rendered[ROLE_MEMORY] = merge_layered(base_memory, role_memory) if role_memory else base_memory
-
+def render_agent(agent: dict) -> dict[str, str]:
+    """Render one agent's 5 identity files. Returns {filename: contents}."""
+    role = agent["role"]
+    rendered = {
+        "SOUL.md": _layer(role, "SOUL.md", CORE_DIR / "SOUL_base.md"),
+        "IDENTITY.md": render_identity(agent),
+        "USER.md": _layer(role, "USER.md", CORE_DIR / "USER_base.md"),
+        "MEMORY.md": _layer(role, "MEMORY.md", CORE_DIR / "MEMORY_base.md"),
+    }
+    # AGENTS.md carries any stack overlay (stack conventions are operating rules).
+    agents_md = _layer(role, "AGENTS.md", CORE_DIR / "AGENTS_base.md")
+    overlay = render_stack_overlay(agent.get("stacks", []) or [])
+    rendered["AGENTS.md"] = agents_md.rstrip() + "\n" + overlay if overlay else agents_md
     return rendered
-
-
-def resolve_model(agent: dict) -> str:
-    """Model precedence: compose config > role.yaml default_model > 'sonnet'."""
-    if agent.get("model"):
-        return agent["model"]
-    role_yaml = ROLES_DIR / agent["role"] / "role.yaml"
-    if role_yaml.is_file():
-        meta = yaml.safe_load(_read(role_yaml)) or {}
-        if meta.get("default_model"):
-            return meta["default_model"]
-    return "sonnet"
 
 
 def render_agents_yaml(config: dict) -> str:
@@ -279,7 +321,7 @@ def render_agents_yaml(config: dict) -> str:
             "role": agent["role"],
             "model": resolve_model(agent),
             "stacks": agent.get("stacks", []) or [],
-            "skills": agent.get("skills", []) or [],
+            "skills": agent_skills(agent),
             "workspace": f"./{agent['role']}",
         }
         for agent in config["agents"]
@@ -298,11 +340,10 @@ def render_agents_yaml(config: dict) -> str:
 def write_project(name: str, config: dict, out_dir: Path) -> Path:
     """Write the rendered team under <out_dir>/<name>/. Idempotent.
 
-    The project dir is generated output (agents write their runtime artefacts
-    elsewhere, to output/<project>/), so it is wiped and rewritten each run —
-    the result reflects the config exactly, and a re-run with an unchanged
-    config produces byte-identical files. The wipe is guarded to a real
-    directory under out_dir (never a symlink) for safety.
+    The project dir is generated output, so it is wiped and rewritten each run —
+    the result reflects the config exactly, and a re-run with an unchanged config
+    produces byte-identical files. The wipe is guarded to a real directory under
+    out_dir (never a symlink) for safety.
     """
     project_dir = out_dir / name
     if project_dir.is_symlink():
@@ -324,7 +365,7 @@ def write_project(name: str, config: dict, out_dir: Path) -> Path:
 # ── cli ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compose an AI dev team.")
+    parser = argparse.ArgumentParser(description="Compose an AI dev-team agent.")
     parser.add_argument("config", type=Path, help="path to the compose config yaml")
     parser.add_argument("--out", type=Path, default=PROJECTS_DIR, help="output dir")
     parser.add_argument(
@@ -345,14 +386,16 @@ def main() -> None:
         print(f"[dry-run] project: {name}  ({len(agents)} agents) -> {args.out / name}")
         for agent in agents:
             files = ", ".join(sorted(render_agent(agent)))
+            skills = ", ".join(agent_skills(agent))
             print(f"  - {agent['role']:<16} model={resolve_model(agent):<8} files: {files}")
+            print(f"      skills: {skills}")
         print("[dry-run] + agents.yaml")
         return
 
     project_dir = write_project(name, config, args.out)
     print(f"composed '{name}': {len(agents)} agents -> {project_dir}")
     for agent in agents:
-        print(f"  - {agent['role']} ({resolve_model(agent)})")
+        print(f"  - {agent['role']} ({resolve_model(agent)})  skills: {', '.join(agent_skills(agent))}")
 
 
 if __name__ == "__main__":

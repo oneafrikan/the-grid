@@ -7,17 +7,21 @@ role  ×  stack  ×  skills   ──compose.py──▶   a ready-to-run agent t
 ```
 
 - **role** — *who* the agent is (Tech Lead, Backend Dev, QA…). Stack-agnostic
-  identity + operating manual. Lives in `roles/<role>/`.
+  identity + an operating skill. Lives in `roles/<role>/`.
 - **stack** — *what* it builds on (LAMP, modern-frontend, data-engineering…).
-  An overlay injected into a role's SKILL.md. Lives in `stacks/<stack>/`.
+  An overlay. Lives in `stacks/<stack>/`.
 - **skills** — bolt-on capabilities pulled from the ecosystem (Paperclip, php,
   mysql…). Lives in `skills/<skill>/`.
 
-A **compose config** (see `docs/architect-agent-composition.yaml` for an example)
-names a project and lists agents, each as `role + stacks[] + skills[] + model`.
-`compose.py` reads it and emits one folder per agent under `projects/<name>/`,
-each containing the rendered `SOUL.md`, `SKILL.md`, `MEMORY.md`, plus a top-level
-`agents.yaml` wiring them together.
+A **compose config** (see `examples/tech-lead.yaml`) names a project and lists
+agents, each as `role + stacks[] + skills[] + model`. `compose.py` reads it and
+emits one folder per agent under `projects/<name>/`, rendered to the **live
+OpenClaw 5-file identity model** — `SOUL.md` (how it behaves), `IDENTITY.md` (who
+it is + model), `AGENTS.md` (boot sequence + async handoff), `USER.md` (who it
+serves), `MEMORY.md` (what it carries) — plus a top-level `agents.yaml` that wires
+the team together and lists each agent's skills by name. A role's operating skill
+(its `SKILL.md`) is referenced by name, not copied — OpenClaw wires skills from a
+shared skills dir.
 
 > Sibling `skills-factory/` is a **separate** concern (skills are built there via a
 > Karpathy loop in another repo, then dropped into `skills/`). This factory only
@@ -29,19 +33,26 @@ each containing the rendered `SOUL.md`, `SKILL.md`, `MEMORY.md`, plus a top-leve
 agent-factory/
 ├── _core/                  shared base templates every role inherits
 │   ├── SOUL_base.md        universal personality scaffolding
+│   ├── IDENTITY_base.md    nameplate token template (name/role/model/cron_model)
+│   ├── AGENTS_base.md      universal boot sequence + async handoff protocol
+│   ├── USER_base.md        operator/team skeleton
 │   ├── MEMORY_base.md      universal memory structure
 │   └── agents_base.yaml    universal runtime config template
 ├── roles/<role>/           role source (stack-agnostic)
-│   ├── role.yaml           metadata: default model, base skills, summary
-│   ├── SOUL.md             identity template
-│   ├── SKILL.md            operating manual (with stack injection points)
-│   └── MEMORY.md           memory seed template
-├── stacks/<stack>/         stack overlay injected into a role's SKILL.md
+│   ├── role.yaml           metadata: title, default/cron model, summary, orchestrator
+│   ├── SOUL.md             personality / voice (required)
+│   ├── IDENTITY.md         nameplate extras (optional; merged over _core)
+│   ├── AGENTS.md           roster + routing (optional; merged over _core)
+│   ├── USER.md             operator-reading notes (optional; merged over _core)
+│   ├── MEMORY.md           memory seed (optional; merged over _core)
+│   └── SKILL.md            the role's operating skill — required, referenced by name
+├── stacks/<stack>/         stack overlay (appended to AGENTS.md)
 │   └── stack.yaml          + fragment files
 ├── skills/<skill>/         local skill library (built elsewhere, dropped here)
-├── compose.py              the factory engine (STUB — see file)
+├── compose.py              the factory engine
 ├── factory.schema.yaml     what a valid compose config looks like
-└── projects/<name>/        OUTPUT — one folder per composed team
+├── examples/               sample compose configs
+└── projects/<name>/        OUTPUT — one folder per composed agent (gitignored)
 ```
 
 ## Running it
@@ -66,27 +77,41 @@ produces byte-identical files (the project dir is wiped and rewritten each run).
 
 ### How merging works
 
-`SOUL.md` and `MEMORY.md` are merged section-by-section with the `_core` base:
-shared level-2 (`## `) headings unify under one heading (base guidance first,
-then the role's seed); sections unique to either side are kept in order. This is
-why role templates reuse the base headings. `SKILL.md` is the role's operating
-manual with any stack overlay(s) appended.
+`SOUL.md`, `AGENTS.md`, `USER.md`, and `MEMORY.md` are merged section-by-section
+with their `_core` base: shared level-2 (`## `) headings unify under one heading
+(base guidance first, then the role's seed); sections unique to either side are
+kept in order. This is why role templates reuse the base headings.
+
+`IDENTITY.md` is different — it's a token template. `compose.py` substitutes
+`{{name}}`, `{{role}}`, `{{model}}`, `{{cron_model}}` (from `role.yaml` + the
+config) and appends the role's `IDENTITY.md` extras.
+
+Stack overlays (when a stack is named) append to `AGENTS.md` as a trailing
+"Stack overlays" section — stack conventions are operating rules.
 
 ## Status
 
-**Engine works; content is in progress.** `compose.py` renders, merges, and
-writes a team idempotently, validated end-to-end with the Tech Lead role
-(`examples/tech-lead.yaml`). Remaining work: port the other roles (only
-`role.yaml` metadata exists so far), flesh the stack overlays (`stacks/*` are
-`stack.yaml` stubs with empty `fragments`), and add keyed inline stack injection
-at the `<!-- STACK: ... -->` markers (today overlays append as a trailing
-section). See repo-root `TODO.md`.
+**Engine works against the 5-file model; content is in progress.** `compose.py`
+renders, merges, and writes an agent idempotently in the live OpenClaw 5-file
+shape, validated end-to-end with the Tech Lead role (`examples/tech-lead.yaml`).
+Remaining work: port the other roles to the 5-file model (only `role.yaml`
+metadata exists so far), flesh the stack overlays (`stacks/*` are `stack.yaml`
+stubs with empty `fragments`), and build the per-runtime emitters (OpenClaw is
+near-native today; Claude Code skill/subagent forms are next). See repo-root
+`TODO.md`.
 
-## Runtime assumptions (decided 2026-06-13)
+## Runtime assumptions
 
+- The canonical agent is the **live OpenClaw 5-file model** (SOUL / IDENTITY /
+  AGENTS / USER / MEMORY) + skills — verified against the running system on
+  guide-server, not the (outdated 3-file) playbook.
 - Target surface is **Claude Code + ACP** (swappable coding CLI), not Claude Code
-  alone. SKILL.md content should stay LCD (lowest common denominator) where possible.
-- Memory starts as flat **MEMORY.md** / signals files; a queryable DB (gbrain)
+  alone. Content stays LCD (lowest common denominator) where possible.
+- Memory starts as flat **MEMORY.md** / signal files; a queryable DB (gbrain)
   replaces it later. Don't hard-bake gbrain assumptions yet.
-- Handoff supports **both** `sessions_spawn()` (live) and PR + webhook (async).
+- Handoff is **async** — signal files (`signals/→agent.md`, as the live system
+  does) or PR + webhook. Not a live `sessions_spawn`.
 - Stacks are overlays. LAMP is one overlay among several, not the spine.
+- `compose.py` is a multi-target compiler: one 5-file source → OpenClaw agent
+  (near-native), Claude Code subagent (flattened `.md`), or Claude Code skill
+  (boots via the AGENTS.md sequence).

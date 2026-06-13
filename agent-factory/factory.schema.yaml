@@ -13,17 +13,25 @@
 # agents       (list, required)  one entry per agent on the team
 #
 # ── per-agent entry ──────────────────────────────────────────────────────────
-# role    (str, required)   must match a folder in roles/<role>/
-# stacks  (list, optional)  zero or more overlays from stacks/<stack>/; []=agnostic
-# skills  (list, optional)  zero or more skills from skills/<skill>/
-# model   (str, optional)   model string; falls back to role.yaml default
+# role        (str, required)   must match a folder in roles/<role>/
+# name        (str, optional)   agent's persona name for IDENTITY.md; defaults to
+#                               the role's title (role.yaml `title`) or the slug
+# stacks      (list, optional)  overlays from stacks/<stack>/; []=stack-agnostic
+# skills      (list, optional)  bolt-on skills from skills/<skill>/ (the role's own
+#                               operating skill is always included automatically)
+# model       (str, optional)   model string; falls back to role.yaml default_model
+# cron_model  (str, optional)   model for scheduled runs; falls back to role.yaml
 #
-# ── validation rules (enforced once compose.py is real) ──────────────────────
+# Each agent renders to the live OpenClaw 5-file identity model —
+# SOUL / IDENTITY / AGENTS / USER / MEMORY — plus a skill list (by name).
+#
+# ── validation rules (enforced by compose.py) ────────────────────────────────
 # - every `role` resolves to an existing roles/<role>/ dir
+# - every role provides the required files: SOUL.md and SKILL.md
 # - every `stack` resolves to an existing stacks/<stack>/ dir
 # - every `skill` resolves to an existing skills/<skill>/ dir
-# - `model` is one of the allowed model strings (TBD; e.g. opus | sonnet | haiku)
-# - exactly one orchestrator role present if the team uses spawned handoffs
+# - (future) `model` is one of the allowed model strings (e.g. opus | sonnet | haiku)
+# - (future) exactly one orchestrator role present if the team hands off work
 
 schema_version: 0   # bump when the contract changes
 

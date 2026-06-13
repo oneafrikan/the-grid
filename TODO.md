@@ -21,13 +21,14 @@
 - [x] **1. Scaffold the factory** — `agent-factory/` structure (`_core/`, `roles/`, `stacks/`, `skills/`, `projects/`), `compose.py`, `factory.schema.yaml`. Done.
 - [x] **2. Clarify `agent-factory/` vs `skills-factory/`** — resolved: two separate factories. `skills-factory/` builds skills (Karpathy loop, elsewhere) → dropped into `agent-factory/skills/`; `agent-factory/` composes teams.
 - [x] **3. Port the Tech Lead role** — `roles/tech-lead/{SOUL,SKILL,MEMORY}.md`, stack-agnostic with `<!-- STACK: -->` injection points.
-- [x] **3b. Flesh `compose.py`** — engine renders/merges/writes a team idempotently; `_core` base templates filled; round-trip validated with `examples/tech-lead.yaml`. PyYAML in `.venv` (see `requirements.txt`).
-- [ ] **4. Port remaining roles** — one at a time (backend-dev, frontend-dev, qa-engineer, devops next). Only `role.yaml` metadata exists; add `SOUL.md` + `SKILL.md` + `MEMORY.md`. Use the sub-agent-reads-playbook pattern to keep context clean.
-- [ ] **5. Flesh stack overlays** — `stacks/*` are `stack.yaml` stubs with empty `fragments`. Add LAMP (PHP/MySQL/Apache/WordPress constraints) + others. Then add keyed inline injection at the `<!-- STACK: ... -->` markers (today overlays append as a trailing section).
-- [ ] **6. Pull skills from repos** — once factory structure is solid, pull skill files from GitHub repos in `docs/reference-repos.md` into `agent-factory/skills/`.
-- [ ] **7. Create `machines/wilderness.yaml`** — declare which agents are active on this machine (agree with Gareth which agent to build first).
-- [ ] **8. Stub first agent in `agents/`** — four soulspec files (SOUL.md, IDENTITY.md, AGENTS.md, USER.md) + `tools/` and `skills/` subdirs.
-- [ ] **9. Update CLAUDE.md** — document `agents/`, `machines/`, `scripts/` conventions and the new agent loading model.
+- [x] **3b. Flesh `compose.py`** — engine renders/merges/writes an agent idempotently; PyYAML in `.venv` (see `requirements.txt`).
+- [x] **3c. Adopt the live 5-file agent model** — verified the running OpenClaw on guide-server uses SOUL/IDENTITY/AGENTS/USER/MEMORY + skills (playbook's 3-file model is outdated). Re-cut `_core` (added IDENTITY/AGENTS/USER bases) + Tech Lead to the 5-file form; round-trip re-proven OpenClaw-native with `examples/tech-lead.yaml`. Handoff = async signal files. See memory `live-openclaw-agent-model`.
+- [ ] **4. Build the per-runtime emitters** — `compose.py` is a multi-target compiler. OpenClaw form is near-native (the 5 files in a workspace + skills in `openclaw.json`). Add: Claude Code subagent (flatten 5 files → single `.md` + frontmatter, model from IDENTITY) and Claude Code skill (folder that boots via the AGENTS.md sequence). Test that one actually loads/runs — the real end-to-end "agent in agents/ that runs".
+- [ ] **5. Port remaining roles** — one at a time (backend-dev, frontend-dev, qa-engineer, devops next) to the 5-file model: each needs `SOUL.md` + `SKILL.md` (required) + IDENTITY/AGENTS/USER/MEMORY layers. Use the sub-agent-reads-playbook pattern to keep context clean.
+- [ ] **6. Machine manifest** — one file per machine (`machines/<host>`), shared baseline + per-machine overlay, listing BOTH wired skills and active agents. Bash-parseable (don't force YAML into wire.sh).
+- [ ] **7. Flesh stack overlays** — `stacks/*` are `stack.yaml` stubs with empty `fragments`. Add LAMP + others. Overlays currently append to `AGENTS.md`; keyed inline injection is a later upgrade.
+- [ ] **8. Pull skills from repos** — once factory structure is solid, pull skill files from GitHub repos in `docs/reference-repos.md` into `agent-factory/skills/`.
+- [ ] **9. Update CLAUDE.md** — document `agents/`, `machines/`, `scripts/` conventions and the agent loading model (5-file + emitters).
 
 ---
 
