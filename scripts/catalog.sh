@@ -15,8 +15,8 @@
 
 set -euo pipefail
 
-# Repo root: this script's own directory unless GRID_DIR overrides it.
-GRID_DIR="${GRID_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+# Repo root: parent of scripts/ unless GRID_DIR overrides it.
+GRID_DIR="${GRID_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 OUT="${1:-$GRID_DIR/SKILLS.md}"
 
 # --- Parse one SKILL.md → prints "name<TAB>summary" ------------------------
