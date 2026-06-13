@@ -1,0 +1,10 @@
+# tech-lead.yaml — minimal compose config.
+# Proves the factory round-trips end to end with the one fully-ported role.
+# Stack-agnostic, no skills (the stacks/ and skills/ are still stubs).
+project: demo-tech-lead
+description: Minimal round-trip — Tech Lead only, stack-agnostic.
+paperclip: false
+
+agents:
+  - role: tech-lead
+    model: opus

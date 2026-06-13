@@ -44,11 +44,43 @@ agent-factory/
 └── projects/<name>/        OUTPUT — one folder per composed team
 ```
 
+## Running it
+
+`compose.py` needs PyYAML. Install it once into a project venv:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+Then compose a team from a config:
+
+```bash
+.venv/bin/python compose.py examples/tech-lead.yaml            # writes projects/demo-tech-lead/
+.venv/bin/python compose.py examples/tech-lead.yaml --dry-run  # report only, writes nothing
+```
+
+Output is regenerable and idempotent: re-running with an unchanged config
+produces byte-identical files (the project dir is wiped and rewritten each run).
+`projects/` output is gitignored — the compose config is the tracked artefact.
+
+### How merging works
+
+`SOUL.md` and `MEMORY.md` are merged section-by-section with the `_core` base:
+shared level-2 (`## `) headings unify under one heading (base guidance first,
+then the role's seed); sections unique to either side are kept in order. This is
+why role templates reuse the base headings. `SKILL.md` is the role's operating
+manual with any stack overlay(s) appended.
+
 ## Status
 
-**Scaffold stage.** Structure + stubs are in place; `compose.py` is not yet
-functional. Build order: scaffold → port Tech Lead role → flesh compose.py →
-add stack overlays → iterate. See repo-root `TODO.md`.
+**Engine works; content is in progress.** `compose.py` renders, merges, and
+writes a team idempotently, validated end-to-end with the Tech Lead role
+(`examples/tech-lead.yaml`). Remaining work: port the other roles (only
+`role.yaml` metadata exists so far), flesh the stack overlays (`stacks/*` are
+`stack.yaml` stubs with empty `fragments`), and add keyed inline stack injection
+at the `<!-- STACK: ... -->` markers (today overlays append as a trailing
+section). See repo-root `TODO.md`.
 
 ## Runtime assumptions (decided 2026-06-13)
 

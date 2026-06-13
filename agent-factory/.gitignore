@@ -1,0 +1,8 @@
+# Project venv (compose.py's PyYAML lives here — see requirements.txt).
+.venv/
+__pycache__/
+
+# Generated team output. Regenerable from a compose config via compose.py,
+# so it is not tracked. The dir itself is kept via .gitkeep.
+projects/*
+!projects/.gitkeep
