@@ -12,9 +12,6 @@ set -euo pipefail
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 
-# Dirs inside GRID_DIR that are never skills
-EXCLUDED=(repos tests .git)
-
 # --- Wiring allowlist ---------------------------------------------------------
 # Only submodules listed in wired-submodules.txt have their skills wired into
 # SKILLS_DIR. Every other repo under repos/ is library-only (indexed by
@@ -130,14 +127,14 @@ if [ -d "$GRID_DIR/repos" ]; then
   done
 fi
 
-# --- 3. Wire root-level skills last (higher precedence — overrides repos) ---
-for skill_dir in "$GRID_DIR"/*/; do
-  [ -d "$skill_dir" ] || continue
-  name=$(basename "$skill_dir")
-  [[ " ${EXCLUDED[*]} " == *" $name "* ]] && continue  # skip non-skill dirs
-  [ -f "$skill_dir/SKILL.md" ] || continue              # must be a valid skill
-  wire_skill "$skill_dir"
-done
+# --- 3. Wire skills/ dir last (higher precedence — overrides repos) ---
+if [ -d "$GRID_DIR/skills" ]; then
+  for skill_dir in "$GRID_DIR/skills"/*/; do
+    [ -d "$skill_dir" ] || continue
+    [ -f "$skill_dir/SKILL.md" ] || continue
+    wire_skill "$skill_dir"
+  done
+fi
 
 # --- 4. Refresh the skill catalogue so wiring and SKILLS.md never drift ---
 # Coupled on purpose: any change to what's wired re-renders the catalogue.

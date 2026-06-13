@@ -5,8 +5,8 @@ load helpers/setup
 
 setup() {
   common_setup
-  make_skill "$MOCK_GRID/skill-alpha" "skill-alpha"
-  make_skill "$MOCK_GRID/skill-beta"  "skill-beta"
+  make_skill "$MOCK_GRID/skills/skill-alpha" "skill-alpha"
+  make_skill "$MOCK_GRID/skills/skill-beta"  "skill-beta"
   # A nested submodule skill (mattpocock/superpowers style)
   make_skill "$MOCK_GRID/repos/gstack/deep-skill" "deep-skill"
   # A repo-root SKILL.md marker (gstack style) — must NOT be catalogued

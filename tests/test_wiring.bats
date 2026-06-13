@@ -5,8 +5,8 @@ load helpers/setup
 
 setup() {
   common_setup
-  make_skill "$MOCK_GRID/skill-alpha" "skill-alpha"
-  make_skill "$MOCK_GRID/skill-beta"  "skill-beta"
+  make_skill "$MOCK_GRID/skills/skill-alpha" "skill-alpha"
+  make_skill "$MOCK_GRID/skills/skill-beta"  "skill-beta"
 }
 
 teardown() {
@@ -36,7 +36,7 @@ teardown() {
 
 @test "removes stale symlink when skill is deleted from the-grid" {
   GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/wire.sh"
-  rm -rf "$MOCK_GRID/skill-alpha"
+  rm -rf "$MOCK_GRID/skills/skill-alpha"
   GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/wire.sh"
   [ ! -e "$MOCK_SKILLS/skill-alpha" ]
   [ ! -L "$MOCK_SKILLS/skill-alpha" ]
