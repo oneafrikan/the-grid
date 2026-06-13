@@ -1,0 +1,9 @@
+# role.yaml — ceo-orchestrator (STUB)
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md / MEMORY.md templates beside it carry the actual content.
+name: ceo-orchestrator
+default_model: opus
+summary: >-
+  Top-level orchestrator. Sets goals, sequences the team, gates releases.
+base_skills: []      # skills always included for this role (TBD)
+orchestrator: true

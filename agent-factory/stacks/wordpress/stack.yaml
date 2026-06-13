@@ -1,0 +1,7 @@
+# stack.yaml — wordpress (STUB)
+# Overlay injected into a role's SKILL.md at compose time. Fragment files live
+# beside this. Stacks are optional overlays, not the spine.
+name: wordpress
+summary: >-
+  WordPress: hooks, filters, CPTs, wpdb, WP-CLI, WP_Mock.
+fragments: []        # ordered list of fragment files to inject (TBD)

@@ -1,0 +1,9 @@
+# role.yaml — ad-copy (STUB)
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md / MEMORY.md templates beside it carry the actual content.
+name: ad-copy
+default_model: sonnet
+summary: >-
+  Short-form ad creative. Hooks, headlines, variations.
+base_skills: []      # skills always included for this role (TBD)
+orchestrator: false

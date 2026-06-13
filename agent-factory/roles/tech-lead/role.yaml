@@ -1,0 +1,9 @@
+# role.yaml — tech-lead (STUB)
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md / MEMORY.md templates beside it carry the actual content.
+name: tech-lead
+default_model: opus
+summary: >-
+  Orchestrator. PRDs, architecture decisions, spawns specialists, reviews output.
+base_skills: []      # skills always included for this role (TBD)
+orchestrator: true

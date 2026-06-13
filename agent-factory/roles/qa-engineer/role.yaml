@@ -1,0 +1,9 @@
+# role.yaml — qa-engineer (STUB)
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md / MEMORY.md templates beside it carry the actual content.
+name: qa-engineer
+default_model: sonnet
+summary: >-
+  Code review, test writing, release gating.
+base_skills: []      # skills always included for this role (TBD)
+orchestrator: false

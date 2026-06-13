@@ -1,0 +1,7 @@
+# stack.yaml — data-engineering (STUB)
+# Overlay injected into a role's SKILL.md at compose time. Fragment files live
+# beside this. Stacks are optional overlays, not the spine.
+name: data-engineering
+summary: >-
+  BigQuery, dbt, Python, GA4.
+fragments: []        # ordered list of fragment files to inject (TBD)

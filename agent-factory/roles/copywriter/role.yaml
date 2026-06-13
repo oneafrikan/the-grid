@@ -1,0 +1,9 @@
+# role.yaml — copywriter (STUB)
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md / MEMORY.md templates beside it carry the actual content.
+name: copywriter
+default_model: sonnet
+summary: >-
+  Long-form and product copy. Voice, clarity, structure.
+base_skills: []      # skills always included for this role (TBD)
+orchestrator: false

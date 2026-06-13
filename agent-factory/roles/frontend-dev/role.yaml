@@ -1,0 +1,9 @@
+# role.yaml — frontend-dev (STUB)
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md / MEMORY.md templates beside it carry the actual content.
+name: frontend-dev
+default_model: sonnet
+summary: >-
+  Templates, CSS, JS, UI components, forms.
+base_skills: []      # skills always included for this role (TBD)
+orchestrator: false

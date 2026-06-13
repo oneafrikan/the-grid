@@ -1,0 +1,38 @@
+# factory.schema.yaml
+#
+# Describes the shape of a valid *compose config* — the input file you hand to
+# compose.py to generate a team. This is documentation-as-schema for now (human
+# reference); a machine-enforced version (jsonschema / pydantic) comes when
+# compose.py is fleshed out. See docs/architect-agent-composition.yaml for a
+# filled-in example.
+#
+# ── top level ────────────────────────────────────────────────────────────────
+# project      (str, required)   slug for the output folder: projects/<project>/
+# description  (str, optional)   one-line human description
+# paperclip    (bool, optional)  wire Paperclip heartbeat skills into every agent
+# agents       (list, required)  one entry per agent on the team
+#
+# ── per-agent entry ──────────────────────────────────────────────────────────
+# role    (str, required)   must match a folder in roles/<role>/
+# stacks  (list, optional)  zero or more overlays from stacks/<stack>/; []=agnostic
+# skills  (list, optional)  zero or more skills from skills/<skill>/
+# model   (str, optional)   model string; falls back to role.yaml default
+#
+# ── validation rules (enforced once compose.py is real) ──────────────────────
+# - every `role` resolves to an existing roles/<role>/ dir
+# - every `stack` resolves to an existing stacks/<stack>/ dir
+# - every `skill` resolves to an existing skills/<skill>/ dir
+# - `model` is one of the allowed model strings (TBD; e.g. opus | sonnet | haiku)
+# - exactly one orchestrator role present if the team uses spawned handoffs
+
+schema_version: 0   # bump when the contract changes
+
+required:
+  top_level: [project, agents]
+  per_agent: [role]
+
+defaults:
+  paperclip: false
+  stacks: []
+  skills: []
+  # model: pulled from roles/<role>/role.yaml when omitted
