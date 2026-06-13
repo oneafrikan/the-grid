@@ -114,7 +114,7 @@ for r in "$GRID_DIR"/repos/*/; do
   if [ -f "${r%/}/SKILL.md" ]; then repo_roots=$((repo_roots + 1)); fi
 done
 root_owned=0
-for d in "$GRID_DIR"/*/; do
+for d in "$GRID_DIR/skills"/*/; do
   if [ -f "${d%/}/SKILL.md" ]; then root_owned=$((root_owned + 1)); fi
 done
 total=$((all_md - repo_roots))
@@ -191,9 +191,9 @@ wired_live=$((root_owned + wired_skill_count))
     "$total" "$wired_live" "$root_owned" "$wired_skill_count" "$library_skill_count"
   printf 'Library repos are part of the-grid as an index/hub — browse here or search via skill-scout. Promote one to wired in `wired-submodules.txt`.\n\n'
 
-  # Root-owned skills first (top-level dirs containing a SKILL.md).
+  # Root-owned skills first (skills/ dir).
   emit_section "Root (owned / edited)" < <(
-    for d in "$GRID_DIR"/*/; do
+    for d in "$GRID_DIR/skills"/*/; do
       [ -f "$d/SKILL.md" ] && printf '%s\n' "$d/SKILL.md"
     done
   )

@@ -3,7 +3,6 @@
 # all_wired_skill_dirs mirrors wire.sh's discovery logic exactly.
 
 GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
-EXCLUDED=(repos tests .git)
 
 # Wiring allowlist (mirror wire.sh): only these submodules are wired; the rest
 # are library-only (upstream community content we neither wire nor validate).
@@ -24,10 +23,8 @@ repo_is_wired() {
 
 # Returns every skill dir that wire.sh would actually wire.
 all_wired_skill_dirs() {
-  # Root-level skills (wire.sh step 2)
-  for d in "$GRID_ROOT"/*/; do
-    local name; name=$(basename "$d")
-    [[ " ${EXCLUDED[*]} " == *" $name "* ]] && continue
+  # skills/ dir (wire.sh step 3)
+  for d in "$GRID_ROOT/skills"/*/; do
     [ -f "${d}SKILL.md" ] || continue
     echo "${d%/}"
   done
@@ -80,11 +77,9 @@ all_wired_skill_dirs() {
 }
 
 @test "no duplicate skill names in root-level skills (skills we own)" {
-  # Only check skills at the-grid root — external repos may overlap intentionally.
+  # Only check skills in skills/ — external repos may overlap intentionally.
   local all unique
-  all=$(for d in "$GRID_ROOT"/*/; do
-    local name; name=$(basename "$d")
-    [[ " ${EXCLUDED[*]} " == *" $name "* ]] && continue
+  all=$(for d in "$GRID_ROOT/skills"/*/; do
     [ -f "${d}SKILL.md" ] && grep "^name:" "${d}SKILL.md" | awk '{print $2}'
   done | sort)
   unique=$(echo "$all" | uniq)
