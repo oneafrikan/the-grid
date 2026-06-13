@@ -1,0 +1,20 @@
+# agents_base.yaml — universal runtime config template.
+#
+# Base wiring rendered into each project's top-level agents.yaml. Holds defaults
+# common to every team; compose.py overlays the per-agent entries from the
+# compose config on top.
+#
+# Runtime target: Claude Code + ACP (swappable coding CLI). Don't hard-bake a
+# single CLI's assumptions here.
+# STUB: keys are indicative, not final.
+
+runtime:
+  surface: acp            # claude-code today, opencode/codex tomorrow
+  handoff:
+    modes: [sessions_spawn, pr_webhook]   # both supported; team picks per task
+
+defaults:
+  model: sonnet           # specialists default; orchestrator overrides to opus
+  workspace: ./           # per-agent workspace root; overridden per project
+
+# agents: []              # <- compose.py fills this from the compose config
