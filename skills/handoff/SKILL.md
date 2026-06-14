@@ -40,7 +40,7 @@ Determine save location by matching the current working directory path:
 | `guide-build` | `Logs/` |
 | `guide-core` | `Logs/` if it exists, otherwise project root |
 | `guide-engine` | `context/` |
-| Obsidian vault (`Gareth_SovereignOS`) | `__LOGS/` |
+| Obsidian vault (`Gareth_SovereignOS`) | `LOGS/` |
 | All others | `LOGS/` — ask before creating if it doesn't exist |
 
 ---
