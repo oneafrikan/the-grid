@@ -1,5 +1,3 @@
-# the-grid
-
 ```
 
 ████████╗██╗  ██╗███████╗    ██████╗ ██████╗ ██╗██████╗ 
@@ -25,7 +23,7 @@ And then, one day...
 I got in.
 ```
 
-
+# the-grid
 the-grid is a personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw, Paperclip, and friends. It's not a framework; it's one person's opinionated system for organising and activating skills, agents, and machines. Fork it for your own. Skills are the first asset type it manages, but the remit is broader: agents, machines, MCP servers, and prompts are already growing in.
 
 The core mechanic: a single script (`scripts/wire.sh`) symlinks skills into `~/.claude/skills/` so Claude picks them up automatically — no installs, no config files.
