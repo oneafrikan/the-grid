@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>the-grid</title>
+  <style>
+    /* System font stack — no network requests */
+    :root {
+      --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Menlo, Consolas, monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+
+      /* Colour tokens — dark background, high contrast */
+      --bg:         #0d0d0f;
+      --surface:    #141418;
+      --border:     #252530;
+      --text:       #d8d8e0;
+      --text-dim:   #7878a0;
+      --accent:     #5b8af0;
+      --accent-dim: #2a3d6b;
+      --code-bg:    #1a1a22;
+      --tag-wired:  #1d3d2f;
+      --tag-wired-text: #5fbd8a;
+      --tag-lib:    #2b2240;
+      --tag-lib-text: #9b82e8;
+      --tag-ref:    #2a2215;
+      --tag-ref-text: #c99a4a;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.65;
+      /* Centre with a sensible max-width; fluid below it */
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover, a:focus { text-decoration: underline; }
+    a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+    /* ── Layout shell ── */
+    .page-wrap {
+      width: 100%;
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 0 1.25rem;
+    }
+
+    /* ── Header ── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 3rem 0 2.5rem;
+    }
+
+    .logo {
+      font-family: var(--font-mono);
+      font-size: clamp(2rem, 6vw, 3.25rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: #fff;
+      /* Subtle grid-line glow as decoration; purely visual */
+    }
+
+    /* Decorative rule — hidden from screen readers */
+    .logo-rule {
+      display: block;
+      height: 2px;
+      width: 3.5rem;
+      background: var(--accent);
+      margin: 0.75rem 0 1rem;
+      border-radius: 1px;
+    }
+
+    .tagline {
+      font-size: 1.05rem;
+      color: var(--text-dim);
+      max-width: 55ch;
+    }
+
+    /* ── Main content ── */
+    main { flex: 1; padding: 3rem 0; }
+
+    section { margin-bottom: 3.5rem; }
+
+    h2 {
+      font-family: var(--font-sans);
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 1.25rem;
+    }
+
+    p { max-width: 70ch; margin-bottom: 0.9rem; }
+    p:last-child { margin-bottom: 0; }
+
+    /* ── Tier cards ── */
+    .tier-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+
+    .tier-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+    }
+
+    .tier-card h3 {
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 0.75rem;
+    }
+
+    /* Tier label badges */
+    .badge {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 0.15em 0.55em;
+      border-radius: 4px;
+      margin-left: 0.4rem;
+      vertical-align: middle;
+      /* decorative — aria-hidden set in markup */
+    }
+
+    .badge-wired  { background: var(--tag-wired);  color: var(--tag-wired-text); }
+    .badge-lib    { background: var(--tag-lib);    color: var(--tag-lib-text); }
+    .badge-ref    { background: var(--tag-ref);    color: var(--tag-ref-text); }
+
+    .tier-card p {
+      font-size: 0.92rem;
+      color: var(--text-dim);
+      margin-bottom: 0;
+    }
+
+    .tier-card code {
+      font-family: var(--font-mono);
+      font-size: 0.85em;
+      color: var(--text);
+      background: var(--code-bg);
+      padding: 0.1em 0.35em;
+      border-radius: 3px;
+    }
+
+    /* ── Key files table ── */
+    .files-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    .files-table th {
+      text-align: left;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 0.5rem 1rem 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .files-table td {
+      padding: 0.65rem 1rem 0.65rem 0;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    .files-table tr:last-child td { border-bottom: none; }
+
+    .files-table code {
+      font-family: var(--font-mono);
+      font-size: 0.85em;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .files-table td:last-child {
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    /* ── Commands ── */
+    .command-block {
+      margin-bottom: 1.75rem;
+    }
+
+    .command-block h3 {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--text-dim);
+      margin-bottom: 0.5rem;
+    }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      /* Prevent horizontal overflow on narrow screens */
+      white-space: pre;
+    }
+
+    pre code {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--text);
+      background: none;
+      padding: 0;
+    }
+
+    /* ── Ownership note ── */
+    .ownership-note {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent-dim);
+      border-radius: 0 6px 6px 0;
+      padding: 1rem 1.25rem;
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+
+    .ownership-note code {
+      font-family: var(--font-mono);
+      font-size: 0.85em;
+      color: var(--text);
+      background: var(--code-bg);
+      padding: 0.1em 0.35em;
+      border-radius: 3px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem 0;
+    }
+
+    .footer-inner {
+      font-size: 0.88rem;
+      color: var(--text-dim);
+    }
+
+    .footer-inner strong { color: var(--text); }
+
+    /* ── Responsive ── */
+    @media (max-width: 480px) {
+      header { padding: 2rem 0 1.75rem; }
+      main { padding: 2rem 0; }
+      section { margin-bottom: 2.5rem; }
+
+      /* Stack table on very small screens */
+      .files-table thead { display: none; }
+      .files-table td {
+        display: block;
+        padding: 0.4rem 0;
+        border-bottom: none;
+      }
+      .files-table tr {
+        display: block;
+        border-bottom: 1px solid var(--border);
+        padding: 0.75rem 0;
+      }
+      .files-table tr:last-child { border-bottom: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="page-wrap">
+
+    <!-- ═══════════════════════════════════════════ HEADER -->
+    <header>
+      <div class="logo">the-grid</div>
+      <!-- Decorative accent bar — hidden from assistive tech -->
+      <span class="logo-rule" aria-hidden="true"></span>
+      <p class="tagline">
+        A personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw,
+        Paperclip, Hermes, opencode, and friends.
+      </p>
+    </header>
+
+    <!-- ═══════════════════════════════════════════ MAIN -->
+    <main>
+
+      <!-- 1. What it is -->
+      <section aria-labelledby="what-heading">
+        <h2 id="what-heading">What it is</h2>
+        <p>
+          the-grid is not a framework and not skills-only. Skills are the first
+          asset type it manages, but the remit is broader: agents, machines, MCP
+          servers, prompts, and configs are already growing in.
+        </p>
+        <p>
+          The core mechanic: a single script (<code>wire.sh</code>) symlinks skills
+          into <code>~/.claude/skills/</code> so Claude picks them up automatically —
+          no installs, no config files. the-grid owns some assets directly and pulls
+          many more from sibling repos via git submodules.
+        </p>
+      </section>
+
+      <!-- 2. The two tiers -->
+      <section aria-labelledby="tiers-heading">
+        <h2 id="tiers-heading">The two tiers</h2>
+
+        <div class="tier-grid">
+
+          <article class="tier-card">
+            <h3>
+              Wired
+              <span class="badge badge-wired" aria-hidden="true">live</span>
+            </h3>
+            <p>
+              Repos listed in <code>wired-submodules.txt</code>. Their skills are
+              symlinked live into <code>~/.claude/skills/</code> and active in every
+              session. Keep this list small and intentional.
+            </p>
+          </article>
+
+          <article class="tier-card">
+            <h3>
+              Library
+              <span class="badge badge-lib" aria-hidden="true">indexed</span>
+            </h3>
+            <p>
+              Everything else: indexed in <code>SKILLS.md</code> and searchable via
+              <code>skill-scout</code>, but not symlinked. Keeps the active set sane
+              even as the-grid indexes thousands of ecosystem skills. Promote to wired
+              by adding to the allowlist.
+            </p>
+          </article>
+
+          <article class="tier-card">
+            <h3>
+              Reference
+              <span class="badge badge-ref" aria-hidden="true">browse</span>
+            </h3>
+            <p>
+              Awesome-lists and indexes with no <code>SKILL.md</code> files. Kept for
+              browsing and as a source for <code>skill-scout</code>. Nothing to wire;
+              <code>catalog.sh</code> auto-detects and lists them separately.
+            </p>
+          </article>
+
+        </div>
+
+        <div class="ownership-note" style="margin-top: 1.25rem;">
+          <strong>Ownership rule:</strong> root-level dirs are for skills Gareth owns
+          or has deliberately forked. Everything else is managed upstream in
+          <code>repos/*</code> submodules and wired on demand. When a root dir and a
+          submodule share the same skill name, the root copy wins — that's the escape
+          hatch for an edited fork. Don't copy an upstream skill to the root just to
+          use it; add the repo as a submodule instead.
+        </div>
+      </section>
+
+      <!-- 3. Key files -->
+      <section aria-labelledby="files-heading">
+        <h2 id="files-heading">Key files</h2>
+
+        <table class="files-table">
+          <thead>
+            <tr>
+              <th scope="col">File / dir</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>scripts/wire.sh</code></td>
+              <td>The wiring script. Idempotent — tears down all grid-owned symlinks and rebuilds the wired set each run.</td>
+            </tr>
+            <tr>
+              <td><code>wired-submodules.txt</code></td>
+              <td>Allowlist of submodules whose skills are wired live. Anything not listed is library-only.</td>
+            </tr>
+            <tr>
+              <td><code>scripts/catalog.sh</code></td>
+              <td>Regenerates <code>SKILLS.md</code>. Deterministic, timestamp-free output. Called automatically by <code>wire.sh</code>.</td>
+            </tr>
+            <tr>
+              <td><code>SKILLS.md</code></td>
+              <td>Generated index of the whole ecosystem. Never edit by hand.</td>
+            </tr>
+            <tr>
+              <td><code>scripts/reconcile.sh</code></td>
+              <td>Removes stale shadowing dirs on a fresh machine so the-grid owns the slot, then re-wires.</td>
+            </tr>
+            <tr>
+              <td><code>tests/</code></td>
+              <td>Bats test suite covering wiring, idempotency, skill format, and submodule health.</td>
+            </tr>
+            <tr>
+              <td><code>repos/</code></td>
+              <td>Sibling skill repos as git submodules. Each may contain many skill dirs at any nesting depth.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- 4. Common commands -->
+      <section aria-labelledby="commands-heading">
+        <h2 id="commands-heading">Common commands</h2>
+
+        <div class="command-block">
+          <h3>Bootstrap a new machine</h3>
+          <pre><code>git clone https://github.com/&lt;your-username&gt;/the-grid.git ~/.the-grid
+cd ~/.the-grid
+git submodule update --init --recursive
+bash scripts/wire.sh</code></pre>
+        </div>
+
+        <div class="command-block">
+          <h3>Add a skill</h3>
+          <pre><code>mkdir ~/.the-grid/skills/my-skill
+# create SKILL.md with name: and description: frontmatter
+bash scripts/wire.sh</code></pre>
+        </div>
+
+        <div class="command-block">
+          <h3>Regenerate the skill catalogue</h3>
+          <pre><code>bash scripts/catalog.sh
+# wire.sh calls this automatically — rarely needed standalone</code></pre>
+        </div>
+
+        <div class="command-block">
+          <h3>Add a sibling repo (library by default)</h3>
+          <pre><code>git submodule add &lt;repo-url&gt; repos/&lt;name&gt;
+git submodule update --init
+bash scripts/wire.sh
+# To wire it live: add repos/&lt;name&gt; to wired-submodules.txt, then re-run wire.sh</code></pre>
+        </div>
+
+        <div class="command-block">
+          <h3>Reconcile stale shadows on a fresh machine</h3>
+          <pre><code>bash scripts/reconcile.sh          # dry run — list shadowing dirs
+bash scripts/reconcile.sh --force  # remove + re-wire</code></pre>
+        </div>
+
+        <div class="command-block">
+          <h3>Run tests</h3>
+          <pre><code>tests/lib/bats-core/bin/bats tests/</code></pre>
+        </div>
+
+      </section>
+
+    </main>
+
+    <!-- ═══════════════════════════════════════════ FOOTER -->
+    <footer>
+      <div class="footer-inner">
+        <p>
+          <strong>the-grid</strong> is Gareth's brainchild — a personal, evolving
+          system for organising and wiring up his Claude skills. Intended to
+          eventually be a public repo. Treat it as an extension of how Gareth
+          thinks and works.
+        </p>
+      </div>
+    </footer>
+
+  </div><!-- /.page-wrap -->
+
+</body>
+</html>
