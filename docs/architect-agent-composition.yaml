@@ -1,0 +1,30 @@
+# marketplace.yaml
+project: fallow-marketplace
+description: Retreat marketplace MVP
+paperclip: true               # Wire Paperclip heartbeat skills into every agent
+
+agents:
+  - role: tech-lead
+    stacks: [lamp]
+    skills: [paperclip, paperclip-tasks, wordpress]
+    model: opus
+
+  - role: backend-dev
+    stacks: [lamp, wordpress]
+    skills: [paperclip, php, mysql, wordpress]
+    model: sonnet
+
+  - role: frontend-dev
+    stacks: [lamp, astro]
+    skills: [paperclip, astro-seo]
+    model: sonnet
+
+  - role: copywriter
+    stacks: []                # Stack-agnostic role
+    skills: [paperclip, copywriting, copy-editing]
+    model: sonnet
+
+  - role: growth-hacker
+    stacks: []
+    skills: [paperclip, growth-hacker, marketing-skills]
+    model: sonnet

@@ -1,0 +1,54 @@
+agent_factory/
+│
+├── _core/                          # Shared base templates
+│   ├── SOUL_base.md                # Universal personality scaffolding
+│   ├── MEMORY_base.md              # Universal memory structure
+│   └── agents_base.yaml            # Universal OpenClaw config template
+│
+├── roles/                          # Role definitions (stack-agnostic)
+│   ├── tech-lead/
+│   ├── frontend-dev/
+│   ├── backend-dev/
+│   ├── qa-engineer/
+│   ├── devops/
+│   ├── data-engineer/
+│   ├── data-analyst/
+│   ├── growth-hacker/
+│   ├── copywriter/
+│   ├── ad-copy/
+│   ├── product-manager/
+│   └── ceo-orchestrator/
+│   └── ..../
+│
+├── stacks/                         # Stack overlays (injected into roles)
+│   ├── lamp/                       # PHP, MySQL, Apache, WordPress, ezSQL
+│   ├── modern-frontend/            # React, Next.js, TypeScript, Prisma
+│   ├── astro/                      # Astro, Alpine.js, Content Collections
+│   ├── data-engineering/           # BigQuery, dbt, Python, GA4
+│   └── wordpress/                  # WP-specific plugin/theme patterns
+│
+├── skills/                         # Local skill library (pulled from repos)
+│   ├── paperclip/                  # paperclipai/paperclip
+│   ├── paperclip-tasks/            # paperclip-converting-plans-to-tasks
+│   ├── wordpress/                  # WordPress/agent-skills
+│   ├── php/                        # clawbot.ai PHP skill
+│   ├── mysql/                      # openclaw/skills mysql
+│   ├── bigquery/                   # mozilla/bigquery-etl-skills
+│   ├── ga4/                        # GA4 Claude Code skill
+│   ├── astro-seo/                  # jdevalk/skills
+│   └── ...                         # All others from the reference doc
+│
+├── compose.py                      # The factory script
+├── factory.schema.yaml             # Schema — what a valid compose config looks like
+│
+└── projects/                       # Output — one folder per composed project
+    └── {project-name}/
+        ├── agents.yaml
+        ├── tech-lead/
+        │   ├── SOUL.md
+        │   ├── SKILL.md
+        │   └── MEMORY.md
+        └── backend-dev/
+            ├── SOUL.md
+            ├── SKILL.md
+            └── MEMORY.md
