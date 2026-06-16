@@ -304,13 +304,14 @@
       <section aria-labelledby="what-heading">
         <h2 id="what-heading">What it is</h2>
         <p>
-          the-grid is not a framework and not skills-only. Skills are the first
-          asset type it manages, but the remit is broader: agents, machines, MCP
-          servers, prompts, and configs are already growing in.
+          the-grid is not a framework and not skills-only. It wires skills from
+          across the ecosystem, and it composes and wires AI dev-team agents.
+          Agents, machines, MCP servers, prompts, and configs are already growing in.
         </p>
         <p>
           The core mechanic: a single script (<code>wire.sh</code>) symlinks skills
-          into <code>~/.claude/skills/</code> so Claude picks them up automatically —
+          and composed agents into <code>~/.claude/skills/</code> and
+          <code>~/.claude/agents/</code> so Claude picks them up automatically —
           no installs, no config files. the-grid owns some assets directly and pulls
           many more from sibling repos via git submodules.
         </p>
@@ -371,7 +372,109 @@
         </div>
       </section>
 
-      <!-- 3. Key files -->
+      <!-- 3. agent-factory — composed agents -->
+      <section aria-labelledby="agent-factory-heading">
+        <h2 id="agent-factory-heading">agent-factory — composed agents</h2>
+
+        <p>
+          <code>agent-factory/</code> composes AI dev-team agents from three
+          orthogonal inputs: <strong>role × stack × skills</strong>. Each input
+          is independent — swap a stack overlay without touching the role's
+          identity, or bolt on a skill without rewriting anything else.
+        </p>
+
+        <div class="tier-grid" style="margin: 1.25rem 0;">
+
+          <article class="tier-card">
+            <h3>role</h3>
+            <p>
+              <em>Who</em> the agent is — Tech Lead, Backend Dev, QA, and so on.
+              Stack-agnostic identity, personality, and an operating skill.
+              Lives in <code>roles/&lt;role&gt;/</code>.
+            </p>
+          </article>
+
+          <article class="tier-card">
+            <h3>stack</h3>
+            <p>
+              <em>What</em> it builds on — LAMP, modern-frontend,
+              data-engineering…. An overlay appended to the role's operating
+              rules. Lives in <code>stacks/&lt;stack&gt;/</code>.
+            </p>
+          </article>
+
+          <article class="tier-card">
+            <h3>skills</h3>
+            <p>
+              Bolt-on capabilities pulled from the ecosystem (Paperclip, php,
+              mysql…). Referenced by name — not copied into the agent output.
+            </p>
+          </article>
+
+        </div>
+
+        <p>
+          A <strong>compose config</strong> names a project and lists agents, each
+          as <code>role + stacks[] + skills[] + model</code>. <code>compose.py</code>
+          reads it and emits one folder per agent under
+          <code>agent-factory/projects/&lt;name&gt;/</code>, rendered to the live
+          OpenClaw <strong>5-file identity model</strong>: <code>SOUL.md</code> (how
+          it behaves), <code>IDENTITY.md</code> (who it is + model),
+          <code>AGENTS.md</code> (boot sequence + async handoff), <code>USER.md</code>
+          (who it serves), <code>MEMORY.md</code> (what it carries).
+        </p>
+
+        <p>
+          <code>compose.py</code> is a <strong>multi-target compiler</strong> — one
+          5-file source, a different artefact shape per <code>--target</code>. The
+          <code>claude-code</code> target splits on <code>role.yaml orchestrator</code>:
+        </p>
+
+        <table class="files-table" style="margin: 1rem 0 1.25rem;">
+          <thead>
+            <tr>
+              <th scope="col">Form</th>
+              <th scope="col">Roles</th>
+              <th scope="col">How to invoke</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Skill</strong> (orchestrator)</td>
+              <td><code>tech-lead</code>, <code>ceo-orchestrator</code></td>
+              <td>Slash command — <code>/tech-lead</code>. Transforms the session into that role.</td>
+            </tr>
+            <tr>
+              <td><strong>Subagent</strong> (specialist)</td>
+              <td>the other 10 roles</td>
+              <td>Not a slash command. Delegate: <em>"Use the backend-dev subagent to…"</em>, or let an orchestrator hand off automatically.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="command-block">
+          <h3>Compose a team and wire it into Claude Code</h3>
+          <pre><code># Compose for the Claude Code target
+.venv/bin/python agent-factory/compose.py agent-factory/examples/full-team.yaml --target claude-code
+
+# Wire the output — orchestrators → ~/.claude/skills/, specialists → ~/.claude/agents/
+bash scripts/wire.sh
+
+# Open a fresh Claude Code session to pick up the new agents, then:
+# /tech-lead    ← invoke the orchestrator
+</code></pre>
+        </div>
+
+        <div class="ownership-note">
+          The very agents that maintain the-grid — the Tech Lead orchestrator and
+          the Frontend, Backend, and QA specialists — are themselves output of
+          agent-factory. The Claude Code target is live today; OpenClaw and
+          Paperclip (autonomous) targets are the next work.
+        </div>
+
+      </section>
+
+      <!-- 4. Key files -->
       <section aria-labelledby="files-heading">
         <h2 id="files-heading">Key files</h2>
 
@@ -383,6 +486,10 @@
             </tr>
           </thead>
           <tbody>
+            <tr>
+              <td><code>agent-factory/</code></td>
+              <td>Composes dev-team agents from <code>role × stack × skills</code>. <code>compose.py</code> is the multi-target compiler — one 5-file source, different artefact per <code>--target</code>. <code>wire.sh</code> wires the output live.</td>
+            </tr>
             <tr>
               <td><code>scripts/wire.sh</code></td>
               <td>The wiring script. Idempotent — tears down all grid-owned symlinks and rebuilds the wired set each run.</td>
@@ -415,7 +522,7 @@
         </table>
       </section>
 
-      <!-- 4. Common commands -->
+      <!-- 5. Common commands -->
       <section aria-labelledby="commands-heading">
         <h2 id="commands-heading">Common commands</h2>
 
