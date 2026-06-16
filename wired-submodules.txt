@@ -14,11 +14,9 @@
 # (If this file is deleted, wire.sh falls back to wiring ALL repos — legacy.)
 
 # --- anthropic (18 skills) ---
-anthropic/algorithmic-art
 anthropic/brand-guidelines
 anthropic/canvas-design
 anthropic/claude-api
-anthropic/doc-coauthoring
 anthropic/docx
 anthropic/frontend-design
 anthropic/internal-comms
@@ -26,7 +24,6 @@ anthropic/mcp-builder
 anthropic/pdf
 anthropic/pptx
 anthropic/skill-creator
-anthropic/slack-gif-creator
 anthropic/template
 anthropic/theme-factory
 anthropic/webapp-testing
@@ -58,14 +55,8 @@ gstack/gstack-openclaw-office-hours
 gstack/gstack-openclaw-retro
 gstack/gstack-upgrade
 gstack/guard
-gstack/hackernews-frontpage
 gstack/health
 gstack/investigate
-gstack/ios-clean
-gstack/ios-design-review
-gstack/ios-fix
-gstack/ios-qa
-gstack/ios-sync
 gstack/land-and-deploy
 gstack/landing-report
 gstack/learn
@@ -93,35 +84,20 @@ gstack/sync-gbrain
 gstack/unfreeze
 
 # --- jeffallan (68 skills) ---
-jeffallan/angular-architect
-jeffallan/api-designer
 jeffallan/architecture-designer
-jeffallan/atlassian-mcp
 jeffallan/chaos-engineer
 jeffallan/cli-developer
 jeffallan/cloud-architect
 jeffallan/code-documenter
 jeffallan/code-reviewer
 jeffallan/cpp-pro
-jeffallan/csharp-developer
 jeffallan/database-optimizer
 jeffallan/debugging-wizard
 jeffallan/devops-engineer
-jeffallan/django-expert
-jeffallan/dotnet-core-expert
-jeffallan/embedded-systems
-jeffallan/fastapi-expert
 jeffallan/feature-forge
 jeffallan/fine-tuning-expert
-jeffallan/flutter-expert
 jeffallan/fullstack-guardian
-jeffallan/game-developer
-jeffallan/golang-pro
-jeffallan/graphql-architect
-jeffallan/java-architect
 jeffallan/javascript-pro
-jeffallan/kotlin-specialist
-jeffallan/kubernetes-specialist
 jeffallan/laravel-specialist
 jeffallan/legacy-modernizer
 jeffallan/mcp-developer
@@ -137,47 +113,32 @@ jeffallan/postgres-pro
 jeffallan/prompt-engineer
 jeffallan/python-pro
 jeffallan/rag-architect
-jeffallan/rails-expert
-jeffallan/react-expert
-jeffallan/react-native-expert
-jeffallan/rust-engineer
-jeffallan/salesforce-developer
 jeffallan/secure-code-guardian
 jeffallan/security-reviewer
-jeffallan/shopify-expert
-jeffallan/spark-engineer
 jeffallan/spec-miner
-jeffallan/spring-boot-engineer
 jeffallan/sql-pro
 jeffallan/sre-engineer
-jeffallan/swift-expert
-jeffallan/terraform-engineer
 jeffallan/test-master
 jeffallan/the-fool
-jeffallan/typescript-pro
 jeffallan/vue-expert
 jeffallan/vue-expert-js
 jeffallan/websocket-engineer
 jeffallan/wordpress-pro
 
 # --- mattpocock (29 skills) ---
-mattpocock/caveman
 mattpocock/design-an-interface
 mattpocock/diagnose
 mattpocock/edit-article
 mattpocock/git-guardrails-claude-code
 mattpocock/grill-me
 mattpocock/grill-with-docs
-mattpocock/handoff
 mattpocock/improve-codebase-architecture
-mattpocock/migrate-to-shoehorn
 mattpocock/obsidian-vault
 mattpocock/prototype
 mattpocock/qa
 mattpocock/request-refactor-plan
 mattpocock/review
 mattpocock/scaffold-exercises
-mattpocock/setup-matt-pocock-skills
 mattpocock/setup-pre-commit
 mattpocock/tdd
 mattpocock/teach
