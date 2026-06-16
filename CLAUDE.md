@@ -33,11 +33,11 @@ submodules into two tiers:
 
 ## Key files
 
-- `wire.sh` — the wiring script. Idempotent. Tears down all grid-owned symlinks
+- `scripts/wire.sh` — the wiring script. Idempotent. Tears down all grid-owned symlinks
   and rebuilds the wired set each run (so un-wiring a repo actually removes it).
 - `wired-submodules.txt` — the allowlist of submodules whose skills are wired live.
   Anything not listed is library-only. Delete the file to wire everything (legacy).
-- `catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
+- `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
   repos as counts, reference (no-skill) repos in a footer. Deterministic output.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
 - `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
@@ -46,15 +46,15 @@ submodules into two tiers:
 
 ## Adding a skill
 
-Create a directory at the repo root with a `SKILL.md` inside it. Frontmatter requires `name:` and `description:`. Then run `bash wire.sh`.
+Create a directory at the repo root with a `SKILL.md` inside it. Frontmatter requires `name:` and `description:`. Then run `bash scripts/wire.sh`.
 
 ## Regenerating the skill catalogue
 
 ```bash
-bash catalog.sh        # rewrites SKILLS.md from every SKILL.md's frontmatter
+bash scripts/catalog.sh        # rewrites SKILLS.md from every SKILL.md's frontmatter
 ```
 
-`wire.sh` calls `catalog.sh` automatically as its final step, so wiring and
+`scripts/wire.sh` calls `scripts/catalog.sh` automatically as its final step, so wiring and
 `SKILLS.md` never drift — you rarely need to run it by hand. Output is sorted and
 timestamp-free, so an unchanged skill set yields an identical file (clean diffs).
 A repo-root `SKILL.md` (gstack marker) is excluded, matching wire.sh.
@@ -64,12 +64,12 @@ A repo-root `SKILL.md` (gstack marker) is excluded, matching wire.sh.
 ```bash
 git submodule add <repo-url> repos/<name>
 git submodule update --init
-bash wire.sh
+bash scripts/wire.sh
 ```
 
 A newly added submodule is **library by default** (indexed, not wired). To wire its
 skills live, add its `repos/<name>` dir name to `wired-submodules.txt` and re-run
-`bash wire.sh`. This keeps `~/.claude/skills/` small even as the-grid indexes
+`bash scripts/wire.sh`. This keeps `~/.claude/skills/` small even as the-grid indexes
 thousands of ecosystem skills.
 
 ### Reference submodules (indexes, not skill collections)
@@ -90,8 +90,8 @@ removes them so the-grid owns the slot, then re-wires. It parses wire.sh's own
 `skip (real dir, not managed)` output, so it never hardcodes names.
 
 ```bash
-bash reconcile.sh          # dry run — list shadowing dirs
-bash reconcile.sh --force  # remove them (sudo only where needed) + re-wire
+bash scripts/reconcile.sh          # dry run — list shadowing dirs
+bash scripts/reconcile.sh --force  # remove them (sudo only where needed) + re-wire
 ```
 
 Idempotent: a fully-wired machine reports "Nothing to reconcile".
