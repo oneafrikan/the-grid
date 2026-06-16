@@ -55,8 +55,11 @@
       padding: 0 1.25rem;
     }
 
-    /* ── Header ── */
-    header {
+    /* ── Header (legacy styles — kept to avoid removing pre-existing code) ──
+       The hero overrides these via .hero specificity. The border-bottom
+       is suppressed on .hero since the hero uses its own bottom treatment.
+    ── */
+    header:not(.hero) {
       border-bottom: 1px solid var(--border);
       padding: 3rem 0 2.5rem;
     }
@@ -262,7 +265,6 @@
 
     /* ── Responsive ── */
     @media (max-width: 480px) {
-      header { padding: 2rem 0 1.75rem; }
       main { padding: 2rem 0; }
       section { margin-bottom: 2.5rem; }
 
@@ -280,22 +282,297 @@
       }
       .files-table tr:last-child { border-bottom: none; }
     }
-  </style>
+
+    /* ═══════════════════════════════════════════════════════════════════
+       HERO — Tron aesthetic
+       All tokens prefixed --hero- to avoid touching existing body tokens.
+    ════════════════════════════════════════════════════════════════════ */
+    :root {
+      --hero-bg:          #02050a;         /* near-black, slightly blue-tinted */
+      --hero-cyan:        #00d9ff;         /* Tron primary neon */
+      --hero-cyan-dim:    #6ee5ff;         /* softer cyan for body text */
+      --hero-cyan-faint:  rgba(0, 217, 255, 0.12); /* grid line colour */
+      --hero-amber:       #ffae57;         /* single accent — "I got in." */
+      --hero-glow-near:   rgba(0, 217, 255, 0.55);
+      --hero-glow-far:    rgba(0, 217, 255, 0);
+    }
+
+    /* ── Hero outer shell ──
+       Direct child of <body flex-column>, so it stretches full-width
+       naturally — no bleed tricks needed. Flex children fill the cross
+       axis (width: 100%) by default.
+    ── */
+    .hero {
+      position: relative;
+      width: 100%;              /* belt-and-suspenders with flex stretch */
+      /* Tall enough to feel cinematic, not so tall it buries content */
+      min-height: clamp(560px, 92vh, 860px);
+      background: var(--hero-bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      /* Fade the hero into the body background at the bottom */
+      -webkit-mask-image: linear-gradient(to bottom, #000 75%, transparent 100%);
+      mask-image: linear-gradient(to bottom, #000 75%, transparent 100%);
+    }
+
+    /* ── Tron perspective grid backdrop ──
+       Two layers composited:
+       1. Vertical lines — repeating-linear-gradient, no transform.
+       2. Horizontal lines — repeating-linear-gradient on a rotateX() plane
+          so they appear to recede toward a vanishing point at the horizon.
+       aria-hidden is set on the element in markup — purely decorative.
+    ── */
+    .hero-grid {
+      position: absolute;
+      inset: 0;
+      /* We want the grid to feel like a floor receding toward a horizon,
+         so we tilt the entire element back on the X axis. */
+      transform-origin: 50% 65%;   /* horizon sits at 65% down the element */
+      transform: perspective(600px) rotateX(35deg);
+
+      /* Layer 1 (background): Vertical lines — columns marching to the horizon */
+      background:
+        /* Vertical lines */
+        repeating-linear-gradient(
+          90deg,
+          var(--hero-cyan-faint) 0px,
+          var(--hero-cyan-faint) 1px,
+          transparent 1px,
+          transparent 60px
+        ),
+        /* Horizontal lines — these recede with the perspective transform */
+        repeating-linear-gradient(
+          0deg,
+          var(--hero-cyan-faint) 0px,
+          var(--hero-cyan-faint) 1px,
+          transparent 1px,
+          transparent 60px
+        );
+
+      /* Drift animation: the grid scrolls toward the viewer (downward in CSS),
+         creating the illusion of forward motion through the Grid.
+         One full tile (60px) over 4 s = calm, steady drift. */
+      animation: grid-drift 4s linear infinite;
+    }
+
+    /* Freeze animation for users who prefer reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      .hero-grid { animation: none; }
+    }
+
+    @keyframes grid-drift {
+      from { background-position: 0 0,    0 0; }
+      to   { background-position: 0 60px, 0 60px; }
+    }
+
+    /* Radial vignette over the grid — darkens the outer edges so the
+       wordmark and quote have a clean, high-contrast reading surface. */
+    .hero-vignette {
+      position: absolute;
+      inset: 0;
+      /* Dark centre circle expands to total blackout at the corners */
+      background: radial-gradient(
+        ellipse 70% 60% at 50% 40%,
+        rgba(2, 5, 10, 0.25) 0%,
+        rgba(2, 5, 10, 0.80) 60%,
+        rgba(2, 5, 10, 0.97) 100%
+      );
+    }
+
+    /* Horizon glow — a soft horizontal cyan bloom at the vanishing line */
+    .hero-horizon {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 48%;
+      height: 2px;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--hero-glow-near) 30%,
+        var(--hero-cyan) 50%,
+        var(--hero-glow-near) 70%,
+        transparent 100%
+      );
+      /* Bloom outward from the line */
+      box-shadow:
+        0 0 18px 4px  rgba(0, 217, 255, 0.35),
+        0 0 60px 16px rgba(0, 217, 255, 0.12);
+      opacity: 0.85;
+    }
+
+    /* ── Hero content layer (above the grid/vignette) ── */
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: clamp(2rem, 6vw, 4rem) clamp(1.25rem, 5vw, 3rem);
+      max-width: 720px;
+      width: 100%;
+    }
+
+    /* ── Wordmark — the page's only <h1> ── */
+    .hero-wordmark {
+      font-family: var(--font-mono);
+      font-size: clamp(3rem, 10vw, 6.5rem);
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      color: var(--hero-cyan);
+      line-height: 1;
+      margin: 0 0 2.5rem;
+      /* Layered glow: tight core, broad bloom, faint outer halo.
+         Three shadows keep it legible — not a blur, a radiance. */
+      text-shadow:
+        0 0  4px  var(--hero-cyan),
+        0 0 16px  rgba(0, 217, 255, 0.75),
+        0 0 48px  rgba(0, 217, 255, 0.30),
+        0 0 96px  rgba(0, 217, 255, 0.12);
+      /* Subtle breathing pulse — very slow, very quiet */
+      animation: wordmark-breathe 6s ease-in-out infinite;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hero-wordmark { animation: none; }
+    }
+
+    @keyframes wordmark-breathe {
+      0%,  100% { text-shadow:
+        0 0  4px  var(--hero-cyan),
+        0 0 16px  rgba(0, 217, 255, 0.75),
+        0 0 48px  rgba(0, 217, 255, 0.30),
+        0 0 96px  rgba(0, 217, 255, 0.12); }
+      50% { text-shadow:
+        0 0  6px  var(--hero-cyan),
+        0 0 24px  rgba(0, 217, 255, 0.85),
+        0 0 64px  rgba(0, 217, 255, 0.40),
+        0 0 120px rgba(0, 217, 255, 0.16); }
+    }
+
+    /* Narrow accent rule between wordmark and quote — decorative */
+    .hero-rule {
+      display: block;
+      width: clamp(2.5rem, 8vw, 5rem);
+      height: 1px;
+      background: linear-gradient(
+        90deg,
+        transparent,
+        var(--hero-cyan) 50%,
+        transparent
+      );
+      margin: 0 auto 2.5rem;
+      opacity: 0.6;
+    }
+
+    /* ── Flynn monologue blockquote ── */
+    .hero-quote {
+      font-family: var(--font-mono);
+      font-size: clamp(0.8rem, 2.2vw, 1.0rem);
+      line-height: 2;           /* generous leading — cinematic pacing */
+      color: rgba(110, 229, 255, 0.70);   /* dim cyan — legible but not competing with the wordmark */
+      font-style: normal;       /* blockquote default italic would break the Tron vibe */
+      text-align: center;
+      letter-spacing: 0.03em;
+      margin: 0;
+      border: none;             /* override any UA blockquote indent */
+      padding: 0;
+    }
+
+    .hero-quote p {
+      max-width: none;          /* override body p rule */
+      margin-bottom: 0;
+    }
+
+    /* Each line of the monologue is a <span> so we can control spacing
+       and styling without disrupting the semantic block-level structure. */
+    .hero-quote .line {
+      display: block;
+    }
+
+    /* "I got in." — the punchline. Brighter, slight extra glow. */
+    .hero-quote .line-punchline {
+      color: var(--hero-cyan);
+      text-shadow:
+        0 0  4px  rgba(0, 217, 255, 0.80),
+        0 0 16px  rgba(0, 217, 255, 0.35);
+      letter-spacing: 0.06em;
+      margin-top: 0.5em;        /* a beat of silence before the reveal */
+    }
+
+    /* ── Hero → body transition ──
+       Gradient crossfade from hero near-black to body bg.
+       Also a direct flex child of <body>, so width: 100% naturally.
+    ── */
+    .hero-to-body {
+      width: 100%;
+      height: 3rem;
+      background: linear-gradient(to bottom, var(--hero-bg), var(--bg));
+    }
+
+    /* ── Mobile adjustments ── */
+    @media (max-width: 480px) {
+      .hero { min-height: clamp(480px, 85vh, 700px); }
+      /* The perspective grid can feel crowded on mobile; loosen the lines slightly
+         by scaling the background-size. We can't easily parameterise the gradient
+         stops without CSS custom-property trickery, so we scale the element instead. */
+      .hero-grid { background-size: 45px 45px, 45px 45px; }
+    }
 </head>
 <body>
 
-  <div class="page-wrap">
+  <!-- ═══════════════════════════════════════════ HERO
+       Full-viewport Tron hero. Lives outside .page-wrap so it can bleed
+       edge-to-edge. The page-wrap resumes after .hero-to-body.
+  ══════════════════════════════════════════════ -->
+  <header class="hero" role="banner">
 
-    <!-- ═══════════════════════════════════════════ HEADER -->
-    <header>
-      <div class="logo">the-grid</div>
-      <!-- Decorative accent bar — hidden from assistive tech -->
-      <span class="logo-rule" aria-hidden="true"></span>
-      <p class="tagline">
-        A personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw,
-        Paperclip, Hermes, opencode, and friends.
-      </p>
-    </header>
+    <!-- Perspective grid backdrop — purely decorative, hidden from screen readers -->
+    <div class="hero-grid" aria-hidden="true"></div>
+
+    <!-- Radial vignette darkens edges for text contrast — decorative -->
+    <div class="hero-vignette" aria-hidden="true"></div>
+
+    <!-- Horizon glow line — decorative -->
+    <div class="hero-horizon" aria-hidden="true"></div>
+
+    <!-- Content: wordmark + monologue, layered above the grid -->
+    <div class="hero-content">
+
+      <!-- The page's single <h1>. The existing page had no h1; fixed here. -->
+      <h1 class="hero-wordmark">the-grid</h1>
+
+      <!-- Narrow decorative rule — hidden from assistive tech -->
+      <span class="hero-rule" aria-hidden="true"></span>
+
+      <!-- Flynn monologue — real selectable text, semantic blockquote.
+           cite points to the film and character as the source. -->
+      <blockquote class="hero-quote" cite="Tron: Legacy (2010) — Kevin Flynn">
+        <p>
+          <span class="line">The Grid.</span>
+          <span class="line">A digital frontier.</span>
+          <span class="line">I tried to picture clusters of information as they moved through the computer.</span>
+          <span class="line">What did they look like? Ships? Motorcycles?</span>
+          <span class="line">Were the circuits like freeways?</span>
+          <span class="line">I kept dreaming of a world I thought I&#8217;d never see.</span>
+          <span class="line">And then, one day&#8230;</span>
+          <!-- The punchline — brighter, a beat apart -->
+          <span class="line line-punchline">I got in.</span>
+        </p>
+      </blockquote>
+
+    </div><!-- /.hero-content -->
+
+  </header><!-- /.hero -->
+
+  <!-- Gradient crossfade from hero to body — decorative -->
+  <div class="hero-to-body" aria-hidden="true"></div>
+
+  <div class="page-wrap">
 
     <!-- ═══════════════════════════════════════════ MAIN -->
     <main>
