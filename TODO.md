@@ -32,7 +32,7 @@
 - [ ] **6. Machine manifest** — one file per machine (`machines/<host>`), shared baseline + per-machine overlay, listing BOTH wired skills and active agents. Bash-parseable (don't force YAML into wire.sh).
 - [ ] **7. Flesh stack overlays** — `stacks/*` are `stack.yaml` stubs with empty `fragments`. Add LAMP + others. Overlays currently append to `AGENTS.md`; keyed inline injection is a later upgrade.
 - [ ] **8. Pull skills from repos** — once factory structure is solid, pull skill files from GitHub repos in `docs/reference-repos.md` into `agent-factory/skills/`.
-- [ ] **9. Update CLAUDE.md** — document `agents/`, `machines/`, `scripts/` conventions and the agent loading model (5-file + emitters).
+- [x] **9. Update CLAUDE.md** — DONE (2026-06-16): documented the agent loading model (5-file source → CC skills/subagents) and `wire.sh` agent wiring (`AGENTS_DIR`). `machines/` conventions still pending the manifest (item 6).
 
 ---
 
@@ -40,6 +40,11 @@
 
 > File: `prompts/2026-06-13-openclaw-lamp-team-prompt.md`
 > The LAMP content generation task is correct. Four architectural gaps need surgical fixes before using this prompt in a fresh session.
+>
+> **NOTE (2026-06-16): likely superseded.** Role content was NOT generated via this
+> monolithic prompt — it was ported role-by-role via sub-agents off the tech-lead +
+> backend-dev exemplars, with async-only handoff enforced. Keep this only if the
+> prompt is still wanted for a from-scratch LAMP run; otherwise it can be retired.
 
 - [ ] **ACP missing** — prompt tells Opus to write SKILL.md files targeting Claude Code as runtime. Skills should target the ACP surface (Claude Code today, OpenCode/Codex tomorrow). Add one sentence to the constraints section.
 - [ ] **MEMORY.md wrong model** — prompt describes MEMORY.md as a flat markdown file. The-grid uses gbrain (queryable, shared, per-repo trust tiers). Reframe Opus output as a gbrain seed, or flag it as "Phase 3 — gbrain replaces this."
@@ -50,12 +55,12 @@
 
 ## Open questions
 
-- Which agent to build first — QA engineer, backend dev, or writer? (Gareth to decide before step 7 above.)
+- ~~Which agent to build first?~~ RESOLVED (2026-06-16): all 12 roles ported. Order was tech-lead → backend-dev → the rest in parallel.
 - ~~Does wire.sh wire agent skills into `~/.claude/skills/`?~~ ANSWERED (2026-06-16): `wire.sh` wires orchestrator **skills** into `~/.claude/skills/` and specialist **subagents** into `~/.claude/agents/`, from `agent-factory/projects/*/_claude-code/` output. Open follow-up: a machine manifest to gate *which* composed agents wire per host (today it wires every composed project).
 - `machines/wilderness.yaml` format — YAML assumed, not confirmed. TOML or another format?
 - Manifest filename inside an agent folder — `agent.yaml` (OpenGAP convention) or something else?
 - Add OpenGAP (`open-gitagent/opengap`) and soulspec (`clawsouls/soulspec`) as reference submodules now, or after the first agent is built?
-- **`agent-factory/` vs `skills-factory/`** — two empty dirs at root; `docs/architect-agent-factory` describes a single `agent_factory/`. Are these two separate factories, or one? If one, which name wins and what does the other do?
+- ~~`agent-factory/` vs `skills-factory/`~~ RESOLVED (see Now/Next #2): two separate factories. `agent-factory/` is built out and composes teams; `skills-factory/` builds skills elsewhere and drops them into `agent-factory/skills/`.
 
 ---
 
@@ -65,4 +70,4 @@
 - [ ] `check-grid.sh` — quick health check: run bats suite and report broken symlinks without full bats output
 - [ ] Pre-commit git hook — run bats before commit so bad skill format never lands in main
 - [ ] Fix stale test count in BOOTSTRAP.md ("All 17 tests" → should be 30)
-- [ ] Commit the `wired-submodules.txt` changes (anthropic, jeffallan, superpowers commented out) — excluded from last session's commits deliberately; needs a decision first
+- [ ] ~~Commit the `wired-submodules.txt` comment-out tweak~~ OBSOLETE (2026-06-16): forge's commit `c012fde` rewrote the file to per-skill granularity, superseding the whole-repo comment-out. The old tweak is parked in `git stash@{0}` — `git stash drop` when confirmed.
