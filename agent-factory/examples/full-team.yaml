@@ -20,10 +20,11 @@ agents:
   - role: qa-engineer
   - role: security-reviewer
   - role: devops
-  # data specialists
+  # data + research specialists
   - role: data-engineer
   - role: data-analyst
   - role: data-scientist
+  - role: researcher
   # marketing specialists
   - role: copywriter
   - role: ad-copy
