@@ -64,16 +64,54 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-Then compose a team from a config:
+Then compose a team from a config. `compose.py` is a **multi-target compiler** —
+one 5-file source, a different artifact shape per `--target`:
 
 ```bash
-.venv/bin/python compose.py examples/tech-lead.yaml            # writes projects/demo-tech-lead/
-.venv/bin/python compose.py examples/tech-lead.yaml --dry-run  # report only, writes nothing
+# OpenClaw target (default): 5 identity files + agents.yaml per agent
+.venv/bin/python compose.py examples/full-team.yaml
+.venv/bin/python compose.py examples/full-team.yaml --dry-run     # report only
+
+# Claude Code target: orchestrators -> CC skills, specialists -> CC subagents
+.venv/bin/python compose.py examples/full-team.yaml --target claude-code
+.venv/bin/python compose.py examples/full-team.yaml --target claude-code --dry-run
 ```
 
 Output is regenerable and idempotent: re-running with an unchanged config
-produces byte-identical files (the project dir is wiped and rewritten each run).
+produces byte-identical files (the output dir is wiped and rewritten each run).
 `projects/` output is gitignored — the compose config is the tracked artefact.
+
+The `claude-code` target writes to `projects/<name>/_claude-code/`:
+
+```
+projects/<name>/_claude-code/
+├── skills/<role>/SKILL.md   one per orchestrator role (orchestrator: true)
+└── agents/<role>.md         one per specialist role
+```
+
+## Wiring composed agents into Claude Code
+
+`scripts/wire.sh` (in the-grid root) symlinks the `_claude-code/` output into
+your live Claude Code config — orchestrator skills into `~/.claude/skills/`,
+specialist subagents into `~/.claude/agents/` — the same idempotent, grid-owned
+symlink model it uses for ecosystem skills. After composing with
+`--target claude-code`, run `bash scripts/wire.sh` from the-grid root.
+
+> Skills and subagents load at the **start** of a Claude Code session — wire,
+> then open a fresh session to pick them up.
+
+## Invoking composed agents
+
+The orchestrator/specialist split (`role.yaml` `orchestrator:`) decides *how* you
+invoke a composed agent in Claude Code:
+
+| Form | Roles (current) | How to invoke |
+|------|-----------------|---------------|
+| **Skill** (orchestrator) | `tech-lead`, `ceo-orchestrator` | Slash command: `/tech-lead`, `/ceo-orchestrator`. Transforms the session into that role. |
+| **Subagent** (specialist) | the other 10 | **Not** a slash command. Delegate to it: *"Use the backend-dev subagent to …"*, or let an orchestrator hand off to it. Claude can also auto-delegate based on the subagent's `description`. |
+
+Typical flow: invoke `/tech-lead`, give it a feature → it writes a PRD and hands
+off (async) to the specialist subagents. You rarely call a specialist directly.
 
 ### How merging works
 
@@ -91,14 +129,21 @@ Stack overlays (when a stack is named) append to `AGENTS.md` as a trailing
 
 ## Status
 
-**Engine works against the 5-file model; content is in progress.** `compose.py`
-renders, merges, and writes an agent idempotently in the live OpenClaw 5-file
-shape, validated end-to-end with the Tech Lead role (`examples/tech-lead.yaml`).
-Remaining work: port the other roles to the 5-file model (only `role.yaml`
-metadata exists so far), flesh the stack overlays (`stacks/*` are `stack.yaml`
-stubs with empty `fragments`), and build the per-runtime emitters (OpenClaw is
-near-native today; Claude Code skill/subagent forms are next). See repo-root
-`TODO.md`.
+**Claude Code delivery target is done and live.** All 12 roles are ported to the
+5-file model (`examples/full-team.yaml`): 2 orchestrators (`tech-lead`,
+`ceo-orchestrator`) + 10 specialists (product-manager, backend-dev, frontend-dev,
+qa-engineer, devops, data-engineer, data-analyst, copywriter, ad-copy,
+growth-hacker). `compose.py` emits both the OpenClaw 5-file shape and the Claude
+Code skill/subagent shape; `scripts/wire.sh` wires the CC output into
+`~/.claude/`. The full team is wired live on wilderness — `/tech-lead` boots and
+runs end-to-end.
+
+Remaining work (see repo-root `TODO.md`):
+- **OpenClaw + Paperclip targets** — 5 files → workspace + `openclaw.json`; the
+  async/autonomous heartbeat loop. Deferred (Claude Code was built first).
+- **Stack overlays** — `stacks/*` are still `stack.yaml` stubs with empty `fragments`.
+- **Machine manifest** — gate which composed agents wire on which machine (today
+  `wire.sh` wires every composed project's `_claude-code/` output).
 
 ## Runtime assumptions
 

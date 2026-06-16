@@ -1,6 +1,6 @@
 # the-grid TODO
 
-**Current focus:** evolving the-grid from a skills-wiring hub into a full agent-composition / factory hub — building `agent-factory/` so a single compose config can produce a complete LAMP team.
+**Current focus:** `agent-factory/` composes AI dev-team agents from a single config. The **Claude Code** delivery target is done — all 12 roles compose to CC skills (orchestrators) + subagents (specialists) and wire live via `wire.sh` (2026-06-16). Next: OpenClaw + Paperclip targets, stack overlays, machine manifest. See `LOGS/2026-06-16-handoff-agent-factory.md`.
 
 ---
 
@@ -24,11 +24,11 @@
 - [x] **3b. Flesh `compose.py`** — engine renders/merges/writes an agent idempotently; PyYAML in `.venv` (see `requirements.txt`).
 - [x] **3c. Adopt the live 5-file agent model** — verified the running OpenClaw on guide-server uses SOUL/IDENTITY/AGENTS/USER/MEMORY + skills (playbook's 3-file model is outdated). Re-cut `_core` (added IDENTITY/AGENTS/USER bases) + Tech Lead to the 5-file form; round-trip re-proven OpenClaw-native with `examples/tech-lead.yaml`. Handoff = async signal files. See memory `live-openclaw-agent-model`.
 - [ ] **4. Build emitters + wiring for all THREE delivery targets** (production + unattended; `compose.py` is the multi-target compiler, one 5-file source → emitter + wiring per target):
-  - **(a) OpenClaw** (guide-server, do first — native + reuses live Paperclip autonomy): 5 files → workspace + `openclaw.json` wiring. Prove load with a NEW test workspace, never a live agent.
-  - **(b) Claude Code interactive** (wilderness): orchestrator → CC skill (`~/.claude/skills/`, boots via AGENTS.md); specialist → CC subagent (`.md`, `~/.claude/agents/`, frontmatter from IDENTITY). Extend `wire.sh` to wire agents. Prove transform + spawn (nesting confirmed).
-  - **(c) Async & autonomous via Paperclip** (either runtime): wire the paperclip base skill (`paperclip: true`) into every agent; trigger via Paperclip heartbeat (OpenClaw, exists) or scheduled/headless CC run; handoff async (signal files / PR+webhook). Prove an unattended task pickup→run→handoff→exit.
+  - [x] **(b) Claude Code interactive** (wilderness) — DONE (2026-06-16, commits `875d84d`, `96b4dea`). `compose.py --target claude-code`: orchestrator → CC skill (`~/.claude/skills/`), specialist → CC subagent (`~/.claude/agents/`). `wire.sh` wires both. `/tech-lead` boots + runs e2e. Built first per Gareth's call (overrode "OpenClaw first").
+  - [ ] **(a) OpenClaw** (guide-server): 5 files → workspace + `openclaw.json` wiring. Prove load with a NEW test workspace, never a live agent. Deferred.
+  - [ ] **(c) Async & autonomous via Paperclip** (either runtime): wire the paperclip base skill (`paperclip: true`) into every agent; trigger via Paperclip heartbeat (OpenClaw, exists) or scheduled/headless CC run; handoff async (signal files / PR+webhook). Prove an unattended task pickup→run→handoff→exit.
   - Test each ACTUALLY loads/runs, not just renders — the real end-to-end "agent that runs".
-- [ ] **5. Port remaining roles** — one at a time (backend-dev, frontend-dev, qa-engineer, devops next) to the 5-file model: each needs `SOUL.md` + `SKILL.md` (required) + IDENTITY/AGENTS/USER/MEMORY layers. Use the sub-agent-reads-playbook pattern to keep context clean.
+- [x] **5. Port remaining roles** — DONE (2026-06-16, commit `96b4dea`). All 12 roles on the 5-file model: tech-lead, ceo-orchestrator, product-manager, backend-dev, frontend-dev, qa-engineer, devops, data-engineer, data-analyst, copywriter, ad-copy, growth-hacker. The 11 new ones written by parallel sub-agents off the tech-lead (orchestrator) + backend-dev (specialist) exemplars. `examples/full-team.yaml` composes all 12.
 - [ ] **6. Machine manifest** — one file per machine (`machines/<host>`), shared baseline + per-machine overlay, listing BOTH wired skills and active agents. Bash-parseable (don't force YAML into wire.sh).
 - [ ] **7. Flesh stack overlays** — `stacks/*` are `stack.yaml` stubs with empty `fragments`. Add LAMP + others. Overlays currently append to `AGENTS.md`; keyed inline injection is a later upgrade.
 - [ ] **8. Pull skills from repos** — once factory structure is solid, pull skill files from GitHub repos in `docs/reference-repos.md` into `agent-factory/skills/`.
@@ -51,7 +51,7 @@
 ## Open questions
 
 - Which agent to build first — QA engineer, backend dev, or writer? (Gareth to decide before step 7 above.)
-- Does wire.sh wire agent skills into `~/.claude/skills/`? Or is agent loading a separate mechanism (e.g. SOUL.md injected into system prompt at session start)?
+- ~~Does wire.sh wire agent skills into `~/.claude/skills/`?~~ ANSWERED (2026-06-16): `wire.sh` wires orchestrator **skills** into `~/.claude/skills/` and specialist **subagents** into `~/.claude/agents/`, from `agent-factory/projects/*/_claude-code/` output. Open follow-up: a machine manifest to gate *which* composed agents wire per host (today it wires every composed project).
 - `machines/wilderness.yaml` format — YAML assumed, not confirmed. TOML or another format?
 - Manifest filename inside an agent folder — `agent.yaml` (OpenGAP convention) or something else?
 - Add OpenGAP (`open-gitagent/opengap`) and soulspec (`clawsouls/soulspec`) as reference submodules now, or after the first agent is built?
