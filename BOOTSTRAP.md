@@ -15,9 +15,16 @@ cd ~/.the-grid && git submodule update --init --recursive
 
 # 3. Wire skills into Claude
 bash ~/.the-grid/scripts/wire.sh
+
+# 4. Build the composed agent team and wire agents into Claude
+cd ~/.the-grid/agent-factory
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python compose.py examples/full-team.yaml --target claude-code
+cd ~/.the-grid && bash scripts/wire.sh
 ```
 
-That's it. All skills are live immediately — no restart needed.
+Skills are live after step 3. Agents (subagents + orchestrator skills) are live after step 4.
+No restart needed — Claude picks up symlinks immediately.
 
 ---
 
@@ -123,7 +130,7 @@ cd ~/.the-grid
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 17 tests should be green. If they're not, something is misconfigured.
+All 30 tests should be green. If they're not, something is misconfigured.
 
 ---
 
@@ -143,3 +150,8 @@ bash ~/.the-grid/scripts/wire.sh   # re-running is always safe
 ```bash
 cd ~/.the-grid && git submodule update --init --recursive
 ```
+
+**Agents not showing up in Claude:**
+- Check `~/.claude/agents/` contains `.md` symlinks pointing into `agent-factory/projects/`
+- If `agent-factory/projects/` is empty, compose hasn't been run — see step 4 above
+- Re-running `bash scripts/wire.sh` is always safe (idempotent)

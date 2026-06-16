@@ -33,6 +33,7 @@ submodules into two tiers:
 
 ## Key files
 
+- `BOOTSTRAP.md` — **full machine boot sequence**: clone → submodules → wire skills → compose agents → wire agents. Start here on a new machine.
 - `scripts/wire.sh` — the wiring script. Idempotent. Tears down all grid-owned symlinks
   and rebuilds the wired set each run (so un-wiring a repo actually removes it).
 - `wired-submodules.txt` — the allowlist of submodules whose skills are wired live.
