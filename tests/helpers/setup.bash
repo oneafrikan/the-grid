@@ -8,10 +8,16 @@ common_setup() {
   MOCK_SKILLS=$(mktemp -d)
   OTHER_DIR=$(mktemp -d)
   mkdir -p "$MOCK_GRID/repos"
+  # Point wire.sh's agents dir at a temp dir too, so tests never touch the real
+  # ~/.claude/agents. Exported so child `bash wire.sh` invocations inherit it
+  # even though test lines only set GRID_DIR/SKILLS_DIR inline.
+  MOCK_AGENTS=$(mktemp -d)
+  export AGENTS_DIR="$MOCK_AGENTS"
 }
 
 common_teardown() {
-  rm -rf "$MOCK_GRID" "$MOCK_SKILLS" "$OTHER_DIR"
+  rm -rf "$MOCK_GRID" "$MOCK_SKILLS" "$OTHER_DIR" "$MOCK_AGENTS"
+  unset AGENTS_DIR
 }
 
 # Write a minimal valid skill dir to a given path

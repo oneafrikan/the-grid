@@ -42,6 +42,7 @@ Requires PyYAML — install into the project venv:
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -335,6 +336,130 @@ def render_agents_yaml(config: dict) -> str:
     return header + yaml.safe_dump(base, sort_keys=False, default_flow_style=False)
 
 
+# ── claude-code emitter ───────────────────────────────────────────────────────
+# A second emit target: transform the 5-file source into Claude Code-native
+# artifacts. The orchestrator/specialist split (role.yaml `orchestrator`) decides
+# the shape — a CC *skill* that transforms the session, or a CC *subagent* that
+# can be spawned. These are what wire.sh symlinks into ~/.claude/.
+
+# Order the identity files are flattened into a single prompt: who I am, how I
+# behave, who I serve, what I carry, how I operate (matches the boot sequence).
+FLATTEN_ORDER = ["IDENTITY.md", "SOUL.md", "USER.md", "MEMORY.md", "AGENTS.md"]
+
+
+def strip_html_comments(md: str) -> str:
+    """Remove <!-- ... --> blocks. The templates are comment-heavy scaffolding
+    (authoring notes, [FILL] hints); those are noise inside an agent's prompt."""
+    text = re.sub(r"<!--.*?-->", "", md, flags=re.DOTALL)
+    # Collapse the blank-line runs the removed comments leave behind.
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def is_orchestrator(role: str) -> bool:
+    return bool(role_meta(role).get("orchestrator", False))
+
+
+def role_summary(role: str) -> str:
+    return " ".join((role_meta(role).get("summary") or "").split())
+
+
+def _frontmatter(fields: dict) -> str:
+    """A YAML frontmatter block (--- ... ---) from an ordered dict of fields."""
+    return "---\n" + yaml.safe_dump(fields, sort_keys=False, default_flow_style=False).strip() + "\n---\n"
+
+
+def _flattened_identity(agent: dict) -> str:
+    """The 5 identity files (comment-stripped) joined in boot order."""
+    rendered = render_agent(agent)
+    return "\n\n---\n\n".join(strip_html_comments(rendered[fn]) for fn in FLATTEN_ORDER)
+
+
+def emit_cc_subagent(agent: dict) -> tuple[str, str]:
+    """A specialist role → one Claude Code subagent `.md` (spawnable).
+
+    Frontmatter (name/description/model) + a body that adopts the flattened
+    identity as the subagent's system prompt. Returns (filename, contents).
+    """
+    role = agent["role"]
+    title = role_meta(role).get("title") or role
+    skills = agent_skills(agent)
+
+    fields = {
+        "name": role,
+        "description": f"{title}. {role_summary(role)} "
+                       f"Use this subagent for {role} work.",
+        "model": resolve_model(agent),
+    }
+    body = (
+        f"You are the **{title}**, a specialist agent on a composed dev team. "
+        f"Adopt the identity, behaviour, and operating rules below as your own.\n\n"
+        f"{_flattened_identity(agent)}\n\n---\n\n"
+        f"## Your capability\n\n"
+        f"Your operating skill is `{role}`"
+        + (f" (plus: {', '.join(skills[1:])})" if len(skills) > 1 else "")
+        + ". Follow that procedure for your core work.\n"
+    )
+    return f"{role}.md", _frontmatter(fields) + "\n" + body
+
+
+def emit_cc_skill(agent: dict) -> dict[str, str]:
+    """An orchestrator role → a Claude Code skill folder (transforms the session).
+
+    SKILL.md = frontmatter + a "become the <role>" boot body + the flattened
+    identity + the role's operating procedure (its SKILL.md) inline. Self-contained
+    so invoking it turns the current session into the orchestrator. Returns
+    {relpath: contents} (one SKILL.md for now).
+    """
+    role = agent["role"]
+    title = role_meta(role).get("title") or role
+
+    fields = {
+        "name": role,
+        "description": f"{title} orchestrator. {role_summary(role)} "
+                       f"Invoke with /{role} or when coordinating a multi-step dev-team feature.",
+    }
+    procedure = strip_html_comments(_read(ROLES_DIR / role / "SKILL.md"))
+    body = (
+        f"# {title}\n\n"
+        f"When this skill is invoked, **become the {title}**: adopt the identity, "
+        f"personality, and operating rules below, then follow the operating procedure. "
+        f"This transforms the current session into the {title} orchestrator.\n\n"
+        f"## Boot — adopt this identity\n\n"
+        f"{_flattened_identity(agent)}\n\n"
+        f"---\n\n## Operating procedure\n\n"
+        f"{procedure}\n"
+    )
+    return {"SKILL.md": _frontmatter(fields) + "\n" + body}
+
+
+def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
+    """Emit the team as Claude Code artifacts under <out_dir>/<name>/_claude-code/.
+
+    Orchestrators → skills/<role>/SKILL.md; specialists → agents/<role>.md.
+    Idempotent: the _claude-code dir is wiped and rewritten each run. wire.sh
+    symlinks skills/* into ~/.claude/skills/ and agents/* into ~/.claude/agents/.
+    """
+    cc_dir = (out_dir / name / "_claude-code")
+    if cc_dir.is_symlink():
+        raise ValueError(f"refusing to write: {cc_dir} is a symlink, not a dir")
+    if cc_dir.exists():
+        shutil.rmtree(cc_dir)
+    (cc_dir / "skills").mkdir(parents=True)
+    (cc_dir / "agents").mkdir(parents=True)
+
+    for agent in config["agents"]:
+        role = agent["role"]
+        if is_orchestrator(role):
+            skill_dir = cc_dir / "skills" / role
+            skill_dir.mkdir()
+            for relpath, contents in emit_cc_skill(agent).items():
+                (skill_dir / relpath).write_text(contents, encoding="utf-8")
+        else:
+            filename, contents = emit_cc_subagent(agent)
+            (cc_dir / "agents" / filename).write_text(contents, encoding="utf-8")
+    return cc_dir
+
+
 # ── writing ───────────────────────────────────────────────────────────────────
 
 def write_project(name: str, config: dict, out_dir: Path) -> Path:
@@ -369,6 +494,11 @@ def main() -> None:
     parser.add_argument("config", type=Path, help="path to the compose config yaml")
     parser.add_argument("--out", type=Path, default=PROJECTS_DIR, help="output dir")
     parser.add_argument(
+        "--target", choices=["openclaw", "claude-code"], default="openclaw",
+        help="emit shape: openclaw = 5 files + agents.yaml (default); "
+             "claude-code = CC skills (orchestrators) + subagents (specialists)",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="render + report what would be written, but write nothing",
     )
@@ -383,13 +513,27 @@ def main() -> None:
     agents = config["agents"]
 
     if args.dry_run:
-        print(f"[dry-run] project: {name}  ({len(agents)} agents) -> {args.out / name}")
+        print(f"[dry-run] target={args.target}  project: {name}  ({len(agents)} agents) -> {args.out / name}")
         for agent in agents:
-            files = ", ".join(sorted(render_agent(agent)))
-            skills = ", ".join(agent_skills(agent))
-            print(f"  - {agent['role']:<16} model={resolve_model(agent):<8} files: {files}")
-            print(f"      skills: {skills}")
-        print("[dry-run] + agents.yaml")
+            role = agent["role"]
+            if args.target == "claude-code":
+                shape = "skill (orchestrator)" if is_orchestrator(role) else "subagent (specialist)"
+                print(f"  - {role:<16} model={resolve_model(agent):<8} -> CC {shape}")
+            else:
+                files = ", ".join(sorted(render_agent(agent)))
+                print(f"  - {role:<16} model={resolve_model(agent):<8} files: {files}")
+                print(f"      skills: {', '.join(agent_skills(agent))}")
+        if args.target == "openclaw":
+            print("[dry-run] + agents.yaml")
+        return
+
+    if args.target == "claude-code":
+        cc_dir = write_claude_code(name, config, args.out)
+        print(f"composed '{name}' (claude-code): {len(agents)} agents -> {cc_dir}")
+        for agent in agents:
+            role = agent["role"]
+            shape = "skill" if is_orchestrator(role) else "subagent"
+            print(f"  - {role} ({resolve_model(agent)}) -> CC {shape}")
         return
 
     project_dir = write_project(name, config, args.out)
