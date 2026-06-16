@@ -59,6 +59,7 @@ Skills to curate into `agent-factory/skills/` from the existing submodules:
 | copywriter | jchopard69 copywriting + copy-editing, reef-copywriting, `robertbstillwell` |
 | ad-copy | abm-ad-creative, google-ads-api, `sebclawops`, `mattberman-google-ads`/`meta-ads`, `nowork-toprank`, `amekala-ads-mcp` |
 | growth-hacker | ivangdavila/growth-hacker, marketing-mode, marketing-skills, `robertbstillwell` |
+| researcher *(added 2026-06-16)* | `deep-research` skill; web-search/fetch tools; `hesamsheikh` (usecases). External/desk research → cited synthesis |
 | seo *(new)* | `nowork-toprank`, `jdevalk` astro-seo, marketing-mode SEO |
 | security-reviewer *(new)* | `jeffallan/security-reviewer` + secure-code-guardian, `gstack/cso` |
 | designer *(new)* | `anthropic` canvas-design/frontend-design/theme-factory, `gstack/design-review` |

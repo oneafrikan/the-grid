@@ -1,6 +1,6 @@
 # the-grid TODO
 
-**Current focus:** `agent-factory/` composes AI dev-team agents from a single config. The **Claude Code** delivery target is done — all **17 roles** (expanded from 12: +seo, +security-reviewer, +designer, +data-scientist, +project-manager) compose to CC skills (orchestrators) + subagents (specialists) and wire live via `wire.sh` (2026-06-16). Next: OpenClaw + Paperclip targets, stack overlays, machine manifest, skills population (deferred to OpenClaw work). See `LOGS/2026-06-16-handoff-agent-factory.md` + `agent-factory/docs/role-skill-map.md`.
+**Current focus:** `agent-factory/` composes AI dev-team agents from a single config. The **Claude Code** delivery target is done — all **18 roles** (expanded from 12: +seo, +security-reviewer, +designer, +data-scientist, +project-manager, +researcher) compose to CC skills (orchestrators) + subagents (specialists) and wire live via `wire.sh` (2026-06-16). Next: OpenClaw + Paperclip targets, stack overlays, machine manifest, skills population (deferred to OpenClaw work). See `LOGS/2026-06-16-handoff-agent-factory.md` + `agent-factory/docs/role-skill-map.md`.
 
 ---
 
