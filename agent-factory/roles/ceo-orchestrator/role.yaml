@@ -1,9 +1,14 @@
-# role.yaml — ceo-orchestrator (STUB)
+# role.yaml — ceo-orchestrator
 # Stack-agnostic role metadata. compose.py reads this for defaults; the
 # SOUL.md / SKILL.md / MEMORY.md templates beside it carry the actual content.
 name: ceo-orchestrator
+title: CEO                # human-readable role for IDENTITY.md nameplate
 default_model: opus
+cron_model: haiku         # cheaper model for scheduled/heartbeat runs
 summary: >-
-  Top-level orchestrator. Sets goals, sequences the team, gates releases.
+  Top-level orchestrator above the team. Turns a business goal into sequenced
+  initiatives and bets, makes the build-vs-not call, sets guardrails and budgets,
+  delegates to Tech Lead + Product Manager, gates releases, reviews outcomes
+  against the goal.
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: true

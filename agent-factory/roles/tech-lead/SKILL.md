@@ -161,60 +161,11 @@ Save to: `output/<project>/PRD.md`
 
 ## Step 4 — Hand off to specialists
 
-Two handoff modes — choose based on project setup:
+Handoff is **asynchronous and file-based** — never a live spawn. Per the Signal
+Protocol (see AGENTS.md): append the task to `signals/→<agent>.md`, or open a PR
+and notify via webhook. The specialist picks it up on its own next run.
 
-### Mode A: Live spawn (`sessions_spawn`) — use when agents are online, in-session
-
-```
-sessions_spawn(
-  agentId: "<specialist-agent-id>",
-  task: """
-  ## <Role> Tasks — <Feature Name>
-
-  ### PRD
-  <!-- [FILL] Exact path to PRD file -->
-  PRD: output/<project>/PRD.md
-
-  ### Tasks
-  <!-- [FILL] Copy the relevant task list from the PRD verbatim -->
-  - [ ] Task 1
-  - [ ] Task 2
-
-  ### Context
-  <!-- [FILL] Relevant file paths, conventions, prior art -->
-  - Existing patterns: <path/to/example>
-  - Conventions: <brief note or link>
-
-  <!-- STACK: stack-specific context injected here -->
-
-  ### Constraints
-  <!-- [FILL] What must the specialist NOT do or MUST follow -->
-  - Follow TDD — write failing tests first, then implement
-  - <Any stack or project-specific constraints>
-
-  <!-- STACK: stack-specific constraints injected here -->
-
-  ### Expected output
-  <!-- [FILL] Concrete deliverables -->
-  - PR to staging branch named: <branch-naming-convention>
-  - Tests written and passing
-  - Lint/type-check clean
-
-  ### Definition of done
-  <!-- [FILL] How the specialist knows they are finished -->
-  - All acceptance criteria from PRD Section "Acceptance criteria" are met
-  - Verification command passes: `<command>`
-  """
-)
-```
-
-**When to use:** Agents are online and in the same session / multi-agent orchestration is live.
-
----
-
-### Mode B: PR + webhook (async) — use when agents are offline or async
-
-Create a GitHub PR (or equivalent) with the following body:
+Create a GitHub PR (or equivalent), or write the signal file, with the following body:
 
 ```markdown
 ## Task: <Role> — <Feature Name>
@@ -253,8 +204,6 @@ PRD: output/<project>/PRD.md (Section: <section name>)
 <!-- [FILL] URL or mechanism to notify Tech Lead on completion -->
 Notify: <webhook-url or mention @tech-lead>
 ```
-
-**When to use:** Agents run asynchronously, or the project uses GitHub-native orchestration rather than live session spawning.
 
 ---
 
