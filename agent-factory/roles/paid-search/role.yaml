@@ -1,0 +1,13 @@
+# role.yaml — paid-search
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md (+ identity layers) beside it carry the actual content.
+name: paid-search
+title: Paid Search Specialist   # human-readable role for IDENTITY.md nameplate
+default_model: sonnet
+summary: >-
+  Paid search / SEM: Google Ads + Microsoft Ads. Account and campaign structure,
+  keyword + match-type + negative strategy, Quality Score, bidding and budget
+  pacing, conversion tracking, search-term mining. Plans and optimises spend;
+  the human approves the budget.
+base_skills: []      # skills always included for this role (TBD — toprank / paid-ads candidates)
+orchestrator: false
