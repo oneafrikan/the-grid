@@ -1,0 +1,12 @@
+# role.yaml — security-reviewer
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md (+ identity layers) beside it carry the actual content.
+name: security-reviewer
+title: Security Reviewer  # human-readable role for IDENTITY.md nameplate
+default_model: sonnet
+summary: >-
+  Threat models, audits code + dependencies + secrets, rates findings by
+  severity, and gives remediation guidance. Advisory security gate — does not
+  implement fixes.
+base_skills: []      # skills always included for this role (TBD)
+orchestrator: false

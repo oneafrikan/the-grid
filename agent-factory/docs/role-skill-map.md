@@ -5,8 +5,11 @@ present as submodules in `repos/`, and proposes the broader-role expansion that
 surfaced in the May-2026 research session (see `../../docs/reference-resources.md`
 and `../../docs/reference-repos.md`).
 
-**Status: PROPOSAL — pending Gareth's sign-off on (a) the final new-role list and
-(b) the skills-population mechanism (see end).** Nothing built from this yet.
+**Status (2026-06-16): roster expansion DONE; skills population NEXT.**
+Decisions made: added **seo, security-reviewer, designer, data-scientist,
+project-manager** (5) — roster now **17**. Skills mechanism = **(A) symlink from
+repos/**. project-manager kept as a separate role (delivery/tracking) distinct
+from product-manager (scope/PRD). Social/email/content remain skills, not roles.
 
 ---
 
