@@ -166,9 +166,17 @@ def resolve_cron_model(agent: dict) -> str:
 
 
 def agent_skills(agent: dict) -> list[str]:
-    """The role's own operating skill (named after the role) + bolt-on skills,
-    deduped and order-preserving."""
-    ordered = [agent["role"], *(agent.get("skills") or [])]
+    """The role's own operating skill (named after the role) + the role's
+    base_skills (role.yaml — always included) + per-agent bolt-on skills from the
+    compose config. Deduped, order-preserving.
+
+    base_skills may name a skill that lives outside the factory's curated
+    skills/ dir (e.g. a session-available Claude Code skill like `deep-research`),
+    so unlike the config's `skills` it is NOT validated against SKILLS_DIR — it is
+    an intrinsic capability pointer surfaced in the agent's prompt.
+    """
+    base = role_meta(agent["role"]).get("base_skills") or []
+    ordered = [agent["role"], *base, *(agent.get("skills") or [])]
     seen: set[str] = set()
     result: list[str] = []
     for skill in ordered:
