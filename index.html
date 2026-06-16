@@ -522,7 +522,219 @@
          stops without CSS custom-property trickery, so we scale the element instead. */
       .hero-grid { background-size: 45px 45px, 45px 45px; }
     }
-</head>
+
+  </style>
+
+  <!-- ── Agents + Skills sections — new CSS added separately to avoid
+       touching the existing (unclosed) style block above. ── -->
+  <style>
+
+    /* ── Agent cards ──
+       Compact variant of .tier-card: tighter padding, smaller type.
+       Reuses --surface, --border, --text-dim tokens exactly.
+    ── */
+    .agent-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 0.85rem;
+    }
+
+    .agent-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+    }
+
+    /* Card name line: slug in mono + badge side-by-side */
+    .agent-card-name {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      margin-bottom: 0.35rem;
+      flex-wrap: wrap;
+    }
+
+    .agent-card-name code {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--accent);  /* blue — same as .files-table code */
+    }
+
+    /* Human title — slightly dimmer, small sans */
+    .agent-card-title {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-bottom: 0.5rem;
+    }
+
+    /* One-line summary — readable body colour, not dim */
+    .agent-card-summary {
+      font-size: 0.85rem;
+      color: var(--text);
+      line-height: 1.5;
+      margin-bottom: 0;
+    }
+
+    /* Badges for orchestrator vs specialist — reuse .badge geometry,
+       add two new colour variants that don't conflict with wired/lib/ref. */
+    .badge-orchestrator {
+      /* cyan-tinted — signals "this becomes a /slash command" */
+      background: #0d2a33;
+      color: #4dd9f5;
+    }
+
+    .badge-specialist {
+      /* neutral dark — signals subagent */
+      background: #1e1e28;
+      color: var(--text-dim);
+    }
+
+    /* Group sub-heading inside the agents section */
+    .agent-group-heading {
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin: 1.5rem 0 0.85rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* First group needs no top margin */
+    .agent-group-heading:first-child { margin-top: 0; }
+
+    /* ── Skills catalogue ──
+       150 entries split into CSS columns for density.
+       Each source group has its own sub-heading + column list.
+    ── */
+    .skills-source-heading {
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin: 1.75rem 0 0.75rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+    }
+
+    .skills-source-heading:first-of-type { margin-top: 0; }
+
+    /* Count pill next to source name */
+    .skills-count {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--text-dim);
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      padding: 0.1em 0.45em;
+      border-radius: 3px;
+    }
+
+    /* Dense multi-column list — columns collapse gracefully */
+    .skills-list {
+      list-style: none;
+      /* 3 columns on wide, 2 on mid, 1 on mobile — controlled via clamp */
+      columns: 3 220px;
+      column-gap: 1.5rem;
+    }
+
+    .skills-list li {
+      break-inside: avoid;  /* don't split a skill entry across columns */
+      padding: 0.28rem 0;
+      border-bottom: 1px solid rgba(37, 37, 48, 0.5);  /* very faint separator */
+      font-size: 0.84rem;
+      line-height: 1.45;
+      /* Body colour for readability; cyan reserved for headings/accents only */
+      color: var(--text);
+    }
+
+    .skills-list li:last-child { border-bottom: none; }
+
+    /* Skill name — mono, accent-coloured for scannability */
+    .skill-name {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      color: var(--accent);
+    }
+
+    /* Description — dim, wraps naturally */
+    .skill-desc {
+      color: var(--text-dim);
+    }
+
+    /* ── Library summary block — reuses .ownership-note geometry ── */
+    .library-summary {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent-dim);
+      border-radius: 0 6px 6px 0;
+      padding: 1rem 1.25rem;
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      margin-top: 1.75rem;
+    }
+
+    .library-summary strong { color: var(--text); }
+
+    /* Compact two-column table inside the library summary */
+    .lib-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      margin-top: 0.75rem;
+    }
+
+    .lib-table th {
+      text-align: left;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 0.4rem 1rem 0.4rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .lib-table td {
+      padding: 0.45rem 1rem 0.45rem 0;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      color: var(--text-dim);
+    }
+
+    .lib-table tr:last-child td { border-bottom: none; }
+
+    .lib-table code {
+      font-family: var(--font-mono);
+      font-size: 0.82em;
+      color: var(--text);
+      background: var(--code-bg);
+      padding: 0.1em 0.3em;
+      border-radius: 3px;
+    }
+
+    /* ── Responsive adjustments ── */
+    @media (max-width: 600px) {
+      /* Agent grid: 2 columns down to 1 on very small */
+      .agent-grid { grid-template-columns: 1fr; }
+
+      /* Skills list: 2 columns → 1 column on mobile */
+      .skills-list { columns: 1; }
+    }
+
+    @media (min-width: 601px) and (max-width: 820px) {
+      /* Skills list: mid-width gets 2 columns */
+      .skills-list { columns: 2 200px; }
+    }
+
+
 <body>
 
   <!-- ═══════════════════════════════════════════ HERO
@@ -723,7 +935,7 @@
             </tr>
             <tr>
               <td><strong>Subagent</strong> (specialist)</td>
-              <td>the other 10 roles</td>
+              <td>the other 16 roles</td>
               <td>Not a slash command. Delegate: <em>"Use the backend-dev subagent to…"</em>, or let an orchestrator hand off automatically.</td>
             </tr>
           </tbody>
@@ -751,7 +963,468 @@ bash scripts/wire.sh
 
       </section>
 
-      <!-- 4. Key files -->
+      <!-- 4. Agents — who the factory produces -->
+      <section aria-labelledby="agents-heading">
+        <h2 id="agents-heading">Agents</h2>
+
+        <p>
+          agent-factory produces 18 roles. Two are <strong>orchestrators</strong> —
+          they become Claude Code skills invoked as slash commands and can coordinate
+          the rest of the team. The other 16 are <strong>specialists</strong> —
+          subagents delegated to by an orchestrator or called directly.
+        </p>
+
+        <!-- ── Orchestrators ── -->
+        <h3 class="agent-group-heading">
+          Orchestrators
+          <span class="badge badge-orchestrator" aria-hidden="true">skill / slash command</span>
+        </h3>
+
+        <div class="agent-grid">
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>ceo-orchestrator</code>
+              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
+            </div>
+            <div class="agent-card-title">CEO</div>
+            <p class="agent-card-summary">Top-level orchestrator above the team. Turns a business goal into sequenced initiatives and bets, makes the build-vs-not call, sets guardrails and budgets, delegates to Tech Lead + Product Manager, gates releases, reviews outcomes against the goal.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>tech-lead</code>
+              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
+            </div>
+            <div class="agent-card-title">Tech Lead</div>
+            <p class="agent-card-summary">PRDs, architecture decisions, hands off to specialists, reviews output.</p>
+          </article>
+
+        </div>
+
+        <!-- ── Specialists ── -->
+        <h3 class="agent-group-heading">
+          Specialists
+          <span class="badge badge-specialist" aria-hidden="true">subagent</span>
+        </h3>
+
+        <div class="agent-grid">
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>ad-copy</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Ad Copy</div>
+            <p class="agent-card-summary">Short-form ad creative. Hooks, headlines, and channel-fit copy variants written to be A/B tested, not admired. Works from a brief.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>backend-dev</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Backend Dev</div>
+            <p class="agent-card-summary">Server-side logic, APIs, database, auth, business rules. Implements to a PRD.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>copywriter</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Copywriter</div>
+            <p class="agent-card-summary">Long-form and product copy. Writes to a brief: voice, clarity, structure.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>data-analyst</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Data Analyst</div>
+            <p class="agent-card-summary">Queries, dashboards, analysis, reporting. Turns a question into a defensible answer, with assumptions and caveats stated.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>data-engineer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Data Engineer</div>
+            <p class="agent-card-summary">Pipelines, warehousing, transforms, data quality. Builds to a pipeline spec.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>data-scientist</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Data Scientist</div>
+            <p class="agent-card-summary">Statistical modeling and experiments — A/B testing, causal inference, feature engineering, ML models. Turns data into validated models and experiment readouts.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>designer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Designer</div>
+            <p class="agent-card-summary">UI/UX design: user flows, layout, design systems, component specs, accessibility-by-design. Hands a design spec to frontend-dev.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>devops</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">DevOps</div>
+            <p class="agent-card-summary">CI/CD, environments, secrets, deploy and rollback, monitoring. Proposes deploys; the human approves production.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>frontend-dev</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Frontend Dev</div>
+            <p class="agent-card-summary">Client side: UI templates, components, client state, forms, accessibility. Implements to a PRD against the API contract from backend-dev.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>growth-hacker</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Growth Hacker</div>
+            <p class="agent-card-summary">Acquisition and funnel experiments, analytics-driven growth. Runs disciplined, hypothesis-first experiments — one variable at a time, lets the data decide.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>product-manager</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Product Manager</div>
+            <p class="agent-card-summary">Converts intent into precise specs. Owns scope, acceptance criteria, PRDs, and tracer-bullet tickets. Does not architect or implement.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>project-manager</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Project Manager</div>
+            <p class="agent-card-summary">Delivery management. Turns a plan or PRD into tracked tasks with owners, estimates, and dependencies; runs standups, surfaces blockers, reports status against the timeline.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>qa-engineer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">QA Engineer</div>
+            <p class="agent-card-summary">The release gate. Builds test plans, verifies work against PRD acceptance criteria, reviews for correctness and edge cases, blocks release on critical issues.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>researcher</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Researcher</div>
+            <p class="agent-card-summary">Desk, web, market, competitive and technical research. Source-grounded, fact-checked synthesis with citations. Investigates a question; does not decide.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>security-reviewer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Security Reviewer</div>
+            <p class="agent-card-summary">Threat models, audits code + dependencies + secrets, rates findings by severity, and gives remediation guidance. Advisory security gate — does not implement fixes.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>seo</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">SEO Specialist</div>
+            <p class="agent-card-summary">Technical, on-page, and content SEO: audits, schema/JSON-LD, sitemaps, Core Web Vitals, GSC, keyword/intent strategy. Recommends; does not deploy.</p>
+          </article>
+
+        </div>
+
+        <div class="ownership-note" style="margin-top: 1.25rem;">
+          <strong>Self-referential note:</strong> the agents that built this very page —
+          <code>tech-lead</code> (orchestrator) and <code>frontend-dev</code> (specialist)
+          — are in this list. <code>backend-dev</code>, <code>qa-engineer</code>, and the
+          rest are wired the same way and ready to work any project.
+        </div>
+
+      </section><!-- /#agents-heading -->
+
+      <!-- 5. Skills — wired catalogue + library summary -->
+      <section aria-labelledby="skills-heading">
+        <h2 id="skills-heading">Skills</h2>
+
+        <p>
+          <strong>150 wired live</strong> across 6 sources — active in every Claude
+          session. Another <strong>3,058</strong> are indexed in the library (not wired)
+          and searchable via <code>skill-scout</code>.
+        </p>
+
+        <!-- ── Root (owned / edited) — 6 ── -->
+        <h3 class="skills-source-heading">
+          Root (owned / edited)
+          <span class="skills-count">6</span>
+          <span class="badge badge-wired" aria-hidden="true">wired</span>
+        </h3>
+        <ul class="skills-list">
+          <li><span class="skill-name">caveman</span> — <span class="skill-desc">Ultra-compressed communication mode.</span></li>
+          <li><span class="skill-name">handoff</span> — <span class="skill-desc">Compact the current conversation into a handoff document for another agent to pick up.</span></li>
+          <li><span class="skill-name">rubber-duck</span> — <span class="skill-desc">Structured rubber duck debugging.</span></li>
+          <li><span class="skill-name">setup-gareth-skills</span> — <span class="skill-desc">Sets up an Agent skills block in AGENTS.md/CLAUDE.md and docs/agents/ so engineering skills know this repo's issue tracker, triage labels, and domain details.</span></li>
+          <li><span class="skill-name">skill-scout</span> — <span class="skill-desc">Scout public agent-skill directories (ranked by installs) and propose new skills to add to the-grid, deduped against what's already wired.</span></li>
+          <li><span class="skill-name">standup</span> — <span class="skill-desc">Generate a concise standup summary from recent git activity across repos.</span></li>
+        </ul>
+
+        <!-- ── repos/anthropic — 15 ── -->
+        <h3 class="skills-source-heading">
+          repos/anthropic
+          <span class="skills-count">15</span>
+          <span class="badge badge-wired" aria-hidden="true">wired</span>
+        </h3>
+        <ul class="skills-list">
+          <li><span class="skill-name">brand-guidelines</span> — <span class="skill-desc">Applies Anthropic's official brand colors and typography to any artifact.</span></li>
+          <li><span class="skill-name">canvas-design</span> — <span class="skill-desc">Create beautiful visual art in .png and .pdf documents using design philosophy.</span></li>
+          <li><span class="skill-name">claude-api</span> — <span class="skill-desc">Build, debug, and optimize Claude API / Anthropic SDK apps.</span></li>
+          <li><span class="skill-name">docx</span> — <span class="skill-desc">Create, read, edit, or manipulate Word documents (.docx files).</span></li>
+          <li><span class="skill-name">frontend-design</span> — <span class="skill-desc">Create distinctive, production-grade frontend interfaces with high design quality.</span></li>
+          <li><span class="skill-name">internal-comms</span> — <span class="skill-desc">Write all kinds of internal communications using company-preferred formats.</span></li>
+          <li><span class="skill-name">mcp-builder</span> — <span class="skill-desc">Guide for creating high-quality MCP servers that enable LLMs to interact with external services.</span></li>
+          <li><span class="skill-name">pdf</span> — <span class="skill-desc">Do anything with PDF files.</span></li>
+          <li><span class="skill-name">pptx</span> — <span class="skill-desc">Handle .pptx files as input, output, or both.</span></li>
+          <li><span class="skill-name">skill-creator</span> — <span class="skill-desc">Create new skills, modify and improve existing skills, and measure skill performance.</span></li>
+          <li><span class="skill-name">template-skill</span> — <span class="skill-desc">Starter template for new skills.</span></li>
+          <li><span class="skill-name">theme-factory</span> — <span class="skill-desc">Toolkit for styling artifacts with a theme.</span></li>
+          <li><span class="skill-name">web-artifacts-builder</span> — <span class="skill-desc">Create elaborate, multi-component HTML artifacts using React, Tailwind CSS, shadcn/ui.</span></li>
+          <li><span class="skill-name">webapp-testing</span> — <span class="skill-desc">Interact with and test local web applications using Playwright.</span></li>
+          <li><span class="skill-name">xlsx</span> — <span class="skill-desc">Handle spreadsheet files as primary input or output.</span></li>
+        </ul>
+
+        <!-- ── repos/gstack — 51 ── -->
+        <h3 class="skills-source-heading">
+          repos/gstack
+          <span class="skills-count">51</span>
+          <span class="badge badge-wired" aria-hidden="true">wired</span>
+        </h3>
+        <ul class="skills-list">
+          <li><span class="skill-name">autoplan</span> — <span class="skill-desc">Auto-review pipeline — CEO, design, eng, and DX reviews run sequentially with auto-decisions.</span></li>
+          <li><span class="skill-name">benchmark</span> — <span class="skill-desc">Performance regression detection using the browse daemon.</span></li>
+          <li><span class="skill-name">benchmark-models</span> — <span class="skill-desc">Cross-model benchmark for gstack skills.</span></li>
+          <li><span class="skill-name">browse</span> — <span class="skill-desc">Fast headless browser for QA testing and site dogfooding.</span></li>
+          <li><span class="skill-name">canary</span> — <span class="skill-desc">Post-deploy canary monitoring.</span></li>
+          <li><span class="skill-name">careful</span> — <span class="skill-desc">Safety guardrails for destructive commands.</span></li>
+          <li><span class="skill-name">codex</span> — <span class="skill-desc">OpenAI Codex CLI wrapper — three modes.</span></li>
+          <li><span class="skill-name">context-restore</span> — <span class="skill-desc">Restore working context saved earlier by /context-save.</span></li>
+          <li><span class="skill-name">context-save</span> — <span class="skill-desc">Save working context.</span></li>
+          <li><span class="skill-name">cso</span> — <span class="skill-desc">Chief Security Officer mode.</span></li>
+          <li><span class="skill-name">design-consultation</span> — <span class="skill-desc">Research the landscape, propose a complete design system, and generate font + color previews.</span></li>
+          <li><span class="skill-name">design-html</span> — <span class="skill-desc">Design finalization: generate production-quality Pretext-native HTML/CSS.</span></li>
+          <li><span class="skill-name">design-review</span> — <span class="skill-desc">Designer's eye QA: find visual inconsistencies, spacing issues, hierarchy problems — then fix them.</span></li>
+          <li><span class="skill-name">design-shotgun</span> — <span class="skill-desc">Generate multiple AI design variants, open a comparison board, collect structured feedback, and iterate.</span></li>
+          <li><span class="skill-name">devex-review</span> — <span class="skill-desc">Live developer experience audit.</span></li>
+          <li><span class="skill-name">document-generate</span> — <span class="skill-desc">Generate missing documentation from scratch for a feature, module, or entire project.</span></li>
+          <li><span class="skill-name">document-release</span> — <span class="skill-desc">Post-ship documentation update.</span></li>
+          <li><span class="skill-name">freeze</span> — <span class="skill-desc">Restrict file edits to a specific directory for the session.</span></li>
+          <li><span class="skill-name">gstack-openclaw-ceo-review</span> — <span class="skill-desc">Review a plan, challenge a proposal, run a CEO review, or decide whether to expand or reduce scope.</span></li>
+          <li><span class="skill-name">gstack-openclaw-investigate</span> — <span class="skill-desc">Debug, fix a bug, investigate an error, or do root cause analysis.</span></li>
+          <li><span class="skill-name">gstack-openclaw-office-hours</span> — <span class="skill-desc">Brainstorm, evaluate whether an idea is worth building, or think through a new product idea before code is written.</span></li>
+          <li><span class="skill-name">gstack-openclaw-retro</span> — <span class="skill-desc">Weekly engineering retrospective.</span></li>
+          <li><span class="skill-name">gstack-upgrade</span> — <span class="skill-desc">Upgrade gstack to the latest version.</span></li>
+          <li><span class="skill-name">guard</span> — <span class="skill-desc">Full safety mode: destructive command warnings + directory-scoped edits.</span></li>
+          <li><span class="skill-name">health</span> — <span class="skill-desc">Code quality dashboard.</span></li>
+          <li><span class="skill-name">investigate</span> — <span class="skill-desc">Systematic debugging with root cause investigation.</span></li>
+          <li><span class="skill-name">land-and-deploy</span> — <span class="skill-desc">Land and deploy workflow.</span></li>
+          <li><span class="skill-name">landing-report</span> — <span class="skill-desc">Read-only queue dashboard for workspace-aware ship.</span></li>
+          <li><span class="skill-name">learn</span> — <span class="skill-desc">Manage project learnings.</span></li>
+          <li><span class="skill-name">make-pdf</span> — <span class="skill-desc">Turn any markdown file into a publication-quality PDF.</span></li>
+          <li><span class="skill-name">office-hours</span> — <span class="skill-desc">YC Office Hours — two modes.</span></li>
+          <li><span class="skill-name">open-gstack-browser</span> — <span class="skill-desc">Launch GStack Browser — AI-controlled Chromium with the sidebar extension baked in.</span></li>
+          <li><span class="skill-name">pair-agent</span> — <span class="skill-desc">Pair a remote AI agent with your browser.</span></li>
+          <li><span class="skill-name">plan-ceo-review</span> — <span class="skill-desc">CEO/founder-mode plan review.</span></li>
+          <li><span class="skill-name">plan-design-review</span> — <span class="skill-desc">Designer's eye plan review — interactive, like CEO and Eng review.</span></li>
+          <li><span class="skill-name">plan-devex-review</span> — <span class="skill-desc">Interactive developer experience plan review.</span></li>
+          <li><span class="skill-name">plan-eng-review</span> — <span class="skill-desc">Eng manager-mode plan review.</span></li>
+          <li><span class="skill-name">plan-tune</span> — <span class="skill-desc">Self-tuning question sensitivity + developer psychographic for gstack.</span></li>
+          <li><span class="skill-name">qa</span> — <span class="skill-desc">Systematically QA test a web application and fix bugs found.</span></li>
+          <li><span class="skill-name">qa-only</span> — <span class="skill-desc">Report-only QA testing.</span></li>
+          <li><span class="skill-name">retro</span> — <span class="skill-desc">Weekly engineering retrospective.</span></li>
+          <li><span class="skill-name">review</span> — <span class="skill-desc">Pre-landing PR review.</span></li>
+          <li><span class="skill-name">scrape</span> — <span class="skill-desc">Pull data from a web page.</span></li>
+          <li><span class="skill-name">setup-browser-cookies</span> — <span class="skill-desc">Import cookies from your real Chromium browser into the headless browse session.</span></li>
+          <li><span class="skill-name">setup-deploy</span> — <span class="skill-desc">Configure deployment settings for /land-and-deploy.</span></li>
+          <li><span class="skill-name">setup-gbrain</span> — <span class="skill-desc">Install gbrain CLI, initialize a PGLite or Supabase brain, register MCP, capture per-remote trust policy.</span></li>
+          <li><span class="skill-name">ship</span> — <span class="skill-desc">Ship workflow: detect + merge base branch, run tests, review diff, bump VERSION, update CHANGELOG, commit, push, create PR.</span></li>
+          <li><span class="skill-name">skillify</span> — <span class="skill-desc">Codify the most recent successful /scrape flow into a permanent browser-skill on disk.</span></li>
+          <li><span class="skill-name">spec</span> — <span class="skill-desc">Turn vague intent into a precise, executable spec in five phases.</span></li>
+          <li><span class="skill-name">sync-gbrain</span> — <span class="skill-desc">Keep gbrain current with this repo's code and refresh agent search guidance in CLAUDE.md.</span></li>
+          <li><span class="skill-name">unfreeze</span> — <span class="skill-desc">Clear the freeze boundary set by /freeze, allowing edits to all directories again.</span></li>
+        </ul>
+
+        <!-- ── repos/jeffallan — 40 ── -->
+        <h3 class="skills-source-heading">
+          repos/jeffallan
+          <span class="skills-count">40</span>
+          <span class="badge badge-wired" aria-hidden="true">wired</span>
+        </h3>
+        <ul class="skills-list">
+          <li><span class="skill-name">architecture-designer</span> — <span class="skill-desc">Design new high-level system architecture, review existing designs, or make architectural decisions.</span></li>
+          <li><span class="skill-name">chaos-engineer</span> — <span class="skill-desc">Design chaos experiments, create failure injection frameworks, and facilitate game day exercises for distributed systems.</span></li>
+          <li><span class="skill-name">cli-developer</span> — <span class="skill-desc">Build CLI tools, implement argument parsing, or add interactive prompts.</span></li>
+          <li><span class="skill-name">cloud-architect</span> — <span class="skill-desc">Design cloud architectures, create migration plans, generate cost optimization recommendations across AWS, Azure, and GCP.</span></li>
+          <li><span class="skill-name">code-documenter</span> — <span class="skill-desc">Generate, format, and validate technical documentation — docstrings, OpenAPI/Swagger specs, JSDoc, doc portals, and user guides.</span></li>
+          <li><span class="skill-name">code-reviewer</span> — <span class="skill-desc">Analyze code diffs to identify bugs, security vulnerabilities, code smells, N+1 queries, and architectural concerns.</span></li>
+          <li><span class="skill-name">cpp-pro</span> — <span class="skill-desc">Write, optimize, and debug C++ applications using modern C++20/23 features and high-performance systems techniques.</span></li>
+          <li><span class="skill-name">database-optimizer</span> — <span class="skill-desc">Optimize database queries and improve performance across PostgreSQL and MySQL systems.</span></li>
+          <li><span class="skill-name">debugging-wizard</span> — <span class="skill-desc">Parse error messages, trace execution flow through stack traces, and apply systematic hypothesis-driven methodology to isolate bugs.</span></li>
+          <li><span class="skill-name">devops-engineer</span> — <span class="skill-desc">Create Dockerfiles, configure CI/CD pipelines, write Kubernetes manifests, and generate Terraform/Pulumi infrastructure templates.</span></li>
+          <li><span class="skill-name">feature-forge</span> — <span class="skill-desc">Conduct structured requirements workshops to produce feature specs, user stories, EARS-format requirements, and acceptance criteria.</span></li>
+          <li><span class="skill-name">fine-tuning-expert</span> — <span class="skill-desc">Fine-tune LLMs, train custom models, or adapt foundation models for specific tasks.</span></li>
+          <li><span class="skill-name">fullstack-guardian</span> — <span class="skill-desc">Build security-focused full-stack web applications with layered security at every level.</span></li>
+          <li><span class="skill-name">javascript-pro</span> — <span class="skill-desc">Write, debug, and refactor JavaScript using modern ES2023+ features, async/await patterns, ESM, and Node.js APIs.</span></li>
+          <li><span class="skill-name">laravel-specialist</span> — <span class="skill-desc">Build and configure Laravel 10+ applications with Eloquent models, Sanctum auth, Horizon queues, and RESTful APIs.</span></li>
+          <li><span class="skill-name">legacy-modernizer</span> — <span class="skill-desc">Design incremental migration strategies, identify service boundaries, produce dependency maps and migration roadmaps.</span></li>
+          <li><span class="skill-name">mcp-developer</span> — <span class="skill-desc">Build, debug, or extend MCP servers or clients that connect AI systems with external tools and data sources.</span></li>
+          <li><span class="skill-name">microservices-architect</span> — <span class="skill-desc">Design distributed system architectures, decompose monoliths into bounded-context services, recommend communication patterns.</span></li>
+          <li><span class="skill-name">ml-pipeline</span> — <span class="skill-desc">Design and implement production-grade ML pipeline infrastructure with MLflow, Kubeflow, or Airflow.</span></li>
+          <li><span class="skill-name">monitoring-expert</span> — <span class="skill-desc">Configure monitoring systems, implement structured logging, create Prometheus/Grafana dashboards, and instrument distributed tracing.</span></li>
+          <li><span class="skill-name">nestjs-expert</span> — <span class="skill-desc">Create and configure NestJS modules, controllers, services, DTOs, guards, and interceptors for enterprise TypeScript backends.</span></li>
+          <li><span class="skill-name">nextjs-developer</span> — <span class="skill-desc">Build Next.js 14+ applications with App Router, server components, or server actions.</span></li>
+          <li><span class="skill-name">pandas-pro</span> — <span class="skill-desc">Perform pandas DataFrame operations for data analysis, manipulation, and transformation.</span></li>
+          <li><span class="skill-name">php-pro</span> — <span class="skill-desc">Build PHP applications with modern PHP 8.3+ features, Laravel, or Symfony frameworks.</span></li>
+          <li><span class="skill-name">playwright-expert</span> — <span class="skill-desc">Write E2E tests with Playwright, set up test infrastructure, or debug flaky browser tests.</span></li>
+          <li><span class="skill-name">postgres-pro</span> — <span class="skill-desc">Optimize PostgreSQL queries, configure replication, or implement advanced database features.</span></li>
+          <li><span class="skill-name">prompt-engineer</span> — <span class="skill-desc">Write, refactor, and evaluate prompts for LLMs — generating optimized templates, structured output schemas, and evaluation rubrics.</span></li>
+          <li><span class="skill-name">python-pro</span> — <span class="skill-desc">Build Python 3.11+ applications requiring type safety, async programming, or robust error handling.</span></li>
+          <li><span class="skill-name">rag-architect</span> — <span class="skill-desc">Design and implement production-grade RAG systems: chunking, embeddings, vector stores, hybrid search, reranking, and evaluation.</span></li>
+          <li><span class="skill-name">secure-code-guardian</span> — <span class="skill-desc">Implement authentication/authorization, secure user input, or prevent OWASP Top 10 vulnerabilities.</span></li>
+          <li><span class="skill-name">security-reviewer</span> — <span class="skill-desc">Identify security vulnerabilities, generate structured audit reports with severity ratings, and provide remediation guidance.</span></li>
+          <li><span class="skill-name">spec-miner</span> — <span class="skill-desc">Reverse-engineering specialist that extracts specifications from existing codebases.</span></li>
+          <li><span class="skill-name">sql-pro</span> — <span class="skill-desc">Optimize SQL queries, design database schemas, and troubleshoot performance issues.</span></li>
+          <li><span class="skill-name">sre-engineer</span> — <span class="skill-desc">Define SLOs, create error budget policies, design incident response procedures, and develop capacity models for production systems.</span></li>
+          <li><span class="skill-name">test-master</span> — <span class="skill-desc">Generate test files, create mocking strategies, analyze coverage, and produce test plans across functional, performance, and security testing.</span></li>
+          <li><span class="skill-name">the-fool</span> — <span class="skill-desc">Challenge ideas, plans, decisions, or proposals using structured critical reasoning.</span></li>
+          <li><span class="skill-name">vue-expert</span> — <span class="skill-desc">Build Vue 3 components with Composition API, configure Nuxt 3 SSR/SSG, set up Pinia stores, scaffold Quasar/Capacitor mobile apps.</span></li>
+          <li><span class="skill-name">vue-expert-js</span> — <span class="skill-desc">Create Vue 3 components, build vanilla JS composables, configure Vite projects using JavaScript only — no TypeScript.</span></li>
+          <li><span class="skill-name">websocket-engineer</span> — <span class="skill-desc">Build real-time communication systems with WebSockets or Socket.IO.</span></li>
+          <li><span class="skill-name">wordpress-pro</span> — <span class="skill-desc">Develop custom WordPress themes and plugins, create Gutenberg blocks, configure WooCommerce stores, implement REST API endpoints.</span></li>
+        </ul>
+
+        <!-- ── repos/mattpocock — 25 ── -->
+        <h3 class="skills-source-heading">
+          repos/mattpocock
+          <span class="skills-count">25</span>
+          <span class="badge badge-wired" aria-hidden="true">wired</span>
+        </h3>
+        <ul class="skills-list">
+          <li><span class="skill-name">design-an-interface</span> — <span class="skill-desc">Generate multiple radically different interface designs for a module using parallel sub-agents.</span></li>
+          <li><span class="skill-name">diagnose</span> — <span class="skill-desc">Disciplined diagnosis loop for hard bugs and performance regressions.</span></li>
+          <li><span class="skill-name">edit-article</span> — <span class="skill-desc">Edit and improve articles by restructuring sections, improving clarity, and tightening prose.</span></li>
+          <li><span class="skill-name">git-guardrails-claude-code</span> — <span class="skill-desc">Set up Claude Code hooks to block dangerous git commands before they execute.</span></li>
+          <li><span class="skill-name">grill-me</span> — <span class="skill-desc">Interview the user relentlessly about a plan or design until reaching shared understanding.</span></li>
+          <li><span class="skill-name">grill-with-docs</span> — <span class="skill-desc">Grilling session that challenges your plan against the existing domain model and updates documentation inline as decisions crystallise.</span></li>
+          <li><span class="skill-name">improve-codebase-architecture</span> — <span class="skill-desc">Find deepening opportunities in a codebase, informed by CONTEXT.md and docs/adr/.</span></li>
+          <li><span class="skill-name">obsidian-vault</span> — <span class="skill-desc">Search, create, and manage notes in the Obsidian vault with wikilinks and index notes.</span></li>
+          <li><span class="skill-name">prototype</span> — <span class="skill-desc">Build a throwaway prototype to flesh out a design before committing to it.</span></li>
+          <li><span class="skill-name">qa</span> — <span class="skill-desc">Interactive QA session where user reports bugs or issues conversationally, and the agent files GitHub issues.</span></li>
+          <li><span class="skill-name">request-refactor-plan</span> — <span class="skill-desc">Create a detailed refactor plan with tiny commits via user interview, then file it as a GitHub issue.</span></li>
+          <li><span class="skill-name">review</span> — <span class="skill-desc">Review changes since a fixed point along two axes — Standards and Spec.</span></li>
+          <li><span class="skill-name">scaffold-exercises</span> — <span class="skill-desc">Create exercise directory structures with sections, problems, solutions, and explainers that pass linting.</span></li>
+          <li><span class="skill-name">setup-pre-commit</span> — <span class="skill-desc">Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo.</span></li>
+          <li><span class="skill-name">tdd</span> — <span class="skill-desc">Test-driven development with red-green-refactor loop.</span></li>
+          <li><span class="skill-name">teach</span> — <span class="skill-desc">Teach the user a new skill or concept, within this workspace.</span></li>
+          <li><span class="skill-name">to-issues</span> — <span class="skill-desc">Break a plan, spec, or PRD into independently-grabbable issues on the project issue tracker using tracer-bullet vertical slices.</span></li>
+          <li><span class="skill-name">to-prd</span> — <span class="skill-desc">Turn the current conversation context into a PRD and publish it to the project issue tracker.</span></li>
+          <li><span class="skill-name">triage</span> — <span class="skill-desc">Triage issues through a state machine driven by triage roles.</span></li>
+          <li><span class="skill-name">ubiquitous-language</span> — <span class="skill-desc">Extract a DDD-style ubiquitous language glossary from the current conversation, flagging ambiguities and proposing canonical terms.</span></li>
+          <li><span class="skill-name">write-a-skill</span> — <span class="skill-desc">Create new agent skills with proper structure, progressive disclosure, and bundled resources.</span></li>
+          <li><span class="skill-name">writing-beats</span> — <span class="skill-desc">Shape an article as a journey of beats, choose-your-own-adventure style.</span></li>
+          <li><span class="skill-name">writing-fragments</span> — <span class="skill-desc">Mine the user for fragments — heterogeneous nuggets of writing — and append them to a single document as raw material.</span></li>
+          <li><span class="skill-name">writing-shape</span> — <span class="skill-desc">Take a markdown file of raw material and shape it into an article through a conversational session.</span></li>
+          <li><span class="skill-name">zoom-out</span> — <span class="skill-desc">Tell the agent to zoom out and give broader context or a higher-level perspective.</span></li>
+        </ul>
+
+        <!-- ── repos/superpowers — 13 ── -->
+        <h3 class="skills-source-heading">
+          repos/superpowers
+          <span class="skills-count">13</span>
+          <span class="badge badge-wired" aria-hidden="true">wired</span>
+        </h3>
+        <ul class="skills-list">
+          <li><span class="skill-name">brainstorming</span> — <span class="skill-desc">Use before any creative work: creating features, building components, adding functionality, or modifying behavior.</span></li>
+          <li><span class="skill-name">dispatching-parallel-agents</span> — <span class="skill-desc">Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies.</span></li>
+          <li><span class="skill-name">executing-plans</span> — <span class="skill-desc">Use when you have a written implementation plan to execute in a separate session with review checkpoints.</span></li>
+          <li><span class="skill-name">finishing-a-development-branch</span> — <span class="skill-desc">Use when implementation is complete and all tests pass — guides completion via structured options for merge, PR, or cleanup.</span></li>
+          <li><span class="skill-name">receiving-code-review</span> — <span class="skill-desc">Use when receiving code review feedback, before implementing suggestions — requires technical rigor and verification.</span></li>
+          <li><span class="skill-name">requesting-code-review</span> — <span class="skill-desc">Use when completing tasks or before merging to verify work meets requirements.</span></li>
+          <li><span class="skill-name">subagent-driven-development</span> — <span class="skill-desc">Use when executing implementation plans with independent tasks in the current session.</span></li>
+          <li><span class="skill-name">systematic-debugging</span> — <span class="skill-desc">Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes.</span></li>
+          <li><span class="skill-name">test-driven-development</span> — <span class="skill-desc">Use when implementing any feature or bugfix, before writing implementation code.</span></li>
+          <li><span class="skill-name">using-git-worktrees</span> — <span class="skill-desc">Use when starting feature work that needs isolation from the current workspace.</span></li>
+          <li><span class="skill-name">using-superpowers</span> — <span class="skill-desc">Use when starting any conversation — establishes how to find and use skills.</span></li>
+          <li><span class="skill-name">verification-before-completion</span> — <span class="skill-desc">Use when about to claim work is complete — requires running verification commands and confirming output before any success claims.</span></li>
+          <li><span class="skill-name">writing-plans</span> — <span class="skill-desc">Use when you have a spec or requirements for a multi-step task, before touching code.</span></li>
+        </ul>
+
+        <!-- ── Library + Reference summary ── -->
+        <div class="library-summary">
+          <strong>3,058 more skills in the library</strong> — indexed, not wired.
+          Browse any repo as a submodule under <code>repos/</code>, or search across
+          all of them with <code>skill-scout</code>. Promote a repo to wired by adding
+          its name to <code>wired-submodules.txt</code> and running <code>bash wire.sh</code>.
+
+          <table class="lib-table">
+            <thead>
+              <tr>
+                <th scope="col">Repo</th>
+                <th scope="col">Skills</th>
+                <th scope="col">Tier</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>repos/alirezarezvani</code></td><td>753</td><td>Library</td></tr>
+              <tr><td><code>repos/leoyeai</code></td><td>1,784</td><td>Library</td></tr>
+              <tr><td><code>repos/robertbstillwell</code></td><td>152</td><td>Library</td></tr>
+              <tr><td><code>repos/openclaw</code></td><td>112</td><td>Library</td></tr>
+              <tr><td><code>repos/paperclip</code></td><td>33</td><td>Library</td></tr>
+              <tr><td><code>repos/deanpeters</code></td><td>49</td><td>Library</td></tr>
+              <tr><td><code>repos/amekala-ads-mcp</code></td><td>24</td><td>Library</td></tr>
+              <tr><td><code>repos/mattberman-google-ads</code></td><td>16</td><td>Library</td></tr>
+              <tr><td><code>repos/wordpress</code></td><td>17</td><td>Library</td></tr>
+              <tr><td><code>repos/jdevalk</code></td><td>11</td><td>Library</td></tr>
+              <tr><td><code>repos/automattic</code></td><td>13</td><td>Library</td></tr>
+              <tr><td><code>repos/clawhub</code></td><td>10</td><td>Library</td></tr>
+              <tr><td><code>repos/nowork-toprank</code></td><td>18</td><td>Library</td></tr>
+              <tr><td><code>repos/mozilla-bq-etl</code></td><td>13</td><td>Library</td></tr>
+              <tr><td><code>repos/mattberman-meta-ads</code></td><td>6</td><td>Library</td></tr>
+              <tr><td><code>repos/automattic-wordpress</code></td><td>4</td><td>Library</td></tr>
+              <tr><td><code>repos/sarai-wp-openclaw</code></td><td>2</td><td>Library</td></tr>
+              <tr><td><code>repos/spillwave-astro</code></td><td>1</td><td>Library</td></tr>
+              <tr><td><code>repos/hesamsheikh</code></td><td>—</td><td>Reference (index)</td></tr>
+              <tr><td><code>repos/sebclawops</code></td><td>—</td><td>Reference (index)</td></tr>
+              <tr><td><code>repos/sjkncs</code></td><td>—</td><td>Reference (index)</td></tr>
+              <tr><td><code>repos/voltagent</code></td><td>—</td><td>Reference (index)</td></tr>
+              <tr><td><code>repos/voltagent-agent-skills</code></td><td>—</td><td>Reference (index)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </section><!-- /#skills-heading -->
+
+      <!-- 6. Key files -->
       <section aria-labelledby="files-heading">
         <h2 id="files-heading">Key files</h2>
 
@@ -799,7 +1472,7 @@ bash scripts/wire.sh
         </table>
       </section>
 
-      <!-- 5. Common commands -->
+      <!-- 7. Common commands -->
       <section aria-labelledby="commands-heading">
         <h2 id="commands-heading">Common commands</h2>
 
