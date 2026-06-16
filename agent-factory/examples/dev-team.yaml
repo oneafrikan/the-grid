@@ -1,0 +1,12 @@
+# dev-team.yaml — the full composed dev team.
+# Orchestrators emit as Claude Code skills; specialists as CC subagents.
+# Roles are added here as they are ported to the 5-file model.
+project: dev-team
+description: Composed AI dev team — orchestrator + specialists.
+paperclip: false
+
+agents:
+  - role: tech-lead       # orchestrator -> CC skill
+    model: opus
+  - role: backend-dev     # specialist  -> CC subagent
+    model: sonnet

@@ -390,14 +390,17 @@ def emit_cc_subagent(agent: dict) -> tuple[str, str]:
                        f"Use this subagent for {role} work.",
         "model": resolve_model(agent),
     }
+    procedure = strip_html_comments(_read(ROLES_DIR / role / "SKILL.md"))
+    bolt_ons = (
+        f"\n\nAdditional skills available to you: {', '.join(skills[1:])}."
+        if len(skills) > 1 else ""
+    )
     body = (
         f"You are the **{title}**, a specialist agent on a composed dev team. "
         f"Adopt the identity, behaviour, and operating rules below as your own.\n\n"
         f"{_flattened_identity(agent)}\n\n---\n\n"
-        f"## Your capability\n\n"
-        f"Your operating skill is `{role}`"
-        + (f" (plus: {', '.join(skills[1:])})" if len(skills) > 1 else "")
-        + ". Follow that procedure for your core work.\n"
+        f"## Operating procedure\n\n"
+        f"{procedure}{bolt_ons}\n"
     )
     return f"{role}.md", _frontmatter(fields) + "\n" + body
 

@@ -1,9 +1,10 @@
-# role.yaml — backend-dev (STUB)
+# role.yaml — backend-dev
 # Stack-agnostic role metadata. compose.py reads this for defaults; the
-# SOUL.md / SKILL.md / MEMORY.md templates beside it carry the actual content.
+# SOUL.md / SKILL.md (+ identity layers) beside it carry the actual content.
 name: backend-dev
+title: Backend Dev        # human-readable role for IDENTITY.md nameplate
 default_model: sonnet
 summary: >-
-  Server-side logic, APIs, database, auth, business rules.
+  Server-side logic, APIs, database, auth, business rules. Implements to a PRD.
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false

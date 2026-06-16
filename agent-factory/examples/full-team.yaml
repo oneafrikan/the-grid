@@ -1,0 +1,25 @@
+# full-team.yaml — the complete composed team, all 12 ported roles.
+# Orchestrators (ceo-orchestrator, tech-lead) emit as Claude Code skills;
+# the 10 specialists emit as CC subagents. Models come from each role.yaml
+# default unless overridden here.
+project: full-team
+description: Full composed team — 2 orchestrators + 10 specialists, all 5-file model.
+paperclip: false
+
+agents:
+  # orchestrators -> CC skills
+  - role: ceo-orchestrator
+  - role: tech-lead
+  # engineering specialists -> CC subagents
+  - role: product-manager
+  - role: backend-dev
+  - role: frontend-dev
+  - role: qa-engineer
+  - role: devops
+  # data specialists
+  - role: data-engineer
+  - role: data-analyst
+  # marketing specialists
+  - role: copywriter
+  - role: ad-copy
+  - role: growth-hacker
