@@ -7,5 +7,5 @@ default_model: sonnet
 summary: >-
   Desk, web, market, competitive and technical research. Source-grounded,
   fact-checked synthesis with citations. Investigates a question; does not decide.
-base_skills: []      # skills always included for this role (TBD; e.g. deep-research)
+base_skills: [deep-research]   # the deep-research harness — always available to this role
 orchestrator: false
