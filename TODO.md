@@ -1,6 +1,6 @@
 # the-grid TODO
 
-**Current focus:** `agent-factory/` composes AI dev-team agents from a single config. The **Claude Code** delivery target is done — all 12 roles compose to CC skills (orchestrators) + subagents (specialists) and wire live via `wire.sh` (2026-06-16). Next: OpenClaw + Paperclip targets, stack overlays, machine manifest. See `LOGS/2026-06-16-handoff-agent-factory.md`.
+**Current focus:** `agent-factory/` composes AI dev-team agents from a single config. The **Claude Code** delivery target is done — all **17 roles** (expanded from 12: +seo, +security-reviewer, +designer, +data-scientist, +project-manager) compose to CC skills (orchestrators) + subagents (specialists) and wire live via `wire.sh` (2026-06-16). Next: OpenClaw + Paperclip targets, stack overlays, machine manifest, skills population (deferred to OpenClaw work). See `LOGS/2026-06-16-handoff-agent-factory.md` + `agent-factory/docs/role-skill-map.md`.
 
 ---
 
@@ -31,7 +31,7 @@
 - [x] **5. Port remaining roles** — DONE (2026-06-16, commit `96b4dea`). All 12 roles on the 5-file model: tech-lead, ceo-orchestrator, product-manager, backend-dev, frontend-dev, qa-engineer, devops, data-engineer, data-analyst, copywriter, ad-copy, growth-hacker. The 11 new ones written by parallel sub-agents off the tech-lead (orchestrator) + backend-dev (specialist) exemplars. `examples/full-team.yaml` composes all 12.
 - [ ] **6. Machine manifest** — one file per machine (`machines/<host>`), shared baseline + per-machine overlay, listing BOTH wired skills and active agents. Bash-parseable (don't force YAML into wire.sh).
 - [ ] **7. Flesh stack overlays** — `stacks/*` are `stack.yaml` stubs with empty `fragments`. Add LAMP + others. Overlays currently append to `AGENTS.md`; keyed inline injection is a later upgrade.
-- [ ] **8. Pull skills from repos** — once factory structure is solid, pull skill files from GitHub repos in `docs/reference-repos.md` into `agent-factory/skills/`.
+- [ ] **8. Pull skills from repos → `agent-factory/skills/`** — DEFERRED to the OpenClaw-target work (decided 2026-06-16). Mechanism chosen: **symlink** from the already-present `repos/` submodules (all reference-doc repos are now submodules). The per-role skill map is in `agent-factory/docs/role-skill-map.md §3`. Rationale for deferring: the live Claude Code subagents already get ecosystem skills via `wire.sh`; `agent-factory/skills/` only matters for compose-validation of declared bolt-ons + the OpenClaw target's by-name wiring.
 - [x] **9. Update CLAUDE.md** — DONE (2026-06-16): documented the agent loading model (5-file source → CC skills/subagents) and `wire.sh` agent wiring (`AGENTS_DIR`). `machines/` conventions still pending the manifest (item 6).
 
 ---
