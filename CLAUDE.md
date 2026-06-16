@@ -6,9 +6,11 @@ the first asset type it wires, but the remit is broader (commands, agents, MCP
 servers, plugins, configs may follow). It owns some assets directly and pulls many
 more from sibling repos via git submodules.
 
-Today, `wire.sh` symlinks **skills** into `~/.claude/skills/` so Claude picks them
-up. To keep the active set sane while still indexing the whole ecosystem, the-grid
-splits submodules into two tiers:
+`wire.sh` symlinks **skills** into `~/.claude/skills/` so Claude picks them up. It
+also wires **composed agents** from `agent-factory/` (see below): orchestrator
+skills into `~/.claude/skills/`, specialist subagents into `~/.claude/agents/`. To
+keep the active set sane while still indexing the whole ecosystem, the-grid splits
+submodules into two tiers:
 
 - **Wired** — a small curated allowlist (`wired-submodules.txt`) whose skills are
   symlinked live into `~/.claude/skills/`.
@@ -100,12 +102,13 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 28 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/`.
+All 30 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`.
 
 ## wire.sh contract
 
 - `GRID_DIR` env var overrides the repo root (default: script's own directory).
-- `SKILLS_DIR` env var overrides the target (default: `~/.claude/skills/`).
+- `SKILLS_DIR` env var overrides the skills target (default: `~/.claude/skills/`).
+- `AGENTS_DIR` env var overrides the subagents target (default: `~/.claude/agents/`).
 - Only manages symlinks that point into `GRID_DIR` — never touches foreign symlinks.
 - Skills in `repos/*/` are discovered at **any depth** via `find` (flat, `skills/`,
   `skills/<category>/`, etc.) — wire.sh symlinks each dir containing a `SKILL.md`,
@@ -113,6 +116,21 @@ All 28 tests must stay green. Tests use temp dirs — they never touch the real 
 - Only submodules in `wired-submodules.txt` are wired; the rest are library-only.
   If the file is absent, all repos are wired (legacy fallback). `catalog.sh` reads
   the same file to label wired vs library.
+- **Composed agents:** wire.sh also wires `agent-factory/projects/*/_claude-code/`
+  output — orchestrator skills into `SKILLS_DIR`, specialist subagents into
+  `AGENTS_DIR`. (Today every composed project is wired; a machine manifest will
+  gate this per host — see `agent-factory/` and `TODO.md`.)
+
+## agent-factory (composed agents)
+
+`agent-factory/` composes AI dev-team agents from a single config
+(`role × stack × skills`). `compose.py` is a multi-target compiler: one source (the
+live OpenClaw 5-file identity model — SOUL/IDENTITY/AGENTS/USER/MEMORY + skills)
+emits to different runtimes via `--target`. The **Claude Code** target is built and
+wired live: orchestrator roles (`role.yaml orchestrator: true`) → CC **skills**
+(invoke with `/<role>`); specialist roles → CC **subagents** (delegate to them, or
+an orchestrator hands off). OpenClaw + Paperclip (autonomous) targets are the next
+work. See `agent-factory/README.md` and `LOGS/2026-06-16-handoff-agent-factory.md`.
 
 ## About
 
