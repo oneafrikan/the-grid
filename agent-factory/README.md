@@ -108,7 +108,7 @@ invoke a composed agent in Claude Code:
 | Form | Roles (current) | How to invoke |
 |------|-----------------|---------------|
 | **Skill** (orchestrator) | `tech-lead`, `ceo-orchestrator` | Slash command: `/tech-lead`, `/ceo-orchestrator`. Transforms the session into that role. |
-| **Subagent** (specialist) | the other 10 | **Not** a slash command. Delegate to it: *"Use the backend-dev subagent to …"*, or let an orchestrator hand off to it. Claude can also auto-delegate based on the subagent's `description`. |
+| **Subagent** (specialist) | the other 15 | **Not** a slash command. Delegate to it: *"Use the backend-dev subagent to …"*, or let an orchestrator hand off to it. Claude can also auto-delegate based on the subagent's `description`. |
 
 Typical flow: invoke `/tech-lead`, give it a feature → it writes a PRD and hands
 off (async) to the specialist subagents. You rarely call a specialist directly.
@@ -129,10 +129,11 @@ Stack overlays (when a stack is named) append to `AGENTS.md` as a trailing
 
 ## Status
 
-**Claude Code delivery target is done and live.** All 12 roles are ported to the
+**Claude Code delivery target is done and live.** All 17 roles are ported to the
 5-file model (`examples/full-team.yaml`): 2 orchestrators (`tech-lead`,
-`ceo-orchestrator`) + 10 specialists (product-manager, backend-dev, frontend-dev,
-qa-engineer, devops, data-engineer, data-analyst, copywriter, ad-copy,
+`ceo-orchestrator`) + 15 specialists (product-manager, project-manager,
+backend-dev, frontend-dev, designer, qa-engineer, security-reviewer, devops,
+data-engineer, data-analyst, data-scientist, copywriter, ad-copy, seo,
 growth-hacker). `compose.py` emits both the OpenClaw 5-file shape and the Claude
 Code skill/subagent shape; `scripts/wire.sh` wires the CC output into
 `~/.claude/`. The full team is wired live on wilderness — `/tech-lead` boots and

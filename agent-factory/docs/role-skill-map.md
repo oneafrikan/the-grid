@@ -5,11 +5,15 @@ present as submodules in `repos/`, and proposes the broader-role expansion that
 surfaced in the May-2026 research session (see `../../docs/reference-resources.md`
 and `../../docs/reference-repos.md`).
 
-**Status (2026-06-16): roster expansion DONE; skills population NEXT.**
+**Status (2026-06-16): roster expansion DONE; skills population DEFERRED.**
 Decisions made: added **seo, security-reviewer, designer, data-scientist,
-project-manager** (5) — roster now **17**. Skills mechanism = **(A) symlink from
-repos/**. project-manager kept as a separate role (delivery/tracking) distinct
-from product-manager (scope/PRD). Social/email/content remain skills, not roles.
+project-manager** (5) — roster now **17**, all emitted + wired live. Skills
+mechanism chosen = **(A) symlink from repos/**, but population is **deferred to the
+OpenClaw-target work** (TODO #8): the live Claude Code subagents already get
+ecosystem skills via `wire.sh`, so `agent-factory/skills/` only pays off for
+compose-validation of declared bolt-ons + the by-name wiring the OpenClaw target
+needs. project-manager kept separate from product-manager. Social/email/content
+remain skills, not roles.
 
 ---
 
