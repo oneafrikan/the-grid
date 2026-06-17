@@ -107,17 +107,11 @@ find_skills() {
 }
 
 # --- Build the document into a buffer, then write once ---------------------
-# Total = every SKILL.md minus repo-root markers (which wire.sh skips).
-all_md=$(find "$GRID_DIR" -name SKILL.md -not -path '*/.git/*' | wc -l | tr -d ' ')
-repo_roots=0
-for r in "$GRID_DIR"/repos/*/; do
-  if [ -f "${r%/}/SKILL.md" ]; then repo_roots=$((repo_roots + 1)); fi
-done
+# Count root-owned skills (skills/ dir only — not agent-factory, not repo root).
 root_owned=0
 for d in "$GRID_DIR/skills"/*/; do
   if [ -f "${d%/}/SKILL.md" ]; then root_owned=$((root_owned + 1)); fi
 done
-total=$((all_md - repo_roots))
 
 # Wiring allowlist (same file wire.sh uses) — to label wired vs library repos.
 # Supports two entry formats:
@@ -176,12 +170,15 @@ for repo in "$GRID_DIR"/repos/*/; do
         library_skill_count=$((library_skill_count + 1))
       fi
     done < <(find_skills "$repo")
-  else
-    c=$(find_skills "$repo" | wc -l | tr -d ' ')
-    library_skill_count=$((library_skill_count + c))
+  # else: pure library repo — skills shown as counts in the Library section,
+  # but not added to the headline total (could be thousands from community repos).
   fi
 done
 wired_live=$((root_owned + wired_skill_count))
+# Total = wired + unlisted skills from partially-wired repos.
+# Pure library repos are excluded from the headline to avoid explosion when
+# community submodules are initialized (they can contain thousands of skills).
+total=$((wired_live + library_skill_count))
 
 {
   printf '# the-grid — skill catalogue\n\n'
