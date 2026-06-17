@@ -9,6 +9,12 @@
 #   repo-name          → wire ALL skills in that submodule
 #   repo-name/skill    → wire ONLY that specific skill (granular control)
 #
+# Precedence: repos are wired alphabetically; later wins on name collision.
+# Intentional order: anthropic → gstack → jeffallan → mattpocock → superpowers.
+# gstack beats mattpocock by design — if both list the same skill name,
+# remove the mattpocock entry here so gstack's version is served.
+# Current gstack-wins resolutions: qa, review.
+#
 # To apply changes: bash ~/.the-grid/scripts/wire.sh
 #
 # (If this file is deleted, wire.sh falls back to wiring ALL repos — legacy.)
@@ -135,9 +141,7 @@ mattpocock/grill-with-docs
 mattpocock/improve-codebase-architecture
 mattpocock/obsidian-vault
 mattpocock/prototype
-mattpocock/qa
 mattpocock/request-refactor-plan
-mattpocock/review
 mattpocock/scaffold-exercises
 mattpocock/setup-pre-commit
 mattpocock/tdd
