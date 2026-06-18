@@ -23,6 +23,11 @@ OUT="${1:-$GRID_DIR/SKILLS.md}"
 # Handles inline, quoted, folded (>) and block (|) YAML scalars for the
 # description, plus plain multi-line continuations. The "summary" is the first
 # sentence of the description, capped for readability.
+#
+# All sorts are pinned to LC_ALL=C (byte-order collation) so the output is
+# identical on every machine — without this, macOS (C collation) and Linux
+# (UTF-8 dictionary collation) order punctuation differently (e.g. "web-…"
+# vs "webapp-…"), causing spurious cross-machine diffs on every re-run.
 parse_skill() {
   awk '
     function trim(s){ sub(/^[[:space:]]+/,"",s); sub(/[[:space:]]+$/,"",s); return s }
@@ -88,7 +93,7 @@ emit_section() {
   SECTION_COUNT=${#lines[@]}
   printf '## %s — %s\n\n' "$title" "$SECTION_COUNT"
   if [ "$SECTION_COUNT" -gt 0 ]; then
-    printf '%s\n' "${lines[@]}" | sort -f | cut -f2-
+    printf '%s\n' "${lines[@]}" | LC_ALL=C sort -f | cut -f2-
   else
     printf '_none_\n'
   fi
@@ -233,7 +238,7 @@ total=$((wired_live + library_skill_count))
   if [ "${#lib_lines[@]}" -gt 0 ]; then
     printf '## Library submodules (indexed, not wired)\n\n'
     printf 'Not enumerated per-skill here (too many) — browse the repo or search with skill-scout:\n\n'
-    printf '%s\n' "${lib_lines[@]}" | sort -f | cut -f2-
+    printf '%s\n' "${lib_lines[@]}" | LC_ALL=C sort -f | cut -f2-
     printf '\n'
   fi
 
@@ -241,7 +246,7 @@ total=$((wired_live + library_skill_count))
   if [ "${#reference_repos[@]}" -gt 0 ]; then
     printf '## Reference submodules (no wired skills)\n\n'
     printf 'Kept for reference — these are indexes/awesome-lists, not skill collections:\n\n'
-    printf '%s\n' "${reference_repos[@]}" | sort -f | while IFS= read -r r; do
+    printf '%s\n' "${reference_repos[@]}" | LC_ALL=C sort -f | while IFS= read -r r; do
       printf -- '- **repos/%s**\n' "$r"
     done
     printf '\n'

@@ -30,8 +30,8 @@ Library repos are part of the-grid as an index/hub — browse here or search via
 - **skill-creator** — Create new skills, modify and improve existing skills, and measure skill performance.
 - **template-skill** — Replace with description of the skill and when Claude should use it.
 - **theme-factory** — Toolkit for styling artifacts with a theme.
-- **webapp-testing** — Toolkit for interacting with and testing local web applications using Playwright.
 - **web-artifacts-builder** — Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui).
+- **webapp-testing** — Toolkit for interacting with and testing local web applications using Playwright.
 - **xlsx** — Use this skill any time a spreadsheet file is the primary input or output.
 
 ## repos/gstack (partial) — 51
@@ -74,8 +74,8 @@ Library repos are part of the-grid as an index/hub — browse here or search via
 - **plan-devex-review** — Interactive developer experience plan review.
 - **plan-eng-review** — Eng manager-mode plan review.
 - **plan-tune** — Self-tuning question sensitivity + developer psychographic for gstack (v1: observational).
-- **qa-only** — Report-only QA testing.
 - **qa** — Systematically QA test a web application and fix bugs found.
+- **qa-only** — Report-only QA testing.
 - **retro** — Weekly engineering retrospective.
 - **review** — Pre-landing PR review.
 - **scrape** — Pull data from a web page.
@@ -126,8 +126,8 @@ Library repos are part of the-grid as an index/hub — browse here or search via
 - **sre-engineer** — Defines service level objectives, creates error budget policies, designs incident response procedures, develops capacity models, and produces monitoring configurations and automation scripts for prod…
 - **test-master** — Generates test files, creates mocking strategies, analyzes code coverage, designs test architectures, and produces test plans and defect reports across functional, performance, and security testing d…
 - **the-fool** — Use when challenging ideas, plans, decisions, or proposals using structured critical reasoning.
-- **vue-expert-js** — Creates Vue 3 components, builds vanilla JS composables, configures Vite projects, and sets up routing and state management using JavaScript only — no TypeScript.
 - **vue-expert** — Builds Vue 3 components with Composition API patterns, configures Nuxt 3 SSR/SSG projects, sets up Pinia stores, scaffolds Quasar/Capacitor mobile apps, implements PWA features, and optimises Vite bu…
+- **vue-expert-js** — Creates Vue 3 components, builds vanilla JS composables, configures Vite projects, and sets up routing and state management using JavaScript only — no TypeScript.
 - **websocket-engineer** — Use when building real-time communication systems with WebSockets or Socket.IO.
 - **wordpress-pro** — Develops custom WordPress themes and plugins, creates and registers Gutenberg blocks and block patterns, configures WooCommerce stores, implements WordPress REST API endpoints, applies security harde…
 
