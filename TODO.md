@@ -64,6 +64,10 @@
 
 ---
 
+## Known issues
+
+- [ ] **`repos/leoyeai` out of sync (2026-06-18, wilderness)** — working tree is a stale/divergent checkout (`8099077`, v0.14.0) with ~2,271/1,710 lines of *unreviewed* uncommitted edits (stripe/payment/amazon-checkout/siyuan/zyfai), some moving backwards (stripe HEARTBEAT 2.8.0→2.3.0). Grid HEAD records `4c6d5d4`. Deliberately NOT synced per Gareth ("not worried about it right now"). Do not `submodule update --force` it or discard the edits without asking. Until resolved, `wire.sh` on the affected machine shows a 1-line leoyeai count diff in SKILLS.md (harmless). See `LOGS/2026-06-18-context.md`.
+
 ## Backlog
 
 - [ ] `bootstrap.sh` — clone the-grid, init submodules, run wire.sh in one command (document one-liner in README)
