@@ -8,3 +8,4 @@ paperclip: false
 agents:
   - role: tech-lead
     model: opus
+    delegates_to: []   # solo demo — no specialists; roster renders a placeholder

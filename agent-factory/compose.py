@@ -238,6 +238,40 @@ def load_config(path: Path) -> dict:
             if not (SKILLS_DIR / skill).is_dir():
                 errors.append(f"{where}: skill '{skill}' has no dir at {SKILLS_DIR / skill}")
 
+    # Roster validation: an orchestrator's roster is generated from delegates_to
+    # and injected at the {{ROSTER_TABLE}} token in its AGENTS.md. Enforce that
+    # the two stay in lockstep so a roster can never silently render empty (the
+    # very drift this mechanism exists to prevent), and that every delegate is a
+    # role actually present on this team.
+    team_roles = {a.get("role") for a in (agents or []) if isinstance(a, dict)}
+    for i, agent in enumerate(agents or []):
+        if not isinstance(agent, dict):
+            continue
+        where = f"agents[{i}]"
+        role = agent.get("role")
+        delegates = agent.get("delegates_to")
+
+        if delegates is not None and not isinstance(delegates, list):
+            errors.append(f"{where}: delegates_to must be a list")
+            delegates = None
+        for d in delegates or []:
+            if d not in team_roles:
+                errors.append(f"{where}: delegates_to '{d}' is not a role on this team")
+
+        if role and (ROLES_DIR / role).is_dir():
+            agents_md = ROLES_DIR / role / "AGENTS.md"
+            has_token = agents_md.is_file() and ROSTER_TOKEN in _read(agents_md)
+            if has_token and delegates is None:
+                errors.append(
+                    f"{where}: role '{role}' declares a {ROSTER_TOKEN} slot but the "
+                    f"agent has no delegates_to (use `delegates_to: []` for no team)"
+                )
+            if delegates is not None and not has_token:
+                errors.append(
+                    f"{where}: agent has delegates_to but role '{role}' AGENTS.md "
+                    f"has no {ROSTER_TOKEN} slot to render it into"
+                )
+
     if errors:
         raise ValueError("invalid compose config:\n  - " + "\n  - ".join(errors))
 
@@ -308,8 +342,9 @@ def render_agent(agent: dict) -> dict[str, str]:
         "USER.md": _layer(role, "USER.md", CORE_DIR / "USER_base.md"),
         "MEMORY.md": _layer(role, "MEMORY.md", CORE_DIR / "MEMORY_base.md"),
     }
-    # AGENTS.md carries any stack overlay (stack conventions are operating rules).
+    # AGENTS.md: inject the generated roster (orchestrators) then any stack overlay.
     agents_md = _layer(role, "AGENTS.md", CORE_DIR / "AGENTS_base.md")
+    agents_md = inject_roster(agents_md, agent)
     overlay = render_stack_overlay(agent.get("stacks", []) or [])
     rendered["AGENTS.md"] = agents_md.rstrip() + "\n" + overlay if overlay else agents_md
     return rendered
@@ -369,6 +404,47 @@ def is_orchestrator(role: str) -> bool:
 
 def role_summary(role: str) -> str:
     return " ".join((role_meta(role).get("summary") or "").split())
+
+
+# ── roster generation ─────────────────────────────────────────────────────────
+# An orchestrator's roster is GENERATED from the project config's delegates_to
+# list (single source of truth, co-located with the team) and injected into the
+# role's AGENTS.md at the {{ROSTER_TABLE}} token. This keeps the roster from
+# drifting out of sync with the team as roles are added or removed.
+
+ROSTER_TOKEN = "{{ROSTER_TABLE}}"
+
+
+def role_owns(role: str) -> str:
+    """The short 'owns' phrase for a roster row: role.yaml `owns:` if set,
+    else the first sentence of the role's summary (the summaries already read
+    like owns statements)."""
+    owns = role_meta(role).get("owns")
+    if owns:
+        return " ".join(owns.split())
+    summary = role_summary(role)
+    # First sentence = up to the first period followed by whitespace (or the lot).
+    return re.split(r"(?<=\.)\s", summary, maxsplit=1)[0].strip()
+
+
+def render_roster_table(delegates: list[str]) -> str:
+    """A markdown roster table (Agent | Owns) from a list of delegate roles.
+    An empty list renders a placeholder — a valid state for a team with no
+    specialists assigned yet (e.g. a demo with the orchestrator alone)."""
+    if not delegates:
+        return "_No specialists assigned to this team yet._"
+    rows = ["| Agent | Owns |", "|-------|------|"]
+    rows += [f"| {role} | {role_owns(role)} |" for role in delegates]
+    return "\n".join(rows)
+
+
+def inject_roster(agents_md: str, agent: dict) -> str:
+    """Replace the {{ROSTER_TABLE}} token (if present) with the generated roster.
+    load_config has already validated token/delegates_to symmetry, so here we
+    only substitute. Roles without the token pass through unchanged."""
+    if ROSTER_TOKEN not in agents_md:
+        return agents_md
+    return agents_md.replace(ROSTER_TOKEN, render_roster_table(agent.get("delegates_to") or []))
 
 
 def _frontmatter(fields: dict) -> str:

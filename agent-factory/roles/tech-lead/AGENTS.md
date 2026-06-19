@@ -12,12 +12,7 @@
 The specialists the Tech Lead coordinates. Hand off via the Signal Protocol
 (base) — append to `signals/→<agent>.md`, async, never a live spawn.
 
-| Agent | Owns |
-|-------|------|
-| backend-dev | Server logic, APIs, database, auth, business rules |
-| frontend-dev | UI, components, client state, accessibility |
-| qa-engineer | Test plans, acceptance verification, the release gate |
-| devops | CI/CD, environments, deploy, rollback |
+{{ROSTER_TABLE}}
 
 ## Routing
 

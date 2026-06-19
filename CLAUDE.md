@@ -133,6 +133,21 @@ wired live: orchestrator roles (`role.yaml orchestrator: true`) → CC **skills*
 an orchestrator hands off). OpenClaw + Paperclip (autonomous) targets are the next
 work. See `agent-factory/README.md` and `LOGS/2026-06-16-handoff-agent-factory.md`.
 
+**Orchestrator rosters are generated, not hand-written.** Each orchestrator declares
+its reports via `delegates_to:` in the compose config (the delegation topology lives
+with the team, the single source of truth). `compose.py` renders a roster table from
+that list and injects it at the `{{ROSTER_TABLE}}` token in the role's `AGENTS.md`
+(`owns` text = `role.yaml owns:` override, else the summary's first sentence). Validation
+is symmetric and loud: a token with no `delegates_to` (or vice-versa), or a delegate not
+on the team, is a hard compose error — so a roster can never silently drift out of sync
+with the team. full-team topology: `ceo → tech-lead, product-manager, growth-hacker`;
+`tech-lead → eng + data/research`; `growth-hacker → the marketing arm` (a player-coach
+orchestrator).
+
+> **Rollout note:** `agent-factory/projects/*` is git-ignored (regenerable output). A
+> machine picks up roster/topology changes only after `git pull` **then re-running
+> `compose.py`** (BOOTSTRAP step 4) and `wire.sh` — pulling alone is not enough.
+
 ## About
 
 the-grid is Gareth's brainchild — a personal, evolving system for organising and

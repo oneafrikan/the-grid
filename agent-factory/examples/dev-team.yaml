@@ -8,5 +8,6 @@ paperclip: false
 agents:
   - role: tech-lead       # orchestrator -> CC skill
     model: opus
+    delegates_to: [backend-dev]   # generates the roster in tech-lead's AGENTS.md
   - role: backend-dev     # specialist  -> CC subagent
     model: sonnet
