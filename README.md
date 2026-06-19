@@ -73,7 +73,14 @@ git submodule update --init --recursive
 bash scripts/wire.sh
 ```
 
-That's it. Skills are live immediately.
+That's it. Skills are live immediately. To also build and wire the composed
+**agent team** (orchestrator skills + specialist subagents), continue with the
+agent-factory step in **[BOOTSTRAP.md](BOOTSTRAP.md)**.
+
+> **Already set up, just pulled new changes?** See BOOTSTRAP.md →
+> *Updating an existing machine*. Key gotcha: `agent-factory/projects/*` is
+> git-ignored, so changes to composed agents/rosters need a **recompose** then
+> re-wire — `git pull` alone won't refresh them.
 
 ## Adding a skill directly to the-grid
 
@@ -126,8 +133,13 @@ On each run, `scripts/wire.sh`:
 1. Tears down all grid-owned symlinks (anything pointing into this repo).
 2. Re-wires skills from repos in `wired-submodules.txt`, discovered at any nesting depth.
 3. Wires `skills/` last — root skills override any same-named repo skill.
-4. Leaves symlinks pointing elsewhere untouched.
-5. Regenerates `SKILLS.md` via `catalog.sh`.
+4. Wires composed **agents** from `agent-factory/projects/*/_claude-code/` — orchestrator skills into `~/.claude/skills/`, specialist subagents into `~/.claude/agents/`.
+5. Leaves symlinks pointing elsewhere untouched.
+6. Regenerates `SKILLS.md` via `catalog.sh`.
+
+Step 4 wires whatever `compose.py` last produced. Because that output is
+git-ignored, a freshly pulled machine must **recompose first** (see
+[BOOTSTRAP.md](BOOTSTRAP.md)) or `wire.sh` will wire a stale/empty agent set.
 
 Override paths via env vars (used by tests):
 
