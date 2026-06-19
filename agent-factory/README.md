@@ -39,10 +39,10 @@ agent-factory/
 │   ├── MEMORY_base.md      universal memory structure
 │   └── agents_base.yaml    universal runtime config template
 ├── roles/<role>/           role source (stack-agnostic)
-│   ├── role.yaml           metadata: title, default/cron model, summary, orchestrator
+│   ├── role.yaml           metadata: title, default/cron model, summary, owns, orchestrator
 │   ├── SOUL.md             personality / voice (required)
 │   ├── IDENTITY.md         nameplate extras (optional; merged over _core)
-│   ├── AGENTS.md           roster + routing (optional; merged over _core)
+│   ├── AGENTS.md           routing + a {{ROSTER_TABLE}} slot (optional; merged over _core)
 │   ├── USER.md             operator-reading notes (optional; merged over _core)
 │   ├── MEMORY.md           memory seed (optional; merged over _core)
 │   └── SKILL.md            the role's operating skill — required, referenced by name
@@ -81,6 +81,11 @@ Output is regenerable and idempotent: re-running with an unchanged config
 produces byte-identical files (the output dir is wiped and rewritten each run).
 `projects/` output is gitignored — the compose config is the tracked artefact.
 
+> **On a machine that just pulled new source, recompose before wiring.** A `git
+> pull` updates the tracked source (`compose.py`, `roles/*`, `examples/*`) but not
+> the git-ignored `projects/*`, so the live agents won't reflect the change until
+> you re-run `compose.py` and then `bash scripts/wire.sh`.
+
 The `claude-code` target writes to `projects/<name>/_claude-code/`:
 
 ```
@@ -107,8 +112,8 @@ invoke a composed agent in Claude Code:
 
 | Form | Roles (current) | How to invoke |
 |------|-----------------|---------------|
-| **Skill** (orchestrator) | `tech-lead`, `ceo-orchestrator` | Slash command: `/tech-lead`, `/ceo-orchestrator`. Transforms the session into that role. |
-| **Subagent** (specialist) | the other 16 | **Not** a slash command. Delegate to it: *"Use the backend-dev subagent to …"*, or let an orchestrator hand off to it. Claude can also auto-delegate based on the subagent's `description`. |
+| **Skill** (orchestrator) | `ceo-orchestrator`, `tech-lead`, `growth-hacker` | Slash command: `/ceo-orchestrator`, `/tech-lead`, `/growth-hacker`. Transforms the session into that role. |
+| **Subagent** (specialist) | the other 17 | **Not** a slash command. Delegate to it: *"Use the backend-dev subagent to …"*, or let an orchestrator hand off to it. Claude can also auto-delegate based on the subagent's `description`. |
 
 Typical flow: invoke `/tech-lead`, give it a feature → it writes a PRD and hands
 off (async) to the specialist subagents. You rarely call a specialist directly.
@@ -127,17 +132,52 @@ config) and appends the role's `IDENTITY.md` extras.
 Stack overlays (when a stack is named) append to `AGENTS.md` as a trailing
 "Stack overlays" section — stack conventions are operating rules.
 
+## Rosters & delegation
+
+An orchestrator's roster — the agents it can hand work to — is **generated from the
+compose config**, not hand-written. Each orchestrator declares its reports with a
+`delegates_to:` list; the delegation topology lives with the team definition as its
+single source of truth:
+
+```yaml
+agents:
+  - role: ceo-orchestrator
+    delegates_to: [tech-lead, product-manager, growth-hacker]
+  - role: tech-lead
+    delegates_to: [backend-dev, frontend-dev, designer, ...]
+```
+
+`compose.py` renders a `| Agent | Owns |` table from that list and substitutes it
+into the role's `AGENTS.md` at the `{{ROSTER_TABLE}}` token. The `Owns` text is each
+role's `role.yaml` `owns:` field, falling back to the first sentence of its
+`summary`. Behavioural routing rules (e.g. the CEO's "never reach specialists
+directly") stay as authored prose in `AGENTS.md` — only the table is generated.
+
+Validation is symmetric and loud, so a roster can never silently drift out of sync
+with the team:
+
+- a role whose `AGENTS.md` carries `{{ROSTER_TABLE}}` **must** have a `delegates_to`
+  in the config (use `delegates_to: []` for a solo/demo team), and vice-versa;
+- every name in `delegates_to` must be a role present on the same team.
+
+Any violation is a hard `compose.py` error. **full-team topology:**
+
+- `ceo-orchestrator` → `tech-lead`, `product-manager`, `growth-hacker` (the three leads)
+- `tech-lead` → engineering + data/research specialists
+- `growth-hacker` → the marketing arm — a player-coach lead that also runs growth experiments itself
+
 ## Status
 
-**Claude Code delivery target is done and live.** All 18 roles are ported to the
-5-file model (`examples/full-team.yaml`): 2 orchestrators (`tech-lead`,
-`ceo-orchestrator`) + 16 specialists (product-manager, project-manager,
+**Claude Code delivery target is done and live.** All 20 roles are ported to the
+5-file model (`examples/full-team.yaml`): 3 orchestrators (`ceo-orchestrator`,
+`tech-lead`, `growth-hacker`) + 17 specialists (product-manager, project-manager,
 backend-dev, frontend-dev, designer, qa-engineer, security-reviewer, devops,
 data-engineer, data-analyst, data-scientist, researcher, copywriter, ad-copy, seo,
-growth-hacker). `compose.py` emits both the OpenClaw 5-file shape and the Claude
-Code skill/subagent shape; `scripts/wire.sh` wires the CC output into
-`~/.claude/`. The full team is wired live on wilderness — `/tech-lead` boots and
-runs end-to-end.
+paid-search, paid-social). Orchestrator rosters are generated from each one's
+`delegates_to` (see **Rosters & delegation** above). `compose.py` emits both the
+OpenClaw 5-file shape and the Claude Code skill/subagent shape; `scripts/wire.sh`
+wires the CC output into `~/.claude/`. The full team is wired live on wilderness —
+`/tech-lead` boots and runs end-to-end.
 
 Remaining work (see repo-root `TODO.md`):
 - **OpenClaw + Paperclip targets** — 5 files → workspace + `openclaw.json`; the

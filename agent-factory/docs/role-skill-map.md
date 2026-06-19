@@ -1,5 +1,12 @@
 # Role → Skill Map & Roster Expansion Plan
 
+> **Partly superseded (2026-06-19).** `growth-hacker` is now an **orchestrator**
+> (the marketing-arm lead), so the team is **3 orchestrators + 17 specialists** — not
+> the "Orchestrators: ceo-orchestrator, tech-lead" line below. Orchestrator rosters
+> are now **generated** from each one's `delegates_to` in the compose config, not
+> hand-written. This file is kept as the 2026-06-16 planning snapshot; for the current
+> mechanism see `agent-factory/README.md` → *Rosters & delegation*.
+
 Planning doc (2026-06-16). Maps the agent-factory roster to skill sources already
 present as submodules in `repos/`, and proposes the broader-role expansion that
 surfaced in the May-2026 research session (see `../../docs/reference-resources.md`

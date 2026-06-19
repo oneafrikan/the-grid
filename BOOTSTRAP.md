@@ -24,7 +24,39 @@ cd ~/.the-grid && bash scripts/wire.sh
 ```
 
 Skills are live after step 3. Agents (subagents + orchestrator skills) are live after step 4.
-No restart needed — Claude picks up symlinks immediately.
+No restart needed — Claude picks up symlinks immediately (open a fresh session for new agents/skills).
+
+---
+
+## Updating an existing machine (after `git pull`)
+
+When you pull the-grid on a machine that's already set up:
+
+```bash
+cd ~/.the-grid
+git pull                                    # 1. latest the-grid (source of truth)
+git submodule update --init --recursive     # 2. sync submodule pointers
+
+# 3. If ANYTHING under agent-factory/ changed (roles, compose.py, or a compose
+#    config), recompose — projects/ is git-ignored, so a pull alone does NOT
+#    refresh the composed agents/rosters on this machine:
+cd agent-factory
+.venv/bin/python compose.py examples/full-team.yaml --target claude-code
+cd ..
+
+bash scripts/wire.sh                         # 4. re-wire skills + agents, regenerate SKILLS.md
+```
+
+**Why step 3 matters.** The composed output under `agent-factory/projects/*` is
+**git-ignored** (regenerable, not tracked). The tracked artefacts are the *source*:
+`compose.py`, `roles/*`, and the compose configs in `agent-factory/examples/`. So a
+change to a roster or the delegation topology (who an orchestrator delegates to)
+reaches this machine **only after you recompose, then wire** — `git pull` alone is
+not enough. If your pull touched nothing under `agent-factory/`, skip step 3;
+`wire.sh` on its own is sufficient.
+
+> Not sure if agent-factory changed? `git diff --stat HEAD@{1} HEAD -- agent-factory/`
+> after a pull shows it. When in doubt, recomposing is cheap and idempotent.
 
 ---
 

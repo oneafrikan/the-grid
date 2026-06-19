@@ -1,6 +1,8 @@
 # the-grid TODO
 
-**Current focus:** `agent-factory/` composes AI dev-team agents from a single config. The **Claude Code** delivery target is done — all **18 roles** (expanded from 12: +seo, +security-reviewer, +designer, +data-scientist, +project-manager, +researcher) compose to CC skills (orchestrators) + subagents (specialists) and wire live via `wire.sh` (2026-06-16). Next: OpenClaw + Paperclip targets, stack overlays, machine manifest, skills population (deferred to OpenClaw work). See `LOGS/2026-06-16-handoff-agent-factory.md` + `agent-factory/docs/role-skill-map.md`.
+**Current focus:** `agent-factory/` composes AI dev-team agents from a single config. The **Claude Code** delivery target is done — all roles compose to CC skills (orchestrators) + subagents (specialists) and wire live via `wire.sh` (2026-06-16). Next: OpenClaw + Paperclip targets, stack overlays, machine manifest, skills population (deferred to OpenClaw work). See `LOGS/2026-06-16-handoff-agent-factory.md` + `agent-factory/docs/role-skill-map.md`.
+
+**Update (2026-06-19):** orchestrator rosters are now **generated** from each orchestrator's `delegates_to` in the compose config (injected at the `{{ROSTER_TABLE}}` token in `AGENTS.md`; validated symmetrically so they can't drift). `growth-hacker` promoted to a **third orchestrator** leading the marketing arm — full-team is now **3 orchestrators + 17 specialists**. Topology: `ceo → tech-lead, product-manager, growth-hacker`; `tech-lead → eng + data/research`; `growth-hacker → marketing arm`. Docs (BOOTSTRAP/README/CLAUDE/agent-factory README) updated with the **recompose-on-pull** requirement (`projects/*` is git-ignored). See `agent-factory/README.md` → *Rosters & delegation*.
 
 ---
 
@@ -73,5 +75,5 @@
 - [ ] `bootstrap.sh` — clone the-grid, init submodules, run wire.sh in one command (document one-liner in README)
 - [ ] `check-grid.sh` — quick health check: run bats suite and report broken symlinks without full bats output
 - [ ] Pre-commit git hook — run bats before commit so bad skill format never lands in main
-- [ ] Fix stale test count in BOOTSTRAP.md ("All 17 tests" → should be 30)
+- [x] ~~Fix stale test count in BOOTSTRAP.md ("All 17 tests" → should be 30)~~ DONE — BOOTSTRAP.md reads "All 30 tests".
 - [ ] ~~Commit the `wired-submodules.txt` comment-out tweak~~ OBSOLETE (2026-06-16): forge's commit `c012fde` rewrote the file to per-skill granularity, superseding the whole-repo comment-out. The old tweak is parked in `git stash@{0}` — `git stash drop` when confirmed.
