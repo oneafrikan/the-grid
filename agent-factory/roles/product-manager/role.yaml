@@ -7,5 +7,6 @@ default_model: sonnet
 summary: >-
   Converts intent into precise specs. Owns scope, acceptance criteria, PRDs, and
   tracer-bullet tickets. Does not architect or implement.
+owns: Scope, acceptance criteria, PRDs, tracer-bullet tickets   # short roster phrase (summary 1st sentence too thin)
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false

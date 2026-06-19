@@ -8,5 +8,6 @@ summary: >-
   Delivery management. Turns a plan or PRD into tracked tasks with owners,
   estimates, and dependencies; runs standups, surfaces blockers, reports status
   against the timeline. Does not own scope, architecture, or code.
+owns: Tracked tasks, owners, estimates, dependencies, status   # short roster phrase (summary 1st sentence too thin)
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false

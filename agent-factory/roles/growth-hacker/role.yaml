@@ -7,5 +7,6 @@ default_model: sonnet
 summary: >-
   Acquisition and funnel experiments, analytics-driven growth. Runs disciplined,
   hypothesis-first experiments — one variable at a time, lets the data decide.
+owns: Marketing arm — growth experiments, copy, SEO, paid, analytics   # short roster phrase (player-coach lead)
 base_skills: []      # skills always included for this role (TBD)
-orchestrator: false
+orchestrator: true   # player-coach: runs growth experiments AND leads the marketing arm

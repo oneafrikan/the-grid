@@ -1,15 +1,36 @@
 # full-team.yaml — the complete composed team, all 20 ported roles.
-# Orchestrators (ceo-orchestrator, tech-lead) emit as Claude Code skills;
-# the 18 specialists emit as CC subagents. Models come from each role.yaml
-# default unless overridden here.
+# Orchestrators (ceo-orchestrator, tech-lead, growth-hacker) emit as Claude Code
+# skills; the 17 specialists emit as CC subagents. Models come from each
+# role.yaml default unless overridden here.
+#
+# Delegation topology (drives the generated roster in each orchestrator's
+# AGENTS.md — see compose.py `inject_roster`):
+#   ceo  → tech-lead, product-manager, growth-hacker          (the three leads)
+#   tech-lead     → engineering + data/research specialists
+#   growth-hacker → the marketing arm (player-coach lead)
+# delegates_to entries must name a role present in this team.
 project: full-team
-description: Full composed team — 2 orchestrators + 18 specialists, all 5-file model.
+description: Full composed team — 3 orchestrators + 17 specialists, all 5-file model.
 paperclip: false
 
 agents:
   # orchestrators -> CC skills
   - role: ceo-orchestrator
+    delegates_to: [tech-lead, product-manager, growth-hacker]
   - role: tech-lead
+    delegates_to:
+      - backend-dev
+      - frontend-dev
+      - designer
+      - qa-engineer
+      - security-reviewer
+      - devops
+      - data-engineer
+      - data-scientist
+      - researcher
+      - project-manager
+  - role: growth-hacker   # player-coach lead of the marketing arm -> CC skill
+    delegates_to: [copywriter, ad-copy, seo, paid-search, paid-social, data-analyst]
   # product + delivery
   - role: product-manager
   - role: project-manager
@@ -25,11 +46,9 @@ agents:
   - role: data-analyst
   - role: data-scientist
   - role: researcher
-  # marketing specialists
+  # marketing specialists (led by growth-hacker)
   - role: copywriter
   - role: ad-copy
   - role: seo
-  - role: growth-hacker
-  # paid-media specialists
   - role: paid-search
   - role: paid-social
