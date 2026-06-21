@@ -89,6 +89,12 @@ gstack/spec
 gstack/sync-gbrain
 gstack/unfreeze
 
+# --- hubspot (official HubSpot/agent-cli-skills; 15 skills, data-eng subset wired) ---
+hubspot/crm-data-quality
+hubspot/crm-lookup
+hubspot/bulk-operations
+hubspot/data-enrichment
+
 # --- jeffallan (68 skills) ---
 jeffallan/architecture-designer
 jeffallan/chaos-engineer
