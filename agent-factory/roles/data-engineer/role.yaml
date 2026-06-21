@@ -6,5 +6,15 @@ title: Data Engineer       # human-readable role for IDENTITY.md nameplate
 default_model: sonnet
 summary: >-
   Pipelines, warehousing, transforms, data quality. Builds to a pipeline spec.
-base_skills: []      # skills always included for this role (TBD)
+base_skills:         # session-wired skills this role always advertises (CC target)
+  - python-pro
+  - pandas-pro
+  - sql-pro
+  - postgres-pro
+  - database-optimizer
+  - xlsx
+  - crm-data-quality   # hubspot/agent-cli-skills
+  - crm-lookup         # hubspot/agent-cli-skills
+  - bulk-operations    # hubspot/agent-cli-skills
+  - data-enrichment    # hubspot/agent-cli-skills
 orchestrator: false

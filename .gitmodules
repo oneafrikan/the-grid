@@ -85,3 +85,6 @@
 [submodule "repos/mozilla-bq-etl"]
 	path = repos/mozilla-bq-etl
 	url = git@github.com:mozilla/bigquery-etl-skills.git
+[submodule "repos/hubspot"]
+	path = repos/hubspot
+	url = https://github.com/HubSpot/agent-cli-skills.git
