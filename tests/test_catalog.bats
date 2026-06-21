@@ -51,7 +51,7 @@ teardown() {
 @test "labels wired vs library submodules from the allowlist" {
   make_skill "$MOCK_GRID/repos/wiredrepo/sk-w" "sk-w"
   make_skill "$MOCK_GRID/repos/libraryrepo/sk-l" "sk-l"
-  printf 'wiredrepo\n' > "$MOCK_GRID/wired-submodules.txt"
+  printf 'wiredrepo\n' > "$MOCK_GRID/baseline-submodules.txt"
   GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
   grep -q '^## repos/wiredrepo (wired)' "$OUT"        # wired → full section
   grep -q '^## Library submodules' "$OUT"             # library → counts section
