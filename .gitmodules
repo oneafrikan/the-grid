@@ -28,9 +28,6 @@
 [submodule "repos/voltagent-agent-skills"]
 	path = repos/voltagent-agent-skills
 	url = git@github.com:VoltAgent/awesome-agent-skills.git
-[submodule "repos/leoyeai"]
-	path = repos/leoyeai
-	url = git@github.com:LeoYeAI/openclaw-master-skills.git
 [submodule "repos/sjkncs"]
 	path = repos/sjkncs
 	url = git@github.com:sjkncs/awesome-openclaw-skills.git
