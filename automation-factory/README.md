@@ -22,11 +22,6 @@ where the reusable asset is managed.
 |---------|--------------|
 | [`issue-loop`](patterns/issue-loop/) | Autonomous agent that works a repo's GitHub issue backlog unattended, with an auto code-review posted to each issue. Composes a `/loop` prompt (Module 2) with a post-commit review hook (Module 1). |
 
-> **Related (WIP):** `bootstrap/` holds machine-profiled *setup recipes* for
-> standing up autonomous coding (personal / work / mac-mini). Those recipes and
-> the `patterns/` cut overlap (the recipes currently embed their own hook copies);
-> they're to be reconciled so the recipes reference the single `patterns/` source.
-
 ## Anatomy of a pattern
 
 ```
@@ -42,8 +37,10 @@ project context, verify command, labels) so one cut serves many suits.
 
 ## Roadmap
 
-- **`instantiate.sh`** — cut a pattern into a target repo in one command
-  (copy + placeholder-fill + settings merge).
+- **`instantiate.sh`** ([issue #15](https://github.com/oneafrikan/the-grid/issues/15)) —
+  machine-profiled (personal / work / mac-mini) cut of a pattern into a target repo:
+  copy + placeholder-fill + settings merge, plus a guard hook + worktree/PR sandboxing
+  (work), and launchd vs cloud scheduling.
 - **`AUTOMATIONS.md`** — a generated index of patterns, parallel to `SKILLS.md`.
 - **More patterns** — issue-loop is the first. Scheduled jobs, watch-and-react
   hooks, release automations, and agent-team orchestrations follow.

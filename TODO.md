@@ -30,6 +30,7 @@ Paperclip emitter targets (**#3**, **#4**).
 | [#12](https://github.com/oneafrikan/the-grid/issues/12) | Add OpenGAP + soulspec as reference submodules | backlog |
 | [#13](https://github.com/oneafrikan/the-grid/issues/13) | Optional: deepen growth-hacker to marketing-director orchestrator | agent-factory, backlog |
 | [#14](https://github.com/oneafrikan/the-grid/issues/14) | chore: `git stash drop` the obsolete wired-submodules tweak | chore |
+| [#15](https://github.com/oneafrikan/the-grid/issues/15) | automation-factory: `instantiate.sh` — machine-profiled deployment of issue-loop | automation-factory |
 
 ---
 
