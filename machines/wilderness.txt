@@ -1,0 +1,15 @@
+# Machine overlay — wilderness (Gareth's Wilderness Safaris MacBook).
+#
+# Layered ON TOP of baseline-submodules.txt. wire.sh resolves this file by
+# `hostname -s` (= "wilderness"). Same entry grammar as the baseline:
+#
+#   repo-name            → also wire ALL skills in that submodule (additive)
+#   repo-name/skill      → also wire ONLY that skill (additive)
+#   project:<name>       → also wire a composed agent-factory project
+#   -repo | -repo/skill  → REMOVE a baseline entry on this machine
+#   -project:<name>      → un-gate a baseline project on this machine
+#
+# Apply with: bash ~/.the-grid/scripts/wire.sh
+#
+# Empty for now: the baseline already covers wilderness. As the baseline is
+# trimmed (Step 2 — issue #1), machine-specific packs move here.

@@ -8,50 +8,81 @@
 #   GRID_DIR    — root of the-grid repo  (default: parent of scripts/)
 #   SKILLS_DIR  — Claude skills directory (default: ~/.claude/skills)
 #   AGENTS_DIR  — Claude subagents directory (default: ~/.claude/agents)
+#   GRID_HOST   — machine key for the overlay (default: hostname -s)
 set -euo pipefail
 
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 AGENTS_DIR="${AGENTS_DIR:-$HOME/.claude/agents}"
+GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || echo unknown)}"
 
-# --- Wiring allowlist ---------------------------------------------------------
-# Only submodules listed in wired-submodules.txt have their skills wired into
-# SKILLS_DIR. Every other repo under repos/ is library-only (indexed by
-# catalog.sh, not symlinked). If the file is absent, all repos are wired (legacy).
+# --- Manifest: baseline + per-machine overlay ---------------------------------
+# What gets wired is resolved from two layers, unioned in order:
+#   1. baseline-submodules.txt   — wired on EVERY machine (the baseline)
+#   2. machines/<host>.txt       — THIS machine's overlay (host = GRID_HOST)
+# catalog.sh reads the BASELINE only, so SKILLS.md stays a deterministic,
+# machine-agnostic index (clean cross-machine diffs); the overlay changes the
+# live symlink set, not the catalogue.
 #
-# Two entry formats are supported:
-#   repo-name          → wire ALL skills in that submodule (existing behaviour)
-#   repo-name/skill    → wire ONLY that specific skill (granular control)
-#
-# catalog.sh reads the SAME file to label wired vs library in SKILLS.md.
-WIRE_ALLOWLIST_FILE="$GRID_DIR/wired-submodules.txt"
-WIRED_REPOS=()   # whole-repo entries
-WIRED_SKILLS=()  # repo/skill-name entries
+# Entry grammar (identical in both files):
+#   repo                 → wire ALL skills in that submodule
+#   repo/skill           → wire ONLY that skill
+#   -repo  | -repo/skill → SUBTRACT (remove a baseline entry — overlay escape hatch)
+#   project:<name>       → wire that composed agent-factory project's _claude-code output
+#   -project:<name>      → un-gate a project
+# Legacy fallbacks: if NO manifest file exists at all, every repo is wired; if
+# NO project: entry exists anywhere, every composed project is wired.
+WIRED_REPOS=()     # whole-repo entries
+WIRED_SKILLS=()    # repo/skill entries
+DENY_REPOS=()      # -repo subtractions
+DENY_SKILLS=()     # -repo/skill subtractions
+WIRED_PROJECTS=()  # project:<name> entries
+any_project_entry=0
 wire_all_repos=1
-if [ -f "$WIRE_ALLOWLIST_FILE" ]; then
-  wire_all_repos=0
+
+# Parse one manifest file into the arrays above. Later files (the overlay) layer
+# on top of earlier ones (the baseline): additions append, subtractions deny.
+load_manifest() {
+  local file="$1" line p tmp x
+  [ -f "$file" ] || return 0
+  wire_all_repos=0                           # a manifest exists → no legacy wire-all
   while IFS= read -r line; do
     line="${line%%#*}"                       # strip trailing comment
     line="$(echo "$line" | tr -d '[:space:]')"
     [ -z "$line" ] && continue
-    if [[ "$line" == */* ]]; then
-      WIRED_SKILLS+=("$line")              # per-skill entry
-    else
-      WIRED_REPOS+=("$line")              # whole-repo entry
-    fi
-  done < "$WIRE_ALLOWLIST_FILE"
-fi
+    case "$line" in
+      project:*)  any_project_entry=1; WIRED_PROJECTS+=("${line#project:}") ;;
+      -project:*) any_project_entry=1
+                  p="${line#-project:}"; tmp=()
+                  for x in "${WIRED_PROJECTS[@]:-}"; do [ -n "$x" ] && [ "$x" != "$p" ] && tmp+=("$x"); done
+                  WIRED_PROJECTS=("${tmp[@]:-}") ;;
+      -*/*)       DENY_SKILLS+=("${line#-}") ;;
+      -*)         DENY_REPOS+=("${line#-}") ;;
+      */*)        WIRED_SKILLS+=("$line") ;;
+      *)          WIRED_REPOS+=("$line") ;;
+    esac
+  done < "$file"
+}
 
-# Is a given submodule dir name fully wired (whole-repo entry)?
+load_manifest "$GRID_DIR/baseline-submodules.txt"
+load_manifest "$GRID_DIR/machines/$GRID_HOST.txt"
+
+# --- predicates ---------------------------------------------------------------
+repo_is_denied()  { local n="$1" r; for r in "${DENY_REPOS[@]:-}";   do [ "$r" = "$n" ] && return 0; done; return 1; }
+skill_is_denied() { local e="$1/$2" s; for s in "${DENY_SKILLS[@]:-}"; do [ "$s" = "$e" ] && return 0; done; return 1; }
+
+# Is a given submodule dir name fully wired (whole-repo entry, not denied)?
 repo_is_wired() {
+  repo_is_denied "$1" && return 1
   [ "$wire_all_repos" -eq 1 ] && return 0
   local n="$1" r
   for r in "${WIRED_REPOS[@]:-}"; do [ "$r" = "$n" ] && return 0; done
   return 1
 }
 
-# Is a specific skill (repo, skill-name) listed in WIRED_SKILLS?
+# Is a specific skill (repo, skill-name) wired by a per-skill entry (not denied)?
 skill_is_wired() {
+  skill_is_denied "$1" "$2" && return 1
   local entry="$1/$2" s
   for s in "${WIRED_SKILLS[@]:-}"; do [ "$s" = "$entry" ] && return 0; done
   return 1
@@ -63,6 +94,14 @@ repo_has_skill_entries() {
   for s in "${WIRED_SKILLS[@]:-}"; do
     [[ "$s" == "$repo/"* ]] && return 0
   done
+  return 1
+}
+
+# Is a composed agent-factory project wired? (no project: entries → all, legacy)
+project_is_wired() {
+  [ "$any_project_entry" -eq 0 ] && return 0
+  local name="$1" p
+  for p in "${WIRED_PROJECTS[@]:-}"; do [ "$p" = "$name" ] && return 0; done
   return 1
 }
 
@@ -134,10 +173,12 @@ if [ -d "$GRID_DIR/repos" ]; then
     repo_name="$(basename "$repo_dir")"
 
     if repo_is_wired "$repo_name"; then
-      # Wire all skills in this repo (whole-repo entry).
+      # Wire all skills in this repo (whole-repo entry), minus any -repo/skill
+      # subtractions from the overlay.
       while IFS= read -r skill_md; do
         skill_dir=$(dirname "$skill_md")
         [ "$skill_dir" = "$repo_dir" ] && continue
+        skill_is_denied "$repo_name" "$(basename "$skill_dir")" && continue
         wire_skill "$skill_dir"
       done < <(find "$repo_dir" -name "SKILL.md" -not -path "*/.git/*")
     elif repo_has_skill_entries "$repo_name"; then
@@ -167,16 +208,21 @@ fi
 #   agent-factory/projects/<name>/_claude-code/{skills,agents}/
 # Orchestrator skills wire into SKILLS_DIR (override same-named ecosystem skills,
 # since they're wired last); specialist subagents wire into AGENTS_DIR.
-# NOTE: this currently wires EVERY composed project's output. The machine manifest
-# (TODO #6) will gate which agents are active per machine; until then it's all-on.
+# Gated per machine by project:<name> manifest entries (project_is_wired); with
+# no project: entries anywhere, every composed project wires (legacy fallback).
 CC_OUT="$GRID_DIR/agent-factory/projects"
 if [ -d "$CC_OUT" ]; then
-  while IFS= read -r skill_md; do
-    wire_skill "$(dirname "$skill_md")"
-  done < <(find "$CC_OUT"/*/_claude-code/skills -name "SKILL.md" 2>/dev/null)
-  while IFS= read -r agent_md; do
-    wire_agent "$agent_md"
-  done < <(find "$CC_OUT"/*/_claude-code/agents -name "*.md" 2>/dev/null)
+  for proj_dir in "$CC_OUT"/*/; do
+    [ -d "$proj_dir" ] || continue
+    proj_name="$(basename "${proj_dir%/}")"
+    project_is_wired "$proj_name" || continue
+    while IFS= read -r skill_md; do
+      wire_skill "$(dirname "$skill_md")"
+    done < <(find "$proj_dir/_claude-code/skills" -name "SKILL.md" 2>/dev/null)
+    while IFS= read -r agent_md; do
+      wire_agent "$agent_md"
+    done < <(find "$proj_dir/_claude-code/agents" -name "*.md" 2>/dev/null)
+  done
 fi
 
 # --- 4. Refresh the skill catalogue so wiring and SKILLS.md never drift ---

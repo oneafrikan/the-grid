@@ -7,12 +7,12 @@ GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 # Wiring allowlist (mirror wire.sh): only these submodules are wired; the rest
 # are library-only (upstream community content we neither wire nor validate).
 WIRED_REPOS=(); wire_all_repos=1
-if [ -f "$GRID_ROOT/wired-submodules.txt" ]; then
+if [ -f "$GRID_ROOT/baseline-submodules.txt" ]; then
   wire_all_repos=0
   while IFS= read -r line; do
     line="${line%%#*}"; line="$(echo "$line" | tr -d '[:space:]')"
     [ -n "$line" ] && WIRED_REPOS+=("$line")
-  done < "$GRID_ROOT/wired-submodules.txt"
+  done < "$GRID_ROOT/baseline-submodules.txt"
 fi
 repo_is_wired() {
   [ "$wire_all_repos" -eq 1 ] && return 0

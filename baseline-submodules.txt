@@ -1,23 +1,36 @@
-# Submodules whose skills are wired live into ~/.claude/skills.
+# BASELINE manifest — wired live into ~/.claude/skills on EVERY machine.
+#
+# This is the shared, machine-agnostic layer. A machine adds to (or subtracts
+# from) it via a per-machine OVERLAY at machines/<hostname>.txt (host = `hostname
+# -s`). wire.sh unions baseline + overlay; catalog.sh reads the BASELINE ONLY, so
+# SKILLS.md stays a deterministic, machine-agnostic index. Keep this list tight —
+# everything here loads on every box.
 #
 # Every OTHER repo under repos/ is LIBRARY-ONLY: indexed in SKILLS.md and
 # searchable by skill-scout, but NOT symlinked into your active skill set.
-# This keeps the active set small while the-grid still indexes the whole
-# ecosystem (OpenClaw / Paperclip / agent repos / etc.).
 #
-# Two entry formats:
-#   repo-name          → wire ALL skills in that submodule
-#   repo-name/skill    → wire ONLY that specific skill (granular control)
+# Entry grammar (same in the overlay):
+#   repo-name            → wire ALL skills in that submodule
+#   repo-name/skill      → wire ONLY that specific skill
+#   project:<name>       → wire a composed agent-factory project's CC output
+#   -repo | -repo/skill  → SUBTRACT (overlay escape hatch — remove a baseline entry)
+#   -project:<name>      → un-gate a project
 #
 # Precedence: repos are wired alphabetically; later wins on name collision.
-# Intentional order: anthropic → gstack → jeffallan → mattpocock → superpowers.
+# Intentional order: anthropic → gstack → hubspot → jeffallan → mattpocock → superpowers.
 # gstack beats mattpocock by design — if both list the same skill name,
 # remove the mattpocock entry here so gstack's version is served.
 # Current gstack-wins resolutions: qa, review.
 #
 # To apply changes: bash ~/.the-grid/scripts/wire.sh
 #
-# (If this file is deleted, wire.sh falls back to wiring ALL repos — legacy.)
+# Legacy fallbacks: if NO manifest file exists at all, ALL repos are wired; if
+# NO project: entry exists anywhere, ALL composed projects are wired.
+
+# --- composed agent-factory projects (gates _claude-code output per machine) ---
+# Only full-team wires; demo-tech-lead + dev-team stay dormant (they collide on
+# role names). Override per machine in machines/<host>.txt with -project:/project:.
+project:full-team
 
 # --- anthropic (18 skills) ---
 anthropic/brand-guidelines

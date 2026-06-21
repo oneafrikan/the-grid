@@ -12,11 +12,14 @@ skills into `~/.claude/skills/`, specialist subagents into `~/.claude/agents/`. 
 keep the active set sane while still indexing the whole ecosystem, the-grid splits
 submodules into two tiers:
 
-- **Wired** — a small curated allowlist (`wired-submodules.txt`) whose skills are
-  symlinked live into `~/.claude/skills/`.
+- **Wired** — a small curated allowlist whose skills are symlinked live into
+  `~/.claude/skills/`. The allowlist is **layered**: a shared
+  `baseline-submodules.txt` (wired on every machine) plus an optional per-machine
+  overlay at `machines/<hostname>.txt` (host = `hostname -s`) that adds or
+  subtracts entries. wire.sh unions baseline + overlay.
 - **Library** — everything else: indexed in `SKILLS.md` and searchable by
   `skill-scout`, but **not** wired (so a session isn't drowned in thousands of
-  skills). Promote a library repo to wired by adding its name to the allowlist.
+  skills). Promote a library repo to wired by adding its name to the baseline.
 
 ## What lives where (ownership principle)
 
@@ -36,8 +39,12 @@ submodules into two tiers:
 - `BOOTSTRAP.md` — **full machine boot sequence**: clone → submodules → wire skills → compose agents → wire agents. Start here on a new machine.
 - `scripts/wire.sh` — the wiring script. Idempotent. Tears down all grid-owned symlinks
   and rebuilds the wired set each run (so un-wiring a repo actually removes it).
-- `wired-submodules.txt` — the allowlist of submodules whose skills are wired live.
-  Anything not listed is library-only. Delete the file to wire everything (legacy).
+- `baseline-submodules.txt` — the baseline allowlist of submodules whose skills are
+  wired live on **every** machine. Anything not listed is library-only. Also gates
+  composed projects via `project:<name>` entries. Delete the file to wire everything (legacy).
+- `machines/<hostname>.txt` — per-machine overlay layered on the baseline (`hostname -s`).
+  Adds (`repo`, `repo/skill`, `project:<name>`) or subtracts (`-repo`, `-repo/skill`,
+  `-project:<name>`) for that host only. Absent overlay → baseline as-is.
 - `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
   repos as counts, reference (no-skill) repos in a footer. Deterministic output.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
@@ -69,7 +76,8 @@ bash scripts/wire.sh
 ```
 
 A newly added submodule is **library by default** (indexed, not wired). To wire its
-skills live, add its `repos/<name>` dir name to `wired-submodules.txt` and re-run
+skills live everywhere, add its `repos/<name>` dir name to `baseline-submodules.txt`
+(or to a single machine's `machines/<host>.txt` overlay) and re-run
 `bash scripts/wire.sh`. This keeps `~/.claude/skills/` small even as the-grid indexes
 thousands of ecosystem skills.
 
@@ -114,13 +122,16 @@ All 30 tests must stay green. Tests use temp dirs — they never touch the real 
 - Skills in `repos/*/` are discovered at **any depth** via `find` (flat, `skills/`,
   `skills/<category>/`, etc.) — wire.sh symlinks each dir containing a `SKILL.md`,
   skipping a `SKILL.md` sitting at a repo root.
-- Only submodules in `wired-submodules.txt` are wired; the rest are library-only.
-  If the file is absent, all repos are wired (legacy fallback). `catalog.sh` reads
-  the same file to label wired vs library.
+- Only submodules in the manifest (`baseline-submodules.txt` + `machines/<host>.txt`
+  overlay) are wired; the rest are library-only. If no manifest exists, all repos are
+  wired (legacy fallback). `catalog.sh` reads the **baseline only** (machine-agnostic,
+  deterministic `SKILLS.md`).
+- **Machine key:** `GRID_HOST` env var overrides the overlay host (default `hostname -s`).
 - **Composed agents:** wire.sh also wires `agent-factory/projects/*/_claude-code/`
   output — orchestrator skills into `SKILLS_DIR`, specialist subagents into
-  `AGENTS_DIR`. (Today every composed project is wired; a machine manifest will
-  gate this per host — see `agent-factory/` and `TODO.md`.)
+  `AGENTS_DIR`. Gated per machine by `project:<name>` manifest entries; with no
+  `project:` entry anywhere, every composed project wires (legacy). The baseline
+  currently pins `project:full-team` (see `agent-factory/` and issue #1).
 
 ## agent-factory (composed agents)
 

@@ -118,11 +118,12 @@ for d in "$GRID_DIR/skills"/*/; do
   if [ -f "${d%/}/SKILL.md" ]; then root_owned=$((root_owned + 1)); fi
 done
 
-# Wiring allowlist (same file wire.sh uses) — to label wired vs library repos.
-# Supports two entry formats:
+# Baseline manifest (same baseline wire.sh uses) — to label wired vs library repos.
+# catalog.sh reads the BASELINE only (not per-machine overlays), so SKILLS.md is a
+# deterministic, machine-agnostic index. Supports two entry formats:
 #   repo-name          → whole-repo wired
 #   repo-name/skill    → only that skill wired (partial)
-WIRE_ALLOWLIST_FILE="$GRID_DIR/wired-submodules.txt"
+WIRE_ALLOWLIST_FILE="$GRID_DIR/baseline-submodules.txt"
 WIRED_REPOS=()
 WIRED_SKILLS=()
 wire_all_repos=1
@@ -191,7 +192,7 @@ total=$((wired_live + library_skill_count))
   printf '> **Do not edit by hand** — re-run `bash catalog.sh` after adding or updating skills.\n\n'
   printf '**%s skills indexed** — %s wired live (%s root-owned + %s from allowlisted repos), %s in library (indexed & searchable, not wired).\n\n' \
     "$total" "$wired_live" "$root_owned" "$wired_skill_count" "$library_skill_count"
-  printf 'Library repos are part of the-grid as an index/hub — browse here or search via skill-scout. Promote one to wired in `wired-submodules.txt`.\n\n'
+  printf 'Library repos are part of the-grid as an index/hub — browse here or search via skill-scout. Promote one to wired in `baseline-submodules.txt`.\n\n'
 
   # Root-owned skills first (skills/ dir).
   emit_section "Root (owned / edited)" < <(

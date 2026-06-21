@@ -59,8 +59,9 @@ The core mechanic: a single script (`scripts/wire.sh`) symlinks skills into `~/.
     test_catalog.bats
     test_repo_health.bats
     lib/bats-core/      ← test runner (submodule, no install needed)
-  SKILLS.md             ← generated skill index (never edit by hand)
-  wired-submodules.txt  ← allowlist: which repos are wired live
+  SKILLS.md               ← generated skill index (never edit by hand)
+  baseline-submodules.txt ← baseline allowlist: wired on every machine
+  machines/<host>.txt     ← per-machine overlay (adds/subtracts on the baseline)
   TODO.md
 ```
 
@@ -111,7 +112,7 @@ git submodule update --init
 bash scripts/wire.sh
 ```
 
-A newly added submodule is **library-only** by default (indexed in `SKILLS.md`, not symlinked). To wire its skills live, add its name to `wired-submodules.txt` and re-run `bash scripts/wire.sh`.
+A newly added submodule is **library-only** by default (indexed in `SKILLS.md`, not symlinked). To wire its skills live on every machine, add its name to `baseline-submodules.txt` (or to a single machine's `machines/<host>.txt` overlay) and re-run `bash scripts/wire.sh`.
 
 ## Running tests
 
@@ -125,13 +126,13 @@ Tests cover: symlink creation, idempotency, stale cleanup, skill format validati
 
 Skills are split into two tiers:
 
-- **Wired** — repos listed in `wired-submodules.txt`. Their skills are symlinked live into `~/.claude/skills/`.
+- **Wired** — repos in the manifest: a shared `baseline-submodules.txt` (every machine) plus an optional per-machine overlay `machines/<host>.txt` (keyed on `hostname -s`) that adds/subtracts entries. Their skills are symlinked live into `~/.claude/skills/`.
 - **Library** — everything else: indexed in `SKILLS.md` and searchable via `skill-scout`, but not symlinked. Keeps the active skill set sane even as the-grid indexes thousands of ecosystem skills.
 
 On each run, `scripts/wire.sh`:
 
 1. Tears down all grid-owned symlinks (anything pointing into this repo).
-2. Re-wires skills from repos in `wired-submodules.txt`, discovered at any nesting depth.
+2. Re-wires skills from the manifest (baseline + this machine's overlay), discovered at any nesting depth.
 3. Wires `skills/` last — root skills override any same-named repo skill.
 4. Wires composed **agents** from `agent-factory/projects/*/_claude-code/` — orchestrator skills into `~/.claude/skills/`, specialist subagents into `~/.claude/agents/`.
 5. Leaves symlinks pointing elsewhere untouched.

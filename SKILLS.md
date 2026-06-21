@@ -5,7 +5,7 @@
 
 **206 skills indexed** — 153 wired live (6 root-owned + 147 from allowlisted repos), 53 in library (indexed & searchable, not wired).
 
-Library repos are part of the-grid as an index/hub — browse here or search via skill-scout. Promote one to wired in `wired-submodules.txt`.
+Library repos are part of the-grid as an index/hub — browse here or search via skill-scout. Promote one to wired in `baseline-submodules.txt`.
 
 ## Root (owned / edited) — 6
 
