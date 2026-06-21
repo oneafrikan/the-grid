@@ -13,7 +13,7 @@ role  ×  stack  ×  skills   ──compose.py──▶   a ready-to-run agent t
 - **skills** — bolt-on capabilities pulled from the ecosystem (Paperclip, php,
   mysql…). Lives in `skills/<skill>/`.
 
-A **compose config** (see `examples/tech-lead.yaml`) names a project and lists
+A **compose config** (see `examples/full-team.yaml`) names a project and lists
 agents, each as `role + stacks[] + skills[] + model`. `compose.py` reads it and
 emits one folder per agent under `projects/<name>/`, rendered to the **live
 OpenClaw 5-file identity model** — `SOUL.md` (how it behaves), `IDENTITY.md` (who

@@ -28,8 +28,8 @@
 # NO project: entry exists anywhere, ALL composed projects are wired.
 
 # --- composed agent-factory projects (gates _claude-code output per machine) ---
-# Only full-team wires; demo-tech-lead + dev-team stay dormant (they collide on
-# role names). Override per machine in machines/<host>.txt with -project:/project:.
+# full-team is the only composed team. Compose more from agent-factory/examples/
+# and add project:<name> here (or in a machine overlay) to wire them.
 project:full-team
 
 # --- anthropic (18 skills) ---
