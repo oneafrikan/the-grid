@@ -207,6 +207,10 @@ def load_config(path: Path) -> dict:
         if key not in config:
             errors.append(f"missing required top-level key: {key}")
 
+    slug = config.get("slug")
+    if slug is not None and not re.match(r'^[a-z][a-z0-9-]+$', str(slug)):
+        errors.append("slug must be lowercase kebab-case (e.g. 'full-team')")
+
     agents = config.get("agents")
     if agents is not None and not isinstance(agents, list):
         errors.append("`agents` must be a list")
@@ -333,8 +337,10 @@ def render_identity(agent: dict) -> str:
     return text if text.endswith("\n") else text + "\n"
 
 
-def render_agent(agent: dict) -> dict[str, str]:
-    """Render one agent's 5 identity files. Returns {filename: contents}."""
+def render_agent(agent: dict, slug: str | None = None) -> dict[str, str]:
+    """Render one agent's 5 identity files. Returns {filename: contents}.
+    slug, when given, is forwarded to roster generation so roster tables name
+    delegates by their slugged agent name (CC target only)."""
     role = agent["role"]
     rendered = {
         "SOUL.md": _layer(role, "SOUL.md", CORE_DIR / "SOUL_base.md"),
@@ -344,7 +350,7 @@ def render_agent(agent: dict) -> dict[str, str]:
     }
     # AGENTS.md: inject the generated roster (orchestrators) then any stack overlay.
     agents_md = _layer(role, "AGENTS.md", CORE_DIR / "AGENTS_base.md")
-    agents_md = inject_roster(agents_md, agent)
+    agents_md = inject_roster(agents_md, agent, slug=slug)
     overlay = render_stack_overlay(agent.get("stacks", []) or [])
     rendered["AGENTS.md"] = agents_md.rstrip() + "\n" + overlay if overlay else agents_md
     return rendered
@@ -427,24 +433,26 @@ def role_owns(role: str) -> str:
     return re.split(r"(?<=\.)\s", summary, maxsplit=1)[0].strip()
 
 
-def render_roster_table(delegates: list[str]) -> str:
+def render_roster_table(delegates: list[str], slug: str | None = None) -> str:
     """A markdown roster table (Agent | Owns) from a list of delegate roles.
     An empty list renders a placeholder — a valid state for a team with no
-    specialists assigned yet (e.g. a demo with the orchestrator alone)."""
+    specialists assigned yet (e.g. a demo with the orchestrator alone).
+    When slug is given, agent names are prefixed (e.g. 'full-team-tech-lead')
+    to match the slugged subagent names emitted by the CC target."""
     if not delegates:
         return "_No specialists assigned to this team yet._"
     rows = ["| Agent | Owns |", "|-------|------|"]
-    rows += [f"| {role} | {role_owns(role)} |" for role in delegates]
+    rows += [f"| {(slug + '-' + role) if slug else role} | {role_owns(role)} |" for role in delegates]
     return "\n".join(rows)
 
 
-def inject_roster(agents_md: str, agent: dict) -> str:
+def inject_roster(agents_md: str, agent: dict, slug: str | None = None) -> str:
     """Replace the {{ROSTER_TABLE}} token (if present) with the generated roster.
     load_config has already validated token/delegates_to symmetry, so here we
     only substitute. Roles without the token pass through unchanged."""
     if ROSTER_TOKEN not in agents_md:
         return agents_md
-    return agents_md.replace(ROSTER_TOKEN, render_roster_table(agent.get("delegates_to") or []))
+    return agents_md.replace(ROSTER_TOKEN, render_roster_table(agent.get("delegates_to") or [], slug=slug))
 
 
 def _frontmatter(fields: dict) -> str:
@@ -452,24 +460,27 @@ def _frontmatter(fields: dict) -> str:
     return "---\n" + yaml.safe_dump(fields, sort_keys=False, default_flow_style=False).strip() + "\n---\n"
 
 
-def _flattened_identity(agent: dict) -> str:
+def _flattened_identity(agent: dict, slug: str | None = None) -> str:
     """The 5 identity files (comment-stripped) joined in boot order."""
-    rendered = render_agent(agent)
+    rendered = render_agent(agent, slug=slug)
     return "\n\n---\n\n".join(strip_html_comments(rendered[fn]) for fn in FLATTEN_ORDER)
 
 
-def emit_cc_subagent(agent: dict) -> tuple[str, str]:
+def emit_cc_subagent(agent: dict, slug: str) -> tuple[str, str]:
     """A specialist role → one Claude Code subagent `.md` (spawnable).
 
     Frontmatter (name/description/model) + a body that adopts the flattened
     identity as the subagent's system prompt. Returns (filename, contents).
+    The name is slug-prefixed (e.g. 'full-team-backend-dev') so teams are
+    collision-safe and discoverable as a group.
     """
     role = agent["role"]
+    slugged_name = f"{slug}-{role}"
     title = role_meta(role).get("title") or role
     skills = agent_skills(agent)
 
     fields = {
-        "name": role,
+        "name": slugged_name,
         "description": f"{title}. {role_summary(role)} "
                        f"Use this subagent for {role} work.",
         "model": resolve_model(agent),
@@ -482,28 +493,31 @@ def emit_cc_subagent(agent: dict) -> tuple[str, str]:
     body = (
         f"You are the **{title}**, a specialist agent on a composed dev team. "
         f"Adopt the identity, behaviour, and operating rules below as your own.\n\n"
-        f"{_flattened_identity(agent)}\n\n---\n\n"
+        f"{_flattened_identity(agent, slug=slug)}\n\n---\n\n"
         f"## Operating procedure\n\n"
         f"{procedure}{bolt_ons}\n"
     )
-    return f"{role}.md", _frontmatter(fields) + "\n" + body
+    return f"{slugged_name}.md", _frontmatter(fields) + "\n" + body
 
 
-def emit_cc_skill(agent: dict) -> dict[str, str]:
+def emit_cc_skill(agent: dict, slug: str) -> dict[str, str]:
     """An orchestrator role → a Claude Code skill folder (transforms the session).
 
     SKILL.md = frontmatter + a "become the <role>" boot body + the flattened
     identity + the role's operating procedure (its SKILL.md) inline. Self-contained
     so invoking it turns the current session into the orchestrator. Returns
     {relpath: contents} (one SKILL.md for now).
+    The name is slug-prefixed (e.g. 'full-team-tech-lead') so typing the slug
+    in the / menu clusters the whole team and prevents cross-project collisions.
     """
     role = agent["role"]
+    slugged_name = f"{slug}-{role}"
     title = role_meta(role).get("title") or role
 
     fields = {
-        "name": role,
+        "name": slugged_name,
         "description": f"{title} orchestrator. {role_summary(role)} "
-                       f"Invoke with /{role} or when coordinating a multi-step dev-team feature.",
+                       f"Invoke with /{slugged_name} or when coordinating a multi-step dev-team feature.",
     }
     procedure = strip_html_comments(_read(ROLES_DIR / role / "SKILL.md"))
     body = (
@@ -512,7 +526,7 @@ def emit_cc_skill(agent: dict) -> dict[str, str]:
         f"personality, and operating rules below, then follow the operating procedure. "
         f"This transforms the current session into the {title} orchestrator.\n\n"
         f"## Boot — adopt this identity\n\n"
-        f"{_flattened_identity(agent)}\n\n"
+        f"{_flattened_identity(agent, slug=slug)}\n\n"
         f"---\n\n## Operating procedure\n\n"
         f"{procedure}\n"
     )
@@ -522,10 +536,12 @@ def emit_cc_skill(agent: dict) -> dict[str, str]:
 def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
     """Emit the team as Claude Code artifacts under <out_dir>/<name>/_claude-code/.
 
-    Orchestrators → skills/<role>/SKILL.md; specialists → agents/<role>.md.
+    Orchestrators → skills/<slug>-<role>/SKILL.md; specialists → agents/<slug>-<role>.md.
     Idempotent: the _claude-code dir is wiped and rewritten each run. wire.sh
     symlinks skills/* into ~/.claude/skills/ and agents/* into ~/.claude/agents/.
+    Slug defaults to the project name when not set in the config.
     """
+    slug = config.get("slug") or name
     cc_dir = (out_dir / name / "_claude-code")
     if cc_dir.is_symlink():
         raise ValueError(f"refusing to write: {cc_dir} is a symlink, not a dir")
@@ -536,13 +552,14 @@ def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
 
     for agent in config["agents"]:
         role = agent["role"]
+        slugged_name = f"{slug}-{role}"
         if is_orchestrator(role):
-            skill_dir = cc_dir / "skills" / role
+            skill_dir = cc_dir / "skills" / slugged_name
             skill_dir.mkdir()
-            for relpath, contents in emit_cc_skill(agent).items():
+            for relpath, contents in emit_cc_skill(agent, slug).items():
                 (skill_dir / relpath).write_text(contents, encoding="utf-8")
         else:
-            filename, contents = emit_cc_subagent(agent)
+            filename, contents = emit_cc_subagent(agent, slug)
             (cc_dir / "agents" / filename).write_text(contents, encoding="utf-8")
     return cc_dir
 
@@ -600,12 +617,14 @@ def main() -> None:
     agents = config["agents"]
 
     if args.dry_run:
-        print(f"[dry-run] target={args.target}  project: {name}  ({len(agents)} agents) -> {args.out / name}")
+        slug = config.get("slug") or name
+        print(f"[dry-run] target={args.target}  project: {name}  slug: {slug}  ({len(agents)} agents) -> {args.out / name}")
         for agent in agents:
             role = agent["role"]
             if args.target == "claude-code":
+                slugged_name = f"{slug}-{role}"
                 shape = "skill (orchestrator)" if is_orchestrator(role) else "subagent (specialist)"
-                print(f"  - {role:<16} model={resolve_model(agent):<8} -> CC {shape}")
+                print(f"  - {slugged_name:<32} model={resolve_model(agent):<8} -> CC {shape}")
             else:
                 files = ", ".join(sorted(render_agent(agent)))
                 print(f"  - {role:<16} model={resolve_model(agent):<8} files: {files}")
@@ -616,11 +635,13 @@ def main() -> None:
 
     if args.target == "claude-code":
         cc_dir = write_claude_code(name, config, args.out)
+        slug = config.get("slug") or name
         print(f"composed '{name}' (claude-code): {len(agents)} agents -> {cc_dir}")
         for agent in agents:
             role = agent["role"]
+            slugged_name = f"{slug}-{role}"
             shape = "skill" if is_orchestrator(role) else "subagent"
-            print(f"  - {role} ({resolve_model(agent)}) -> CC {shape}")
+            print(f"  - {slugged_name} ({resolve_model(agent)}) -> CC {shape}")
         return
 
     project_dir = write_project(name, config, args.out)

@@ -1,0 +1,15 @@
+# Machine overlay — forge (Gareth's personal dev machine).
+#
+# Layered ON TOP of baseline-submodules.txt. wire.sh resolves this file by
+# `hostname -s` (= "forge"). Same entry grammar as the baseline:
+#
+#   repo-name            → also wire ALL skills in that submodule (additive)
+#   repo-name/skill      → also wire ONLY that skill (additive)
+#   project:<name>       → also wire a composed agent-factory project
+#   -repo | -repo/skill  → REMOVE a baseline entry on this machine
+#   -project:<name>      → un-gate a baseline project on this machine
+#
+# Apply with: bash ~/.the-grid/scripts/wire.sh
+#
+# TODO: populate with forge-specific packs. Remove skills from baseline that
+# are wilderness-only (e.g. hubspot/* if not needed here).

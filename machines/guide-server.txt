@@ -1,0 +1,17 @@
+# Machine overlay — guide-server (OpenClaw/guide hosted server).
+#
+# Layered ON TOP of baseline-submodules.txt. wire.sh resolves this file by
+# `hostname -s` (= "guide-server"). Same entry grammar as the baseline:
+#
+#   repo-name            → also wire ALL skills in that submodule (additive)
+#   repo-name/skill      → also wire ONLY that skill (additive)
+#   project:<name>       → also wire a composed agent-factory project
+#   -repo | -repo/skill  → REMOVE a baseline entry on this machine
+#   -project:<name>      → un-gate a baseline project on this machine
+#
+# Apply with: bash ~/.the-grid/scripts/wire.sh
+#
+# TODO: populate with guide-server-specific packs. Consider stripping
+# desktop-only skills (canvas-design, webapp-testing, etc.) from baseline
+# here via -repo/skill entries. Add agent-factory project: entries as
+# OpenClaw targets are composed and deployed here.
