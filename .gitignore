@@ -4,3 +4,4 @@
 # Sublime Text project/workspace files (local editor state)
 *.sublime-project
 *.sublime-workspace
+.DS_Store
