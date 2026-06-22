@@ -10,6 +10,7 @@
 #   growth-hacker → the marketing arm (player-coach lead)
 # delegates_to entries must name a role present in this team.
 project: full-team
+slug: full-team
 description: Full composed team — 3 orchestrators + 17 specialists, all 5-file model.
 paperclip: false
 
