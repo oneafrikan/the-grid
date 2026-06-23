@@ -11,5 +11,22 @@
 #
 # Apply with: bash ~/.the-grid/scripts/wire.sh
 #
-# TODO: populate with forge-specific packs. Remove skills from baseline that
-# are wilderness-only (e.g. hubspot/* if not needed here).
+# LAMP dev stack: content, websites, automation. Strip ML/data science,
+# heavy infra/SRE, and desktop design tools not relevant to web dev.
+
+# --- strip ML / data science ---
+-jeffallan/ml-pipeline
+-jeffallan/fine-tuning-expert
+-jeffallan/pandas-pro
+-jeffallan/rag-architect
+-gstack/benchmark-models
+
+# --- strip heavy infra / SRE (not needed for LAMP web dev) ---
+-jeffallan/microservices-architect
+-jeffallan/sre-engineer
+-jeffallan/chaos-engineer
+-jeffallan/cpp-pro
+
+# --- strip desktop design tools ---
+-anthropic/canvas-design
+-anthropic/theme-factory

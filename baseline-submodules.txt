@@ -17,7 +17,7 @@
 #   -project:<name>      → un-gate a project
 #
 # Precedence: repos are wired alphabetically; later wins on name collision.
-# Intentional order: anthropic → gstack → hubspot → jeffallan → mattpocock → superpowers.
+# Intentional order: anthropic → gstack → jeffallan → mattpocock → superpowers.
 # gstack beats mattpocock by design — if both list the same skill name,
 # remove the mattpocock entry here so gstack's version is served.
 # Current gstack-wins resolutions: qa, review.
@@ -102,11 +102,7 @@ gstack/spec
 gstack/sync-gbrain
 gstack/unfreeze
 
-# --- hubspot (official HubSpot/agent-cli-skills; 15 skills, data-eng subset wired) ---
-hubspot/crm-data-quality
-hubspot/crm-lookup
-hubspot/bulk-operations
-hubspot/data-enrichment
+# --- hubspot (wilderness-only — personal CRM; wired via machines/wilderness.txt) ---
 
 # --- jeffallan (68 skills) ---
 jeffallan/architecture-designer

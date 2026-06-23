@@ -11,7 +11,22 @@
 #
 # Apply with: bash ~/.the-grid/scripts/wire.sh
 #
-# TODO: populate with guide-server-specific packs. Consider stripping
-# desktop-only skills (canvas-design, webapp-testing, etc.) from baseline
-# here via -repo/skill entries. Add agent-factory project: entries as
-# OpenClaw targets are composed and deployed here.
+# Team-facing data/comms server. Strip desktop UI and personal tools.
+# playwright-expert is kept — headless browser automation is valid server use.
+
+# --- strip desktop/design tools (no GUI on a server) ---
+-anthropic/canvas-design
+-anthropic/brand-guidelines
+-anthropic/frontend-design
+-anthropic/theme-factory
+-anthropic/web-artifacts-builder
+-anthropic/webapp-testing
+
+# --- strip personal tools ---
+-mattpocock/obsidian-vault
+
+# --- strip niche JS frameworks (not relevant on this server) ---
+-jeffallan/vue-expert
+-jeffallan/vue-expert-js
+-jeffallan/nextjs-developer
+-jeffallan/nestjs-expert

@@ -11,5 +11,8 @@
 #
 # Apply with: bash ~/.the-grid/scripts/wire.sh
 #
-# Empty for now: the baseline already covers wilderness. As the baseline is
-# trimmed (Step 2 — issue #1), machine-specific packs move here.
+# HubSpot: personal CRM tools, wilderness-only. Not wired on any other machine.
+hubspot/crm-data-quality
+hubspot/crm-lookup
+hubspot/bulk-operations
+hubspot/data-enrichment

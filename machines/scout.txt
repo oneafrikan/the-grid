@@ -11,5 +11,6 @@
 #
 # Apply with: bash ~/.the-grid/scripts/wire.sh
 #
-# TODO: populate with scout-specific packs. Remove skills from baseline that
-# are wilderness-only (e.g. hubspot/* if not needed here).
+# Jarvis / OpenClaw automation instance. Full baseline applies — no additions
+# or subtractions. HubSpot is wilderness-only and not in the baseline, so
+# nothing to strip here. This machine gets everything.
