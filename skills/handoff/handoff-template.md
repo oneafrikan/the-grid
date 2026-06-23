@@ -1,5 +1,6 @@
 ---
 date: YYYY-MM-DD
+machine: <hostname -s>
 type: handoff
 session: [brief topic — e.g. "Import triage" or "[redacted] cron setup"]
 ---

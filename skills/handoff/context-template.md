@@ -1,10 +1,11 @@
 ---
 date: YYYY-MM-DD
+machine: <hostname -s>
 type: context
 session: [brief topic]
 ---
 
-# Session Context: YYYY-MM-DD
+# Session Context: YYYY-MM-DD — <machine>
 
 ## What Was Investigated
 [What problem or area was explored and why — one paragraph max.]
