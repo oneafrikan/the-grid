@@ -10,9 +10,56 @@
 #   -project:<name>      → un-gate a baseline project on this machine
 #
 # Apply with: bash ~/.the-grid/scripts/wire.sh
-#
-# HubSpot: personal CRM tools, wilderness-only. Not wired on any other machine.
+
+# --- hubspot — personal CRM tools, wilderness-only ---
 hubspot/crm-data-quality
 hubspot/crm-lookup
 hubspot/bulk-operations
 hubspot/data-enrichment
+
+# --- anthropic — desktop/design tools ---
+anthropic/brand-guidelines
+anthropic/canvas-design
+anthropic/frontend-design
+anthropic/theme-factory
+anthropic/web-artifacts-builder
+anthropic/webapp-testing
+
+# --- gstack — OpenClaw + gbrain tools ---
+gstack/benchmark-models
+gstack/gstack-openclaw-ceo-review
+gstack/gstack-openclaw-investigate
+gstack/gstack-openclaw-office-hours
+gstack/gstack-openclaw-retro
+gstack/gstack-upgrade
+gstack/open-gstack-browser
+gstack/setup-gbrain
+gstack/sync-gbrain
+
+# --- jeffallan — systems, data/ML, infra, and web pack ---
+# Wilderness is the all-purpose architect/engineer machine.
+jeffallan/chaos-engineer
+jeffallan/cloud-architect
+jeffallan/cpp-pro
+jeffallan/fine-tuning-expert
+jeffallan/fullstack-guardian
+jeffallan/javascript-pro
+jeffallan/laravel-specialist
+jeffallan/microservices-architect
+jeffallan/ml-pipeline
+jeffallan/monitoring-expert
+jeffallan/nestjs-expert
+jeffallan/nextjs-developer
+jeffallan/pandas-pro
+jeffallan/php-pro
+jeffallan/playwright-expert
+jeffallan/python-pro
+jeffallan/rag-architect
+jeffallan/sre-engineer
+jeffallan/websocket-engineer
+jeffallan/wordpress-pro
+
+# --- mattpocock — design and personal tools ---
+mattpocock/design-an-interface
+mattpocock/obsidian-vault
+mattpocock/prototype

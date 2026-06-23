@@ -1,4 +1,4 @@
-# Machine overlay — scout (Gareth's personal dev machine).
+# Machine overlay — scout (Jarvis / OpenClaw automation instance).
 #
 # Layered ON TOP of baseline-submodules.txt. wire.sh resolves this file by
 # `hostname -s` (= "scout"). Same entry grammar as the baseline:
@@ -11,6 +11,31 @@
 #
 # Apply with: bash ~/.the-grid/scripts/wire.sh
 #
-# Jarvis / OpenClaw automation instance. Full baseline applies — no additions
-# or subtractions. HubSpot is wilderness-only and not in the baseline, so
-# nothing to strip here. This machine gets everything.
+# Profile: full team-based automation. Gets the full baseline + OpenClaw tools
+# + data/ML pack for automation pipelines + personal tools.
+# No HubSpot (personal CRM stays on wilderness).
+
+# --- OpenClaw + gbrain management ---
+gstack/gstack-openclaw-ceo-review
+gstack/gstack-openclaw-investigate
+gstack/gstack-openclaw-office-hours
+gstack/gstack-openclaw-retro
+gstack/gstack-upgrade
+gstack/setup-gbrain
+gstack/sync-gbrain
+
+# --- data engineering + ML (automation pipelines) ---
+gstack/benchmark-models
+jeffallan/cloud-architect
+jeffallan/fine-tuning-expert
+jeffallan/microservices-architect
+jeffallan/ml-pipeline
+jeffallan/monitoring-expert
+jeffallan/pandas-pro
+jeffallan/playwright-expert
+jeffallan/python-pro
+jeffallan/rag-architect
+jeffallan/sre-engineer
+
+# --- personal tools ---
+mattpocock/obsidian-vault

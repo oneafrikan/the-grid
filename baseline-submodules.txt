@@ -27,32 +27,26 @@
 # Legacy fallbacks: if NO manifest file exists at all, ALL repos are wired; if
 # NO project: entry exists anywhere, ALL composed projects are wired.
 
-# --- composed agent-factory projects (gates _claude-code output per machine) ---
-# full-team is the only composed team. Compose more from agent-factory/examples/
-# and add project:<name> here (or in a machine overlay) to wire them.
+# --- composed agent-factory projects ---
 project:full-team
 
-# --- anthropic (18 skills) ---
-anthropic/brand-guidelines
-anthropic/canvas-design
+# --- anthropic — universal comms + meta tools (9 skills) ---
+# Desktop/design tools (canvas-design, frontend-design, etc.) live in machine overlays.
 anthropic/claude-api
 anthropic/docx
-anthropic/frontend-design
 anthropic/internal-comms
 anthropic/mcp-builder
 anthropic/pdf
 anthropic/pptx
 anthropic/skill-creator
 anthropic/template
-anthropic/theme-factory
-anthropic/webapp-testing
-anthropic/web-artifacts-builder
 anthropic/xlsx
 
-# --- gstack (55 skills) ---
+# --- gstack — workflow, orchestration, and quality tools (29 skills) ---
+# OpenClaw-specific tools (gstack-openclaw-*, setup-gbrain, sync-gbrain, open-gstack-browser)
+# and benchmark-models live in machine overlays (wilderness + scout).
 gstack/autoplan
 gstack/benchmark
-gstack/benchmark-models
 gstack/browse
 gstack/canary
 gstack/careful
@@ -68,11 +62,6 @@ gstack/devex-review
 gstack/document-generate
 gstack/document-release
 gstack/freeze
-gstack/gstack-openclaw-ceo-review
-gstack/gstack-openclaw-investigate
-gstack/gstack-openclaw-office-hours
-gstack/gstack-openclaw-retro
-gstack/gstack-upgrade
 gstack/guard
 gstack/health
 gstack/investigate
@@ -81,7 +70,6 @@ gstack/landing-report
 gstack/learn
 gstack/make-pdf
 gstack/office-hours
-gstack/open-gstack-browser
 gstack/pair-agent
 gstack/plan-ceo-review
 gstack/plan-design-review
@@ -95,67 +83,42 @@ gstack/review
 gstack/scrape
 gstack/setup-browser-cookies
 gstack/setup-deploy
-gstack/setup-gbrain
 gstack/ship
 gstack/skillify
 gstack/spec
-gstack/sync-gbrain
 gstack/unfreeze
 
-# --- hubspot (wilderness-only — personal CRM; wired via machines/wilderness.txt) ---
+# --- hubspot — wilderness-only; wired via machines/wilderness.txt ---
 
-# --- jeffallan (68 skills) ---
+# --- jeffallan — universal dev tools (18 skills) ---
+# Stack-specific packs (LAMP, data/ML, infra/SRE) live in machine overlays.
 jeffallan/architecture-designer
-jeffallan/chaos-engineer
 jeffallan/cli-developer
-jeffallan/cloud-architect
 jeffallan/code-documenter
 jeffallan/code-reviewer
-jeffallan/cpp-pro
 jeffallan/database-optimizer
 jeffallan/debugging-wizard
 jeffallan/devops-engineer
 jeffallan/feature-forge
-jeffallan/fine-tuning-expert
-jeffallan/fullstack-guardian
-jeffallan/javascript-pro
-jeffallan/laravel-specialist
 jeffallan/legacy-modernizer
 jeffallan/mcp-developer
-jeffallan/microservices-architect
-jeffallan/ml-pipeline
-jeffallan/monitoring-expert
-jeffallan/nestjs-expert
-jeffallan/nextjs-developer
-jeffallan/pandas-pro
-jeffallan/php-pro
-jeffallan/playwright-expert
 jeffallan/postgres-pro
 jeffallan/prompt-engineer
-jeffallan/python-pro
-jeffallan/rag-architect
 jeffallan/secure-code-guardian
 jeffallan/security-reviewer
 jeffallan/spec-miner
 jeffallan/sql-pro
-jeffallan/sre-engineer
 jeffallan/test-master
 jeffallan/the-fool
-jeffallan/vue-expert
-jeffallan/vue-expert-js
-jeffallan/websocket-engineer
-jeffallan/wordpress-pro
 
-# --- mattpocock (29 skills) ---
-mattpocock/design-an-interface
+# --- mattpocock — universal dev process (20 skills) ---
+# Design/personal tools (design-an-interface, obsidian-vault, prototype) live in overlays.
 mattpocock/diagnose
 mattpocock/edit-article
 mattpocock/git-guardrails-claude-code
 mattpocock/grill-me
 mattpocock/grill-with-docs
 mattpocock/improve-codebase-architecture
-mattpocock/obsidian-vault
-mattpocock/prototype
 mattpocock/request-refactor-plan
 mattpocock/scaffold-exercises
 mattpocock/setup-pre-commit
@@ -171,7 +134,7 @@ mattpocock/writing-fragments
 mattpocock/writing-shape
 mattpocock/zoom-out
 
-# --- superpowers (14 skills) ---
+# --- superpowers — all universal (14 skills) ---
 superpowers/brainstorming
 superpowers/dispatching-parallel-agents
 superpowers/executing-plans

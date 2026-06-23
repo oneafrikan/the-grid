@@ -1,4 +1,4 @@
-# Machine overlay — forge (Gareth's personal dev machine).
+# Machine overlay — forge (Gareth's personal LAMP dev machine).
 #
 # Layered ON TOP of baseline-submodules.txt. wire.sh resolves this file by
 # `hostname -s` (= "forge"). Same entry grammar as the baseline:
@@ -11,22 +11,28 @@
 #
 # Apply with: bash ~/.the-grid/scripts/wire.sh
 #
-# LAMP dev stack: content, websites, automation. Strip ML/data science,
-# heavy infra/SRE, and desktop design tools not relevant to web dev.
+# Profile: LAMP dev stack (PHP/Laravel/WordPress), content, web automation.
+# No data science, no ML, no heavy infra/SRE.
 
-# --- strip ML / data science ---
--jeffallan/ml-pipeline
--jeffallan/fine-tuning-expert
--jeffallan/pandas-pro
--jeffallan/rag-architect
--gstack/benchmark-models
+# --- LAMP dev pack ---
+jeffallan/fullstack-guardian
+jeffallan/javascript-pro
+jeffallan/laravel-specialist
+jeffallan/nestjs-expert
+jeffallan/nextjs-developer
+jeffallan/php-pro
+jeffallan/playwright-expert
+jeffallan/python-pro
+jeffallan/websocket-engineer
+jeffallan/wordpress-pro
+jeffallan/vue-expert-js
 
-# --- strip heavy infra / SRE (not needed for LAMP web dev) ---
--jeffallan/microservices-architect
--jeffallan/sre-engineer
--jeffallan/chaos-engineer
--jeffallan/cpp-pro
+# --- frontend + design tools for web dev ---
+anthropic/frontend-design
+anthropic/theme-factory
+anthropic/web-artifacts-builder
+anthropic/webapp-testing
 
-# --- strip desktop design tools ---
--anthropic/canvas-design
--anthropic/theme-factory
+# --- UI design process ---
+mattpocock/design-an-interface
+mattpocock/prototype

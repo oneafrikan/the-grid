@@ -1,4 +1,4 @@
-# Machine overlay — guide-server (OpenClaw/guide hosted server).
+# Machine overlay — guide-server (team-facing data/comms server).
 #
 # Layered ON TOP of baseline-submodules.txt. wire.sh resolves this file by
 # `hostname -s` (= "guide-server"). Same entry grammar as the baseline:
@@ -11,22 +11,22 @@
 #
 # Apply with: bash ~/.the-grid/scripts/wire.sh
 #
-# Team-facing data/comms server. Strip desktop UI and personal tools.
-# playwright-expert is kept — headless browser automation is valid server use.
+# Profile: data engineering, team comms, and headless automation.
+# No desktop/design tools (not in baseline). No HubSpot. No personal tools.
 
-# --- strip desktop/design tools (no GUI on a server) ---
--anthropic/canvas-design
--anthropic/brand-guidelines
--anthropic/frontend-design
--anthropic/theme-factory
--anthropic/web-artifacts-builder
--anthropic/webapp-testing
+# --- data engineering + ML pack ---
+gstack/benchmark-models
+jeffallan/chaos-engineer
+jeffallan/cloud-architect
+jeffallan/fine-tuning-expert
+jeffallan/microservices-architect
+jeffallan/ml-pipeline
+jeffallan/monitoring-expert
+jeffallan/pandas-pro
+jeffallan/playwright-expert
+jeffallan/python-pro
+jeffallan/rag-architect
+jeffallan/sre-engineer
 
-# --- strip personal tools ---
--mattpocock/obsidian-vault
-
-# --- strip niche JS frameworks (not relevant on this server) ---
--jeffallan/vue-expert
--jeffallan/vue-expert-js
--jeffallan/nextjs-developer
--jeffallan/nestjs-expert
+# --- headless browser automation (confirmed use case for digital product team) ---
+anthropic/webapp-testing
