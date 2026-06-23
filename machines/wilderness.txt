@@ -36,28 +36,20 @@ gstack/open-gstack-browser
 gstack/setup-gbrain
 gstack/sync-gbrain
 
-# --- jeffallan — systems, data/ML, infra, and web pack ---
-# Wilderness is the all-purpose architect/engineer machine.
+# --- jeffallan — systems, data/ML, and infra pack ---
+# Work machine: no LAMP/web stack (those live on personal machines forge + scout).
 jeffallan/chaos-engineer
 jeffallan/cloud-architect
 jeffallan/cpp-pro
 jeffallan/fine-tuning-expert
-jeffallan/fullstack-guardian
-jeffallan/javascript-pro
-jeffallan/laravel-specialist
 jeffallan/microservices-architect
 jeffallan/ml-pipeline
 jeffallan/monitoring-expert
-jeffallan/nestjs-expert
-jeffallan/nextjs-developer
 jeffallan/pandas-pro
-jeffallan/php-pro
 jeffallan/playwright-expert
 jeffallan/python-pro
 jeffallan/rag-architect
 jeffallan/sre-engineer
-jeffallan/websocket-engineer
-jeffallan/wordpress-pro
 
 # --- mattpocock — design and personal tools ---
 mattpocock/design-an-interface

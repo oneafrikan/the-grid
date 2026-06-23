@@ -11,9 +11,8 @@
 #
 # Apply with: bash ~/.the-grid/scripts/wire.sh
 #
-# Profile: full team-based automation. Gets the full baseline + OpenClaw tools
-# + data/ML pack for automation pipelines + personal tools.
-# No HubSpot (personal CRM stays on wilderness).
+# Profile: personal machine — full automation + LAMP dev + OpenClaw.
+# No HubSpot (personal CRM stays on wilderness). No pandas (CSV work is on forge).
 
 # --- OpenClaw + gbrain management ---
 gstack/gstack-openclaw-ceo-review
@@ -24,18 +23,30 @@ gstack/gstack-upgrade
 gstack/setup-gbrain
 gstack/sync-gbrain
 
-# --- data engineering + ML (automation pipelines) ---
+# --- automation pipelines + ML ---
 gstack/benchmark-models
 jeffallan/cloud-architect
 jeffallan/fine-tuning-expert
 jeffallan/microservices-architect
 jeffallan/ml-pipeline
 jeffallan/monitoring-expert
-jeffallan/pandas-pro
 jeffallan/playwright-expert
 jeffallan/python-pro
 jeffallan/rag-architect
 jeffallan/sre-engineer
 
+# --- LAMP dev pack (personal projects) ---
+jeffallan/fullstack-guardian
+jeffallan/javascript-pro
+jeffallan/laravel-specialist
+jeffallan/nestjs-expert
+jeffallan/nextjs-developer
+jeffallan/php-pro
+jeffallan/websocket-engineer
+jeffallan/wordpress-pro
+jeffallan/vue-expert-js
+
 # --- personal tools ---
+mattpocock/design-an-interface
 mattpocock/obsidian-vault
+mattpocock/prototype

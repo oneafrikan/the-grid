@@ -14,7 +14,8 @@
 # Profile: LAMP dev stack (PHP/Laravel/WordPress), content, web automation.
 # No data science, no ML, no heavy infra/SRE.
 
-# --- LAMP dev pack ---
+# --- LAMP dev pack + CSV/data work ---
+jeffallan/pandas-pro
 jeffallan/fullstack-guardian
 jeffallan/javascript-pro
 jeffallan/laravel-specialist
