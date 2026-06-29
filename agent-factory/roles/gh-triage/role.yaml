@@ -1,0 +1,11 @@
+# role.yaml — gh-triage
+name: gh-triage
+title: GitHub Triage Agent
+default_model: sonnet
+cron_model: sonnet
+summary: >-
+  Autonomous GitHub issue triage — classifies severity, applies mattpocock
+  labels, writes agent briefs for machine-doable issues and triage notes for
+  human-required ones. Runs on cron; does not initiate CC loops (Phase 2).
+base_skills: [triage]
+orchestrator: false
