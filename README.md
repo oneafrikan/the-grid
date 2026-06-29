@@ -67,16 +67,41 @@ The core mechanic: a single script (`scripts/wire.sh`) symlinks skills into `~/.
 
 ## Bootstrap (new machine)
 
+One command — clone, then run `bootstrap.sh` (syncs submodules → wires skills):
+
 ```bash
-git clone https://github.com/<your-username>/the-grid.git ~/.the-grid
+git clone https://github.com/<your-username>/the-grid.git ~/.the-grid \
+  && bash ~/.the-grid/scripts/bootstrap.sh
+```
+
+Add `--with-agents` to also compose **and** wire the agent team in the same run:
+
+```bash
+bash ~/.the-grid/scripts/bootstrap.sh --with-agents
+```
+
+Prefer the manual steps? They're equivalent:
+
+```bash
 cd ~/.the-grid
 git submodule update --init --recursive
 bash scripts/wire.sh
 ```
 
-That's it. Skills are live immediately. To also build and wire the composed
-**agent team** (orchestrator skills + specialist subagents), continue with the
-agent-factory step in **[BOOTSTRAP.md](BOOTSTRAP.md)**.
+That's it. Skills are live immediately. For the full sequence (including the
+agent-factory compose step), see **[BOOTSTRAP.md](BOOTSTRAP.md)**.
+
+## Checking grid health
+
+```bash
+bash scripts/check-grid.sh
+```
+
+Runs the bats suite (one-line PASS/FAIL — full output only on failure) and scans
+for broken grid-owned symlinks. Exits non-zero if anything's wrong, so it works
+as a CI / pre-push gate. A `pre-commit` hook (in `.githooks/`, activated by
+`bootstrap.sh`) runs the same tests before every commit; bypass with
+`git commit --no-verify` or `GRID_SKIP_HOOK=1`.
 
 > **Already set up, just pulled new changes?** See BOOTSTRAP.md →
 > *Updating an existing machine*. Key gotcha: `agent-factory/projects/*` is
