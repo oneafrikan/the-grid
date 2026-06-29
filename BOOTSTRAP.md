@@ -162,7 +162,7 @@ cd ~/.the-grid
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 30 tests should be green. If they're not, something is misconfigured.
+All 36 tests should be green. If they're not, something is misconfigured.
 
 ---
 
