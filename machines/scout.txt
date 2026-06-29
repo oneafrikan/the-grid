@@ -50,3 +50,7 @@ jeffallan/vue-expert-js
 mattpocock/design-an-interface
 mattpocock/obsidian-vault
 mattpocock/prototype
+
+# --- composed projects ---
+project:full-team
+project:gh-triage
