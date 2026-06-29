@@ -30,3 +30,6 @@ jeffallan/sre-engineer
 
 # --- headless browser automation (confirmed use case for digital product team) ---
 anthropic/webapp-testing
+
+# --- composed projects ---
+project:gh-triage
