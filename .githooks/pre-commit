@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# pre-commit — run the bats suite before allowing a commit, so a malformed
+# skill / broken wiring never lands on main.
+#
+# Tracked in-repo (not in .git/hooks, which git won't version) and activated by
+# pointing git at it:  git config core.hooksPath .githooks
+# scripts/bootstrap.sh does this for you; or run it once by hand.
+#
+# Escape hatches:
+#   GRID_SKIP_HOOK=1 git commit ...   # skip just this run
+#   git commit --no-verify ...        # git's built-in bypass
+set -euo pipefail
+
+if [[ "${GRID_SKIP_HOOK:-0}" == "1" ]]; then
+  echo "pre-commit: skipped (GRID_SKIP_HOOK=1)"
+  exit 0
+fi
+
+# Resolve the repo root regardless of where git invokes the hook from.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+BATS="$REPO_ROOT/tests/lib/bats-core/bin/bats"
+
+if [[ ! -x "$BATS" ]]; then
+  echo "pre-commit: bats not found at $BATS — did submodules init? Skipping tests." >&2
+  exit 0  # don't block a commit just because the test harness is absent
+fi
+
+echo "pre-commit: running bats suite..."
+if ! "$BATS" "$REPO_ROOT/tests/"; then
+  echo "pre-commit: tests FAILED — commit aborted. Fix, or bypass with --no-verify." >&2
+  exit 1
+fi
+echo "pre-commit: tests passed."
