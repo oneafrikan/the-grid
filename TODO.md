@@ -24,12 +24,8 @@ Paperclip emitter targets (**#3**, **#4**).
 | [#6](https://github.com/oneafrikan/the-grid/issues/6) | agent-factory: populate `skills/` from repos submodules | agent-factory |
 | [#7](https://github.com/oneafrikan/the-grid/issues/7) | Decide fate of the LAMP build prompt (likely superseded) + 4 gaps | docs |
 | [#8](https://github.com/oneafrikan/the-grid/issues/8) | repos/leoyeai out of sync on wilderness (deferred — do not force-sync) | deferred |
-| [#9](https://github.com/oneafrikan/the-grid/issues/9) | `bootstrap.sh` — one-command machine setup | infra, backlog |
-| [#10](https://github.com/oneafrikan/the-grid/issues/10) | `check-grid.sh` — quick health check | infra, backlog |
-| [#11](https://github.com/oneafrikan/the-grid/issues/11) | Pre-commit hook: run bats before commit | infra, backlog |
 | [#12](https://github.com/oneafrikan/the-grid/issues/12) | Add OpenGAP + soulspec as reference submodules | backlog |
 | [#13](https://github.com/oneafrikan/the-grid/issues/13) | Optional: deepen growth-hacker to marketing-director orchestrator | agent-factory, backlog |
-| [#14](https://github.com/oneafrikan/the-grid/issues/14) | chore: `git stash drop` the obsolete wired-submodules tweak | chore |
 | [#15](https://github.com/oneafrikan/the-grid/issues/15) | automation-factory: `instantiate.sh` — machine-profiled deployment of issue-loop | automation-factory |
 
 ---
@@ -53,3 +49,6 @@ Paperclip emitter targets (**#3**, **#4**).
 - [x] **9. Update CLAUDE.md** — agent loading model + `wire.sh` agent wiring
 - [x] **Roster generation** — DONE 2026-06-19 (`ab1b6e4`). Rosters generated from `delegates_to`, injected at `{{ROSTER_TABLE}}`, symmetrically validated. growth-hacker promoted to 3rd orchestrator. Doc sweep (`f08b193`).
 - [x] Fix stale test count in BOOTSTRAP.md (now "All 30 tests")
+- [x] **#1 Per-machine manifests** — already shipped (baseline + `machines/<host>.txt` overlays + `project:` gating in wire.sh). Closed as stale 2026-06-29.
+- [x] **#14 stash drop** — stash already empty; closed as moot 2026-06-29.
+- [x] **#9/#10/#11 infra scripts** — DONE 2026-06-29 (`876fe4b`). `bootstrap.sh` (one-command setup), `check-grid.sh` (fast health check), `.githooks/pre-commit` (bats gate, activated via core.hooksPath). README updated.
