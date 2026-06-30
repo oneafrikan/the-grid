@@ -1,22 +1,27 @@
 # gh-triage — Design Spec
 
-Autonomous GitHub issue triage agent. Classifies every open issue across the
-Jarvis and Guide repo sets, applies the mattpocock label schema + severity tiers,
-and writes agent briefs or triage notes as structured comments. No human
+Autonomous GitHub issue triage agent. Classifies every open issue in the repo set
+its **deployment scope** defines, applies the mattpocock label schema + severity
+tiers, and writes agent briefs or triage notes as structured comments. No human
 intervention required for classification; machine-doable items are marked
 `ready-for-agent` so Phase 2 CC loops can act on them autonomously.
+
+The composed agent is **deployment-agnostic** — it describes HOW to triage. WHAT
+to triage (org, repos, repo→live-system map, Slack on/off) is injected per machine.
+See "Deployment scope" below.
 
 ---
 
 ## What it does (Phase 1 — passive classifier)
 
-1. Polls GitHub for unlabeled or `needs-triage` issues across all repos in scope.
-2. Polls the `guide-backlog` Slack channel (`C0B588EN59U`) for new messages;
+1. Reads its deployment scope file (Step 0) to learn org, repos, and Slack config.
+2. Polls GitHub for unlabeled or `needs-triage` issues across the repos in scope.
+3. If its scope enables Slack: polls the configured channel for new messages;
    creates GH issues from actionable ones (LLM-filtered); ignores chat.
-3. For each issue: classifies severity + state role using LLM judgment with
-   repo→live-system context injected into the prompt.
-4. Applies labels and posts a structured comment (agent brief or triage notes).
-5. Does NOT initiate CC loops. That is Phase 2.
+4. For each issue: classifies severity + state role using LLM judgment with
+   repo→live-system context (from the scope file) injected into the prompt.
+5. Applies labels and posts a structured comment (agent brief or triage notes).
+6. Does NOT initiate CC loops. That is Phase 2.
 
 ---
 
@@ -24,36 +29,30 @@ intervention required for classification; machine-doable items are marked
 
 | Concern | Decision |
 |---|---|
-| Agent | Main Jarvis agent (OpenClaw, Scout) |
-| Jarvis repos | Cron every 60 minutes |
-| Guide repos | Cron every 30 minutes |
-| Slack → GH | Same cron, runs before GH triage pass |
+| Agent | One generic composed agent, wired identically on every machine |
+| Scope source | A per-machine deployment scope file the cron prompt points at |
+| Cron schedule | A property of each machine's cron registration, not the agent |
+| Slack → GH | Same cron, runs before GH triage pass — only if scope enables Slack |
 
 ---
 
-## Repos in scope
+## Deployment scope (generic / specific split)
 
-### oneafrikan (Scout / Jarvis stack)
+The generic agent carries no org/repo/Slack/cron specifics. Each machine that runs
+it provides one filled-in scope file in **its own infra repo** (never in the-grid,
+which is shared across machines). The contract template is
+`roles/gh-triage/deployment-scope.template.md`; the agent reads the scope in Step 0
+of its SKILL.md.
 
-| Repo | Live system | Default severity ceiling |
-|---|---|---|
-| `jarvis-core` | Scout OpenClaw runtime + all Jarvis containers | critical |
-| `jarvis-workspace` | Main Jarvis agent identity/memory | high |
-| `paperclip` | Governance/scheduler on Scout | high |
-| `jarvis-skill-factory` | Overnight skill loop | medium |
-| `jarvis-agent-factory` | Overnight agent loop | medium |
-| `the-grid` | Claude Code skill wiring | medium |
+| Deployment | Org | Scope file | Slack |
+|---|---|---|---|
+| Scout (Jarvis) | `oneafrikan` | `jarvis-core/config/gh-triage-scope.md` | off |
+| guide-server | `gkwilderness` | owned by guide-core | `#guide-backlog` |
 
-### gkwilderness (Guide server stack)
-
-| Repo | Live system | Default severity ceiling |
-|---|---|---|
-| `guide-compose` | Guide server Docker stack | critical |
-| `guide-core` | Guide server ops config (sessions, signals, prompts) | high |
-| `guide-workspace` | Guide main agent identity/memory | high |
-| `guide-paperclip` | Guide Paperclip scheduler | high |
-| `guide-skill-factory` | Guide skill loop | medium |
-| `guide-prompt-factory` | Guide prompt versioning | medium |
+Each scope file lists its repos with a live-system description + default severity
+ceiling (e.g. for Scout: `jarvis-core` → Scout OpenClaw runtime, ceiling critical;
+for guide-server: `guide-compose` → Guide Docker stack, ceiling critical). The
+agent injects the matching row into the classification prompt.
 
 ---
 
@@ -118,11 +117,15 @@ All comments open with:
 
 ## Slack ingestion
 
-- Channel: `guide-backlog` (`C0B588EN59U`)
+Conditional — only runs when the deployment scope sets Slack `enabled: true`
+(e.g. guide-server's `#guide-backlog`; Scout has it off).
+
+- Channel: named in the scope file (name + id)
 - Agent polls for new messages since last run
 - LLM filters each message: is this a bug report, feature request, or operational
-  problem? If yes → create GH issue in the appropriate `gkwilderness` repo with
-  the original Slack message verbatim in the body + channel reference
+  problem? If yes → create GH issue in the repo named by the scope's
+  `file-issues-in` rule, with the original Slack message verbatim in the body +
+  channel reference
 - Non-actionable chat is ignored silently
 - No Slack output — agent never writes back to Slack
 
@@ -150,7 +153,8 @@ mechanism that permits autonomous action on low/medium severity issues.
 | Decision | Rationale |
 |---|---|
 | Passive classifier only (Phase 1) | Build the labelling foundation before autonomous action. CC loops need a stable `ready-for-agent` queue to pick from. |
-| Main Jarvis agent, not dedicated | The main agent is the orchestrator. No new agent identity needed for a cron job. |
+| Host's main agent, not dedicated | Each machine's main OpenClaw agent is the orchestrator. No new agent identity needed for a cron job. |
+| Generic agent + per-machine scope | One composed artifact wired everywhere; scope injected by a per-machine file. Avoids a second hardcoded deployment and keeps machines' scope cleanly separated. |
 | OpenClaw cron, not GitHub Actions | No new Docker containers. No YAML in every repo. OpenClaw is already running. |
 | mattpocock label schema | Proven schema. `ready-for-agent` is exactly the CC loop pickup signal we need. |
 | Agent brief format (mattpocock) | Behavioral spec over procedural steps. Durable against codebase churn. |

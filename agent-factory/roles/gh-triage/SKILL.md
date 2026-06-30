@@ -1,63 +1,70 @@
 # Skill: gh-triage
 
-Autonomous GitHub issue triage across the Jarvis and Guide repo sets.
+Autonomous GitHub issue triage for the repo set your deployment scope defines.
 Runs on cron. Classifies severity, applies labels, writes agent briefs or
 triage notes. Does not implement fixes.
 
----
-
-## Cron schedule
-
-| Repo set | Schedule |
-|---|---|
-| Jarvis repos (`oneafrikan`) | Every 60 minutes |
-| Guide repos (`gkwilderness`) | Every 30 minutes |
-
-Each run: (1) ingest Slack → create GH issues, (2) triage open issues.
+This skill describes **how** to triage. **What** to triage — the GitHub org, the
+repos, the repo→live-system map, and whether Slack ingestion is on — is not baked
+in here. It is injected per machine via a deployment scope file (Step 0).
 
 ---
 
-## Repo → live system map
+## Step 0 — Load your deployment scope
 
-Use this context when classifying severity. Always inject the relevant row into
-the classification prompt.
+You have NO built-in knowledge of which org or repos to triage. Your invocation
+names a deployment scope file (an absolute path). Read it first — it is the single
+source of truth for this machine and defines:
 
-### Jarvis (oneafrikan)
+- **`org`** — the GitHub owner/org (e.g. the value used in `--repo <org>/<repo>`).
+- **Repos in scope** — the exact repo list. Triage ONLY these. Never infer or
+  reach for repos not listed.
+- **Repo → live-system map** — for each repo: the live system it backs, a default
+  severity ceiling, and notes. This is the context you inject into the
+  classification prompt (Step 3). Always know which live system a repo backs
+  before classifying it.
+- **Slack ingestion** — whether it is enabled, and if so the channel name + id and
+  the rule for which repo a new issue is filed in. If the scope does not enable
+  Slack, skip Step 1 entirely.
 
-| Repo | Live system | Notes |
-|---|---|---|
-| `jarvis-core` | Scout OpenClaw runtime + all Jarvis Docker containers | Config source of truth — changes affect everything running |
-| `jarvis-workspace` | Main Jarvis agent (identity, memory, soul) | OpenClaw reads this at boot |
-| `paperclip` | Governance/scheduler on Scout | Running Docker container |
-| `jarvis-skill-factory` | Overnight skill improvement loop | Offline job — no real-time user impact |
-| `jarvis-agent-factory` | Overnight agent definition loop | Offline job — no real-time user impact |
-| `the-grid` | Claude Code skill wiring on Scout | Affects CC sessions, not running services |
+Expected scope-file shape (the deployment fills in the values):
 
-### Guide (gkwilderness)
+```markdown
+org: <github-owner>
 
-| Repo | Live system | Notes |
-|---|---|---|
-| `guide-compose` | Guide server Docker stack (production) | Changes here affect all guide services |
-| `guide-core` | Guide server ops config — sessions, signals, prompts | Read by running OpenClaw instance |
-| `guide-workspace` | Guide main agent (identity, memory) | OpenClaw reads this at boot |
-| `guide-paperclip` | Guide Paperclip scheduler | Running Docker container |
-| `guide-skill-factory` | Guide skill improvement loop | Offline job |
-| `guide-prompt-factory` | Guide prompt versioning | Affects agent quality, not uptime |
+## Repos in scope
+| Repo | Live system | Severity ceiling | Notes |
+|---|---|---|---|
+| <repo> | <what it backs> | critical/high/medium/low | <notes> |
+
+## Slack ingestion
+enabled: true | false
+channel: <#name> (<CHANNEL_ID>)        # only if enabled
+file-issues-in: <rule for target repo> # only if enabled
+```
+
+If no scope file is provided, or it is empty/unreadable: STOP. Report the missing
+scope and do nothing else. Do not guess an org or repo list.
+
+The cron schedule (how often you run) is a property of the cron registration on
+the machine, not of this skill — you do not need to know it.
 
 ---
 
-## Step 1 — Slack ingestion
+## Step 1 — Slack ingestion (only if your scope enables it)
 
-Before the GitHub triage pass, poll `guide-backlog` (`C0B588EN59U`) for new
-messages since the last run timestamp.
+Skip this step entirely unless Step 0's scope sets Slack ingestion `enabled: true`.
+
+When enabled, before the GitHub triage pass, poll the channel named in your scope
+for new messages since the last run timestamp.
 
 For each new message:
 1. Pass the message text to the LLM with prompt: "Is this a bug report, feature
    request, or operational problem that should be tracked as a GitHub issue? Answer
    yes/no with one-line reason."
-2. If yes: create a GH issue in the appropriate `gkwilderness` repo. Body must
-   include the original Slack message verbatim and a `> Source: Slack #guide-backlog`
-   footer.
+2. If yes: create a GH issue in the repo named by your scope's `file-issues-in`
+   rule. Body must include the original Slack message verbatim and a
+   `> Source: Slack <channel>` footer.
 3. If no: skip silently.
 4. Update last-processed timestamp.
 
