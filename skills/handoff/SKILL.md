@@ -10,10 +10,11 @@ Write a handoff document summarising the current conversation so a fresh agent c
 
 **Template:** load `handoff-template.md` from this skill's base directory and fill it in. Do not invent a different structure.
 
-**Filename:** `YYYY-MM-DD-<machine>-<slug>.md` where:
+**Filename:** `YYYY-MM-DD-<machine>-<slug>-handoff.md` where:
 - `YYYY-MM-DD` is today's date
 - `<machine>` is the output of `hostname -s` (e.g. `wilderness`, `guide-server`, `forge`, `scout`)
 - `<slug>` is a 2-4 word kebab-case summary of the session topic (e.g. `machine-overlays`, `agent-factory-roster`)
+- `-handoff` is appended to make the file self documenting
 
 **Save location:** follow the Document locations reference below. Read the file before writing (create the directory if it doesn't exist).
 
@@ -27,11 +28,8 @@ Write a handoff document summarising the current conversation so a fresh agent c
 ## Session context file (Gareth's SOP)
 
 Also write a context file using today's actual date.
-
 **Template:** load `context-template.md` from this skill's base directory and fill it in.
-
 **Filename:** `YYYY-MM-DD-<machine>-<slug>-context.md` — same date, machine, and slug as the handoff file, with `-context` appended.
-
 **Must include:** what was investigated and why, every decision and reasoning, field conventions, known bugs, key findings, open questions, immediate next actions.
 
 ---
@@ -51,5 +49,4 @@ Determine save location by matching the current working directory path:
 ---
 
 ## After writing
-
 Commit both files with the session's other changes if the project is a git repo.

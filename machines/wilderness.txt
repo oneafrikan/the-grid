@@ -27,14 +27,8 @@ anthropic/webapp-testing
 
 # --- gstack — OpenClaw + gbrain tools ---
 gstack/benchmark-models
-gstack/gstack-openclaw-ceo-review
-gstack/gstack-openclaw-investigate
-gstack/gstack-openclaw-office-hours
-gstack/gstack-openclaw-retro
 gstack/gstack-upgrade
 gstack/open-gstack-browser
-gstack/setup-gbrain
-gstack/sync-gbrain
 
 # --- jeffallan — systems, data/ML, and infra pack ---
 # Work machine: no LAMP/web stack (those live on personal machines forge + scout).
