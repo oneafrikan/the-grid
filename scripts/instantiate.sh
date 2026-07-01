@@ -185,7 +185,13 @@ detect_repo() {
 # ---------------------------------------------------------------------------
 instantiate_issue_loop() {
   local pattern_dir="$PATTERNS_DIR/issue-loop"
-  local hooks_dir="$TARGET_DIR/.claude/hooks"
+  # loop/ is a TRACKED top-level folder, not .claude/ — a target repo's
+  # .claude/ is commonly gitignored (Claude Code local settings convention),
+  # which would make the automation vanish on the next clone/move. Only the
+  # genuinely machine-specific wiring (.claude/settings.json's absolute hook
+  # path) lives under .claude/; setup.sh regenerates that on demand.
+  local loop_dir="$TARGET_DIR/loop"
+  local hooks_dir="$loop_dir/hooks"
   local settings_file="$TARGET_DIR/.claude/settings.json"
 
   mkdir -p "$hooks_dir"
@@ -215,27 +221,33 @@ instantiate_issue_loop() {
     "$pattern_dir/hooks/post-commit-review.sh")
 
   write_if_changed "$hooks_dir/post-commit-review.sh" "$hook_content"
-  chmod +x "$hooks_dir/post-commit-review.sh"
-
-  merge_hook "$settings_file" "PostToolUse" "Bash" \
-    "$TARGET_DIR/.claude/hooks/post-commit-review.sh"
-  echo "  wired:     PostToolUse hook in settings.json"
 
   # -------------------------------------------------------------------------
-  # Module 2: loop prompt
+  # Module 2: loop prompt + machine wiring
   # -------------------------------------------------------------------------
-  section "Module 2: loop prompt"
+  section "Module 2: loop prompt + wiring"
 
-  local loop_content
-  loop_content=$(sed \
+  # loop-prompt.template.md keeps {{WORKING_DIR}} as the only unfilled
+  # placeholder — the other four don't vary by machine, so bake them in now.
+  local prompt_content
+  prompt_content=$(sed \
     -e "s|{{GH_REPO}}|$GH_REPO|g" \
-    -e "s|{{WORKING_DIR}}|$TARGET_DIR|g" \
     -e "s|{{PROJECT_CONTEXT}}|$PROJECT_CONTEXT|g" \
     -e "s|{{VERIFY_CMD}}|$VERIFY_CMD|g" \
     -e "s|{{ISSUE_LABEL}}|$ISSUE_LABEL|g" \
-    "$pattern_dir/loop-prompt.md")
+    "$pattern_dir/loop-prompt.template.md")
 
-  write_if_changed "$TARGET_DIR/.claude/loop-prompt.md" "$loop_content"
+  write_if_changed "$loop_dir/loop-prompt.template.md" "$prompt_content"
+  write_if_changed "$loop_dir/setup.sh" "$(cat "$pattern_dir/setup.sh")"
+  write_if_changed "$loop_dir/.gitignore" "$(cat "$pattern_dir/.gitignore")"
+  chmod +x "$loop_dir/setup.sh"
+
+  # setup.sh fills {{WORKING_DIR}} -> loop/loop-prompt.md, makes the review
+  # hook executable, and merges its PostToolUse wiring into
+  # .claude/settings.json. This is the SAME script a future clone/move
+  # re-runs by hand, so instantiate-time and regenerate-time wiring never
+  # drift apart.
+  bash "$loop_dir/setup.sh"
 
   # -------------------------------------------------------------------------
   # Work profile: guard hook + worktree helper
@@ -243,7 +255,12 @@ instantiate_issue_loop() {
   if [[ "$PROFILE" == "work" ]]; then
     section "Work profile: guard hook"
 
-    # Guard hook — blocks direct push to main/master.
+    # Guard hook — blocks direct push to main/master. Lives in loop/hooks/
+    # (tracked) for the same reason the review hook does — see the loop_dir
+    # comment above. Its .claude/settings.json wiring is still machine-local
+    # and, unlike the review hook, isn't re-wired by loop/setup.sh (guard-main-push
+    # isn't part of the issue-loop pattern proper — see TODO below) — re-run
+    # this script after a clone/move on a "work" profile repo to restore it.
     # TODO: extract to patterns/guard-main-push/ when reused beyond issue-loop.
     local guard_content
     guard_content=$(cat <<'GUARD'
@@ -254,7 +271,7 @@ INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
 if echo "$COMMAND" | grep -q 'git push' && echo "$COMMAND" | grep -qE '\b(main|master)\b'; then
   echo "BLOCKED: Direct push to main/master is forbidden on this machine." >&2
-  echo "Use: bash .claude/hooks/new-agent-worktree.sh <branch-name>" >&2
+  echo "Use: bash loop/hooks/new-agent-worktree.sh <branch-name>" >&2
   exit 2
 fi
 GUARD
@@ -263,7 +280,7 @@ GUARD
     chmod +x "$hooks_dir/guard-main-push.sh"
 
     merge_hook "$settings_file" "PreToolUse" "Bash" \
-      "$TARGET_DIR/.claude/hooks/guard-main-push.sh"
+      "$TARGET_DIR/loop/hooks/guard-main-push.sh"
     echo "  wired:     PreToolUse guard in settings.json"
 
     # Smoke-test: verify the guard actually blocks (Rule 5 — trust the output).
@@ -280,7 +297,7 @@ GUARD
     worktree_content=$(cat <<WORKTREE
 #!/usr/bin/env bash
 # new-agent-worktree.sh — create a worktree off origin/main for an agent branch.
-# Usage: bash .claude/hooks/new-agent-worktree.sh <branch-name>
+# Usage: bash loop/hooks/new-agent-worktree.sh <branch-name>
 set -euo pipefail
 BRANCH="\${1:?Usage: new-agent-worktree.sh <branch-name>}"
 REPO_ROOT="\$(git rev-parse --show-toplevel)"
@@ -324,7 +341,7 @@ WORKTREE
         <string>/bin/bash</string>
         <string>-l</string>
         <string>-c</string>
-        <string>cd ${TARGET_DIR} &amp;&amp; claude --dangerously-skip-permissions -p "\$(cat .claude/loop-prompt.md)"</string>
+        <string>cd ${TARGET_DIR} &amp;&amp; claude --dangerously-skip-permissions -p "\$(cat loop/loop-prompt.md)"</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>
@@ -389,7 +406,7 @@ PLIST
         profile_rules=$(cat <<'RULES'
 - Agent MUST NOT push to `main` directly — the guard hook enforces this with exit 2.
 - Flow: implement → worktree branch → PR → human merges.
-- Start a branch with: `bash .claude/hooks/new-agent-worktree.sh <branch-name>`
+- Start a branch with: `bash loop/hooks/new-agent-worktree.sh <branch-name>`
 RULES
 )
         ;;
@@ -409,12 +426,16 @@ Machine profile: **${PROFILE}**
 
 ## What's wired
 
-- **Post-commit review hook** (\`.claude/hooks/post-commit-review.sh\`): PostToolUse
+- **Post-commit review hook** (\`loop/hooks/post-commit-review.sh\`): PostToolUse
   on Bash — fires after every \`git commit\`, queues an async \`claude -p\` review,
   posts it as a comment on the issue referenced in the commit message (\`#N\`).
-- **Loop prompt** (\`.claude/loop-prompt.md\`): drives the autonomous issue-loop.
+- **Loop prompt** (\`loop/loop-prompt.md\`): drives the autonomous issue-loop.
   Picks the lowest-numbered \`${ISSUE_LABEL}\`-labelled issue, implements, verifies,
   commits, closes, and reschedules for the next.
+
+\`loop/\` is a tracked folder — everything needed to regenerate this wiring
+survives a clone or repo move. Only \`.claude/settings.json\` (machine-local,
+gitignored by convention) is regenerated on demand, via \`bash loop/setup.sh\`.
 
 ## Profile rules
 
@@ -423,7 +444,13 @@ ${profile_rules}
 ## Running the loop
 
 \`\`\`
-/loop \$(cat .claude/loop-prompt.md)
+/loop \$(cat loop/loop-prompt.md)
+\`\`\`
+
+## After cloning or moving this repo
+
+\`\`\`
+bash loop/setup.sh
 \`\`\`
 
 ## Issue hygiene
@@ -442,7 +469,7 @@ ${VERIFY_CMD:+- Run: \`${VERIFY_CMD}\`}
 ## Forbidden
 
 - Force push (\`--force\`)
-- Modify \`.claude/settings.json\` or hooks without human review
+- Modify \`.claude/settings.json\` or \`loop/\` without human review
 - Touch files outside \`${TARGET_DIR}\`
 CLAUDEMD
 )
@@ -464,12 +491,12 @@ CLAUDEMD
   echo ""
   echo "  Start the loop (in Claude Code inside $TARGET_DIR):"
   echo ""
-  echo "    /loop \$(cat .claude/loop-prompt.md)"
+  echo "    /loop \$(cat loop/loop-prompt.md)"
   echo ""
   if [[ "$PROFILE" == "personal" || "$PROFILE" == "work" ]]; then
     echo "  Or schedule via the cloud:"
     echo ""
-    echo "    /schedule \"nightly at 2am, in $TARGET_DIR: /loop \$(cat .claude/loop-prompt.md)\""
+    echo "    /schedule \"nightly at 2am, in $TARGET_DIR: /loop \$(cat loop/loop-prompt.md)\""
     echo ""
   fi
 }

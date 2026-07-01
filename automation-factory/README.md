@@ -13,8 +13,12 @@ what the-grid owns; the instance lives in the project it serves.
 
 This is the distinction from `skills/`: a skill is **wired** (symlinked) live into
 `~/.claude/skills/`. An automation pattern is **instantiated** (cut + filled) into
-a target repo's `.claude/`. Different deployment, same idea — the-grid is the hub
-where the reusable asset is managed.
+a target repo's top-level, tracked `loop/` folder — not `.claude/`, which is
+commonly gitignored by Claude Code convention and wouldn't survive a clone or
+repo move. Only the genuinely machine-specific wiring (an absolute hook path
+baked into `.claude/settings.json`) lives under `.claude/`, and it's regenerated
+on demand rather than committed. Different deployment, same idea — the-grid is
+the hub where the reusable asset is managed.
 
 ## Patterns
 
@@ -26,21 +30,27 @@ where the reusable asset is managed.
 
 ```
 patterns/<name>/
-  README.md              # what it is, how it composes, how to instantiate, why-each-decision
-  loop-prompt.md         # the agent-facing prompt(s), with {{PLACEHOLDERS}}
-  hooks/*.sh             # any Claude Code hooks the pattern needs
-  settings.snippet.json  # how to wire the hooks into a target repo's .claude/settings.json
+  README.md                  # what it is, how it composes, how to instantiate, why-each-decision
+  loop-prompt.template.md    # the agent-facing prompt(s), with {{PLACEHOLDERS}}
+  hooks/*.sh                 # any Claude Code hooks the pattern needs
+  setup.sh                   # regenerates machine-specific wiring in a target repo (idempotent)
+  .gitignore                 # excludes the generated, path-baked prompt instance
 ```
 
 Patterns use `{{PLACEHOLDERS}}` for everything project-specific (repo, working dir,
-project context, verify command, labels) so one cut serves many suits.
+project context, verify command, labels) so one cut serves many suits. Before
+adding a new pattern module, check whether its destination directory is
+gitignored in target repos (`git check-ignore -v <path>`) — see
+`patterns/issue-loop/README.md` for the reasoning and the tracked-`loop/`-folder
+convention this led to.
 
 ## Roadmap
 
-- **`instantiate.sh`** ([issue #15](https://github.com/oneafrikan/the-grid/issues/15)) —
-  machine-profiled (personal / work / mac-mini) cut of a pattern into a target repo:
-  copy + placeholder-fill + settings merge, plus a guard hook + worktree/PR sandboxing
-  (work), and launchd vs cloud scheduling.
+- **`instantiate.sh`** ([issue #15](https://github.com/oneafrikan/the-grid/issues/15),
+  `scripts/instantiate.sh`) — machine-profiled (personal / work / mac-mini) cut of
+  a pattern into a target repo: copy into `loop/` + placeholder-fill + settings
+  wiring, plus a guard hook + worktree/PR sandboxing (work), and launchd vs cloud
+  scheduling. Ships today for `issue-loop`.
 - **`AUTOMATIONS.md`** — a generated index of patterns, parallel to `SKILLS.md`.
 - **More patterns** — issue-loop is the first. Scheduled jobs, watch-and-react
   hooks, release automations, and agent-team orchestrations follow.
