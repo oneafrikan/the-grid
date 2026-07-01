@@ -52,5 +52,5 @@ mattpocock/obsidian-vault
 mattpocock/prototype
 
 # --- composed projects ---
-project:full-team
+project:grid
 project:gh-triage

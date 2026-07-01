@@ -97,5 +97,5 @@ delivery targets 1 (OpenClaw) and 3 (Paperclip-autonomous).
 
 1. Add the agreed new roles via the sub-agent port pipeline (off tech-lead/backend-dev exemplars).
 2. Populate `agent-factory/skills/` per §3 using the chosen mechanism.
-3. Update `examples/full-team.yaml` (+ new roles, + per-role `skills:`), re-emit, re-wire.
+3. Update `examples/grid.yaml` (+ new roles, + per-role `skills:`), re-emit, re-wire.
 4. Update README/TODO.

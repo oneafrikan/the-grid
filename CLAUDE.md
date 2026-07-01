@@ -131,7 +131,7 @@ All 36 tests must stay green. Tests use temp dirs — they never touch the real 
   output — orchestrator skills into `SKILLS_DIR`, specialist subagents into
   `AGENTS_DIR`. Gated per machine by `project:<name>` manifest entries; with no
   `project:` entry anywhere, every composed project wires (legacy). The baseline
-  currently pins `project:full-team` (see `agent-factory/` and issue #1).
+  currently pins `project:grid` (see `agent-factory/` and issue #1).
 
 ## agent-factory (composed agents)
 
@@ -151,7 +151,7 @@ that list and injects it at the `{{ROSTER_TABLE}}` token in the role's `AGENTS.m
 (`owns` text = `role.yaml owns:` override, else the summary's first sentence). Validation
 is symmetric and loud: a token with no `delegates_to` (or vice-versa), or a delegate not
 on the team, is a hard compose error — so a roster can never silently drift out of sync
-with the team. full-team topology: `ceo → tech-lead, product-manager, growth-hacker`;
+with the team. grid topology: `ceo → tech-lead, product-manager, growth-hacker`;
 `tech-lead → eng + data/research`; `growth-hacker → the marketing arm` (a player-coach
 orchestrator).
 

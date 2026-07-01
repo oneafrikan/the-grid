@@ -13,7 +13,7 @@
 #
 # Usage:
 #   bash scripts/bootstrap.sh                 # submodules + wire skills
-#   bash scripts/bootstrap.sh --with-agents   # also compose + wire the full-team agents
+#   bash scripts/bootstrap.sh --with-agents   # also compose + wire the grid team agents
 #
 # Env (same contract as wire.sh):
 #   GRID_DIR    — root of the-grid repo   (default: parent of scripts/)
@@ -51,14 +51,14 @@ bash "$GRID_DIR/scripts/wire.sh"
 # 3. Optionally build the composed agent team, then re-wire so the freshly
 #    compiled orchestrator skills + specialist subagents go live.
 if [[ "$WITH_AGENTS" == "1" ]]; then
-  echo "==> [3/3] Composing agent-factory full-team + re-wiring"
+  echo "==> [3/3] Composing agent-factory grid team + re-wiring"
   cd "$GRID_DIR/agent-factory"
   # Create the venv on first run; reuse it afterwards (idempotent).
   if [[ ! -x .venv/bin/python ]]; then
     python3 -m venv .venv
     .venv/bin/pip install -q -r requirements.txt
   fi
-  .venv/bin/python compose.py examples/full-team.yaml --target claude-code
+  .venv/bin/python compose.py examples/grid.yaml --target claude-code
   cd "$GRID_DIR"
   bash "$GRID_DIR/scripts/wire.sh"
 else

@@ -1,4 +1,4 @@
-# full-team.yaml — the complete composed team, all 20 ported roles.
+# grid.yaml — the complete composed team, all 20 ported roles.
 # Orchestrators (ceo-orchestrator, tech-lead, growth-hacker) emit as Claude Code
 # skills; the 17 specialists emit as CC subagents. Models come from each
 # role.yaml default unless overridden here.
@@ -9,8 +9,8 @@
 #   tech-lead     → engineering + data/research specialists
 #   growth-hacker → the marketing arm (player-coach lead)
 # delegates_to entries must name a role present in this team.
-project: full-team
-slug: full-team
+project: grid
+slug: grid
 description: Full composed team — 3 orchestrators + 17 specialists, all 5-file model.
 paperclip: false
 

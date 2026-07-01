@@ -19,7 +19,7 @@ bash ~/.the-grid/scripts/wire.sh
 # 4. Build the composed agent team and wire agents into Claude
 cd ~/.the-grid/agent-factory
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python compose.py examples/full-team.yaml --target claude-code
+.venv/bin/python compose.py examples/grid.yaml --target claude-code
 cd ~/.the-grid && bash scripts/wire.sh
 ```
 
@@ -41,7 +41,7 @@ git submodule update --init --recursive     # 2. sync submodule pointers
 #    config), recompose — projects/ is git-ignored, so a pull alone does NOT
 #    refresh the composed agents/rosters on this machine:
 cd agent-factory
-.venv/bin/python compose.py examples/full-team.yaml --target claude-code
+.venv/bin/python compose.py examples/grid.yaml --target claude-code
 cd ..
 
 bash scripts/wire.sh                         # 4. re-wire skills + agents, regenerate SKILLS.md

@@ -28,7 +28,7 @@
 # NO project: entry exists anywhere, ALL composed projects are wired.
 
 # --- composed agent-factory projects ---
-project:full-team
+project:grid
 
 # --- anthropic — universal comms + meta tools (9 skills) ---
 # Desktop/design tools (canvas-design, frontend-design, etc.) live in machine overlays.

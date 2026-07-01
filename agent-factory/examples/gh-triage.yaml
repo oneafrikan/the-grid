@@ -8,7 +8,7 @@
 # See docs/gh-triage-spec.md for full design rationale.
 
 project: gh-triage
-slug: full-team
+slug: grid
 description: Autonomous GitHub issue triage — severity classification, mattpocock labels, agent briefs.
 paperclip: false
 
