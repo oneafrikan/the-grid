@@ -13,7 +13,7 @@ role  ×  stack  ×  skills   ──compose.py──▶   a ready-to-run agent t
 - **skills** — bolt-on capabilities pulled from the ecosystem (Paperclip, php,
   mysql…). Lives in `skills/<skill>/`.
 
-A **compose config** (see `examples/full-team.yaml`) names a project and lists
+A **compose config** (see `examples/grid.yaml`) names a project and lists
 agents, each as `role + stacks[] + skills[] + model`. `compose.py` reads it and
 emits one folder per agent under `projects/<name>/`, rendered to the **live
 OpenClaw 5-file identity model** — `SOUL.md` (how it behaves), `IDENTITY.md` (who
@@ -69,12 +69,12 @@ one 5-file source, a different artifact shape per `--target`:
 
 ```bash
 # OpenClaw target (default): 5 identity files + agents.yaml per agent
-.venv/bin/python compose.py examples/full-team.yaml
-.venv/bin/python compose.py examples/full-team.yaml --dry-run     # report only
+.venv/bin/python compose.py examples/grid.yaml
+.venv/bin/python compose.py examples/grid.yaml --dry-run     # report only
 
 # Claude Code target: orchestrators -> CC skills, specialists -> CC subagents
-.venv/bin/python compose.py examples/full-team.yaml --target claude-code
-.venv/bin/python compose.py examples/full-team.yaml --target claude-code --dry-run
+.venv/bin/python compose.py examples/grid.yaml --target claude-code
+.venv/bin/python compose.py examples/grid.yaml --target claude-code --dry-run
 ```
 
 Output is regenerable and idempotent: re-running with an unchanged config
@@ -160,7 +160,7 @@ with the team:
   in the config (use `delegates_to: []` for a solo/demo team), and vice-versa;
 - every name in `delegates_to` must be a role present on the same team.
 
-Any violation is a hard `compose.py` error. **full-team topology:**
+Any violation is a hard `compose.py` error. **grid topology:**
 
 - `ceo-orchestrator` → `tech-lead`, `product-manager`, `growth-hacker` (the three leads)
 - `tech-lead` → engineering + data/research specialists
@@ -169,7 +169,7 @@ Any violation is a hard `compose.py` error. **full-team topology:**
 ## Status
 
 **Claude Code delivery target is done and live.** All 20 roles are ported to the
-5-file model (`examples/full-team.yaml`): 3 orchestrators (`ceo-orchestrator`,
+5-file model (`examples/grid.yaml`): 3 orchestrators (`ceo-orchestrator`,
 `tech-lead`, `growth-hacker`) + 17 specialists (product-manager, project-manager,
 backend-dev, frontend-dev, designer, qa-engineer, security-reviewer, devops,
 data-engineer, data-analyst, data-scientist, researcher, copywriter, ad-copy, seo,
