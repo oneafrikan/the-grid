@@ -6,8 +6,9 @@ glue** — the loop commits with `#N`, which is exactly what the hook watches fo
 
 | Module | File | Role |
 |--------|------|------|
-| **1 — review hook** | `hooks/post-commit-review.sh` + `settings.snippet.json` | PostToolUse(Bash) hook: on every `git commit`, runs a backgrounded `claude -p` review of the diff and posts it to issue `#N`. |
-| **2 — loop prompt** | `loop-prompt.md` | A `/loop` prompt: pick an eligible issue → implement → **verify** → commit (`#N`) → push → close → repeat; self-paced, stops when the backlog is clear. |
+| **1 — review hook** | `hooks/post-commit-review.sh` | PostToolUse(Bash) hook: on every `git commit`, runs a backgrounded `claude -p` review of the diff and posts it to issue `#N`. |
+| **2 — loop prompt** | `loop-prompt.template.md` | A `/loop` prompt: pick an eligible issue → implement → **verify** → commit (`#N`) → push → close → repeat; self-paced, stops when the backlog is clear. |
+| **wiring** | `setup.sh` + `.gitignore` | Regenerates the prompt instance and merges the hook into `.claude/settings.json` for the current machine. Idempotent — safe to re-run after a clone or repo move. |
 
 **The composition:** Module 2's `git commit -m "… #N"` triggers Module 1. You get
 implement-and-review on every iteration without wiring the two together.
@@ -16,15 +17,48 @@ implement-and-review on every iteration without wiring the two together.
 
 This is a *pattern* (the tailor's cut), not a running automation. To make a suit:
 
-1. **Copy the hook** into the target repo:
-   `cp hooks/post-commit-review.sh <target>/.claude/hooks/ && chmod +x <target>/.claude/hooks/post-commit-review.sh`
-2. **Fill the hook placeholders** (`{{GH_REPO}}`, `{{PROJECT_CONTEXT}}`, `{{REVIEW_FOCUS}}`).
-3. **Wire the hook** — merge `settings.snippet.json` into `<target>/.claude/settings.json`, replacing `{{WORKING_DIR}}`.
-4. **Add an `agent-ready` label** in the target repo and tag the issues you're happy to automate.
-5. **Fill `loop-prompt.md`** placeholders (`{{GH_REPO}}`, `{{WORKING_DIR}}`, `{{PROJECT_CONTEXT}}`, `{{VERIFY_CMD}}`, `{{ISSUE_LABEL}}`).
-6. In Claude Code, run `/loop <the filled prompt>`.
+1. **Copy the whole pattern into a tracked `loop/` folder** in the target repo:
+   `mkdir -p <target>/loop && cp -r hooks loop-prompt.template.md setup.sh .gitignore <target>/loop/`
+   Do this even if `<target>/.claude/` is gitignored (a common Claude Code
+   convention — see "Check gitignore before instantiating" below). `loop/` sits
+   at the target repo's top level, outside `.claude/`, so it's tracked regardless
+   of that repo's `.claude/` policy.
+2. **Fill the hook placeholders** in `<target>/loop/hooks/post-commit-review.sh`:
+   `{{GH_REPO}}`, `{{PROJECT_CONTEXT}}`, `{{REVIEW_FOCUS}}`.
+3. **Fill `loop-prompt.template.md` placeholders** — all except `{{WORKING_DIR}}`:
+   `{{GH_REPO}}`, `{{PROJECT_CONTEXT}}`, `{{VERIFY_CMD}}`, `{{ISSUE_LABEL}}`. These
+   don't vary by machine, so bake them in now; leave `{{WORKING_DIR}}` for
+   `setup.sh` to fill per machine.
+4. **Add an `agent-ready` label** in the target repo and tag the issues you're
+   happy to automate.
+5. **Run `bash loop/setup.sh`** — regenerates `loop/loop-prompt.md` with this
+   machine's absolute path baked in, makes the hook executable, and merges it
+   into `<target>/.claude/settings.json` (creates the file if absent). Re-run
+   this any time the repo clones or moves to a new machine.
+6. **Write a short `loop/README.md`** in the target documenting the layout (the
+   module table above is a good starting point) and noting that
+   `bash loop/setup.sh` re-wires everything after a clone or move.
+7. In Claude Code, run `/loop <the contents of loop/loop-prompt.md>`.
 
-> v2 will replace steps 1-5 with `automation-factory/instantiate.sh` (see Roadmap).
+> v2's `instantiate.sh` (see Roadmap) will collapse steps 1-4 and 6 into one
+> command; step 5 (`setup.sh`) already ships as part of this pattern today.
+
+## Check gitignore before instantiating
+
+Before dropping any generated or automation file into a target repo, check
+whether its destination directory is gitignored there:
+
+    git check-ignore -v <path>
+
+`.claude/` is commonly gitignored — Claude Code local settings are frequently
+excluded by convention. Copy a hook straight into `.claude/hooks/`, or bake a
+value into `.claude/settings.json`, and it silently vanishes on the next clone
+or repo move — the automation doesn't survive. Default instead to a top-level
+**tracked** folder (`loop/`) for anything portable (hook script, prompt
+template, setup script), and regenerate whatever's genuinely machine-specific
+(absolute paths, credentials) with a small idempotent setup script rather than
+hand-baking it into a committed file. `.claude/settings.json` itself can stay
+gitignored — `setup.sh` re-derives its hook-wiring on demand, so nothing is lost.
 
 ## Why each decision was made
 
@@ -52,11 +86,24 @@ This is a *pattern* (the tailor's cut), not a running automation. To make a suit
   done, in which commit, in one line.
 - **No fixed interval.** The loop self-paces via `ScheduleWakeup` — fast issues,
   short gaps; slow issues, longer. Beats a fixed poll that wastes cycles.
+- **Portable content lives in a tracked `loop/` folder, not `.claude/`.** The
+  automation must survive a clone or a repo move (e.g. laptop → production
+  server) — anything needed to regenerate it (hook script, prompt template,
+  setup script) goes in a tracked folder. Only genuinely machine-specific wiring
+  (absolute paths baked into `.claude/settings.json`) gets regenerated on
+  demand by `setup.sh`, never hand-baked into a committed file. Discovered when
+  instantiating into `gkwilderness/keyword-universe`, whose `.gitignore` has a
+  blanket `.claude/` entry — a common convention that would otherwise have
+  made the whole automation invisible to git.
 
 ## Roadmap (v2)
 
 - **`instantiate.sh`** — one command to cut this pattern into a target repo
-  (copy + placeholder-fill + settings merge + label creation).
+  (copy into `loop/` + placeholder-fill + label creation). `setup.sh` already
+  ships today and covers the machine-specific regeneration half of this (was
+  previously the "settings merge" step) — v2 only needs to automate the
+  one-time copy/fill/label steps around it, folding part of this roadmap item
+  forward now.
 - **PR mode** — `{{INTEGRATION}}=pr`: work on a branch, open a PR (review fires on
   the PR), optional auto-merge when green. Safer than committing to `main`.
 - **Actionable review** — next iteration reads the prior auto-review and fixes any

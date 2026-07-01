@@ -72,9 +72,9 @@ open a PR, link it back to the issue.
 ### The execution pattern: `issue-loop`
 
 `automation-factory/patterns/issue-loop/` already has the generic pattern:
-- `loop-prompt.md` — the `/loop` prompt (Module 2)
+- `loop-prompt.template.md` — the `/loop` prompt (Module 2)
 - `hooks/post-commit-review.sh` — auto-review on every commit (Module 1)
-- `settings.snippet.json` — how to wire the hook
+- `setup.sh` — regenerates the machine-specific wiring in a target repo's tracked `loop/` folder
 
 The loop prompt picks the lowest-numbered `{{ISSUE_LABEL}}` issue, reads its body
 (the Agent Brief), implements, verifies, commits `#N`, pushes, closes, repeats.
@@ -98,16 +98,17 @@ should not share a single loop instance.
 Suggested starting repo: **`guide-core`** — lowest blast radius, clearest
 acceptance criteria, already has issue #3 (`ready-for-agent`).
 
-To instantiate (manual until `instantiate.sh` exists):
-1. Copy `patterns/issue-loop/hooks/post-commit-review.sh` into `<repo>/.claude/hooks/`
-2. Fill `{{GH_REPO}}`, `{{PROJECT_CONTEXT}}`, `{{REVIEW_FOCUS}}`
-3. Merge `settings.snippet.json` into `<repo>/.claude/settings.json` (fill `{{WORKING_DIR}}`)
-4. In Claude Code at `<repo>`, run `/loop` with `loop-prompt.md` filled:
-   - `{{GH_REPO}}` → `gkwilderness/<repo>`
-   - `{{WORKING_DIR}}` → `/srv/<working-dir>`
-   - `{{PROJECT_CONTEXT}}` → one line about the repo
-   - `{{VERIFY_CMD}}` → test/lint command, or blank
-   - `{{ISSUE_LABEL}}` → `ready-for-agent`
+To instantiate:
+
+```
+bash scripts/instantiate.sh issue-loop <repo> --profile <profile> \
+  --label ready-for-agent [--verify-cmd <cmd>] [--project-context <text>]
+```
+
+This cuts `patterns/issue-loop/` into `<repo>/loop/` (tracked — survives a clone
+or move to `/srv/`), wires `.claude/settings.json`, and creates the
+`ready-for-agent` label if it doesn't already exist. See
+`patterns/issue-loop/README.md` for what gets instantiated and why.
 
 ### What changes when refactoring existing loops
 

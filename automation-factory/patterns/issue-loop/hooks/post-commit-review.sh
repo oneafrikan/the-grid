@@ -13,7 +13,8 @@
 #   {{REVIEW_FOCUS}}     what the reviewer should prioritise (e.g. "correctness,
 #                        browser compatibility, game UX")
 #
-# Wire it via settings.snippet.json (PostToolUse → Bash → this script's abs path).
+# Wired by ../setup.sh (PostToolUse → Bash → this script's abs path), merged into
+# the target repo's .claude/settings.json.
 # Requires: jq, gh (authenticated), claude CLI.
 
 set -euo pipefail
