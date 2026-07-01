@@ -159,6 +159,30 @@ orchestrator).
 > machine picks up roster/topology changes only after `git pull` **then re-running
 > `compose.py`** (BOOTSTRAP step 4) and `wire.sh` — pulling alone is not enough.
 
+## Learnings
+
+Durable lessons mined from project history — full context and sources in
+`LEARNINGS.md` (generated/maintained by the `mine-learnings` skill).
+
+- Scripts whose output is committed/diffed across machines (like `catalog.sh`)
+  must pin locale (`LC_ALL=C`) and compute counts from a controlled pre-pass,
+  not a raw `find`/`wc` sweep — see LEARNINGS.md ("Cross-machine scripts must
+  pin locale...").
+- Skills that write files from multiple machines (like `handoff`) must scope
+  filenames by hostname and verify target directory names rather than assume
+  them — see LEARNINGS.md ("Handoff output paths...").
+- Library-tier submodules churn independently and can inflate curated counts;
+  keep headline skill totals derived only from wired/root-owned skills, and
+  don't casually `--remote` update noisy library repos — see LEARNINGS.md
+  ("Library submodules can churn...").
+- When writing role/`SKILL.md` instructions for a rule that must never be
+  violated (e.g. gh-triage skip logic), state it as an explicit imperative
+  block — don't rely on step ordering to imply it — see LEARNINGS.md ("Agent
+  instructions that must never be skipped...").
+- Don't write bash-style unquoted-`$var` word-splitting in ad-hoc shell
+  commands — Gareth's machines may run zsh, which doesn't word-split by
+  default — see LEARNINGS.md ("zsh doesn't word-split...").
+
 ## About
 
 the-grid is Gareth's brainchild — a personal, evolving system for organising and
