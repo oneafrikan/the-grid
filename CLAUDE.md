@@ -159,6 +159,21 @@ orchestrator).
 > machine picks up roster/topology changes only after `git pull` **then re-running
 > `compose.py`** (BOOTSTRAP step 4) and `wire.sh` — pulling alone is not enough.
 
+## project-factory (project bootstrapping)
+
+`project-factory/` scaffolds whole new projects from a template — a different job
+from `skills/` (wired), `agent-factory/` (composes personas), and
+`automation-factory/` (cuts a pattern into an existing repo's `.claude/`-adjacent
+`loop/`). A `project-factory` template is standalone: no logic of its own, doesn't
+run, doesn't depend on the-grid once cut. `scripts/cut-project.sh <template>
+<target-dir>` either **seeds** a brand-new project (empty target) or **retrofits**
+an existing one (non-empty target) — same script, same rule either way: never
+overwrite a file that already exists and differs from the template; anything
+skipped is reported for manual review. Composition (which `agent-factory`
+persona, which skills, which `automation-factory` pattern) happens *after*
+seeding, as a normal step in the resulting repo — `project-factory` itself stays
+out of that decision. See `project-factory/README.md`.
+
 ## Learnings
 
 Durable lessons mined from project history — full context and sources in
