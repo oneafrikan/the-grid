@@ -25,6 +25,16 @@ in other worktrees get their own schema and port automatically — this is what
 prevents them from clashing. Read `DB_NAME` and `APP_PORT` from `.env.local`,
 never hardcode them.
 
+## Autonomous loop
+
+This repo pairs with automation-factory's `issue-loop` pattern (see
+`prompts/autonomous-coding-loop.template.md`) — its pre-flight step is
+`bash scripts/worktree-setup.sh` above, and its `{{VERIFY_CMD}}` should be:
+
+```
+composer validate && php -l $(git diff --name-only -- '*.php') && vendor/bin/phpunit
+```
+
 ## Other context files
 
 - `CONTEXT.md` — domain glossary and architecture decisions.

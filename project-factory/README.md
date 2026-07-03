@@ -9,15 +9,35 @@ automation patterns into an existing repo).
 
 A `project-factory` template is a project **seed**: a standalone, self-contained
 directory tree with no logic of its own — it doesn't run, wire into the-grid, or
-depend on being inside `~/.the-grid/`. `cut-project.sh` copies a template into a
-target directory to either:
+depend on being inside `~/.the-grid/`. `cut-project.sh` copies `templates/_common/`
+(see below) followed by the chosen template into a target directory to either:
 
 - **Seed** a brand-new project (target is empty or doesn't exist yet), or
 - **Retrofit** an existing project (target already has files) — additive only,
-  never overwrites a file that already exists and differs from the template.
+  never overwrites a file that already exists and differs from the source.
 
 Both modes run through the same script and the same rule: never silently clobber.
 Anything the retrofit can't safely place is reported at the end for manual review.
+
+## `_common` — session-continuity scaffolding every project gets
+
+Every project cut from this factory is assumed to end up with a GitHub issue
+backlog, an `issue-loop` instance grinding it, and multiple agent sessions
+working it over time — so every project needs the same context-management and
+handoff shape regardless of stack. That shape lives once, in
+[`templates/_common/`](templates/_common/), not copy-pasted into each template:
+
+- `CONTEXT.md` — domain glossary and architecture decisions.
+- `LEARNINGS.md` — empty ledger; target for the `mine-learnings` skill.
+- `handoffs/` — dated handoff+context docs between agent sessions.
+- `prompts/autonomous-coding-loop.template.md` — the pre-flight/`{{VERIFY_CMD}}`
+  gap `issue-loop` leaves to the project.
+
+`_common` isn't a template itself (leading underscore, filtered out of
+`cut-project.sh`'s template listing) — it's cut in before every template, using
+the same copy-if-absent/skip-if-differs rule. A template's own `CLAUDE.md`
+stays template-specific (stack conventions genuinely differ) and isn't part of
+`_common`.
 
 This is deliberately narrow in scope. `cut-project.sh` only scaffolds a directory
 tree. It does not decide what AI personas, skills, or automations the project
@@ -34,7 +54,7 @@ has no ongoing dependency on `project-factory` or the-grid.
 |----------|--------------------|
 | [`python-agent-base`](templates/python-agent-base/) | The default, generic Python AI agent scaffold — no domain-specific tools or logic. Start here for anything that doesn't fit a more specific template. |
 | [`python-astro-content-agent`](templates/python-astro-content-agent/) | A Python agent that reads markdown content and builds pages for an Astro site. |
-| [`lamp-agent-base`](templates/lamp-agent-base/) | Not a Python agent app — a PHP/MySQL/Apache project's agent-injection kit (`CLAUDE.md`, worktree DB/port isolation scripts, context/learnings/prompts files), cut in retrofit mode against an existing LAMP repo most of the time. |
+| [`lamp-agent-base`](templates/lamp-agent-base/) | Not a Python agent app — a PHP/MySQL/Apache project's agent-injection kit (`CLAUDE.md` + worktree DB/port isolation scripts, on top of `_common`), cut in retrofit mode against an existing LAMP repo most of the time. |
 
 Templates are **fully independent** — none inherit from each other or share
 code; they just happen to fall into two families of shape (Python agent app,
@@ -85,12 +105,13 @@ only adds whatever's still missing.
 
 - **Placeholder-fill** (project name, description) — not yet implemented; v1
   ships structural stubs only.
-- **Shared boilerplate between templates** — `python-agent-base` and
-  `python-astro-content-agent` duplicate a fair amount (`src/agent/`,
-  `src/models/`, `src/prompts/`, `src/utils/`, test scaffolding). Deliberately
-  accepted for now — independence over inheritance, per how these two were
-  built — but worth revisiting if a third template makes the duplication
-  actually painful to maintain.
+- **Shared boilerplate within the Python-agent-app family** — `python-agent-base`
+  and `python-astro-content-agent` still duplicate `src/agent/`, `src/models/`,
+  `src/prompts/`, `src/utils/`, test scaffolding between themselves.
+  Deliberately accepted for now — independence over inheritance for
+  stack-specific code — but worth revisiting if a fourth Python template makes
+  it actually painful to maintain. (Session-continuity scaffolding, the other
+  kind of duplication, is already factored out into `_common`.)
 - **More templates** — Node/TS stacks, multi-agent structures, and templates
   that pair with a specific `agent-factory` role are candidates once there's a
   concrete next use.
