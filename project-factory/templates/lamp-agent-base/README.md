@@ -5,22 +5,16 @@ autonomous coding agent against it — not a full LAMP app framework. Seeded
 from `project-factory`, most often in **retrofit mode** against an existing
 LAMP repo (`cut-project.sh` never overwrites a file that already exists and
 differs). Structural stubs only: no business logic — the value here is the
-agent-injection kit (isolation scripts, prompts, context files), not a PHP app.
+agent-injection kit, not a PHP app. Session-continuity scaffolding
+(`CONTEXT.md`, `LEARNINGS.md`, `handoffs/`, the loop pairing prompt) comes
+from `_common` — see [`project-factory/README.md`](../../README.md) — not
+from this template; this README covers only what's LAMP-specific.
 
 ## Shape
 
 - `CLAUDE.md` — stack conventions the agent must follow (PHP/PDO/Composer, no
-  Node backend) and the worktree-isolation rule.
-- `CONTEXT.md` — domain glossary / architecture notes, filled in as the
-  project's vocabulary firms up.
-- `LEARNINGS.md` — empty ledger; target for the `mine-learnings` skill once
-  this repo has history to mine.
-- `prompts/autonomous-coding-loop.template.md` — the one LAMP-specific
-  pre-flight step (DB/port isolation) that composes with
-  `automation-factory`'s `issue-loop` pattern for the actual loop.
-- `handoffs/` — dated handoff+context docs between agent sessions (the-grid's
-  own `LOGS/` convention, renamed here to avoid a `logs/`/`LOGS/` collision on
-  case-insensitive filesystems).
+  Node backend), the worktree-isolation rule, and this repo's `{{VERIFY_CMD}}`
+  for the `_common` loop prompt.
 - `scripts/worktree-setup.sh` / `worktree-teardown.sh` / `db-migrate.sh` —
   working, idempotent scripts. Each git worktree gets its own MySQL schema and
   port, derived deterministically from the worktree's path, so parallel
@@ -39,8 +33,9 @@ codebase via `CLAUDE.md` + the isolation scripts, not a separate service.
 
 1. Run `scripts/worktree-setup.sh` once per worktree before doing any DB work.
 2. Once this repo has a GitHub issue backlog, instantiate
-   `automation-factory`'s `issue-loop` pattern into `loop/`, and layer
-   `prompts/autonomous-coding-loop.template.md`'s pre-flight step on top.
+   `automation-factory`'s `issue-loop` pattern into `loop/`, and fill in
+   `_common`'s `prompts/autonomous-coding-loop.template.md` with the
+   pre-flight step and `{{VERIFY_CMD}}` from this template's `CLAUDE.md`.
 3. Optional: compose `agent-factory`'s `lamp` stack overlay
    (`agent-factory/stacks/lamp/stack.yaml`) if this project also uses a
    composed persona (e.g. `/backend-dev`), rather than duplicating stack

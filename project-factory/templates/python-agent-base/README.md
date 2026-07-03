@@ -13,6 +13,10 @@ clear, narrower purpose from day one.
 
 ## Shape
 
+- `CLAUDE.md`, `CONTEXT.md`, `LEARNINGS.md`, `handoffs/`, `prompts/` — agent
+  conventions and session-continuity scaffolding. The last four come from
+  `_common` (shared across every `project-factory` template, not duplicated
+  here) — see [`project-factory/README.md`](../../README.md).
 - `src/agent/` — core agent loop, execution, state, memory.
 - `src/tools/` — tool definitions the agent can call. Ships with illustrative
   stubs (`search.py`, `calculator.py`, `weather.py`) — delete what you don't

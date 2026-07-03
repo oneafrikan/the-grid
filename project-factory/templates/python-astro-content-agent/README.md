@@ -7,6 +7,10 @@ yet. Fill in the pieces below as the project takes shape.
 
 ## Shape
 
+- `CLAUDE.md`, `CONTEXT.md`, `LEARNINGS.md`, `handoffs/`, `prompts/` — agent
+  conventions and session-continuity scaffolding. The last four come from
+  `_common` (shared across every `project-factory` template, not duplicated
+  here) — see [`project-factory/README.md`](../../README.md).
 - `src/agent/` — the agent loop: read content → decide what needs building →
   write Astro pages → report what changed.
 - `src/tools/` — `read_markdown.py` (parse `content/` into structured docs),
