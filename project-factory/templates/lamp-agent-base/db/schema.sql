@@ -1,0 +1,2 @@
+-- Starter schema stub. Add CREATE TABLE statements as the project takes shape.
+-- Applied via scripts/db-migrate.sh against this worktree's isolated schema.

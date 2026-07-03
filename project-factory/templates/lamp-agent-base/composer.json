@@ -1,0 +1,12 @@
+{
+    "name": "example/lamp-agent-base",
+    "description": "LAMP project scaffold with autonomous-coding-agent injection kit",
+    "require": {
+        "php": ">=8.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    }
+}

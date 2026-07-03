@@ -34,10 +34,11 @@ has no ongoing dependency on `project-factory` or the-grid.
 |----------|--------------------|
 | [`python-agent-base`](templates/python-agent-base/) | The default, generic Python AI agent scaffold — no domain-specific tools or logic. Start here for anything that doesn't fit a more specific template. |
 | [`python-astro-content-agent`](templates/python-astro-content-agent/) | A Python agent that reads markdown content and builds pages for an Astro site. |
+| [`lamp-agent-base`](templates/lamp-agent-base/) | Not a Python agent app — a PHP/MySQL/Apache project's agent-injection kit (`CLAUDE.md`, worktree DB/port isolation scripts, context/learnings/prompts files), cut in retrofit mode against an existing LAMP repo most of the time. |
 
-Templates are **fully independent** — `python-astro-content-agent` doesn't
-inherit from `python-agent-base` or share code with it; the two just happen to
-be the same family of shape. Each is standalone and self-contained, matching
+Templates are **fully independent** — none inherit from each other or share
+code; they just happen to fall into two families of shape (Python agent app,
+vs. LAMP agent-injection kit). Each is standalone and self-contained, matching
 the model above.
 
 ## Anatomy of a template
@@ -65,6 +66,10 @@ generic default; `python-astro-content-agent` deliberately drops both (it's a
 build tool, not a served API, and needs no external services). Include only
 what the template's project actually needs; don't copy the full shape by
 default. See each template's own `README.md` for what it includes and why.
+
+The anatomy above is specific to the Python-agent-app family.
+`lamp-agent-base` is a different family — no `src/agent/`, no `main.py` — see
+its own `README.md`.
 
 ## Usage
 
