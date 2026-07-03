@@ -1,0 +1,8 @@
+# Optional — only needed if this project runs local services (a local model
+# for watcher/scribe, a vector DB, etc). Delete this file if it doesn't.
+#
+# services:
+#   ollama:
+#     image: ollama/ollama
+#     ports:
+#       - "11434:11434"
