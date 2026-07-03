@@ -1,0 +1,8 @@
+# Optional — only needed if this project runs local services (DB, Redis,
+# vector DB, etc). Delete this file if it doesn't. Uncomment and adapt below.
+#
+# services:
+#   redis:
+#     image: redis:7
+#     ports:
+#       - "6379:6379"

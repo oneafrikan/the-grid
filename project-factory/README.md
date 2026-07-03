@@ -32,7 +32,13 @@ has no ongoing dependency on `project-factory` or the-grid.
 
 | Template | What it scaffolds |
 |----------|--------------------|
+| [`python-agent-base`](templates/python-agent-base/) | The default, generic Python AI agent scaffold — no domain-specific tools or logic. Start here for anything that doesn't fit a more specific template. |
 | [`python-astro-content-agent`](templates/python-astro-content-agent/) | A Python agent that reads markdown content and builds pages for an Astro site. |
+
+Templates are **fully independent** — `python-astro-content-agent` doesn't
+inherit from `python-agent-base` or share code with it; the two just happen to
+be the same family of shape. Each is standalone and self-contained, matching
+the model above.
 
 ## Anatomy of a template
 
@@ -53,11 +59,12 @@ templates/<name>/
   .gitignore
 ```
 
-Not every template needs every folder — `python-astro-content-agent` has no
-`api/` (it's a build tool, not a served API) and no `docker-compose.yml` (no
-external services). Include only what the template's project actually needs;
-don't copy the full shape by default. See each template's own `README.md` for
-what it includes and why.
+Not every template needs every folder — `python-agent-base` ships the full
+shape (including `api/` and an optional `docker-compose.yml`) since it's the
+generic default; `python-astro-content-agent` deliberately drops both (it's a
+build tool, not a served API, and needs no external services). Include only
+what the template's project actually needs; don't copy the full shape by
+default. See each template's own `README.md` for what it includes and why.
 
 ## Usage
 
@@ -72,8 +79,13 @@ only adds whatever's still missing.
 ## Roadmap
 
 - **Placeholder-fill** (project name, description) — not yet implemented; v1
-  ships structural stubs only. Add if a second template makes the duplication
-  worth automating.
-- **More templates** — `python-astro-content-agent` is the first. Node/TS
-  stacks, multi-agent structures, and templates that pair with a specific
-  `agent-factory` role are candidates once there's a concrete second use.
+  ships structural stubs only.
+- **Shared boilerplate between templates** — `python-agent-base` and
+  `python-astro-content-agent` duplicate a fair amount (`src/agent/`,
+  `src/models/`, `src/prompts/`, `src/utils/`, test scaffolding). Deliberately
+  accepted for now — independence over inheritance, per how these two were
+  built — but worth revisiting if a third template makes the duplication
+  actually painful to maintain.
+- **More templates** — Node/TS stacks, multi-agent structures, and templates
+  that pair with a specific `agent-factory` role are candidates once there's a
+  concrete next use.
