@@ -111,7 +111,7 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 36 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`.
+All 38 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`.
 
 ## wire.sh contract
 
@@ -132,6 +132,11 @@ All 36 tests must stay green. Tests use temp dirs — they never touch the real 
   `AGENTS_DIR`. Gated per machine by `project:<name>` manifest entries; with no
   `project:` entry anywhere, every composed project wires (legacy). The baseline
   currently pins `project:grid` (see `agent-factory/` and issue #1).
+- **Root-owned agents:** `agents/*.md` at the repo root wires directly into
+  `AGENTS_DIR`, same ownership model as root-level `skills/` — for hand-authored
+  subagents that aren't a compose.py role (no `delegates_to`, not a team
+  position; e.g. a ported persona/behavior-modifier like `grid-ponytail`).
+  Wired last, so a root-owned agent overrides a same-named composed one.
 
 ## agent-factory (composed agents)
 

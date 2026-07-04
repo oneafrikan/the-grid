@@ -225,6 +225,19 @@ if [ -d "$CC_OUT" ]; then
   done
 fi
 
+# --- 3c. Wire root-owned agents/ dir (highest precedence — root wins) ---
+# Hand-authored subagents that aren't composed via agent-factory (no
+# delegates_to, not a team role — e.g. a ported persona/behavior-modifier
+# skill like ponytail) live here so they're tracked and reproducible across
+# machines, same ownership model as root-level skills/. Wired last so a
+# root-owned agent overrides a same-named composed one.
+if [ -d "$GRID_DIR/agents" ]; then
+  for agent_file in "$GRID_DIR/agents"/*.md; do
+    [ -f "$agent_file" ] || continue
+    wire_agent "$agent_file"
+  done
+fi
+
 # --- 4. Refresh the skill catalogue so wiring and SKILLS.md never drift ---
 # Coupled on purpose: any change to what's wired re-renders the catalogue.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
