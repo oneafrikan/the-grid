@@ -1,17 +1,21 @@
-# grid.yaml — the complete composed team, all 20 ported roles.
-# Orchestrators (ceo-orchestrator, tech-lead, growth-hacker) emit as Claude Code
-# skills; the 17 specialists emit as CC subagents. Models come from each
-# role.yaml default unless overridden here.
+# grid.yaml — the complete composed team, all 26 ported roles.
+# Orchestrators (ceo-orchestrator, tech-lead, growth-hacker, finance-manager)
+# emit as Claude Code skills; the 22 specialists emit as CC subagents. Models
+# come from each role.yaml default unless overridden here.
 #
 # Delegation topology (drives the generated roster in each orchestrator's
 # AGENTS.md — see compose.py `inject_roster`):
 #   ceo  → tech-lead, product-manager, growth-hacker          (the three leads)
 #   tech-lead     → engineering + data/research specialists
 #   growth-hacker → the marketing arm (player-coach lead)
+#   finance-manager → the finance desk pipeline (sentinel -> analyst ->
+#     strategist -> risk-officer -> scribe). Standalone top-level orchestrator,
+#     invoked directly (/grid-finance-manager) — deliberately NOT under the
+#     CEO's delegates_to; this is a personal desk, not a dev-team initiative.
 # delegates_to entries must name a role present in this team.
 project: grid
 slug: grid
-description: Full composed team — 3 orchestrators + 17 specialists, all 5-file model.
+description: Full composed team — 4 orchestrators + 22 specialists, all 5-file model.
 paperclip: false
 
 agents:
@@ -53,3 +57,17 @@ agents:
   - role: seo
   - role: paid-search
   - role: paid-social
+  # finance desk (standalone orchestrator, see topology note above) -> CC skill
+  - role: finance-manager
+    delegates_to:
+      - finance-sentinel
+      - finance-analyst
+      - finance-strategist
+      - finance-risk-officer
+      - finance-scribe
+  # finance desk specialists -> CC subagents
+  - role: finance-sentinel
+  - role: finance-analyst
+  - role: finance-strategist
+  - role: finance-risk-officer
+  - role: finance-scribe

@@ -134,6 +134,9 @@ mattpocock/writing-fragments
 mattpocock/writing-shape
 mattpocock/zoom-out
 
+# --- ponytail — lazy senior dev mode, wanted live everywhere (6 skills) ---
+ponytail
+
 # --- superpowers — all universal (14 skills) ---
 superpowers/brainstorming
 superpowers/dispatching-parallel-agents
