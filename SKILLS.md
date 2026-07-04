@@ -154,6 +154,7 @@ Not enumerated per-skill here (too many) — browse the repo or search with skil
 - **repos/nowork-toprank** — 18 skills
 - **repos/openclaw** — 113 skills
 - **repos/paperclip** — 37 skills
+- **repos/ponytail** — 12 skills
 - **repos/robertbstillwell** — 152 skills
 - **repos/sarai-wp-openclaw** — 2 skills
 - **repos/spillwave-astro** — 1 skills
