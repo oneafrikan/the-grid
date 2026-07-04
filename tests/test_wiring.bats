@@ -184,3 +184,22 @@ teardown() {
   [ -L "$MOCK_AGENTS/agent-a.md" ]
   [ -L "$MOCK_AGENTS/agent-b.md" ]
 }
+
+# --- root-owned agents/ (hand-authored subagents, not agent-factory-composed) -
+
+@test "root-owned agents/*.md are wired into AGENTS_DIR" {
+  mkdir -p "$MOCK_GRID/agents"
+  printf -- '---\nname: grid-ponytail\n---\n' > "$MOCK_GRID/agents/grid-ponytail.md"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scripts/wire.sh"
+  [ -L "$MOCK_AGENTS/grid-ponytail.md" ]
+}
+
+@test "root-owned agent overrides a same-named composed agent" {
+  mkdir -p "$MOCK_GRID/agent-factory/projects/team-a/_claude-code/agents"
+  printf -- '---\nname: grid-ponytail\nfrom: composed\n---\n' > "$MOCK_GRID/agent-factory/projects/team-a/_claude-code/agents/grid-ponytail.md"
+  mkdir -p "$MOCK_GRID/agents"
+  printf -- '---\nname: grid-ponytail\nfrom: root\n---\n' > "$MOCK_GRID/agents/grid-ponytail.md"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scripts/wire.sh"
+  [ -L "$MOCK_AGENTS/grid-ponytail.md" ]
+  grep -q "from: root" "$MOCK_AGENTS/grid-ponytail.md"
+}
