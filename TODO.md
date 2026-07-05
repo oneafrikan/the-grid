@@ -20,6 +20,9 @@ Paperclip emitter targets (**#3**, **#4**).
 | [#2](https://github.com/oneafrikan/the-grid/issues/2) | Composed-agent naming: project-slug prefix for `/` discoverability | agent-factory |
 | [#3](https://github.com/oneafrikan/the-grid/issues/3) | agent-factory target: OpenClaw emitter (guide-server) | agent-factory |
 | [#4](https://github.com/oneafrikan/the-grid/issues/4) | agent-factory target: async/autonomous via Paperclip | agent-factory |
+
+Implementation plan for #3/#4, scoped to a curated orchestrator roster (not a full-roster
+port) and chunked into single-session specialist work: `agent-factory/docs/openclaw-paperclip-targets-plan.md`.
 | [#5](https://github.com/oneafrikan/the-grid/issues/5) | agent-factory: flesh stack overlays (LAMP + others) | agent-factory |
 | [#6](https://github.com/oneafrikan/the-grid/issues/6) | agent-factory: populate `skills/` from repos submodules | agent-factory |
 | [#7](https://github.com/oneafrikan/the-grid/issues/7) | Decide fate of the LAMP build prompt (likely superseded) + 4 gaps | docs |

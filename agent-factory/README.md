@@ -181,7 +181,9 @@ wires the CC output into `~/.claude/`. The full team is wired live on wilderness
 
 Remaining work (see repo-root `TODO.md`):
 - **OpenClaw + Paperclip targets** — 5 files → workspace + `openclaw.json`; the
-  async/autonomous heartbeat loop. Deferred (Claude Code was built first).
+  async/autonomous heartbeat loop. Deferred (Claude Code was built first). Implementation
+  plan, scoped to a curated orchestrator roster + chunked into single-session specialist
+  work: `docs/openclaw-paperclip-targets-plan.md`.
 - **Stack overlays** — `stacks/*` are still `stack.yaml` stubs with empty `fragments`.
 - **Machine manifest** — gate which composed agents wire on which machine (today
   `wire.sh` wires every composed project's `_claude-code/` output).
