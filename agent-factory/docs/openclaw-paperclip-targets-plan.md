@@ -48,6 +48,37 @@ tool), one session/chunk at a time — not built end-to-end in one sitting by wh
 this up. Each session below names the specialist and has a standalone definition of done.
 Sessions are ordered; later ones depend on earlier ones as noted.
 
+## Paperclip storage model: DB vs disk (verified 2026-07-05)
+
+Read `paperclip/src/server/src/services/agent-instructions.ts` and
+`company-skills.ts` directly to confirm this — don't assume it holds after
+upstream changes. Also documented in `~/paperclip/CLAUDE.md`.
+
+- **Agent instructions bundle** (`AGENTS.md`, `SOUL.md`, etc.) is **disk-first**.
+  Postgres only stores pointers in `adapterConfig`
+  (`instructionsRootPath`/`instructionsEntryFile`/`instructionsBundleMode`).
+  The actual file content lives at
+  `<PAPERCLIP_HOME>/instances/<instanceId>/companies/<companyId>/agents/<agentId>/instructions/`
+  — real `fs.readFile`/`writeFile`, confirmed in `agent-instructions.ts`. This
+  is what `GET/PUT /api/agents/{id}/instructions-bundle/file` reads and writes.
+  A hire's `instructionsBundle.files` payload materializes straight to these
+  files at hire time (proven live — see Session A3 log).
+- **Company skills** are **DB-first**. Canonical content lives in Postgres,
+  `companySkills` table (Drizzle ORM) — markdown is a column, not a file
+  reference. `POST /companies/{id}/skills` just inserts a row. Skills are
+  materialized to disk **on demand** (first heartbeat, or on-demand fetch) at
+  `<PAPERCLIP_HOME>/instances/<instanceId>/skills/<companyId>/__runtime__/<skill>/`
+  — confirmed via `resolveManagedSkillsRoot()` / `materializeRuntimeSkillFiles()`.
+- **`PAPERCLIP_HOME`** resolves to `~/.paperclip` by default, but scout's
+  Docker deployment sets it to `/paperclip` inside the container, bind-mounted
+  from `/home/gareth/paperclip/data/docker-paperclip` on the host — so on
+  scout, the real host-side instructions path is
+  `/home/gareth/paperclip/data/docker-paperclip/instances/default/companies/<companyId>/agents/<agentId>/instructions/`.
+- **Practical implication for `deploy_paperclip.py`**: the existing-agent 403
+  blocker (item #1 in the 2026-07-05 handoff) only affects the *disk-backed*
+  instructions-bundle PUT — it has no bearing on the DB-backed skills sync
+  path, which already works via the agent API key with no board auth needed.
+
 ## What's reusable vs. what's genuinely new
 
 From investigation (`agent-factory/compose.py`, `paperclip/src`, `~/.openclaw`,
