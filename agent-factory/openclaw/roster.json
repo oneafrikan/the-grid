@@ -1,0 +1,152 @@
+{
+  "_meta": {
+    "description": "Status-lifecycle roster for the 5 grid orchestrator roles deployed as real OpenClaw agents on scout. Source of truth for the-grid's OpenClaw target (see agent-factory/docs/openclaw-paperclip-targets-plan.md, Session B1). Ported from ~/Guide/guide-core/agent-factory/roster.json's shape, adapted for an orchestrator-only rollout.",
+    "updated": "2026-07-05",
+    "statusValues": {
+      "planned": "Designed but no build work started",
+      "building": "Template rendering / compose.py write_openclaw() output in progress (Session B2)",
+      "testing": "Deployed to ~/.openclaw and registered — Gareth testing before flipping to production (Session B3/B4)",
+      "production": "Live and bound to its Telegram surface, in regular use",
+      "paused": "Was live, temporarily disabled"
+    },
+    "_note": "This roster only covers the 5 OpenClaw orchestrators. It is independent of the Claude Code target's roster (compose.py's grid.yaml) and of the separate Paperclip manifest (Session A track) — no live sync between the three."
+  },
+  "securityDefaults": {
+    "_comment": "First-pass adaptation of Guide's ADR-022 securityDefaults for grid's orchestrator-only rollout. Session C (security review, gates Session B4) is expected to scrutinize and likely tighten this before any real deploy — not over-engineered here per the plan's own guidance.",
+    "exec": "restricted",
+    "ask": "on",
+    "toolsPermitted": [
+      "read",
+      "web_search",
+      "web_fetch",
+      "telegram_send"
+    ],
+    "toolsRestricted": [
+      "exec"
+    ],
+    "toolsDenied": [
+      "code_execution",
+      "group:automation"
+    ],
+    "filePermissions": {
+      "identityFiles": "440",
+      "operatingFiles": "644",
+      "agentWritableFiles": "664",
+      "expertiseFile": "640"
+    }
+  },
+  "permissionProfiles": {
+    "orchestrator": {
+      "_comment": "All 5 roles in this rollout are grid orchestrators delegating to already-wired Claude Code specialist subagents via OpenClaw's ACP mechanism, not executing specialist work themselves. One shared profile is a reasonable first pass; split per-role if Session C finds a reason to (e.g. finance-manager touching real money data vs. product-manager touching only specs).",
+      "exec": "restricted",
+      "ask": "on",
+      "toolsPermitted": [
+        "read",
+        "web_search",
+        "web_fetch",
+        "telegram_send"
+      ],
+      "toolsRestricted": [
+        "exec"
+      ],
+      "toolsDenied": [
+        "code_execution",
+        "group:automation"
+      ],
+      "vaultReadScope": "~/.the-grid/ (read-only — source of truth, not writable from a live agent)",
+      "vaultWriteScope": "~/.openclaw/workspace-<role>/ only (own workspace)",
+      "rationale": "Orchestrators need to read their own rendered identity + the-grid's role source, and delegate out via ACP subagents. No need for broad exec or write access outside their own workspace."
+    }
+  },
+  "orchestrators": {
+    "ceo-orchestrator": {
+      "role": "ceo-orchestrator",
+      "title": "CEO",
+      "summary": "Top-level orchestrator above the team. Turns a business goal into sequenced initiatives and bets, makes the build-vs-not call, sets guardrails and budgets, delegates to Tech Lead + Product Manager, gates releases, reviews outcomes against the goal.",
+      "model": "opus",
+      "cronModel": "haiku",
+      "delegatesTo": ["tech-lead", "product-manager", "growth-hacker"],
+      "telegram": {
+        "bot": "TBD",
+        "chatId": "TBD",
+        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the existing coach precedent."
+      },
+      "permissionProfile": "orchestrator",
+      "status": "planned",
+      "workspacePath": "~/.openclaw/workspace-ceo-orchestrator/"
+    },
+    "tech-lead": {
+      "role": "tech-lead",
+      "title": "Tech Lead",
+      "summary": "PRDs, architecture decisions, hands off to specialists, reviews output.",
+      "model": "opus",
+      "cronModel": "haiku",
+      "delegatesTo": [
+        "backend-dev", "frontend-dev", "designer", "qa-engineer",
+        "security-reviewer", "devops", "data-engineer", "data-scientist",
+        "researcher", "project-manager"
+      ],
+      "telegram": {
+        "bot": "TBD",
+        "chatId": "TBD",
+        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the existing coach precedent."
+      },
+      "permissionProfile": "orchestrator",
+      "status": "planned",
+      "workspacePath": "~/.openclaw/workspace-tech-lead/"
+    },
+    "finance-manager": {
+      "role": "finance-manager",
+      "title": "Finance Manager",
+      "summary": "Orchestrates the finance desk pipeline (sentinel -> analyst -> strategist -> risk-officer -> your approval queue -> scribe). Routes and grades escalation; never sizes a trade, never overrides the Risk Officer, never auto-approves.",
+      "model": "sonnet",
+      "cronModel": "haiku",
+      "delegatesTo": [
+        "finance-sentinel", "finance-analyst", "finance-strategist",
+        "finance-risk-officer", "finance-scribe"
+      ],
+      "telegram": {
+        "bot": "TBD",
+        "chatId": "TBD",
+        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the existing coach precedent. First OpenClaw pilot role per the plan's Session B4."
+      },
+      "permissionProfile": "orchestrator",
+      "status": "planned",
+      "workspacePath": "~/.openclaw/workspace-finance-manager/",
+      "_note": "Standalone top-level orchestrator, not a CEO delegate (personal desk, not a dev-team initiative) — matches the-grid's grid.yaml topology note."
+    },
+    "growth-hacker": {
+      "role": "growth-hacker",
+      "title": "Growth Hacker",
+      "summary": "Acquisition and funnel experiments, analytics-driven growth. Runs disciplined, hypothesis-first experiments — one variable at a time, lets the data decide.",
+      "model": "sonnet",
+      "cronModel": "haiku",
+      "delegatesTo": ["copywriter", "ad-copy", "seo", "paid-search", "paid-social", "data-analyst"],
+      "telegram": {
+        "bot": "TBD",
+        "chatId": "TBD",
+        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the existing coach precedent."
+      },
+      "permissionProfile": "orchestrator",
+      "status": "planned",
+      "workspacePath": "~/.openclaw/workspace-growth-hacker/"
+    },
+    "product-manager": {
+      "role": "product-manager",
+      "title": "Product Manager",
+      "summary": "Converts intent into precise specs. Owns scope, acceptance criteria, PRDs, and tracer-bullet tickets. Does not architect or implement.",
+      "model": "sonnet",
+      "cronModel": "haiku",
+      "delegatesTo": [],
+      "telegram": {
+        "bot": "TBD",
+        "chatId": "TBD",
+        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the existing coach precedent."
+      },
+      "permissionProfile": "orchestrator",
+      "status": "planned",
+      "workspacePath": "~/.openclaw/workspace-product-manager/",
+      "_note": "role.yaml marks orchestrator: false (no CC-skill delegates_to in grid.yaml today) but the plan explicitly includes it in the OpenClaw 5 — the OpenClaw target and the Claude Code orchestrator/specialist split are independent classifications."
+    }
+  }
+}
