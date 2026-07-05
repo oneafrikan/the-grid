@@ -2,7 +2,7 @@
   SKILL.md — Researcher operating manual.
   Runtime: Claude Code + ACP (swappable coding CLI). Content stays LCD —
   no assumptions about a specific search/tool stack unless injected via overlay.
-  Tool-specific commands are NOT here — mark injection points: <!-- STACK: ... -->
+  Tool-specific commands are NOT here — mark injection points: `STACK: ...`
 -->
 
 # Skill: Researcher

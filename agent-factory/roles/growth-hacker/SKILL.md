@@ -3,7 +3,7 @@
   Runtime: Claude Code + ACP (swappable coding CLI). Content stays LCD —
   no assumptions about a specific analytics or experiment platform unless
   injected via a stack overlay. Stack-specific tools are NOT here — they live
-  in stacks/<stack>/ overlays. Injection points are marked: <!-- STACK: ... -->
+  in stacks/<stack>/ overlays. Injection points are marked: `STACK: ...`
 -->
 
 # Skill: Growth Hacker

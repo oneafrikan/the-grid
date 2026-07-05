@@ -3,7 +3,7 @@
   Runtime: Claude Code + ACP (swappable coding CLI). Content stays LCD —
   no assumptions about a specific domain or framework unless injected via overlay.
   Stack/domain-specific detail is NOT here — it lives in stacks/<stack>/ overlays.
-  Injection points are marked: <!-- STACK: ... -->
+  Injection points are marked: `STACK: ...`
 -->
 
 # Skill: Product Manager

@@ -3,7 +3,7 @@
   Runtime: Claude Code + ACP (swappable coding CLI). Content stays LCD —
   no assumptions about a specific language/framework unless injected via overlay.
   Stack-specific commands (scanners, CVE tooling) are NOT here — they live in
-  stacks/<stack>/ overlays. Injection points are marked: <!-- STACK: ... -->
+  stacks/<stack>/ overlays. Injection points are marked: `STACK: ...`
 -->
 
 # Skill: Security Reviewer

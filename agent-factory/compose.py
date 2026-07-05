@@ -401,8 +401,35 @@ FLATTEN_ORDER = ["IDENTITY.md", "SOUL.md", "USER.md", "MEMORY.md", "AGENTS.md"]
 
 def strip_html_comments(md: str) -> str:
     """Remove <!-- ... --> blocks. The templates are comment-heavy scaffolding
-    (authoring notes, [FILL] hints); those are noise inside an agent's prompt."""
-    text = re.sub(r"<!--.*?-->", "", md, flags=re.DOTALL)
+    (authoring notes, [FILL] hints); those are noise inside an agent's prompt.
+
+    Some authoring notes show an inline example of comment syntax (e.g.
+    "marked: <!-- STACK: ... -->") inside the real comment. A naive
+    non-greedy regex stops at that inner "-->", leaking the real closing
+    "-->" as literal text. Scan instead: if another "<!--" appears before
+    the first "-->" found, that "-->" belongs to the nested example, not
+    the real close — keep looking past it for the actual terminator.
+    """
+    out = []
+    i = 0
+    n = len(md)
+    while True:
+        start = md.find("<!--", i)
+        if start == -1:
+            out.append(md[i:])
+            break
+        out.append(md[i:start])
+        search_from = start + 4
+        while True:
+            close = md.find("-->", search_from)
+            if close == -1:
+                close = n
+                break
+            if md.find("<!--", search_from, close) == -1:
+                break
+            search_from = close + 3
+        i = min(close + 3, n)
+    text = "".join(out)
     # Collapse the blank-line runs the removed comments leave behind.
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 

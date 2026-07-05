@@ -3,7 +3,7 @@
   Runtime: Claude Code + ACP (swappable coding CLI). Content stays LCD —
   no assumptions about a specific ad platform, creative tool, or analytics suite
   unless injected via a stack overlay. Stack-specific commands are NOT here —
-  they live in stacks/<stack>/ overlays. Injection points: <!-- STACK: ... -->
+  they live in stacks/<stack>/ overlays. Injection points: `STACK: ...`
 -->
 
 # Skill: Paid Social Specialist

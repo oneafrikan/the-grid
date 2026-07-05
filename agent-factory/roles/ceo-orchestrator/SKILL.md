@@ -3,7 +3,7 @@
   Runtime: Claude Code + ACP (swappable coding CLI). Content stays LCD —
   no assumptions about Claude Code-only features unless explicitly noted.
   Stack-specific commands / metrics are NOT here — they live in stacks/<stack>/
-  overlays. Injection points are marked: <!-- STACK: ... -->
+  overlays. Injection points are marked: `STACK: ...`
   Handoff is ASYNC ONLY (signal files / PR + webhook). Never a live spawn.
 -->
 

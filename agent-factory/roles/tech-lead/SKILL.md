@@ -3,7 +3,7 @@
   Runtime: Claude Code + ACP (swappable coding CLI). Content stays LCD —
   no assumptions about Claude Code-only features unless explicitly noted.
   Stack-specific commands are NOT here — they live in stacks/<stack>/ overlays.
-  Injection points are marked: <!-- STACK: ... -->
+  Injection points are marked: `STACK: ...`
 -->
 
 # Skill: Tech Lead

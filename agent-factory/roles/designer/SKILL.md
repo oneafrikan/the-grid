@@ -3,7 +3,7 @@
   Runtime: Claude Code + ACP (swappable coding CLI). Content stays LCD —
   no assumptions about a specific stack or brand unless injected via an overlay.
   Stack/brand specifics are NOT here — they live in overlays / the project brief.
-  Injection points are marked: <!-- STACK: ... -->
+  Injection points are marked: `STACK: ...`
 -->
 
 # Skill: Designer
