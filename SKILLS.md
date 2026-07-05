@@ -179,6 +179,7 @@ Not enumerated per-skill here (too many) — browse the repo or search with skil
 Kept for reference — these are indexes/awesome-lists, not skill collections:
 
 - **repos/hesamsheikh**
+- **repos/quant-zero**
 - **repos/sebclawops**
 - **repos/sjkncs**
 - **repos/voltagent**

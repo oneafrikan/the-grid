@@ -88,3 +88,6 @@
 [submodule "repos/ponytail"]
 	path = repos/ponytail
 	url = https://github.com/DietrichGebert/ponytail.git
+[submodule "repos/quant-zero"]
+	path = repos/quant-zero
+	url = https://github.com/marcohwlam/quant-zero
