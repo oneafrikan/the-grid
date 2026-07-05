@@ -63,6 +63,8 @@ STACKS_DIR = HERE / "stacks"
 SKILLS_DIR = HERE / "skills"
 CORE_DIR = HERE / "_core"
 PROJECTS_DIR = HERE / "projects"
+OPENCLAW_DIR = HERE / "openclaw"
+OPENCLAW_TEMPLATES_DIR = OPENCLAW_DIR / "templates" / "orchestrator"
 
 # The 5 identity files emitted per agent, each = a _core base merged/filled with
 # the role layer. (SKILL.md is the role's *skill*, referenced by name — not here.)
@@ -695,6 +697,106 @@ def write_paperclip(name: str, config: dict, out_dir: Path) -> Path:
     return pc_dir
 
 
+# ── openclaw-native emitter ───────────────────────────────────────────────────
+# A fourth emit target: render the Guide-shaped 9-file workspace set (see
+# openclaw/README.md, Session B1) for the curated 5 grid orchestrator roles
+# named in openclaw/roster.json. Pure rendering only — no docker exec, no
+# writes under ~/.openclaw (that's agent-factory/scripts/deploy_openclaw.sh,
+# Session B3, per docs/openclaw-paperclip-targets-plan.md).
+#
+# Named "openclaw-native" (not "openclaw") because that name is already taken
+# by the legacy default target (write_project below) — the bare 5-file dump
+# with no template wrapping. Both remain selectable; this one is additive.
+
+# Templates whose entire body is a single {{RENDERED_CONTENT}} token, filled
+# verbatim from render_agent()'s own output — same 5-file identity model the
+# claude-code and default openclaw targets already use. No new merge logic.
+OPENCLAW_PASSTHROUGH_FILES = ["IDENTITY.md", "SOUL.md", "AGENTS.md", "USER.md", "MEMORY.md"]
+
+
+def _openclaw_roster_all() -> dict:
+    """The full 5-role orchestrator target from openclaw/roster.json."""
+    return json.loads(_read(OPENCLAW_DIR / "roster.json"))["orchestrators"]
+
+
+def openclaw_roster_roles(config: dict) -> list[str]:
+    """roster.json's orchestrator role keys that are ALSO present as an agent
+    in this compose config, in roster.json's declared order. roster.json names
+    the fixed 5-role rollout target; a given project's config may only compose
+    a subset (e.g. the-grid's own grid.yaml may lack some of them) — those are
+    skipped here, not treated as an error (see openclaw_missing_roles)."""
+    team_roles = {a["role"] for a in config["agents"] if isinstance(a, dict) and a.get("role")}
+    return [role for role in _openclaw_roster_all() if role in team_roles]
+
+
+def openclaw_missing_roles(config: dict) -> list[str]:
+    """roster.json's orchestrator roles NOT present in this compose config —
+    reported by the CLI, not an error (see openclaw_roster_roles)."""
+    team_roles = {a["role"] for a in config["agents"] if isinstance(a, dict) and a.get("role")}
+    return [role for role in _openclaw_roster_all() if role not in team_roles]
+
+
+def render_openclaw_role(agent: dict, slug: str) -> dict[str, str]:
+    """Render the 9-file OpenClaw workspace set for one orchestrator agent.
+    Returns {filename: contents}, ready to write under _openclaw/<role>/."""
+    role = agent["role"]
+    meta = role_meta(role)
+    rendered = render_agent(agent, slug=slug)
+
+    files: dict[str, str] = {}
+    for filename in OPENCLAW_PASSTHROUGH_FILES:
+        template = _read(OPENCLAW_TEMPLATES_DIR / filename)
+        files[filename] = template.replace("{{RENDERED_CONTENT}}", rendered[filename])
+
+    # EXPERTISE.md: the role's own SKILL.md, ported verbatim (not from
+    # render_agent() — that function has no EXPERTISE.md key).
+    expertise_template = _read(OPENCLAW_TEMPLATES_DIR / "EXPERTISE.md")
+    role_skill = _read(ROLES_DIR / role / "SKILL.md")
+    files["EXPERTISE.md"] = expertise_template.replace("{{ROLE_SKILL_CONTENT}}", role_skill)
+
+    # BOOT/TOOLS/HEARTBEAT: role_meta()-derived tokens (see openclaw/README.md
+    # token reference). All three are substituted the same way — whichever
+    # tokens a given template doesn't use simply have nothing to replace.
+    subs = {
+        "{{ORCH_ROLE}}": role,
+        "{{ORCH_TITLE}}": meta.get("title") or role,
+        "{{ORCH_SUMMARY}}": role_summary(role),
+    }
+    for filename in ("BOOT.md", "TOOLS.md", "HEARTBEAT.md"):
+        text = _read(OPENCLAW_TEMPLATES_DIR / filename)
+        for token, value in subs.items():
+            text = text.replace(token, value)
+        files[filename] = text
+
+    return files
+
+
+def write_openclaw(name: str, config: dict, out_dir: Path) -> Path:
+    """Emit the OpenClaw 9-file workspace set under
+    <out_dir>/<name>/_openclaw/<role>/, one dir per roster.json orchestrator
+    role that is present in this compose config. Idempotent: the _openclaw dir
+    is wiped and rewritten each run, same as the other emitters. Pure
+    rendering — no docker exec, no ~/.openclaw writes anywhere in this path.
+    """
+    slug = config.get("slug") or name
+    by_role = {a["role"]: a for a in config["agents"] if isinstance(a, dict) and a.get("role")}
+
+    oc_dir = out_dir / name / "_openclaw"
+    if oc_dir.is_symlink():
+        raise ValueError(f"refusing to write: {oc_dir} is a symlink, not a dir")
+    if oc_dir.exists():
+        shutil.rmtree(oc_dir)
+    oc_dir.mkdir(parents=True)
+
+    for role in openclaw_roster_roles(config):
+        role_dir = oc_dir / role
+        role_dir.mkdir()
+        for filename, contents in render_openclaw_role(by_role[role], slug).items():
+            (role_dir / filename).write_text(contents, encoding="utf-8")
+
+    return oc_dir
+
+
 # ── writing ───────────────────────────────────────────────────────────────────
 
 def write_project(name: str, config: dict, out_dir: Path) -> Path:
@@ -729,10 +831,14 @@ def main() -> None:
     parser.add_argument("config", type=Path, help="path to the compose config yaml")
     parser.add_argument("--out", type=Path, default=PROJECTS_DIR, help="output dir")
     parser.add_argument(
-        "--target", choices=["openclaw", "claude-code", "paperclip"], default="openclaw",
-        help="emit shape: openclaw = 5 files + agents.yaml (default); "
+        "--target",
+        choices=["openclaw", "claude-code", "paperclip", "openclaw-native"],
+        default="openclaw",
+        help="emit shape: openclaw = 5 files + agents.yaml (default, legacy bare dump); "
              "claude-code = CC skills (orchestrators) + subagents (specialists); "
-             "paperclip = _paperclip/manifest.json for the curated Paperclip roster",
+             "paperclip = _paperclip/manifest.json for the curated Paperclip roster; "
+             "openclaw-native = _openclaw/<role>/ 9-file workspace set for roster.json's "
+             "5 orchestrator roles (whichever are present in this config)",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -758,6 +864,16 @@ def main() -> None:
                 role = agent["role"]
                 print(f"  - {role:<20} model={resolve_model(agent):<8} reportsTo={parent_map.get(role)}")
             print(f"[dry-run] {len(ordered)} agents -> _paperclip/manifest.json")
+            return
+        if args.target == "openclaw-native":
+            by_role = {a["role"]: a for a in agents if isinstance(a, dict) and a.get("role")}
+            roles = openclaw_roster_roles(config)
+            missing = openclaw_missing_roles(config)
+            for role in roles:
+                print(f"  - {role:<20} model={resolve_model(by_role[role]):<8} -> _openclaw/{role}/*.md (9 files)")
+            print(f"[dry-run] {len(roles)} of 5 roster.json roles rendered -> _openclaw/<role>/")
+            if missing:
+                print(f"[dry-run] not in this compose config, skipped: {', '.join(missing)}")
             return
         for agent in agents:
             role = agent["role"]
@@ -792,6 +908,17 @@ def main() -> None:
         for agent in ordered:
             role = agent["role"]
             print(f"  - {role} ({resolve_model(agent)})  reportsTo={parent_map.get(role)}")
+        return
+
+    if args.target == "openclaw-native":
+        oc_dir = write_openclaw(name, config, args.out)
+        roles = openclaw_roster_roles(config)
+        missing = openclaw_missing_roles(config)
+        print(f"composed '{name}' (openclaw-native): {len(roles)} of 5 roster.json roles -> {oc_dir}")
+        for role in roles:
+            print(f"  - {role}/  (9 files)")
+        if missing:
+            print(f"  not in this compose config, skipped: {', '.join(missing)}")
         return
 
     project_dir = write_project(name, config, args.out)
