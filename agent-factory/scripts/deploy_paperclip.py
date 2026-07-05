@@ -261,6 +261,46 @@ def sync_skills(client: PaperclipClient, company_id: str, manifest: list[dict]) 
 
 # ── agents step ────────────────────────────────────────────────────────────────
 
+# Session A3: resolve the cwd open question left by A2. Each claude_local
+# agent needs a real filesystem path to run in. For this wiring-proof phase
+# (not real dev work yet) a per-agent git worktree per role is overkill --
+# that's 20 branches/checkouts to create and clean up for agents that aren't
+# doing real work yet. Instead: one dedicated, non-git scratch directory per
+# agent, well outside any real repo, so a session that actually executes in
+# it can't touch production files or history. If/when a role graduates to
+# doing real work, its cwd can be repointed at a real ~/worktrees/<role>
+# checkout then -- this function is the only place that decision lives.
+SCRATCH_ROOT = Path.home() / "paperclip-agents"
+
+
+def agent_scratch_dir(role: str) -> Path:
+    return SCRATCH_ROOT / role
+
+
+def desired_adapter_config(entry: dict) -> dict:
+    """The adapterConfig this script wants an agent to have. Only claude_local
+    agents need a cwd (openclaw_gateway agents like Jarvis run elsewhere and
+    are never in this manifest anyway)."""
+    if entry.get("adapterType") == "claude_local":
+        return {"cwd": str(agent_scratch_dir(entry["role"]))}
+    return {}
+
+
+def ensure_scratch_dirs(manifest: list[dict]) -> None:
+    """Create each claude_local agent's scratch cwd if missing. Pure local
+    filesystem side effect -- idempotent (mkdir -p semantics), never touches
+    the live Paperclip company, so it runs even in dry-run mode. Not called
+    from self_test(), which stays fully offline per its docstring."""
+    for entry in manifest:
+        if entry.get("adapterType") != "claude_local":
+            continue
+        d = agent_scratch_dir(entry["role"])
+        existed = d.is_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        if not existed:
+            print(f"  [mkdir] {d}")
+
+
 def build_hire_payload(entry: dict, reports_to_id: Optional[str]) -> dict:
     return {
         "name": entry["name"],
@@ -271,11 +311,7 @@ def build_hire_payload(entry: dict, reports_to_id: Optional[str]) -> dict:
         "capabilities": entry.get("capabilities"),
         "desiredSkills": entry.get("desiredSkills") or [],
         "adapterType": entry["adapterType"],
-        # adapterConfig.cwd (per-agent worktree, "claude_local" needs a real
-        # filesystem path to run in) is an open question explicitly deferred
-        # to Session A3 in the plan doc — left empty here on purpose, not a
-        # bug in this script.
-        "adapterConfig": {},
+        "adapterConfig": desired_adapter_config(entry),
         "instructionsBundle": entry["instructionsBundle"],
         "runtimeConfig": {"heartbeat": {"enabled": False, "wakeOnDemand": True}},
         # Not sent to Paperclip's schema-validated top-level fields — carried
@@ -315,6 +351,9 @@ def diff_and_patch_agent(client: PaperclipClient, existing: dict, entry: dict, r
         changed_top_level["capabilities"] = entry.get("capabilities")
     if existing.get("reportsTo") != reports_to_id:
         changed_top_level["reportsTo"] = reports_to_id
+    wanted_adapter_config = desired_adapter_config(entry)
+    if (existing.get("adapterConfig") or {}) != wanted_adapter_config:
+        changed_top_level["adapterConfig"] = wanted_adapter_config
 
     if changed_top_level:
         print(f"  [{'would patch' if client.dry_run else 'patching'}] {entry['name']} ({agent_id}): {list(changed_top_level)}")
@@ -448,6 +487,7 @@ def self_test() -> None:
                     "id": new_id, "name": body["name"], "title": body["title"],
                     "capabilities": body["capabilities"], "reportsTo": body["reportsTo"],
                     "desiredSkills": body["desiredSkills"], "metadata": body["metadata"],
+                    "adapterConfig": body.get("adapterConfig") or {},
                     "_files": dict(body["instructionsBundle"]["files"]),
                 }
                 return {"agent": {"id": new_id}}
@@ -532,6 +572,8 @@ def main() -> None:
 
     client = PaperclipClient(api_url, api_key, dry_run=dry_run)
 
+    if not args.skills_only:
+        ensure_scratch_dirs(manifest)
     if not args.agents_only:
         sync_skills(client, company_id, manifest)
     if not args.skills_only:
