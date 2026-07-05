@@ -42,6 +42,7 @@ Requires PyYAML — install into the project venv:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 import sys
@@ -564,6 +565,136 @@ def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
     return cc_dir
 
 
+# ── paperclip emitter ─────────────────────────────────────────────────────────
+# A third emit target: render a deploy-ready manifest for a live Paperclip
+# instance. Pure rendering only — no network calls, no talking to a Paperclip
+# API. A later deploy script (agent-factory/scripts/deploy_paperclip.py, see
+# docs/openclaw-paperclip-targets-plan.md Session A2) walks this manifest and
+# does the actual POST/PATCH.
+#
+# The Paperclip roster is a curated subset of the team, fixed by the plan doc:
+# ceo-orchestrator + tech-lead + tech-lead's reports + growth-hacker + its
+# reports + product-manager (a direct CEO report, currently a leaf role with no
+# delegates_to of its own — included as-is; if it grows reports later they'd be
+# pulled in the same way tech-lead/growth-hacker's are). finance-manager (and
+# its subtree) is explicitly out of scope for this phase — pulled in as named
+# roots only, never by recursing through ceo-orchestrator's full delegates_to
+# (which would also capture its finance-manager delegate).
+PAPERCLIP_LEAD_ROLES = ["tech-lead", "growth-hacker", "product-manager"]
+PAPERCLIP_APEX_ROLE = "ceo-orchestrator"
+
+
+def paperclip_roster(config: dict) -> list[dict]:
+    """The confirmed Paperclip roster (see module docstring above): the apex
+    orchestrator + each lead role + that lead's own delegates_to (empty for a
+    leaf role like product-manager). Returns the agent dicts in their original
+    compose-config order (not yet topological — see topological_roster)."""
+    by_role = {a["role"]: a for a in config["agents"] if isinstance(a, dict) and a.get("role")}
+    roster_roles = {PAPERCLIP_APEX_ROLE}
+    for lead in PAPERCLIP_LEAD_ROLES:
+        roster_roles.add(lead)
+        roster_roles.update(by_role[lead].get("delegates_to") or [])
+    return [a for a in config["agents"] if a.get("role") in roster_roles]
+
+
+def paperclip_parent_map(config: dict) -> dict[str, str]:
+    """role -> the first role whose delegates_to names it as a report. Built
+    from the whole config (not just the Paperclip roster) so a roster role's
+    real parent is always found; a role nobody delegates to (the apex) is
+    simply absent, giving reportsTo: null."""
+    parent: dict[str, str] = {}
+    for a in config["agents"]:
+        for child in a.get("delegates_to") or []:
+            parent.setdefault(child, a["role"])
+    return parent
+
+
+def topological_roster(roster: list[dict], parent_map: dict[str, str]) -> list[dict]:
+    """Order the roster so every agent's parent appears before it, regardless
+    of the order roles happen to be listed in the compose config. A deploy
+    script can then walk the list once and always resolve reportsTo from an
+    already-seen (and by then already-created) parent."""
+    by_role = {a["role"]: a for a in roster}
+    ordered: list[dict] = []
+    placed: set[str] = set()
+
+    def place(role: str) -> None:
+        if role in placed or role not in by_role:
+            return
+        parent = parent_map.get(role)
+        if parent:
+            place(parent)
+        placed.add(role)
+        ordered.append(by_role[role])
+
+    for agent in roster:
+        place(agent["role"])
+    return ordered
+
+
+def paperclip_capabilities(role: str) -> str:
+    """The 'capabilities' blurb: role.yaml `owns:` if set, else the full
+    (whitespace-normalized) `summary`."""
+    meta = role_meta(role)
+    owns = meta.get("owns")
+    return " ".join(owns.split()) if owns else role_summary(role)
+
+
+def paperclip_payload(agent: dict, parent_map: dict[str, str], slug: str) -> dict:
+    """One agent-hire payload: identity + skills + placeholder reportsTo.
+    instructionsBundle.files carries the unflattened 5-file render_agent()
+    output directly — Paperclip's instructionsBundle takes a
+    {filename: content} map, so no flattening step (unlike the CC target)."""
+    role = agent["role"]
+    meta = role_meta(role)
+    title = meta.get("title") or role
+    return {
+        # The raw role key — the join key deploy_paperclip.py uses to resolve
+        # reportsTo (also a role key) to an already-created parent's real UUID.
+        # Not itself sent to Paperclip's API; "name"/"title" below are.
+        "role": role,
+        "name": agent.get("name") or title,
+        "title": title,
+        "capabilities": paperclip_capabilities(role),
+        "adapterType": "claude_local",
+        "instructionsBundle": {
+            "entryFile": "AGENTS.md",
+            "files": render_agent(agent, slug=slug),
+        },
+        "desiredSkills": agent_skills(agent),
+        # Placeholder — a role name, not a UUID. Paperclip agents don't exist
+        # yet at render time; deploy_paperclip.py resolves this to the real
+        # UUID of the already-created parent (topological order guarantees
+        # the parent was processed first).
+        "reportsTo": parent_map.get(role),
+    }
+
+
+def write_paperclip(name: str, config: dict, out_dir: Path) -> Path:
+    """Emit the Paperclip roster as a deploy-ready manifest under
+    <out_dir>/<name>/_paperclip/manifest.json. Idempotent: the _paperclip dir
+    is wiped and rewritten each run, same as write_claude_code/write_project.
+    Pure rendering — no network calls anywhere in this path.
+    """
+    slug = config.get("slug") or name
+    roster = paperclip_roster(config)
+    parent_map = paperclip_parent_map(config)
+    ordered = topological_roster(roster, parent_map)
+
+    pc_dir = out_dir / name / "_paperclip"
+    if pc_dir.is_symlink():
+        raise ValueError(f"refusing to write: {pc_dir} is a symlink, not a dir")
+    if pc_dir.exists():
+        shutil.rmtree(pc_dir)
+    pc_dir.mkdir(parents=True)
+
+    manifest = [paperclip_payload(agent, parent_map, slug) for agent in ordered]
+    (pc_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    return pc_dir
+
+
 # ── writing ───────────────────────────────────────────────────────────────────
 
 def write_project(name: str, config: dict, out_dir: Path) -> Path:
@@ -598,9 +729,10 @@ def main() -> None:
     parser.add_argument("config", type=Path, help="path to the compose config yaml")
     parser.add_argument("--out", type=Path, default=PROJECTS_DIR, help="output dir")
     parser.add_argument(
-        "--target", choices=["openclaw", "claude-code"], default="openclaw",
+        "--target", choices=["openclaw", "claude-code", "paperclip"], default="openclaw",
         help="emit shape: openclaw = 5 files + agents.yaml (default); "
-             "claude-code = CC skills (orchestrators) + subagents (specialists)",
+             "claude-code = CC skills (orchestrators) + subagents (specialists); "
+             "paperclip = _paperclip/manifest.json for the curated Paperclip roster",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -619,6 +751,14 @@ def main() -> None:
     if args.dry_run:
         slug = config.get("slug") or name
         print(f"[dry-run] target={args.target}  project: {name}  slug: {slug}  ({len(agents)} agents) -> {args.out / name}")
+        if args.target == "paperclip":
+            parent_map = paperclip_parent_map(config)
+            ordered = topological_roster(paperclip_roster(config), parent_map)
+            for agent in ordered:
+                role = agent["role"]
+                print(f"  - {role:<20} model={resolve_model(agent):<8} reportsTo={parent_map.get(role)}")
+            print(f"[dry-run] {len(ordered)} agents -> _paperclip/manifest.json")
+            return
         for agent in agents:
             role = agent["role"]
             if args.target == "claude-code":
@@ -642,6 +782,16 @@ def main() -> None:
             slugged_name = f"{slug}-{role}"
             shape = "skill" if is_orchestrator(role) else "subagent"
             print(f"  - {slugged_name} ({resolve_model(agent)}) -> CC {shape}")
+        return
+
+    if args.target == "paperclip":
+        pc_dir = write_paperclip(name, config, args.out)
+        parent_map = paperclip_parent_map(config)
+        ordered = topological_roster(paperclip_roster(config), parent_map)
+        print(f"composed '{name}' (paperclip): {len(ordered)} agents -> {pc_dir}")
+        for agent in ordered:
+            role = agent["role"]
+            print(f"  - {role} ({resolve_model(agent)})  reportsTo={parent_map.get(role)}")
         return
 
     project_dir = write_project(name, config, args.out)
