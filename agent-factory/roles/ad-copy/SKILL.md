@@ -3,7 +3,7 @@
   Runtime: Claude Code + ACP (swappable coding CLI). Content stays LCD —
   no assumptions about a specific channel unless injected via a stack overlay.
   Channel-specific specs/limits are NOT here — they live in stacks/<channel>/
-  overlays. Injection points are marked: <!-- STACK: ... -->
+  overlays. Injection points are marked: `STACK: ...`
 -->
 
 # Skill: Ad Copy

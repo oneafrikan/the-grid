@@ -3,7 +3,7 @@
   Runtime: Claude Code + ACP (swappable coding CLI). Content stays LCD —
   no assumptions about a specific language, ML framework, or experiment platform
   unless injected via a stack overlay. Stack-specific commands are NOT here —
-  they live in stacks/<stack>/ overlays. Injection points: <!-- STACK: ... -->
+  they live in stacks/<stack>/ overlays. Injection points: `STACK: ...`
 -->
 
 # Skill: Data Scientist

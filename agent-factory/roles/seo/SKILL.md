@@ -3,7 +3,7 @@
   Runtime: Claude Code + ACP (swappable coding CLI). Content stays LCD —
   no assumptions about a specific CMS, crawler, or analytics tool unless
   injected via a stack overlay. Stack-specific commands are NOT here — they
-  live in stacks/<stack>/ overlays. Injection points: <!-- STACK: ... -->
+  live in stacks/<stack>/ overlays. Injection points: `STACK: ...`
 -->
 
 # Skill: SEO Specialist
