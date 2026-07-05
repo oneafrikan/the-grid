@@ -152,6 +152,10 @@ From investigation (`agent-factory/compose.py`, `paperclip/src`, `~/.openclaw`,
   `PAPERCLIP_API_KEY`, `PAPERCLIP_COMPANY_ID`.
 - Bootstrap a **new company** (not the dormant "Cogniskeleton" — that's a separate,
   unrelated experiment) — e.g. "The Grid". `--create-company` flag for one-time setup.
+  **Superseded 2026-07-05:** actually deployed against the existing "Cogniskeleton"
+  company instead — company creation needs board-key auth an agent key can never have
+  (see script's own docstring), and Gareth's explicit call was "use a generic company
+  name for now, we are only doing wiring." No `--create-company` flag was built.
 - Skills: for each unique skill key in the manifest, `GET /companies/:id/skills`; if
   missing, read the skill's `SKILL.md` from the-grid filesystem and `POST
   /companies/:id/skills` with raw markdown. Idempotent.
@@ -177,6 +181,33 @@ From investigation (`agent-factory/compose.py`, `paperclip/src`, `~/.openclaw`,
   work in its `cwd`.
 - **Done when:** the full roster exists in Paperclip, one agent has been proven to actually
   execute, and the run is reproducible (re-running A2's script is a clean no-op).
+
+**Status (2026-07-05):** partial, in progress.
+
+- ✅ `cwd` resolved: `~/paperclip-agents/<project>/<role>` (project-scoped, not just
+  role-scoped — a flat `<role>`-only scheme collides the moment a second roster is
+  deployed). Commit `ee0c486`.
+- ✅ First real hire proven: "Tech Lead" hired live into Cogniskeleton via
+  `POST /agent-hires`, `reportsTo` the existing CEO, `status: idle`. Confirmed
+  Paperclip's "Require board approval for new hires" is off company-side — hires
+  activate immediately (`approval: null`), no pending-approval step to handle.
+  5-file instructions bundle materialized straight to disk at hire time (verified
+  on disk, not just via API response).
+- ⬜ **17 of 20 roles still unhired.**
+- ⬜ **New risk, not yet fixed:** CEO's *live* `adapterConfig.cwd` still points at the
+  pre-fix flat path (`~/paperclip-agents/ceo-orchestrator`), set at CEO's original
+  May 22 onboarding. A full manifest run would now try to `PATCH` it to the new
+  nested path — and `diff_and_patch_agent` sends `adapterConfig` as a whole-field
+  replacement, not a merge, so that PATCH risks wiping CEO's `model`/`chrome`/
+  `instructionsBundleMode` etc. Must be resolved (merge fix, or a one-off manual
+  cwd migration) before running the full roster.
+- ⬜ **Original blocker (handoff 2026-07-05 item #1) still unfixed:** the
+  existing-agent instructions-bundle PUT still 403s (`agents.ts:1137`, no
+  agent-key path exists, ever). Only bites when patching an already-hired agent
+  (CEO, Jarvis) — new hires bypass this path entirely, which is how today's
+  Tech Lead hire avoided it.
+- 19 flat scratch dirs at `~/paperclip-agents/<role>/` (pre-dating the project-scoping
+  fix) are now orphaned — harmless, cosmetic cleanup only.
 
 ### Session B1 — OpenClaw template set + roster.json
 
