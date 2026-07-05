@@ -270,23 +270,30 @@ def sync_skills(client: PaperclipClient, company_id: str, manifest: list[dict]) 
 # it can't touch production files or history. If/when a role graduates to
 # doing real work, its cwd can be repointed at a real ~/worktrees/<role>
 # checkout then -- this function is the only place that decision lives.
+#
+# Scoped by project as well as role: a manifest lives at
+# projects/<project>/_paperclip/manifest.json (write_paperclip in compose.py),
+# and the same role (e.g. "backend-dev") will exist in more than one composed
+# roster over time. A flat SCRATCH_ROOT/<role> would collide across projects
+# the moment a second roster is deployed, so cwd is keyed by
+# SCRATCH_ROOT/<project>/<role> from the start.
 SCRATCH_ROOT = Path.home() / "paperclip-agents"
 
 
-def agent_scratch_dir(role: str) -> Path:
-    return SCRATCH_ROOT / role
+def agent_scratch_dir(project: str, role: str) -> Path:
+    return SCRATCH_ROOT / project / role
 
 
-def desired_adapter_config(entry: dict) -> dict:
+def desired_adapter_config(entry: dict, project: str) -> dict:
     """The adapterConfig this script wants an agent to have. Only claude_local
     agents need a cwd (openclaw_gateway agents like Jarvis run elsewhere and
     are never in this manifest anyway)."""
     if entry.get("adapterType") == "claude_local":
-        return {"cwd": str(agent_scratch_dir(entry["role"]))}
+        return {"cwd": str(agent_scratch_dir(project, entry["role"]))}
     return {}
 
 
-def ensure_scratch_dirs(manifest: list[dict]) -> None:
+def ensure_scratch_dirs(manifest: list[dict], project: str) -> None:
     """Create each claude_local agent's scratch cwd if missing. Pure local
     filesystem side effect -- idempotent (mkdir -p semantics), never touches
     the live Paperclip company, so it runs even in dry-run mode. Not called
@@ -294,14 +301,14 @@ def ensure_scratch_dirs(manifest: list[dict]) -> None:
     for entry in manifest:
         if entry.get("adapterType") != "claude_local":
             continue
-        d = agent_scratch_dir(entry["role"])
+        d = agent_scratch_dir(project, entry["role"])
         existed = d.is_dir()
         d.mkdir(parents=True, exist_ok=True)
         if not existed:
             print(f"  [mkdir] {d}")
 
 
-def build_hire_payload(entry: dict, reports_to_id: Optional[str]) -> dict:
+def build_hire_payload(entry: dict, reports_to_id: Optional[str], project: str) -> dict:
     return {
         "name": entry["name"],
         "role": map_paperclip_role(entry["role"]),
@@ -311,7 +318,7 @@ def build_hire_payload(entry: dict, reports_to_id: Optional[str]) -> dict:
         "capabilities": entry.get("capabilities"),
         "desiredSkills": entry.get("desiredSkills") or [],
         "adapterType": entry["adapterType"],
-        "adapterConfig": desired_adapter_config(entry),
+        "adapterConfig": desired_adapter_config(entry, project),
         "instructionsBundle": entry["instructionsBundle"],
         "runtimeConfig": {"heartbeat": {"enabled": False, "wakeOnDemand": True}},
         # Not sent to Paperclip's schema-validated top-level fields — carried
@@ -338,7 +345,7 @@ def find_existing(existing_agents: list[dict], entry: dict) -> Optional[dict]:
     return None
 
 
-def diff_and_patch_agent(client: PaperclipClient, existing: dict, entry: dict, reports_to_id: Optional[str]) -> None:
+def diff_and_patch_agent(client: PaperclipClient, existing: dict, entry: dict, reports_to_id: Optional[str], project: str) -> None:
     """Bring an already-hired agent in line with the manifest. Only issues a
     call for a field that actually changed, so an unmodified manifest run
     against unmodified live state issues zero calls — the idempotency
@@ -351,7 +358,7 @@ def diff_and_patch_agent(client: PaperclipClient, existing: dict, entry: dict, r
         changed_top_level["capabilities"] = entry.get("capabilities")
     if existing.get("reportsTo") != reports_to_id:
         changed_top_level["reportsTo"] = reports_to_id
-    wanted_adapter_config = desired_adapter_config(entry)
+    wanted_adapter_config = desired_adapter_config(entry, project)
     if (existing.get("adapterConfig") or {}) != wanted_adapter_config:
         changed_top_level["adapterConfig"] = wanted_adapter_config
 
@@ -390,7 +397,7 @@ def diff_and_patch_agent(client: PaperclipClient, existing: dict, entry: dict, r
             print(f"  [ok] {entry['name']}: instructions-bundle/{filename} unchanged")
 
 
-def deploy_agents(client: PaperclipClient, company_id: str, manifest: list[dict]) -> None:
+def deploy_agents(client: PaperclipClient, company_id: str, manifest: list[dict], project: str) -> None:
     existing_agents = client.get(f"/api/companies/{company_id}/agents") or []
     role_id_map: dict[str, str] = {}
 
@@ -412,10 +419,10 @@ def deploy_agents(client: PaperclipClient, company_id: str, manifest: list[dict]
 
         existing = find_existing(existing_agents, entry)
         if existing:
-            diff_and_patch_agent(client, existing, entry, reports_to_id)
+            diff_and_patch_agent(client, existing, entry, reports_to_id, project)
             role_id_map[role] = existing["id"]
         else:
-            payload = build_hire_payload(entry, reports_to_id)
+            payload = build_hire_payload(entry, reports_to_id, project)
             print(f"  [{'would hire' if client.dry_run else 'hiring'}] {entry['name']} "
                   f"(role={payload['role']}, reportsTo={reports_to_id})")
             result = client.mutate(
@@ -511,7 +518,7 @@ def self_test() -> None:
     client = FakeClient()
 
     print("\n--- pass 1: empty company -> expect 3 hires, reportsTo chained correctly ---")
-    deploy_agents(client, "fixture-company", manifest)
+    deploy_agents(client, "fixture-company", manifest, "fixture-project")
     assert client.agents["fake-role-a"]["reportsTo"] is None
     assert client.agents["fake-role-b"]["reportsTo"] == "fake-role-a", "B must report to A's real id"
     assert client.agents["fake-role-c"]["reportsTo"] == "fake-role-b", "C must report to B's real id"
@@ -519,7 +526,7 @@ def self_test() -> None:
 
     print("\n--- pass 2: identical manifest against now-existing agents -> expect 0 mutating calls ---")
     calls_before = client.call_count
-    deploy_agents(client, "fixture-company", manifest)
+    deploy_agents(client, "fixture-company", manifest, "fixture-project")
     delta = client.call_count - calls_before
     assert delta == 0, f"expected 0 mutating calls on an unchanged re-run, got {delta}"
     print(f"[self-test] pass 2 OK — {delta} mutating calls (idempotent no-op confirmed)")
@@ -527,7 +534,7 @@ def self_test() -> None:
     print("\n--- pass 3: one field drifts (B's capabilities) -> expect exactly 1 PATCH, nothing else ---")
     manifest[1]["capabilities"] = "middle (updated)"
     calls_before = client.call_count
-    deploy_agents(client, "fixture-company", manifest)
+    deploy_agents(client, "fixture-company", manifest, "fixture-project")
     delta = client.call_count - calls_before
     assert delta == 1, f"expected exactly 1 mutating call for the single drifted field, got {delta}"
     assert client.agents["fake-role-b"]["capabilities"] == "middle (updated)"
@@ -554,7 +561,11 @@ def main() -> None:
         return
 
     manifest = load_manifest(args.manifest)
-    print(f"loaded manifest: {len(manifest)} agents from {args.manifest}")
+    # Manifests always live at projects/<project>/_paperclip/manifest.json
+    # (write_paperclip in compose.py) -- derive the project slug from that
+    # convention so scratch-dir cwds are scoped per project, not just per role.
+    project = args.manifest.resolve().parent.parent.name
+    print(f"loaded manifest: {len(manifest)} agents from {args.manifest} (project={project})")
 
     api_url = os.environ.get("PAPERCLIP_API_URL")
     api_key = os.environ.get("PAPERCLIP_API_KEY")
@@ -573,11 +584,11 @@ def main() -> None:
     client = PaperclipClient(api_url, api_key, dry_run=dry_run)
 
     if not args.skills_only:
-        ensure_scratch_dirs(manifest)
+        ensure_scratch_dirs(manifest, project)
     if not args.agents_only:
         sync_skills(client, company_id, manifest)
     if not args.skills_only:
-        deploy_agents(client, company_id, manifest)
+        deploy_agents(client, company_id, manifest, project)
 
 
 if __name__ == "__main__":
