@@ -29,7 +29,6 @@
 
 # --- composed agent-factory projects ---
 project:grid
-project:gh-triage
 
 # --- anthropic — universal comms + meta tools (9 skills) ---
 # Desktop/design tools (canvas-design, frontend-design, etc.) live in machine overlays.
