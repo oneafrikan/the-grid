@@ -71,3 +71,5 @@ agents:
   - role: finance-strategist
   - role: finance-risk-officer
   - role: finance-scribe
+  # GitHub triage (standalone, cron-driven — not part of any delegation chain)
+  - role: gh-triage
