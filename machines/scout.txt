@@ -53,4 +53,5 @@ mattpocock/prototype
 
 # --- composed projects ---
 project:grid
-project:gh-triage
+# project:gh-triage now wired baseline-wide (see baseline-submodules.txt); no
+# overlay entry needed here.

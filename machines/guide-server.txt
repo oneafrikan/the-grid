@@ -41,4 +41,5 @@ jeffallan/sre-engineer
 anthropic/webapp-testing
 
 # --- composed projects ---
-project:gh-triage
+# project:gh-triage now wired baseline-wide (see baseline-submodules.txt); no
+# overlay entry needed here.
