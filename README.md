@@ -24,9 +24,20 @@ I got in.
 ```
 
 # the-grid
-the-grid is a personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw, Paperclip, and friends. It's not a framework; it's one person's opinionated system for organising and activating skills, agents, and machines. Fork it for your own. Skills are the first asset type it manages, but the remit is broader: agents, machines, MCP servers, and prompts are already growing in.
+the-grid is a personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw, Paperclip, and friends. It's not a framework; it's one person's opinionated system for organising and activating skills, agents, and machines. Fork it for your own. Skills are the first asset type it manages, but the remit is broader: agents, machines, MCP servers, prompts, and reusable automations are already growing in.
 
-The core mechanic: a single script (`scripts/wire.sh`) symlinks skills into `~/.claude/skills/` so Claude picks them up automatically — no installs, no config files.
+The core mechanic: a single script (`scripts/wire.sh`) symlinks skills — and agents composed by `agent-factory/` — into `~/.claude/skills/` and `~/.claude/agents/` so Claude picks them up automatically — no installs, no config files.
+
+## The four factories
+
+Four sibling scaffolds, each owning a different asset type:
+
+| Factory | Produces | Deployed via |
+|---------|----------|---------------|
+| `skills-factory/` | New skills (built via a Karpathy loop elsewhere, dropped into `skills/`) | `scripts/wire.sh` symlinks |
+| `agent-factory/` | Composed AI dev-team agents (`role × stack × skills`) — 27 roles today: 4 orchestrators (CC skills) + 23 specialists (CC subagents) | `scripts/wire.sh` (Claude Code target); OpenClaw + Paperclip targets next |
+| `automation-factory/` | Reusable automation patterns (e.g. `issue-loop`) | Cut into a target repo's tracked `loop/` folder |
+| `project-factory/` | Whole new project scaffolds from a template | `scripts/cut-project.sh` (seed or retrofit) |
 
 ## Repo layout
 
@@ -38,31 +49,36 @@ The core mechanic: a single script (`scripts/wire.sh`) symlinks skills into `~/.
     rubber-duck/
       SKILL.md
     ...
-  agents/               ← agent definitions (growing)
-  machines/             ← machine-specific configs (growing)
+  agents/               ← hand-authored root-owned agents (personas/behavior-modifiers)
+  machines/             ← per-machine skill/project overlays (machines/<host>.txt)
   docs/                 ← reference docs, playbooks, resources
   prompts/              ← reusable prompts
-  agent-factory/        ← scaffolding for composing AI dev teams (early)
+  agent-factory/        ← composes AI dev-team agents (role × stack × skills); live
   skills-factory/       ← scaffolding for generating new skills (early)
+  automation-factory/   ← reusable automation patterns (e.g. issue-loop), cut into target repos
+  project-factory/      ← scaffolds brand-new projects from a template
   repos/                ← sibling repos as git submodules
     gstack/             (each may contain many skill dirs)
     openclaw/
     paperclip/
     ...
   scripts/
-    wire.sh             ← creates ~/.claude/skills/ symlinks (idempotent)
+    wire.sh             ← creates ~/.claude/skills/ + ~/.claude/agents/ symlinks (idempotent)
     catalog.sh          ← regenerates SKILLS.md
     reconcile.sh        ← removes stale skill shadows on a new machine
+    cut-project.sh      ← seeds/retrofits a project-factory template
   tests/
     test_wiring.bats
     test_skill_format.bats
     test_catalog.bats
     test_repo_health.bats
     lib/bats-core/      ← test runner (submodule, no install needed)
+  CLAUDE.md               ← full project context for Claude sessions
   SKILLS.md               ← generated skill index (never edit by hand)
+  LEARNINGS.md            ← durable lessons mined from project history
   baseline-submodules.txt ← baseline allowlist: wired on every machine
   machines/<host>.txt     ← per-machine overlay (adds/subtracts on the baseline)
-  TODO.md
+  TODO.md                 ← issue map; open work lives in GitHub Issues
 ```
 
 ## Bootstrap (new machine)
