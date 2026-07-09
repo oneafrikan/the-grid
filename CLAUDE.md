@@ -158,7 +158,13 @@ is symmetric and loud: a token with no `delegates_to` (or vice-versa), or a dele
 on the team, is a hard compose error — so a roster can never silently drift out of sync
 with the team. grid topology: `ceo → tech-lead, product-manager, growth-hacker`;
 `tech-lead → eng + data/research`; `growth-hacker → the marketing arm` (a player-coach
-orchestrator).
+orchestrator). `finance-manager → the finance desk pipeline` (sentinel → analyst →
+strategist → risk-officer → scribe) is a **standalone** top-level orchestrator, deliberately
+outside the CEO's `delegates_to` — a personal desk, not a dev-team initiative. `gh-triage`
+is a standalone, cron-driven role with no delegation chain. The full team (`examples/grid.yaml`)
+is 27 roles: 4 orchestrators (ceo-orchestrator, tech-lead, growth-hacker, finance-manager) → CC
+skills, 23 specialists → CC subagents. gh-triage was folded into this one composed project
+rather than kept as its own (see Learnings) — one `project:grid` gate in the baseline covers it.
 
 > **Rollout note:** `agent-factory/projects/*` is git-ignored (regenerable output). A
 > machine picks up roster/topology changes only after `git pull` **then re-running
@@ -202,6 +208,10 @@ Durable lessons mined from project history — full context and sources in
 - Don't write bash-style unquoted-`$var` word-splitting in ad-hoc shell
   commands — Gareth's machines may run zsh, which doesn't word-split by
   default — see LEARNINGS.md ("zsh doesn't word-split...").
+- A cron-driven, non-delegating role (e.g. `gh-triage`) doesn't need its own
+  composed project — fold it into an existing project's roster (a `project:`
+  gate already covers it) rather than maintaining a second `baseline-submodules.txt`
+  entry and machine-overlay footprint for one role.
 
 ## About
 

@@ -820,9 +820,10 @@
               <span class="badge badge-wired" aria-hidden="true">live</span>
             </h3>
             <p>
-              Repos listed in <code>wired-submodules.txt</code>. Their skills are
-              symlinked live into <code>~/.claude/skills/</code> and active in every
-              session. Keep this list small and intentional.
+              Repos in <code>baseline-submodules.txt</code> (every machine) plus
+              an optional per-machine overlay at <code>machines/&lt;host&gt;.txt</code>.
+              Their skills are symlinked live into <code>~/.claude/skills/</code> and
+              active in every session. Keep the baseline small and intentional.
             </p>
           </article>
 
@@ -932,12 +933,12 @@
           <tbody>
             <tr>
               <td><strong>Skill</strong> (orchestrator)</td>
-              <td><code>tech-lead</code>, <code>ceo-orchestrator</code></td>
+              <td><code>ceo-orchestrator</code>, <code>tech-lead</code>, <code>growth-hacker</code>, <code>finance-manager</code></td>
               <td>Slash command — <code>/tech-lead</code>. Transforms the session into that role.</td>
             </tr>
             <tr>
               <td><strong>Subagent</strong> (specialist)</td>
-              <td>the other 16 roles</td>
+              <td>the other 23 roles</td>
               <td>Not a slash command. Delegate: <em>"Use the backend-dev subagent to…"</em>, or let an orchestrator hand off automatically.</td>
             </tr>
           </tbody>
@@ -965,14 +966,64 @@ bash scripts/wire.sh
 
       </section>
 
+      <!-- 3b. automation-factory — reusable automation patterns -->
+      <section aria-labelledby="automation-factory-heading">
+        <h2 id="automation-factory-heading">automation-factory — reusable patterns</h2>
+
+        <p>
+          A sibling factory to <code>agent-factory/</code>, one tier down: not composed
+          agents, but <strong>reusable automation patterns</strong> — the orchestration
+          layer that wires an agent into a recurring, unattended workflow. A tailor
+          doesn't sew each suit from scratch — they cut from a pattern. Each pattern is a
+          generic, version-controlled template, <em>instantiated</em> (cut + placeholder-filled)
+          into a target repo's tracked <code>loop/</code> folder — not <code>.claude/</code>,
+          which is commonly gitignored and wouldn't survive a clone or repo move.
+        </p>
+
+        <p>
+          First pattern: <code>issue-loop</code> — an autonomous agent that works a repo's
+          GitHub issue backlog unattended, with an auto code-review posted to each issue.
+          Composes a <code>/loop</code> prompt with a post-commit review hook.
+        </p>
+
+        <div class="ownership-note">
+          The template is what the-grid owns; the instance lives in the project it serves.
+          <code>scripts/instantiate.sh</code> (planned, see TODO.md issue #15) will add a
+          machine-profiled cut: copy into <code>loop/</code> + placeholder-fill + settings
+          wiring, plus worktree/PR sandboxing and launchd vs cloud scheduling.
+        </div>
+      </section><!-- /#automation-factory-heading -->
+
+      <!-- 3c. project-factory — project bootstrapping -->
+      <section aria-labelledby="project-factory-heading">
+        <h2 id="project-factory-heading">project-factory — project bootstrapping</h2>
+
+        <p>
+          Scaffolds whole new projects from a template — a different job from
+          <code>skills/</code> (wired), <code>agent-factory/</code> (composes personas), and
+          <code>automation-factory/</code> (cuts a pattern into an existing repo). A template
+          is standalone: no logic of its own, doesn't run, doesn't depend on the-grid once cut.
+        </p>
+
+        <p>
+          <code>scripts/cut-project.sh &lt;template&gt; &lt;target-dir&gt;</code> either
+          <strong>seeds</strong> a brand-new project (empty target) or <strong>retrofits</strong>
+          an existing one (non-empty target) — same script, same rule either way: never
+          overwrite a file that already exists and differs from the template; anything
+          skipped is reported for manual review. Composition (which agent-factory persona,
+          which skills, which automation-factory pattern) happens <em>after</em> seeding, as a
+          normal step in the resulting repo.
+        </p>
+      </section><!-- /#project-factory-heading -->
+
       <!-- 4. Agents — who the factory produces -->
       <section aria-labelledby="agents-heading">
         <h2 id="agents-heading">Agents</h2>
 
         <p>
-          agent-factory produces 18 roles. Two are <strong>orchestrators</strong> —
+          agent-factory produces 27 roles. Four are <strong>orchestrators</strong> —
           they become Claude Code skills invoked as slash commands and can coordinate
-          the rest of the team. The other 16 are <strong>specialists</strong> —
+          the rest of the team. The other 23 are <strong>specialists</strong> —
           subagents delegated to by an orchestrator or called directly.
         </p>
 
@@ -1000,6 +1051,24 @@ bash scripts/wire.sh
             </div>
             <div class="agent-card-title">Tech Lead</div>
             <p class="agent-card-summary">PRDs, architecture decisions, hands off to specialists, reviews output.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>growth-hacker</code>
+              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
+            </div>
+            <div class="agent-card-title">Growth Hacker</div>
+            <p class="agent-card-summary">Acquisition and funnel experiments, analytics-driven growth. Runs disciplined, hypothesis-first experiments — one variable at a time, lets the data decide. Player-coach: also leads the marketing specialists below.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>finance-manager</code>
+              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
+            </div>
+            <div class="agent-card-title">Finance Manager</div>
+            <p class="agent-card-summary">Orchestrates the finance desk pipeline (sentinel → analyst → strategist → risk-officer → approval → scribe). Routes and grades escalation; never sizes a trade, never overrides the Risk Officer, never auto-approves. Standalone — deliberately outside the CEO's delegation chain.</p>
           </article>
 
         </div>
@@ -1086,6 +1155,51 @@ bash scripts/wire.sh
 
           <article class="agent-card">
             <div class="agent-card-name">
+              <code>finance-analyst</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Finance Analyst</div>
+            <p class="agent-card-summary">Turns a Sentinel flag (or scheduled review) into an evidence pack: what happened, primary sources, base rates, and the bull AND bear case argued with equal effort. Never recommends — output is evidence, not a proposal.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>finance-risk-officer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Finance Risk Officer</div>
+            <p class="agent-card-summary">Layer-2 sanity check: verifies the Strategist's arithmetic and checks the proposal against the Investment Policy's text. The hard-limit veto (position caps, drawdown circuit breaker, no leverage) is Layer-1 pure code elsewhere, not this agent.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>finance-scribe</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Finance Scribe</div>
+            <p class="agent-card-summary">Logs every flag, brief, proposal, approval/rejection, and outcome to the vault with full rationale. Runs the monthly post-mortem. Never proposes or judges — records only.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>finance-sentinel</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Finance Sentinel</div>
+            <p class="agent-card-summary">Polls prices, portfolio state, RSS/filings, and FX against threshold rules. 95% deterministic; the model only classifies and flags. Never analyses, never recommends.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>finance-strategist</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Finance Strategist</div>
+            <p class="agent-card-summary">Reads an evidence pack + the Investment Policy + portfolio state and produces a proposal (hold/trim/add/rebalance) with position size, an explicit confidence level, and the strongest argument against its own proposal.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
               <code>frontend-dev</code>
               <span class="badge badge-specialist" aria-hidden="true">specialist</span>
             </div>
@@ -1095,11 +1209,29 @@ bash scripts/wire.sh
 
           <article class="agent-card">
             <div class="agent-card-name">
-              <code>growth-hacker</code>
+              <code>gh-triage</code>
               <span class="badge badge-specialist" aria-hidden="true">specialist</span>
             </div>
-            <div class="agent-card-title">Growth Hacker</div>
-            <p class="agent-card-summary">Acquisition and funnel experiments, analytics-driven growth. Runs disciplined, hypothesis-first experiments — one variable at a time, lets the data decide.</p>
+            <div class="agent-card-title">GitHub Triage Agent</div>
+            <p class="agent-card-summary">Autonomous GitHub issue triage — classifies severity, applies mattpocock labels, writes agent briefs for machine-doable issues and triage notes for human-required ones. Cron-driven, no delegation chain.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>paid-search</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Paid Search Specialist</div>
+            <p class="agent-card-summary">Google Ads + Microsoft Ads: account/campaign structure, keyword + match-type + negative strategy, Quality Score, bidding and budget pacing, conversion tracking. Plans and optimises spend; the human approves the budget.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>paid-social</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Paid Social Specialist</div>
+            <p class="agent-card-summary">Meta, Instagram, LinkedIn, TikTok: campaign objective + structure, audience strategy, creative testing and fatigue management, pixel/CAPI tracking. Plans and optimises spend; the human approves the budget.</p>
           </article>
 
           <article class="agent-card">
@@ -1172,60 +1304,61 @@ bash scripts/wire.sh
         <h2 id="skills-heading">Skills</h2>
 
         <p>
-          <strong>150 wired live</strong> across 6 sources — active in every Claude
-          session. Another <strong>3,058</strong> are indexed in the library (not wired)
-          and searchable via <code>skill-scout</code>.
+          <strong>123 wired live</strong> (8 root-owned + 115 from allowlisted repos)
+          across 7 sources — active in every Claude session. Another 82 exist in those
+          same partial repos but aren't wired, and a further <strong>~1,267</strong> are
+          indexed across 18 dedicated library submodules — all searchable via
+          <code>skill-scout</code>, none loaded by default.
         </p>
 
-        <!-- ── Root (owned / edited) — 6 ── -->
+        <!-- ── Root (owned / edited) — 8 ── -->
         <h3 class="skills-source-heading">
           Root (owned / edited)
-          <span class="skills-count">6</span>
+          <span class="skills-count">8</span>
           <span class="badge badge-wired" aria-hidden="true">wired</span>
         </h3>
         <ul class="skills-list">
           <li><span class="skill-name">caveman</span> — <span class="skill-desc">Ultra-compressed communication mode.</span></li>
+          <li><span class="skill-name">gh-issues-by-severity</span> — <span class="skill-desc">List open GitHub issues grouped by severity, discovering whatever severity:* label scheme the repo actually uses.</span></li>
           <li><span class="skill-name">handoff</span> — <span class="skill-desc">Compact the current conversation into a handoff document for another agent to pick up.</span></li>
+          <li><span class="skill-name">mine-learnings</span> — <span class="skill-desc">Mine project history for durable technical learnings and fold the highest-value ones into CLAUDE.md.</span></li>
           <li><span class="skill-name">rubber-duck</span> — <span class="skill-desc">Structured rubber duck debugging.</span></li>
           <li><span class="skill-name">setup-gareth-skills</span> — <span class="skill-desc">Sets up an Agent skills block in AGENTS.md/CLAUDE.md and docs/agents/ so engineering skills know this repo's issue tracker, triage labels, and domain details.</span></li>
           <li><span class="skill-name">skill-scout</span> — <span class="skill-desc">Scout public agent-skill directories (ranked by installs) and propose new skills to add to the-grid, deduped against what's already wired.</span></li>
           <li><span class="skill-name">standup</span> — <span class="skill-desc">Generate a concise standup summary from recent git activity across repos.</span></li>
         </ul>
 
-        <!-- ── repos/anthropic — 15 ── -->
+        <!-- ── repos/anthropic (partial) — 9 ── -->
         <h3 class="skills-source-heading">
           repos/anthropic
-          <span class="skills-count">15</span>
+          <span class="skills-count">9</span>
           <span class="badge badge-wired" aria-hidden="true">wired</span>
         </h3>
         <ul class="skills-list">
-          <li><span class="skill-name">brand-guidelines</span> — <span class="skill-desc">Applies Anthropic's official brand colors and typography to any artifact.</span></li>
-          <li><span class="skill-name">canvas-design</span> — <span class="skill-desc">Create beautiful visual art in .png and .pdf documents using design philosophy.</span></li>
-          <li><span class="skill-name">claude-api</span> — <span class="skill-desc">Build, debug, and optimize Claude API / Anthropic SDK apps.</span></li>
+          <li><span class="skill-name">claude-api</span> — <span class="skill-desc">Reference for the Claude API / Anthropic SDK — model ids, pricing, params, streaming, tool use, caching.</span></li>
           <li><span class="skill-name">docx</span> — <span class="skill-desc">Create, read, edit, or manipulate Word documents (.docx files).</span></li>
-          <li><span class="skill-name">frontend-design</span> — <span class="skill-desc">Create distinctive, production-grade frontend interfaces with high design quality.</span></li>
           <li><span class="skill-name">internal-comms</span> — <span class="skill-desc">Write all kinds of internal communications using company-preferred formats.</span></li>
           <li><span class="skill-name">mcp-builder</span> — <span class="skill-desc">Guide for creating high-quality MCP servers that enable LLMs to interact with external services.</span></li>
           <li><span class="skill-name">pdf</span> — <span class="skill-desc">Do anything with PDF files.</span></li>
           <li><span class="skill-name">pptx</span> — <span class="skill-desc">Handle .pptx files as input, output, or both.</span></li>
           <li><span class="skill-name">skill-creator</span> — <span class="skill-desc">Create new skills, modify and improve existing skills, and measure skill performance.</span></li>
           <li><span class="skill-name">template-skill</span> — <span class="skill-desc">Starter template for new skills.</span></li>
-          <li><span class="skill-name">theme-factory</span> — <span class="skill-desc">Toolkit for styling artifacts with a theme.</span></li>
-          <li><span class="skill-name">web-artifacts-builder</span> — <span class="skill-desc">Create elaborate, multi-component HTML artifacts using React, Tailwind CSS, shadcn/ui.</span></li>
-          <li><span class="skill-name">webapp-testing</span> — <span class="skill-desc">Interact with and test local web applications using Playwright.</span></li>
           <li><span class="skill-name">xlsx</span> — <span class="skill-desc">Handle spreadsheet files as primary input or output.</span></li>
         </ul>
+        <p style="font-size: 0.85rem; color: var(--text-dim); margin-top: -0.5rem;">
+          Desktop/design tools (brand-guidelines, canvas-design, frontend-design, theme-factory,
+          web-artifacts-builder, webapp-testing) are wired via machine overlays, not the baseline.
+        </p>
 
-        <!-- ── repos/gstack — 51 ── -->
+        <!-- ── repos/gstack (partial) — 42 ── -->
         <h3 class="skills-source-heading">
           repos/gstack
-          <span class="skills-count">51</span>
+          <span class="skills-count">42</span>
           <span class="badge badge-wired" aria-hidden="true">wired</span>
         </h3>
         <ul class="skills-list">
           <li><span class="skill-name">autoplan</span> — <span class="skill-desc">Auto-review pipeline — CEO, design, eng, and DX reviews run sequentially with auto-decisions.</span></li>
           <li><span class="skill-name">benchmark</span> — <span class="skill-desc">Performance regression detection using the browse daemon.</span></li>
-          <li><span class="skill-name">benchmark-models</span> — <span class="skill-desc">Cross-model benchmark for gstack skills.</span></li>
           <li><span class="skill-name">browse</span> — <span class="skill-desc">Fast headless browser for QA testing and site dogfooding.</span></li>
           <li><span class="skill-name">canary</span> — <span class="skill-desc">Post-deploy canary monitoring.</span></li>
           <li><span class="skill-name">careful</span> — <span class="skill-desc">Safety guardrails for destructive commands.</span></li>
@@ -1241,11 +1374,6 @@ bash scripts/wire.sh
           <li><span class="skill-name">document-generate</span> — <span class="skill-desc">Generate missing documentation from scratch for a feature, module, or entire project.</span></li>
           <li><span class="skill-name">document-release</span> — <span class="skill-desc">Post-ship documentation update.</span></li>
           <li><span class="skill-name">freeze</span> — <span class="skill-desc">Restrict file edits to a specific directory for the session.</span></li>
-          <li><span class="skill-name">gstack-openclaw-ceo-review</span> — <span class="skill-desc">Review a plan, challenge a proposal, run a CEO review, or decide whether to expand or reduce scope.</span></li>
-          <li><span class="skill-name">gstack-openclaw-investigate</span> — <span class="skill-desc">Debug, fix a bug, investigate an error, or do root cause analysis.</span></li>
-          <li><span class="skill-name">gstack-openclaw-office-hours</span> — <span class="skill-desc">Brainstorm, evaluate whether an idea is worth building, or think through a new product idea before code is written.</span></li>
-          <li><span class="skill-name">gstack-openclaw-retro</span> — <span class="skill-desc">Weekly engineering retrospective.</span></li>
-          <li><span class="skill-name">gstack-upgrade</span> — <span class="skill-desc">Upgrade gstack to the latest version.</span></li>
           <li><span class="skill-name">guard</span> — <span class="skill-desc">Full safety mode: destructive command warnings + directory-scoped edits.</span></li>
           <li><span class="skill-name">health</span> — <span class="skill-desc">Code quality dashboard.</span></li>
           <li><span class="skill-name">investigate</span> — <span class="skill-desc">Systematic debugging with root cause investigation.</span></li>
@@ -1254,7 +1382,6 @@ bash scripts/wire.sh
           <li><span class="skill-name">learn</span> — <span class="skill-desc">Manage project learnings.</span></li>
           <li><span class="skill-name">make-pdf</span> — <span class="skill-desc">Turn any markdown file into a publication-quality PDF.</span></li>
           <li><span class="skill-name">office-hours</span> — <span class="skill-desc">YC Office Hours — two modes.</span></li>
-          <li><span class="skill-name">open-gstack-browser</span> — <span class="skill-desc">Launch GStack Browser — AI-controlled Chromium with the sidebar extension baked in.</span></li>
           <li><span class="skill-name">pair-agent</span> — <span class="skill-desc">Pair a remote AI agent with your browser.</span></li>
           <li><span class="skill-name">plan-ceo-review</span> — <span class="skill-desc">CEO/founder-mode plan review.</span></li>
           <li><span class="skill-name">plan-design-review</span> — <span class="skill-desc">Designer's eye plan review — interactive, like CEO and Eng review.</span></li>
@@ -1268,82 +1395,64 @@ bash scripts/wire.sh
           <li><span class="skill-name">scrape</span> — <span class="skill-desc">Pull data from a web page.</span></li>
           <li><span class="skill-name">setup-browser-cookies</span> — <span class="skill-desc">Import cookies from your real Chromium browser into the headless browse session.</span></li>
           <li><span class="skill-name">setup-deploy</span> — <span class="skill-desc">Configure deployment settings for /land-and-deploy.</span></li>
-          <li><span class="skill-name">setup-gbrain</span> — <span class="skill-desc">Install gbrain CLI, initialize a PGLite or Supabase brain, register MCP, capture per-remote trust policy.</span></li>
           <li><span class="skill-name">ship</span> — <span class="skill-desc">Ship workflow: detect + merge base branch, run tests, review diff, bump VERSION, update CHANGELOG, commit, push, create PR.</span></li>
           <li><span class="skill-name">skillify</span> — <span class="skill-desc">Codify the most recent successful /scrape flow into a permanent browser-skill on disk.</span></li>
           <li><span class="skill-name">spec</span> — <span class="skill-desc">Turn vague intent into a precise, executable spec in five phases.</span></li>
-          <li><span class="skill-name">sync-gbrain</span> — <span class="skill-desc">Keep gbrain current with this repo's code and refresh agent search guidance in CLAUDE.md.</span></li>
           <li><span class="skill-name">unfreeze</span> — <span class="skill-desc">Clear the freeze boundary set by /freeze, allowing edits to all directories again.</span></li>
         </ul>
+        <p style="font-size: 0.85rem; color: var(--text-dim); margin-top: -0.5rem;">
+          OpenClaw-specific tools (gstack-openclaw-*, setup-gbrain, sync-gbrain, open-gstack-browser)
+          and benchmark-models are wired via machine overlays, not the baseline.
+        </p>
 
-        <!-- ── repos/jeffallan — 40 ── -->
+        <!-- ── repos/jeffallan (partial) — 18 ── -->
         <h3 class="skills-source-heading">
           repos/jeffallan
-          <span class="skills-count">40</span>
+          <span class="skills-count">18</span>
           <span class="badge badge-wired" aria-hidden="true">wired</span>
         </h3>
         <ul class="skills-list">
           <li><span class="skill-name">architecture-designer</span> — <span class="skill-desc">Design new high-level system architecture, review existing designs, or make architectural decisions.</span></li>
-          <li><span class="skill-name">chaos-engineer</span> — <span class="skill-desc">Design chaos experiments, create failure injection frameworks, and facilitate game day exercises for distributed systems.</span></li>
           <li><span class="skill-name">cli-developer</span> — <span class="skill-desc">Build CLI tools, implement argument parsing, or add interactive prompts.</span></li>
-          <li><span class="skill-name">cloud-architect</span> — <span class="skill-desc">Design cloud architectures, create migration plans, generate cost optimization recommendations across AWS, Azure, and GCP.</span></li>
           <li><span class="skill-name">code-documenter</span> — <span class="skill-desc">Generate, format, and validate technical documentation — docstrings, OpenAPI/Swagger specs, JSDoc, doc portals, and user guides.</span></li>
           <li><span class="skill-name">code-reviewer</span> — <span class="skill-desc">Analyze code diffs to identify bugs, security vulnerabilities, code smells, N+1 queries, and architectural concerns.</span></li>
-          <li><span class="skill-name">cpp-pro</span> — <span class="skill-desc">Write, optimize, and debug C++ applications using modern C++20/23 features and high-performance systems techniques.</span></li>
           <li><span class="skill-name">database-optimizer</span> — <span class="skill-desc">Optimize database queries and improve performance across PostgreSQL and MySQL systems.</span></li>
           <li><span class="skill-name">debugging-wizard</span> — <span class="skill-desc">Parse error messages, trace execution flow through stack traces, and apply systematic hypothesis-driven methodology to isolate bugs.</span></li>
           <li><span class="skill-name">devops-engineer</span> — <span class="skill-desc">Create Dockerfiles, configure CI/CD pipelines, write Kubernetes manifests, and generate Terraform/Pulumi infrastructure templates.</span></li>
           <li><span class="skill-name">feature-forge</span> — <span class="skill-desc">Conduct structured requirements workshops to produce feature specs, user stories, EARS-format requirements, and acceptance criteria.</span></li>
-          <li><span class="skill-name">fine-tuning-expert</span> — <span class="skill-desc">Fine-tune LLMs, train custom models, or adapt foundation models for specific tasks.</span></li>
-          <li><span class="skill-name">fullstack-guardian</span> — <span class="skill-desc">Build security-focused full-stack web applications with layered security at every level.</span></li>
-          <li><span class="skill-name">javascript-pro</span> — <span class="skill-desc">Write, debug, and refactor JavaScript using modern ES2023+ features, async/await patterns, ESM, and Node.js APIs.</span></li>
-          <li><span class="skill-name">laravel-specialist</span> — <span class="skill-desc">Build and configure Laravel 10+ applications with Eloquent models, Sanctum auth, Horizon queues, and RESTful APIs.</span></li>
           <li><span class="skill-name">legacy-modernizer</span> — <span class="skill-desc">Design incremental migration strategies, identify service boundaries, produce dependency maps and migration roadmaps.</span></li>
           <li><span class="skill-name">mcp-developer</span> — <span class="skill-desc">Build, debug, or extend MCP servers or clients that connect AI systems with external tools and data sources.</span></li>
-          <li><span class="skill-name">microservices-architect</span> — <span class="skill-desc">Design distributed system architectures, decompose monoliths into bounded-context services, recommend communication patterns.</span></li>
-          <li><span class="skill-name">ml-pipeline</span> — <span class="skill-desc">Design and implement production-grade ML pipeline infrastructure with MLflow, Kubeflow, or Airflow.</span></li>
-          <li><span class="skill-name">monitoring-expert</span> — <span class="skill-desc">Configure monitoring systems, implement structured logging, create Prometheus/Grafana dashboards, and instrument distributed tracing.</span></li>
-          <li><span class="skill-name">nestjs-expert</span> — <span class="skill-desc">Create and configure NestJS modules, controllers, services, DTOs, guards, and interceptors for enterprise TypeScript backends.</span></li>
-          <li><span class="skill-name">nextjs-developer</span> — <span class="skill-desc">Build Next.js 14+ applications with App Router, server components, or server actions.</span></li>
-          <li><span class="skill-name">pandas-pro</span> — <span class="skill-desc">Perform pandas DataFrame operations for data analysis, manipulation, and transformation.</span></li>
-          <li><span class="skill-name">php-pro</span> — <span class="skill-desc">Build PHP applications with modern PHP 8.3+ features, Laravel, or Symfony frameworks.</span></li>
-          <li><span class="skill-name">playwright-expert</span> — <span class="skill-desc">Write E2E tests with Playwright, set up test infrastructure, or debug flaky browser tests.</span></li>
           <li><span class="skill-name">postgres-pro</span> — <span class="skill-desc">Optimize PostgreSQL queries, configure replication, or implement advanced database features.</span></li>
           <li><span class="skill-name">prompt-engineer</span> — <span class="skill-desc">Write, refactor, and evaluate prompts for LLMs — generating optimized templates, structured output schemas, and evaluation rubrics.</span></li>
-          <li><span class="skill-name">python-pro</span> — <span class="skill-desc">Build Python 3.11+ applications requiring type safety, async programming, or robust error handling.</span></li>
-          <li><span class="skill-name">rag-architect</span> — <span class="skill-desc">Design and implement production-grade RAG systems: chunking, embeddings, vector stores, hybrid search, reranking, and evaluation.</span></li>
           <li><span class="skill-name">secure-code-guardian</span> — <span class="skill-desc">Implement authentication/authorization, secure user input, or prevent OWASP Top 10 vulnerabilities.</span></li>
           <li><span class="skill-name">security-reviewer</span> — <span class="skill-desc">Identify security vulnerabilities, generate structured audit reports with severity ratings, and provide remediation guidance.</span></li>
           <li><span class="skill-name">spec-miner</span> — <span class="skill-desc">Reverse-engineering specialist that extracts specifications from existing codebases.</span></li>
           <li><span class="skill-name">sql-pro</span> — <span class="skill-desc">Optimize SQL queries, design database schemas, and troubleshoot performance issues.</span></li>
-          <li><span class="skill-name">sre-engineer</span> — <span class="skill-desc">Define SLOs, create error budget policies, design incident response procedures, and develop capacity models for production systems.</span></li>
           <li><span class="skill-name">test-master</span> — <span class="skill-desc">Generate test files, create mocking strategies, analyze coverage, and produce test plans across functional, performance, and security testing.</span></li>
           <li><span class="skill-name">the-fool</span> — <span class="skill-desc">Challenge ideas, plans, decisions, or proposals using structured critical reasoning.</span></li>
-          <li><span class="skill-name">vue-expert</span> — <span class="skill-desc">Build Vue 3 components with Composition API, configure Nuxt 3 SSR/SSG, set up Pinia stores, scaffold Quasar/Capacitor mobile apps.</span></li>
-          <li><span class="skill-name">vue-expert-js</span> — <span class="skill-desc">Create Vue 3 components, build vanilla JS composables, configure Vite projects using JavaScript only — no TypeScript.</span></li>
-          <li><span class="skill-name">websocket-engineer</span> — <span class="skill-desc">Build real-time communication systems with WebSockets or Socket.IO.</span></li>
-          <li><span class="skill-name">wordpress-pro</span> — <span class="skill-desc">Develop custom WordPress themes and plugins, create Gutenberg blocks, configure WooCommerce stores, implement REST API endpoints.</span></li>
         </ul>
+        <p style="font-size: 0.85rem; color: var(--text-dim); margin-top: -0.5rem;">
+          Stack-specific packs (LAMP, data/ML, infra/SRE — chaos-engineer, cpp-pro, fullstack-guardian,
+          javascript-pro, laravel-specialist, microservices-architect, ml-pipeline, monitoring-expert,
+          nestjs-expert, nextjs-developer, pandas-pro, php-pro, playwright-expert, python-pro,
+          rag-architect, sre-engineer, vue-expert, vue-expert-js, websocket-engineer, wordpress-pro)
+          live in machine overlays, not the baseline.
+        </p>
 
-        <!-- ── repos/mattpocock — 25 ── -->
+        <!-- ── repos/mattpocock (partial) — 20 ── -->
         <h3 class="skills-source-heading">
           repos/mattpocock
-          <span class="skills-count">25</span>
+          <span class="skills-count">20</span>
           <span class="badge badge-wired" aria-hidden="true">wired</span>
         </h3>
         <ul class="skills-list">
-          <li><span class="skill-name">design-an-interface</span> — <span class="skill-desc">Generate multiple radically different interface designs for a module using parallel sub-agents.</span></li>
           <li><span class="skill-name">diagnose</span> — <span class="skill-desc">Disciplined diagnosis loop for hard bugs and performance regressions.</span></li>
           <li><span class="skill-name">edit-article</span> — <span class="skill-desc">Edit and improve articles by restructuring sections, improving clarity, and tightening prose.</span></li>
           <li><span class="skill-name">git-guardrails-claude-code</span> — <span class="skill-desc">Set up Claude Code hooks to block dangerous git commands before they execute.</span></li>
           <li><span class="skill-name">grill-me</span> — <span class="skill-desc">Interview the user relentlessly about a plan or design until reaching shared understanding.</span></li>
           <li><span class="skill-name">grill-with-docs</span> — <span class="skill-desc">Grilling session that challenges your plan against the existing domain model and updates documentation inline as decisions crystallise.</span></li>
           <li><span class="skill-name">improve-codebase-architecture</span> — <span class="skill-desc">Find deepening opportunities in a codebase, informed by CONTEXT.md and docs/adr/.</span></li>
-          <li><span class="skill-name">obsidian-vault</span> — <span class="skill-desc">Search, create, and manage notes in the Obsidian vault with wikilinks and index notes.</span></li>
-          <li><span class="skill-name">prototype</span> — <span class="skill-desc">Build a throwaway prototype to flesh out a design before committing to it.</span></li>
-          <li><span class="skill-name">qa</span> — <span class="skill-desc">Interactive QA session where user reports bugs or issues conversationally, and the agent files GitHub issues.</span></li>
           <li><span class="skill-name">request-refactor-plan</span> — <span class="skill-desc">Create a detailed refactor plan with tiny commits via user interview, then file it as a GitHub issue.</span></li>
-          <li><span class="skill-name">review</span> — <span class="skill-desc">Review changes since a fixed point along two axes — Standards and Spec.</span></li>
           <li><span class="skill-name">scaffold-exercises</span> — <span class="skill-desc">Create exercise directory structures with sections, problems, solutions, and explainers that pass linting.</span></li>
           <li><span class="skill-name">setup-pre-commit</span> — <span class="skill-desc">Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo.</span></li>
           <li><span class="skill-name">tdd</span> — <span class="skill-desc">Test-driven development with red-green-refactor loop.</span></li>
@@ -1358,11 +1467,32 @@ bash scripts/wire.sh
           <li><span class="skill-name">writing-shape</span> — <span class="skill-desc">Take a markdown file of raw material and shape it into an article through a conversational session.</span></li>
           <li><span class="skill-name">zoom-out</span> — <span class="skill-desc">Tell the agent to zoom out and give broader context or a higher-level perspective.</span></li>
         </ul>
+        <p style="font-size: 0.85rem; color: var(--text-dim); margin-top: -0.5rem;">
+          Design/personal tools (design-an-interface, obsidian-vault, prototype) live in machine overlays.
+        </p>
 
-        <!-- ── repos/superpowers — 13 ── -->
+        <!-- ── repos/ponytail (wired) — 6 ── -->
+        <h3 class="skills-source-heading">
+          repos/ponytail
+          <span class="skills-count">6</span>
+          <span class="badge badge-wired" aria-hidden="true">wired</span>
+        </h3>
+        <ul class="skills-list">
+          <li><span class="skill-name">ponytail</span> — <span class="skill-desc">Forces the laziest solution that actually works — simplest, shortest, most minimal.</span></li>
+          <li><span class="skill-name">ponytail-audit</span> — <span class="skill-desc">Whole-repo audit for over-engineering — a ranked list of what to delete, simplify, or replace.</span></li>
+          <li><span class="skill-name">ponytail-debt</span> — <span class="skill-desc">Harvest every `ponytail:` comment into a debt ledger, so deferrals get tracked instead of forgotten.</span></li>
+          <li><span class="skill-name">ponytail-gain</span> — <span class="skill-desc">Show ponytail's measured impact as a compact scoreboard: less code, less cost, more speed.</span></li>
+          <li><span class="skill-name">ponytail-help</span> — <span class="skill-desc">Quick-reference card for all ponytail modes, skills, and commands.</span></li>
+          <li><span class="skill-name">ponytail-review</span> — <span class="skill-desc">Review a diff for over-engineering.</span></li>
+        </ul>
+        <p style="font-size: 0.85rem; color: var(--text-dim); margin-top: -0.5rem;">
+          Wired whole (all skills in the repo), unlike the partial repos above — wanted live everywhere.
+        </p>
+
+        <!-- ── repos/superpowers (partial) — 14 ── -->
         <h3 class="skills-source-heading">
           repos/superpowers
-          <span class="skills-count">13</span>
+          <span class="skills-count">14</span>
           <span class="badge badge-wired" aria-hidden="true">wired</span>
         </h3>
         <ul class="skills-list">
@@ -1379,14 +1509,16 @@ bash scripts/wire.sh
           <li><span class="skill-name">using-superpowers</span> — <span class="skill-desc">Use when starting any conversation — establishes how to find and use skills.</span></li>
           <li><span class="skill-name">verification-before-completion</span> — <span class="skill-desc">Use when about to claim work is complete — requires running verification commands and confirming output before any success claims.</span></li>
           <li><span class="skill-name">writing-plans</span> — <span class="skill-desc">Use when you have a spec or requirements for a multi-step task, before touching code.</span></li>
+          <li><span class="skill-name">writing-skills</span> — <span class="skill-desc">Use when creating new skills, editing existing skills, or verifying skills work before deployment.</span></li>
         </ul>
 
         <!-- ── Library + Reference summary ── -->
         <div class="library-summary">
-          <strong>3,058 more skills in the library</strong> — indexed, not wired.
+          <strong>~1,267 more skills across 18 library submodules</strong> — indexed, not wired.
           Browse any repo as a submodule under <code>repos/</code>, or search across
           all of them with <code>skill-scout</code>. Promote a repo to wired by adding
-          its name to <code>wired-submodules.txt</code> and running <code>bash wire.sh</code>.
+          its name to <code>baseline-submodules.txt</code> and running <code>bash scripts/wire.sh</code>.
+          Six more repos are reference-only (awesome-lists/indexes, no <code>SKILL.md</code> files).
 
           <table class="lib-table">
             <thead>
@@ -1397,25 +1529,26 @@ bash scripts/wire.sh
               </tr>
             </thead>
             <tbody>
-              <tr><td><code>repos/alirezarezvani</code></td><td>753</td><td>Library</td></tr>
-              <tr><td><code>repos/leoyeai</code></td><td>1,784</td><td>Library</td></tr>
+              <tr><td><code>repos/alirezarezvani</code></td><td>763</td><td>Library</td></tr>
               <tr><td><code>repos/robertbstillwell</code></td><td>152</td><td>Library</td></tr>
-              <tr><td><code>repos/openclaw</code></td><td>112</td><td>Library</td></tr>
-              <tr><td><code>repos/paperclip</code></td><td>33</td><td>Library</td></tr>
+              <tr><td><code>repos/openclaw</code></td><td>113</td><td>Library</td></tr>
+              <tr><td><code>repos/paperclip</code></td><td>37</td><td>Library</td></tr>
               <tr><td><code>repos/deanpeters</code></td><td>49</td><td>Library</td></tr>
               <tr><td><code>repos/amekala-ads-mcp</code></td><td>24</td><td>Library</td></tr>
-              <tr><td><code>repos/mattberman-google-ads</code></td><td>16</td><td>Library</td></tr>
               <tr><td><code>repos/wordpress</code></td><td>17</td><td>Library</td></tr>
-              <tr><td><code>repos/jdevalk</code></td><td>11</td><td>Library</td></tr>
-              <tr><td><code>repos/automattic</code></td><td>13</td><td>Library</td></tr>
-              <tr><td><code>repos/clawhub</code></td><td>10</td><td>Library</td></tr>
               <tr><td><code>repos/nowork-toprank</code></td><td>18</td><td>Library</td></tr>
+              <tr><td><code>repos/hubspot</code></td><td>15</td><td>Library</td></tr>
+              <tr><td><code>repos/mattberman-google-ads</code></td><td>16</td><td>Library</td></tr>
               <tr><td><code>repos/mozilla-bq-etl</code></td><td>13</td><td>Library</td></tr>
+              <tr><td><code>repos/automattic</code></td><td>13</td><td>Library</td></tr>
+              <tr><td><code>repos/clawhub</code></td><td>12</td><td>Library</td></tr>
+              <tr><td><code>repos/jdevalk</code></td><td>12</td><td>Library</td></tr>
               <tr><td><code>repos/mattberman-meta-ads</code></td><td>6</td><td>Library</td></tr>
               <tr><td><code>repos/automattic-wordpress</code></td><td>4</td><td>Library</td></tr>
               <tr><td><code>repos/sarai-wp-openclaw</code></td><td>2</td><td>Library</td></tr>
               <tr><td><code>repos/spillwave-astro</code></td><td>1</td><td>Library</td></tr>
               <tr><td><code>repos/hesamsheikh</code></td><td>—</td><td>Reference (index)</td></tr>
+              <tr><td><code>repos/quant-zero</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/sebclawops</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/sjkncs</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/voltagent</code></td><td>—</td><td>Reference (index)</td></tr>
@@ -1443,12 +1576,24 @@ bash scripts/wire.sh
               <td>Composes dev-team agents from <code>role × stack × skills</code>. <code>compose.py</code> is the multi-target compiler — one 5-file source, different artefact per <code>--target</code>. <code>wire.sh</code> wires the output live.</td>
             </tr>
             <tr>
+              <td><code>automation-factory/</code></td>
+              <td>Reusable automation patterns (e.g. <code>issue-loop</code>), cut into a target repo's tracked <code>loop/</code> folder.</td>
+            </tr>
+            <tr>
+              <td><code>project-factory/</code></td>
+              <td>Scaffolds whole new projects from a template via <code>scripts/cut-project.sh</code> (seed or retrofit).</td>
+            </tr>
+            <tr>
               <td><code>scripts/wire.sh</code></td>
               <td>The wiring script. Idempotent — tears down all grid-owned symlinks and rebuilds the wired set each run.</td>
             </tr>
             <tr>
-              <td><code>wired-submodules.txt</code></td>
-              <td>Allowlist of submodules whose skills are wired live. Anything not listed is library-only.</td>
+              <td><code>baseline-submodules.txt</code></td>
+              <td>Baseline allowlist of submodules whose skills are wired live on every machine. Anything not listed is library-only.</td>
+            </tr>
+            <tr>
+              <td><code>machines/&lt;host&gt;.txt</code></td>
+              <td>Per-machine overlay layered on the baseline — adds or subtracts entries for that host only.</td>
             </tr>
             <tr>
               <td><code>scripts/catalog.sh</code></td>
@@ -1480,10 +1625,15 @@ bash scripts/wire.sh
 
         <div class="command-block">
           <h3>Bootstrap a new machine</h3>
-          <pre><code>git clone https://github.com/&lt;your-username&gt;/the-grid.git ~/.the-grid
-cd ~/.the-grid
-git submodule update --init --recursive
-bash scripts/wire.sh</code></pre>
+          <pre><code>git clone https://github.com/&lt;your-username&gt;/the-grid.git ~/.the-grid \
+  &amp;&amp; bash ~/.the-grid/scripts/bootstrap.sh
+# add --with-agents to also compose + wire the agent team in the same run</code></pre>
+        </div>
+
+        <div class="command-block">
+          <h3>Check grid health</h3>
+          <pre><code>bash scripts/check-grid.sh
+# runs the bats suite + scans for broken grid-owned symlinks; exits non-zero on failure</code></pre>
         </div>
 
         <div class="command-block">
@@ -1504,7 +1654,14 @@ bash scripts/wire.sh</code></pre>
           <pre><code>git submodule add &lt;repo-url&gt; repos/&lt;name&gt;
 git submodule update --init
 bash scripts/wire.sh
-# To wire it live: add repos/&lt;name&gt; to wired-submodules.txt, then re-run wire.sh</code></pre>
+# To wire it live everywhere: add repos/&lt;name&gt; to baseline-submodules.txt, then re-run wire.sh
+# To wire it on one machine only: add it to machines/&lt;host&gt;.txt instead</code></pre>
+        </div>
+
+        <div class="command-block">
+          <h3>Cut a new project from a template</h3>
+          <pre><code>bash project-factory/scripts/cut-project.sh &lt;template&gt; &lt;target-dir&gt;
+# seeds an empty target, or retrofits a non-empty one — never overwrites a differing file</code></pre>
         </div>
 
         <div class="command-block">
