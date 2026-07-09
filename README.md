@@ -81,6 +81,15 @@ Four sibling scaffolds, each owning a different asset type:
   TODO.md                 ← issue map; open work lives in GitHub Issues
 ```
 
+## Daily usage
+
+Once wired, every skill is a slash command (`/standup`, `/skill-scout`, `/ponytail`…)
+and composed orchestrators are too (`/tech-lead`, `/ceo-orchestrator`…) — specialist
+agents are subagents you delegate to, not commands. Ask Claude directly ("how do I…")
+or run `/grid-help` for a live pointer. Full walkthrough — orchestrators vs
+specialists, the four factories in practice, promoting a library skill to wired:
+**[USAGE.md](USAGE.md)**.
+
 ## Bootstrap (new machine)
 
 One command — clone, then run `bootstrap.sh` (syncs submodules → wires skills):
