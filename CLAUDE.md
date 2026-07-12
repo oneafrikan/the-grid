@@ -52,6 +52,40 @@ submodules into two tiers:
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
 - `TODO.md` — current outstanding work.
 
+## Getting a machine up to date
+
+Plain-English sequence for the three things a machine needs: current
+**submodules** (the sibling skill repos), current **skills** (symlinked into
+`~/.claude/skills/`), current **agents** (composed subagents + orchestrator
+skills, symlinked into `~/.claude/agents/`).
+
+### New machine (never had the-grid before)
+
+1. Clone the-grid to `~/.the-grid`.
+2. Pull in submodules: `git submodule update --init --recursive`.
+3. Wire skills: `bash scripts/wire.sh` — skills are live now.
+4. Build the agent team: `cd agent-factory && python3 -m venv .venv &&
+   .venv/bin/pip install -r requirements.txt && .venv/bin/python compose.py
+   examples/grid.yaml --target claude-code`.
+5. Wire again from the repo root: `bash scripts/wire.sh` — agents are live now.
+
+(Steps 2–5 are exactly what `scripts/bootstrap.sh --with-agents` does in one shot.)
+
+### Existing machine (already set up, just did `git fetch && git pull`)
+
+1. Pull the-grid itself — done (that's what triggered this).
+2. Refresh submodules to match what the pull moved the pointers to:
+   `git submodule update --init --recursive`.
+3. Refresh agents — but only if the pull touched anything under
+   `agent-factory/` (composed output there is git-ignored, so a pull alone
+   never updates it). Check with:
+   `git diff --stat HEAD@{1} HEAD -- agent-factory/`.
+   If it shows changes: `cd agent-factory && .venv/bin/python compose.py
+   examples/grid.yaml --target claude-code && cd ..`.
+   If it shows nothing: skip this step.
+4. Refresh skills (and agents, and `SKILLS.md`) in one go: `bash scripts/wire.sh`.
+   Always safe to run, always run it last.
+
 ## Adding a skill
 
 Create a directory at the repo root with a `SKILL.md` inside it. Frontmatter requires `name:` and `description:`. Then run `bash scripts/wire.sh`.
