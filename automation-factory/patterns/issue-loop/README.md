@@ -96,6 +96,41 @@ gitignored — `setup.sh` re-derives its hook-wiring on demand, so nothing is lo
   blanket `.claude/` entry — a common convention that would otherwise have
   made the whole automation invisible to git.
 
+## Known issues — `instantiate.sh --profile work` (found 2026-07-19)
+
+`scripts/instantiate.sh` already ships a `work` profile that's meant to be
+this pattern's PR-mode roadmap item (below) — worktree + PR instead of direct
+push to `main`, enforced by a guard hook. It's **incomplete** in two ways that
+only surface once you actually run the loop end-to-end on `work`, which is
+presumably why neither had been caught before this pattern was instantiated
+into `oneafrikan/FinanceFlow`:
+
+1. **The `PreToolUse` guard hook is wired once, at instantiation time, by
+   `instantiate.sh` itself — never by `loop/setup.sh`.** `setup.sh` (the
+   pattern file shipped here, copied verbatim into every target repo
+   regardless of profile) only ever re-wires `PostToolUse` (the review hook).
+   A fresh clone or repo move on a `work`-profile repo silently loses the
+   push-to-main guard, even though the generated `CLAUDE.md` tells the user
+   `bash loop/setup.sh` is sufficient to restore all wiring after a clone.
+   There's already a TODO comment about this in `instantiate.sh` next to the
+   guard-hook block ("extract to patterns/guard-main-push/ when reused beyond
+   issue-loop") — this is that gap manifesting for real.
+2. **`loop-prompt.template.md`'s STEP 5 is a hardcoded `git push origin
+   main`.** That's correct for the `personal`/`mac-mini` profiles (direct
+   push is the intended behavior there) but directly contradicts `work`
+   profile's entire premise — the loop's own literal instructions would hit
+   the guard's BLOCKED path on every single iteration and never actually land
+   anything.
+
+Neither is fixed in this pattern's canonical files yet — that's a genuine
+scope decision (does `work` profile get its own template variant, or does the
+guard-wiring get promoted into `setup.sh` unconditionally, per the existing
+TODO?) rather than a one-line patch. `oneafrikan/FinanceFlow`'s `loop/`
+directory has a working reference fix for both (setup.sh wires + smoke-tests
+the guard; the loop prompt cuts an `issue-<N>` worktree, pushes that branch,
+opens a PR, and relabels the issue `ready-for-human` instead of closing it) —
+worth diffing against when this gets folded back into the pattern proper.
+
 ## Roadmap (v2)
 
 - **`instantiate.sh`** — one command to cut this pattern into a target repo
@@ -106,6 +141,9 @@ gitignored — `setup.sh` re-derives its hook-wiring on demand, so nothing is lo
   forward now.
 - **PR mode** — `{{INTEGRATION}}=pr`: work on a branch, open a PR (review fires on
   the PR), optional auto-merge when green. Safer than committing to `main`.
+  Partially superseded by `instantiate.sh --profile work`, already shipping —
+  see "Known issues" above for what it's still missing before it matches this
+  roadmap item's intent.
 - **Actionable review** — next iteration reads the prior auto-review and fixes any
   critical findings before moving on (closes the quality loop).
 - **Compose with `agent-factory`** — the *implement* step delegates to composed
