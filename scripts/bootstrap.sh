@@ -51,14 +51,16 @@ bash "$GRID_DIR/scripts/wire.sh"
 # 3. Optionally build the composed agent team, then re-wire so the freshly
 #    compiled orchestrator skills + specialist subagents go live.
 if [[ "$WITH_AGENTS" == "1" ]]; then
-  echo "==> [3/3] Composing agent-factory grid team + re-wiring"
+  echo "==> [3/3] Composing agent-factory teams (core, grid, finance-desk) + re-wiring"
   cd "$GRID_DIR/agent-factory"
   # Create the venv on first run; reuse it afterwards (idempotent).
   if [[ ! -x .venv/bin/python ]]; then
     python3 -m venv .venv
     .venv/bin/pip install -q -r requirements.txt
   fi
+  .venv/bin/python compose.py examples/core.yaml --target claude-code
   .venv/bin/python compose.py examples/grid.yaml --target claude-code
+  .venv/bin/python compose.py examples/finance-desk.yaml --target claude-code
   cd "$GRID_DIR"
   bash "$GRID_DIR/scripts/wire.sh"
 else

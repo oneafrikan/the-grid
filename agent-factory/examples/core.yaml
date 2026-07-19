@@ -1,0 +1,21 @@
+# core.yaml — cross-desk shared infrastructure roles.
+#
+# Neither role here belongs to one team: gh-triage is cron-driven and has no
+# delegation chain; librarian is domain-agnostic wiki maintenance any desk's
+# specialists can file completed research to (research-desk's roles already
+# do, via Signal Protocol — see roles/librarian/SOUL.md). Both are meant to
+# be wired on every machine regardless of which desk-specific project
+# (grid, finance-desk, a private desk) that machine actually runs — hence
+# their own project rather than living inside one desk's roster.
+#
+# Gate with `project:core` in the baseline (not a per-machine overlay) —
+# a machine trimming down to a single desk via `-project:grid` or
+# `-project:finance-desk` should still keep `project:core`.
+project: core
+slug: core
+description: Cross-desk shared infrastructure — gh-triage, librarian.
+paperclip: false
+
+agents:
+  - role: gh-triage
+  - role: librarian
