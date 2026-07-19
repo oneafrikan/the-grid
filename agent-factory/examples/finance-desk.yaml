@@ -1,0 +1,33 @@
+# finance-desk.yaml — the personal finance desk, split out of grid.yaml.
+#
+# finance-manager was always a standalone top-level orchestrator (deliberately
+# NOT under the CEO's delegates_to — a personal desk, not a dev-team
+# initiative), so splitting it into its own composed project changes nothing
+# about how it relates to the rest of the team, only where it's composed
+# from. Gives a task-specific machine a lever to opt out of the whole finance
+# pipeline via `-project:finance-desk` without touching grid's roster.
+#
+# Agent names render as finance-desk-<role> — e.g. finance-desk-finance-
+# sentinel. Redundant-looking (roles already carry a finance- prefix) but
+# left as-is rather than renaming 6 roles' internals for a cosmetic fix.
+project: finance-desk
+slug: finance-desk
+description: >-
+  The personal finance desk pipeline — sentinel -> analyst -> strategist ->
+  risk-officer -> scribe, gated by human approval. Standalone; not part of
+  the CEO's dev-team roster.
+paperclip: false
+
+agents:
+  - role: finance-manager
+    delegates_to:
+      - finance-sentinel
+      - finance-analyst
+      - finance-strategist
+      - finance-risk-officer
+      - finance-scribe
+  - role: finance-sentinel
+  - role: finance-analyst
+  - role: finance-strategist
+  - role: finance-risk-officer
+  - role: finance-scribe

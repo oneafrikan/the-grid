@@ -1,26 +1,24 @@
-# grid.yaml — the complete PUBLIC composed team, all 28 ported roles.
-# Orchestrators (ceo-orchestrator, tech-lead, growth-hacker, finance-manager)
-# emit as Claude Code skills; the 24 specialists emit as CC subagents. Models
-# come from each role.yaml default unless overridden here.
+# grid.yaml — the dev-team project: engineering, product, and marketing.
+# Orchestrators (ceo-orchestrator, tech-lead, growth-hacker) emit as Claude
+# Code skills; the specialists emit as CC subagents. Models come from each
+# role.yaml default unless overridden here.
 #
-# A private project can be composed separately, sourcing its roles from
+# Sibling projects, same repo (see examples/): `core.yaml` (gh-triage,
+# librarian — cross-desk infra wired on every machine) and
+# `finance-desk.yaml` (the personal finance pipeline, standalone). A private
+# project can also be composed separately, sourcing its roles from
 # GRID_PRIVATE_ROLES_DIR (never committed to this repo) instead of this
-# file's roles/. See compose.py's role_dir() for the mechanism — the private
-# project's own name, roster, and role content live entirely outside here.
+# file's roles/ — see compose.py's role_dir() for the mechanism.
 #
 # Delegation topology (drives the generated roster in each orchestrator's
 # AGENTS.md — see compose.py `inject_roster`):
 #   ceo  → tech-lead, product-manager, growth-hacker          (the three leads)
 #   tech-lead     → engineering + data/research specialists
 #   growth-hacker → the marketing arm (player-coach lead)
-#   finance-manager → the finance desk pipeline (sentinel -> analyst ->
-#     strategist -> risk-officer -> scribe). Standalone top-level orchestrator,
-#     invoked directly (/grid-finance-manager) — deliberately NOT under the
-#     CEO's delegates_to; this is a personal desk, not a dev-team initiative.
 # delegates_to entries must name a role present in this team.
 project: grid
 slug: grid
-description: Full composed team — 4 orchestrators + 24 specialists, all 5-file model.
+description: Dev-team project — 3 orchestrators + 17 specialists, all 5-file model.
 paperclip: false
 
 agents:
@@ -62,22 +60,3 @@ agents:
   - role: seo
   - role: paid-search
   - role: paid-social
-  # finance desk (standalone orchestrator, see topology note above) -> CC skill
-  - role: finance-manager
-    delegates_to:
-      - finance-sentinel
-      - finance-analyst
-      - finance-strategist
-      - finance-risk-officer
-      - finance-scribe
-  # finance desk specialists -> CC subagents
-  - role: finance-sentinel
-  - role: finance-analyst
-  - role: finance-strategist
-  - role: finance-risk-officer
-  - role: finance-scribe
-  # GitHub triage (standalone, cron-driven — not part of any delegation chain)
-  - role: gh-triage
-  # librarian (standalone, invoked directly or via Signal Protocol handoff —
-  # domain-agnostic wiki maintainer; see roles/librarian/SOUL.md)
-  - role: librarian

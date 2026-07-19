@@ -64,9 +64,14 @@ skills, symlinked into `~/.claude/agents/`).
 1. Clone the-grid to `~/.the-grid`.
 2. Pull in submodules: `git submodule update --init --recursive`.
 3. Wire skills: `bash scripts/wire.sh` — skills are live now.
-4. Build the agent team: `cd agent-factory && python3 -m venv .venv &&
+4. Build the agent teams: `cd agent-factory && python3 -m venv .venv &&
    .venv/bin/pip install -r requirements.txt && .venv/bin/python compose.py
-   examples/grid.yaml --target claude-code`.
+   examples/core.yaml --target claude-code && .venv/bin/python compose.py
+   examples/grid.yaml --target claude-code && .venv/bin/python compose.py
+   examples/finance-desk.yaml --target claude-code`. (Three public projects,
+   composed independently — a private desk, if you have one, composes the
+   same way with `GRID_PRIVATE_ROLES_DIR` set; see the agent-factory section
+   below.)
 5. Wire again from the repo root: `bash scripts/wire.sh` — agents are live now.
 
 (Steps 2–5 are exactly what `scripts/bootstrap.sh --with-agents` does in one shot.)
@@ -81,10 +86,48 @@ skills, symlinked into `~/.claude/agents/`).
    never updates it). Check with:
    `git diff --stat HEAD@{1} HEAD -- agent-factory/`.
    If it shows changes: `cd agent-factory && .venv/bin/python compose.py
-   examples/grid.yaml --target claude-code && cd ..`.
+   examples/core.yaml --target claude-code && .venv/bin/python compose.py
+   examples/grid.yaml --target claude-code && .venv/bin/python compose.py
+   examples/finance-desk.yaml --target claude-code && cd ..` (recompose all
+   three public projects — cheap even if only one actually changed).
    If it shows nothing: skip this step.
 4. Refresh skills (and agents, and `SKILLS.md`) in one go: `bash scripts/wire.sh`.
    Always safe to run, always run it last.
+
+### ⚠ Pending: agent rename migration (2026-07-19)
+
+`grid.yaml` was split into three sibling projects (`core`, `grid`,
+`finance-desk`) — some agent names changed as a result:
+
+| Old name | New name |
+|---|---|
+| `grid-librarian` | `core-librarian` |
+| `grid-gh-triage` | `core-gh-triage` |
+| `grid-finance-manager` (skill) | `finance-desk-finance-manager` |
+| `grid-finance-sentinel` | `finance-desk-finance-sentinel` |
+| `grid-finance-analyst` | `finance-desk-finance-analyst` |
+| `grid-finance-strategist` | `finance-desk-finance-strategist` |
+| `grid-finance-risk-officer` | `finance-desk-finance-risk-officer` |
+| `grid-finance-scribe` | `finance-desk-finance-scribe` |
+
+`baseline-submodules.txt` now gates three projects (`project:core`,
+`project:grid`, `project:finance-desk`) instead of one — this machine's
+manifest also needs a plain `git pull` to pick that up (it's a tracked file,
+not gitignored output).
+
+**If you're a session on a machine in the checklist below**: follow "Existing
+machine" above (which now composes all three projects), confirm the old
+names are gone from `~/.claude/agents` / `~/.claude/skills` and the new ones
+resolve, then delete your machine's line from the checklist and commit that
+edit. **Once the checklist is empty, delete this entire subsection**
+(including this sentence) and commit that too — this is a one-time migration
+flag, not permanent documentation.
+
+Machines with a the-grid clone still on the pre-split names:
+
+- [ ] forge
+- [ ] wilderness
+- [ ] guide-server
 
 ## Adding a skill
 
@@ -165,7 +208,10 @@ All 38 tests must stay green. Tests use temp dirs — they never touch the real 
   output — orchestrator skills into `SKILLS_DIR`, specialist subagents into
   `AGENTS_DIR`. Gated per machine by `project:<name>` manifest entries; with no
   `project:` entry anywhere, every composed project wires (legacy). The baseline
-  currently pins `project:grid` (see `agent-factory/` and issue #1).
+  currently pins `project:core`, `project:grid`, and `project:finance-desk` (see
+  `agent-factory/` and issue #1) — a task-specific machine can subtract
+  `-project:grid` or `-project:finance-desk` via its overlay to trim clutter,
+  but `project:core` (gh-triage, librarian) is meant to stay on every machine.
 - **Root-owned agents:** `agents/*.md` at the repo root wires directly into
   `AGENTS_DIR`, same ownership model as root-level `skills/` — for hand-authored
   subagents that aren't a compose.py role (no `delegates_to`, not a team
@@ -192,13 +238,23 @@ is symmetric and loud: a token with no `delegates_to` (or vice-versa), or a dele
 on the team, is a hard compose error — so a roster can never silently drift out of sync
 with the team. grid topology: `ceo → tech-lead, product-manager, growth-hacker`;
 `tech-lead → eng + data/research`; `growth-hacker → the marketing arm` (a player-coach
-orchestrator). `finance-manager → the finance desk pipeline` (sentinel → analyst →
-strategist → risk-officer → scribe) is a **standalone** top-level orchestrator, deliberately
-outside the CEO's `delegates_to` — a personal desk, not a dev-team initiative. `gh-triage`
-is a standalone, cron-driven role with no delegation chain. The full team (`examples/grid.yaml`)
-is 27 roles: 4 orchestrators (ceo-orchestrator, tech-lead, growth-hacker, finance-manager) → CC
-skills, 23 specialists → CC subagents. gh-triage was folded into this one composed project
-rather than kept as its own (see Learnings) — one `project:grid` gate in the baseline covers it.
+orchestrator). `examples/grid.yaml` is the **dev-team project** — 20 roles: 3
+orchestrators → CC skills, 17 specialists → CC subagents.
+
+Two sibling public projects, same repo, composed and gated independently:
+`examples/finance-desk.yaml` — `finance-manager → the finance desk pipeline`
+(sentinel → analyst → strategist → risk-officer → scribe), a **standalone**
+top-level orchestrator, deliberately never under the CEO's `delegates_to` — a
+personal desk, not a dev-team initiative. `examples/core.yaml` — cross-desk
+shared infra with no delegation chain (`gh-triage`, `librarian`), gated
+`project:core` and meant to stay wired on every machine regardless of which
+desk-specific project (`grid`, `finance-desk`, or a private desk) that
+machine actually runs — the three projects split apart specifically so a
+task-specific machine can subtract a whole desk via its overlay
+(`-project:grid`, `-project:finance-desk`) without losing the other two. A
+private desk (e.g. a personal research vertical) can be composed the same
+way, sourcing roles from `GRID_PRIVATE_ROLES_DIR` — never committed to this
+repo; see compose.py's `role_dir()`.
 
 > **Rollout note:** `agent-factory/projects/*` is git-ignored (regenerable output). A
 > machine picks up roster/topology changes only after `git pull` **then re-running
@@ -242,10 +298,15 @@ Durable lessons mined from project history — full context and sources in
 - Don't write bash-style unquoted-`$var` word-splitting in ad-hoc shell
   commands — Gareth's machines may run zsh, which doesn't word-split by
   default — see LEARNINGS.md ("zsh doesn't word-split...").
-- A cron-driven, non-delegating role (e.g. `gh-triage`) doesn't need its own
-  composed project — fold it into an existing project's roster (a `project:`
-  gate already covers it) rather than maintaining a second `baseline-submodules.txt`
-  entry and machine-overlay footprint for one role.
+- A cron-driven, non-delegating role (e.g. `gh-triage`) doesn't need a project
+  of its **own** — but a shared `core` project for cross-desk infra (roles no
+  single desk owns, meant to survive that desk being subtracted on a
+  task-specific machine) is a real category, not project-proliferation for
+  its own sake. `gh-triage` and `librarian` both live there now.
+- Splitting a desk (e.g. `finance-desk`) out of a larger composed project is
+  free when that desk's orchestrator was already standalone (not in anyone's
+  `delegates_to`) — the delegation topology doesn't change, only which
+  compose config file it's read from.
 
 ## About
 
