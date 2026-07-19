@@ -23,20 +23,34 @@ can see the wired set and will invoke the right one.
 
 ## Agents — orchestrators vs subagents
 
-`agent-factory/` composes a 27-role dev team. Two different invocation shapes:
+`agent-factory/` composes three public projects (plus any private desk you've
+set up separately — composed the same way from `GRID_PRIVATE_ROLES_DIR`, see
+CLAUDE.md). Two different invocation shapes:
 
 | Form | Roles | How to invoke |
 |------|-------|----------------|
-| **Skill** (orchestrator) | `ceo-orchestrator`, `tech-lead`, `growth-hacker`, `finance-manager` | Slash command — `/tech-lead`. Transforms the session into that role for the rest of the conversation. |
-| **Subagent** (specialist) | the other 23 roles | Not a slash command. Either delegate explicitly — *"use the backend-dev subagent to implement this"* — or let an orchestrator hand off automatically once you've invoked it. |
+| **Skill** (orchestrator) | `grid-ceo-orchestrator`, `grid-tech-lead`, `grid-growth-hacker`, `finance-desk-finance-manager` | Slash command, e.g. `/grid-tech-lead`. Transforms the session into that role for the rest of the conversation. |
+| **Subagent** (specialist) | the other 24 roles | Not a slash command. Either delegate explicitly — *"use the grid-backend-dev subagent to implement this"* — or let an orchestrator hand off automatically once you've invoked it. |
 
-Typical flow: `/ceo-orchestrator` to scope a business goal → it delegates to
-`tech-lead` / `product-manager` / `growth-hacker` → those delegate further down to
-specialists. You can also skip straight to a specialist subagent for a narrow task
-without going through an orchestrator at all.
+Typical flow: `/grid-ceo-orchestrator` to scope a business goal → it delegates
+to `grid-tech-lead` / `grid-product-manager` / `grid-growth-hacker` → those
+delegate further down to specialists. You can also skip straight to a
+specialist subagent for a narrow task without going through an orchestrator
+at all.
 
-The finance desk (`finance-manager` → sentinel/analyst/strategist/risk-officer/scribe)
-and `gh-triage` are standalone — not part of the CEO's chain, invoke them directly.
+Three composed projects, each independently wired and gated
+(`project:<name>` in `baseline-submodules.txt` or a machine overlay):
+
+- **`grid`** — the dev team (engineering, product, marketing).
+- **`finance-desk`** — the personal finance pipeline
+  (`finance-desk-finance-manager` → sentinel/analyst/strategist/risk-officer/
+  scribe). Standalone, not part of the CEO's chain — invoke directly.
+- **`core`** — cross-desk shared infra (`core-gh-triage`, `core-librarian`),
+  meant to stay wired regardless of which desk-specific project a machine
+  runs.
+
+A task-specific machine can subtract a whole desk (`-project:grid` or
+`-project:finance-desk`) via its overlay to cut clutter, while keeping `core`.
 
 ## automation-factory — recurring unattended work
 

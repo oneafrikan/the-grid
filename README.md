@@ -35,7 +35,7 @@ Four sibling scaffolds, each owning a different asset type:
 | Factory | Produces | Deployed via |
 |---------|----------|---------------|
 | `skills-factory/` | New skills (built via a Karpathy loop elsewhere, dropped into `skills/`) | `scripts/wire.sh` symlinks |
-| `agent-factory/` | Composed AI dev-team agents (`role × stack × skills`) — 27 roles today: 4 orchestrators (CC skills) + 23 specialists (CC subagents) | `scripts/wire.sh` (Claude Code target); OpenClaw + Paperclip targets next |
+| `agent-factory/` | Composed AI agents (`role × stack × skills`) — 3 public projects (`core`, `grid`, `finance-desk`; 28 roles, 4 orchestrators + 24 specialists) plus any private desk composed separately | `scripts/wire.sh` (Claude Code target); OpenClaw + Paperclip targets next |
 | `automation-factory/` | Reusable automation patterns (e.g. `issue-loop`) | Cut into a target repo's tracked `loop/` folder |
 | `project-factory/` | Whole new project scaffolds from a template | `scripts/cut-project.sh` (seed or retrofit) |
 
@@ -84,7 +84,7 @@ Four sibling scaffolds, each owning a different asset type:
 ## Daily usage
 
 Once wired, every skill is a slash command (`/standup`, `/skill-scout`, `/ponytail`…)
-and composed orchestrators are too (`/tech-lead`, `/ceo-orchestrator`…) — specialist
+and composed orchestrators are too (`/grid-tech-lead`, `/grid-ceo-orchestrator`…) — specialist
 agents are subagents you delegate to, not commands. Ask Claude directly ("how do I…")
 or run `/grid-help` for a live pointer. Full walkthrough — orchestrators vs
 specialists, the four factories in practice, promoting a library skill to wired:
