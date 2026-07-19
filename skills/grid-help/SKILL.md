@@ -19,12 +19,17 @@ reproducing it verbatim — it changes independently of this skill.
   `/standup`, `/ponytail`, `/skill-scout`. Ask "is there a skill for X?" and
   check [SKILLS.md](../../SKILLS.md) if unsure.
 - **Want a role to do work for you?**
-  - **Orchestrator** (`ceo-orchestrator`, `tech-lead`, `growth-hacker`,
-    `finance-manager`) → slash command, e.g. `/tech-lead`. Transforms the
-    session into that role; it delegates further down the team.
-  - **Specialist** (the other 23 roles) → not a slash command. Delegate
-    explicitly ("use the backend-dev subagent to…") or let an orchestrator
-    hand off once invoked.
+  - **Orchestrator** (`grid-ceo-orchestrator`, `grid-tech-lead`,
+    `grid-growth-hacker`, `finance-desk-finance-manager`) → slash command,
+    e.g. `/grid-tech-lead`. Transforms the session into that role; it
+    delegates further down the team.
+  - **Specialist** (the other 24 roles) → not a slash command. Delegate
+    explicitly ("use the grid-backend-dev subagent to…") or let an
+    orchestrator hand off once invoked.
+  - Three public projects, independently gated (`project:<name>`): `grid`
+    (dev team), `finance-desk` (standalone finance pipeline), `core`
+    (`gh-triage` + `librarian` — cross-desk infra, meant to stay wired
+    everywhere). A private desk can exist too, composed the same way.
 - **Want a recurring, unattended automation** (e.g. clearing a GitHub issue
   backlog)? Cut an `automation-factory/patterns/*` pattern into the target
   repo's tracked `loop/` folder — not a slash command, a one-time setup per

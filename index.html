@@ -933,27 +933,29 @@
           <tbody>
             <tr>
               <td><strong>Skill</strong> (orchestrator)</td>
-              <td><code>ceo-orchestrator</code>, <code>tech-lead</code>, <code>growth-hacker</code>, <code>finance-manager</code></td>
-              <td>Slash command — <code>/tech-lead</code>. Transforms the session into that role.</td>
+              <td><code>grid-ceo-orchestrator</code>, <code>grid-tech-lead</code>, <code>grid-growth-hacker</code>, <code>finance-desk-finance-manager</code></td>
+              <td>Slash command — <code>/grid-tech-lead</code>. Transforms the session into that role.</td>
             </tr>
             <tr>
               <td><strong>Subagent</strong> (specialist)</td>
-              <td>the other 23 roles</td>
-              <td>Not a slash command. Delegate: <em>"Use the backend-dev subagent to…"</em>, or let an orchestrator hand off automatically.</td>
+              <td>the other 24 roles</td>
+              <td>Not a slash command. Delegate: <em>"Use the grid-backend-dev subagent to…"</em>, or let an orchestrator hand off automatically.</td>
             </tr>
           </tbody>
         </table>
 
         <div class="command-block">
           <h3>Compose a team and wire it into Claude Code</h3>
-          <pre><code># Compose for the Claude Code target
-.venv/bin/python agent-factory/compose.py agent-factory/examples/full-team.yaml --target claude-code
+          <pre><code># Compose each public project for the Claude Code target
+.venv/bin/python agent-factory/compose.py agent-factory/examples/core.yaml --target claude-code
+.venv/bin/python agent-factory/compose.py agent-factory/examples/grid.yaml --target claude-code
+.venv/bin/python agent-factory/compose.py agent-factory/examples/finance-desk.yaml --target claude-code
 
 # Wire the output — orchestrators → ~/.claude/skills/, specialists → ~/.claude/agents/
 bash scripts/wire.sh
 
 # Open a fresh Claude Code session to pick up the new agents, then:
-# /tech-lead    ← invoke the orchestrator
+# /grid-tech-lead    ← invoke the orchestrator
 </code></pre>
         </div>
 
@@ -1021,195 +1023,26 @@ bash scripts/wire.sh
         <h2 id="agents-heading">Agents</h2>
 
         <p>
-          agent-factory produces 27 roles. Four are <strong>orchestrators</strong> —
-          they become Claude Code skills invoked as slash commands and can coordinate
-          the rest of the team. The other 23 are <strong>specialists</strong> —
+          agent-factory produces 28 roles across three independently composed
+          and gated public projects (plus any private desk composed the same
+          way, sourcing roles from outside this repo — see CLAUDE.md). Four
+          roles are <strong>orchestrators</strong> — they become Claude Code
+          skills invoked as slash commands and can coordinate the rest of
+          their team. The other 24 are <strong>specialists</strong> —
           subagents delegated to by an orchestrator or called directly.
         </p>
 
-        <!-- ── Orchestrators ── -->
+        <!-- ── core: cross-desk shared infra ── -->
         <h3 class="agent-group-heading">
-          Orchestrators
-          <span class="badge badge-orchestrator" aria-hidden="true">skill / slash command</span>
+          core
+          <span class="badge badge-specialist" aria-hidden="true">cross-desk infra — stays wired everywhere</span>
         </h3>
 
         <div class="agent-grid">
 
           <article class="agent-card">
             <div class="agent-card-name">
-              <code>ceo-orchestrator</code>
-              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
-            </div>
-            <div class="agent-card-title">CEO</div>
-            <p class="agent-card-summary">Top-level orchestrator above the team. Turns a business goal into sequenced initiatives and bets, makes the build-vs-not call, sets guardrails and budgets, delegates to Tech Lead + Product Manager, gates releases, reviews outcomes against the goal.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>tech-lead</code>
-              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
-            </div>
-            <div class="agent-card-title">Tech Lead</div>
-            <p class="agent-card-summary">PRDs, architecture decisions, hands off to specialists, reviews output.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>growth-hacker</code>
-              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
-            </div>
-            <div class="agent-card-title">Growth Hacker</div>
-            <p class="agent-card-summary">Acquisition and funnel experiments, analytics-driven growth. Runs disciplined, hypothesis-first experiments — one variable at a time, lets the data decide. Player-coach: also leads the marketing specialists below.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-manager</code>
-              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
-            </div>
-            <div class="agent-card-title">Finance Manager</div>
-            <p class="agent-card-summary">Orchestrates the finance desk pipeline (sentinel → analyst → strategist → risk-officer → approval → scribe). Routes and grades escalation; never sizes a trade, never overrides the Risk Officer, never auto-approves. Standalone — deliberately outside the CEO's delegation chain.</p>
-          </article>
-
-        </div>
-
-        <!-- ── Specialists ── -->
-        <h3 class="agent-group-heading">
-          Specialists
-          <span class="badge badge-specialist" aria-hidden="true">subagent</span>
-        </h3>
-
-        <div class="agent-grid">
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>ad-copy</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Ad Copy</div>
-            <p class="agent-card-summary">Short-form ad creative. Hooks, headlines, and channel-fit copy variants written to be A/B tested, not admired. Works from a brief.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>backend-dev</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Backend Dev</div>
-            <p class="agent-card-summary">Server-side logic, APIs, database, auth, business rules. Implements to a PRD.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>copywriter</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Copywriter</div>
-            <p class="agent-card-summary">Long-form and product copy. Writes to a brief: voice, clarity, structure.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>data-analyst</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Data Analyst</div>
-            <p class="agent-card-summary">Queries, dashboards, analysis, reporting. Turns a question into a defensible answer, with assumptions and caveats stated.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>data-engineer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Data Engineer</div>
-            <p class="agent-card-summary">Pipelines, warehousing, transforms, data quality. Builds to a pipeline spec.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>data-scientist</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Data Scientist</div>
-            <p class="agent-card-summary">Statistical modeling and experiments — A/B testing, causal inference, feature engineering, ML models. Turns data into validated models and experiment readouts.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>designer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Designer</div>
-            <p class="agent-card-summary">UI/UX design: user flows, layout, design systems, component specs, accessibility-by-design. Hands a design spec to frontend-dev.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>devops</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">DevOps</div>
-            <p class="agent-card-summary">CI/CD, environments, secrets, deploy and rollback, monitoring. Proposes deploys; the human approves production.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-analyst</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Finance Analyst</div>
-            <p class="agent-card-summary">Turns a Sentinel flag (or scheduled review) into an evidence pack: what happened, primary sources, base rates, and the bull AND bear case argued with equal effort. Never recommends — output is evidence, not a proposal.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-risk-officer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Finance Risk Officer</div>
-            <p class="agent-card-summary">Layer-2 sanity check: verifies the Strategist's arithmetic and checks the proposal against the Investment Policy's text. The hard-limit veto (position caps, drawdown circuit breaker, no leverage) is Layer-1 pure code elsewhere, not this agent.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-scribe</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Finance Scribe</div>
-            <p class="agent-card-summary">Logs every flag, brief, proposal, approval/rejection, and outcome to the vault with full rationale. Runs the monthly post-mortem. Never proposes or judges — records only.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-sentinel</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Finance Sentinel</div>
-            <p class="agent-card-summary">Polls prices, portfolio state, RSS/filings, and FX against threshold rules. 95% deterministic; the model only classifies and flags. Never analyses, never recommends.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-strategist</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Finance Strategist</div>
-            <p class="agent-card-summary">Reads an evidence pack + the Investment Policy + portfolio state and produces a proposal (hold/trim/add/rebalance) with position size, an explicit confidence level, and the strongest argument against its own proposal.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>frontend-dev</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Frontend Dev</div>
-            <p class="agent-card-summary">Client side: UI templates, components, client state, forms, accessibility. Implements to a PRD against the API contract from backend-dev.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>gh-triage</code>
+              <code>core-gh-triage</code>
               <span class="badge badge-specialist" aria-hidden="true">specialist</span>
             </div>
             <div class="agent-card-title">GitHub Triage Agent</div>
@@ -1218,7 +1051,134 @@ bash scripts/wire.sh
 
           <article class="agent-card">
             <div class="agent-card-name">
-              <code>paid-search</code>
+              <code>core-librarian</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Librarian</div>
+            <p class="agent-card-summary">Maintains persistent, cross-linked markdown wikis compiled from other agents' research — one wiki per domain. Runs the ingest / query / lint cycle, preserving every page's evidence tier and provenance. Never asserts a claim itself.</p>
+          </article>
+
+        </div>
+
+        <!-- ── grid: the dev team ── -->
+        <h3 class="agent-group-heading">
+          grid
+          <span class="badge badge-orchestrator" aria-hidden="true">dev team — engineering, product, marketing</span>
+        </h3>
+
+        <div class="agent-grid">
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-ceo-orchestrator</code>
+              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
+            </div>
+            <div class="agent-card-title">CEO</div>
+            <p class="agent-card-summary">Top-level orchestrator above the team. Turns a business goal into sequenced initiatives and bets, makes the build-vs-not call, sets guardrails and budgets, delegates to Tech Lead + Product Manager, gates releases, reviews outcomes against the goal.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-tech-lead</code>
+              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
+            </div>
+            <div class="agent-card-title">Tech Lead</div>
+            <p class="agent-card-summary">PRDs, architecture decisions, hands off to specialists, reviews output.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-growth-hacker</code>
+              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
+            </div>
+            <div class="agent-card-title">Growth Hacker</div>
+            <p class="agent-card-summary">Acquisition and funnel experiments, analytics-driven growth. Runs disciplined, hypothesis-first experiments — one variable at a time, lets the data decide. Player-coach: also leads the marketing specialists below.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-ad-copy</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Ad Copy</div>
+            <p class="agent-card-summary">Short-form ad creative. Hooks, headlines, and channel-fit copy variants written to be A/B tested, not admired. Works from a brief.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-backend-dev</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Backend Dev</div>
+            <p class="agent-card-summary">Server-side logic, APIs, database, auth, business rules. Implements to a PRD.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-copywriter</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Copywriter</div>
+            <p class="agent-card-summary">Long-form and product copy. Writes to a brief: voice, clarity, structure.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-data-analyst</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Data Analyst</div>
+            <p class="agent-card-summary">Queries, dashboards, analysis, reporting. Turns a question into a defensible answer, with assumptions and caveats stated.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-data-engineer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Data Engineer</div>
+            <p class="agent-card-summary">Pipelines, warehousing, transforms, data quality. Builds to a pipeline spec.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-data-scientist</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Data Scientist</div>
+            <p class="agent-card-summary">Statistical modeling and experiments — A/B testing, causal inference, feature engineering, ML models. Turns data into validated models and experiment readouts.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-designer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Designer</div>
+            <p class="agent-card-summary">UI/UX design: user flows, layout, design systems, component specs, accessibility-by-design. Hands a design spec to frontend-dev.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-devops</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">DevOps</div>
+            <p class="agent-card-summary">CI/CD, environments, secrets, deploy and rollback, monitoring. Proposes deploys; the human approves production.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-frontend-dev</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Frontend Dev</div>
+            <p class="agent-card-summary">Client side: UI templates, components, client state, forms, accessibility. Implements to a PRD against the API contract from backend-dev.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-paid-search</code>
               <span class="badge badge-specialist" aria-hidden="true">specialist</span>
             </div>
             <div class="agent-card-title">Paid Search Specialist</div>
@@ -1227,7 +1187,7 @@ bash scripts/wire.sh
 
           <article class="agent-card">
             <div class="agent-card-name">
-              <code>paid-social</code>
+              <code>grid-paid-social</code>
               <span class="badge badge-specialist" aria-hidden="true">specialist</span>
             </div>
             <div class="agent-card-title">Paid Social Specialist</div>
@@ -1236,7 +1196,7 @@ bash scripts/wire.sh
 
           <article class="agent-card">
             <div class="agent-card-name">
-              <code>product-manager</code>
+              <code>grid-product-manager</code>
               <span class="badge badge-specialist" aria-hidden="true">specialist</span>
             </div>
             <div class="agent-card-title">Product Manager</div>
@@ -1245,7 +1205,7 @@ bash scripts/wire.sh
 
           <article class="agent-card">
             <div class="agent-card-name">
-              <code>project-manager</code>
+              <code>grid-project-manager</code>
               <span class="badge badge-specialist" aria-hidden="true">specialist</span>
             </div>
             <div class="agent-card-title">Project Manager</div>
@@ -1254,7 +1214,7 @@ bash scripts/wire.sh
 
           <article class="agent-card">
             <div class="agent-card-name">
-              <code>qa-engineer</code>
+              <code>grid-qa-engineer</code>
               <span class="badge badge-specialist" aria-hidden="true">specialist</span>
             </div>
             <div class="agent-card-title">QA Engineer</div>
@@ -1263,7 +1223,7 @@ bash scripts/wire.sh
 
           <article class="agent-card">
             <div class="agent-card-name">
-              <code>researcher</code>
+              <code>grid-researcher</code>
               <span class="badge badge-specialist" aria-hidden="true">specialist</span>
             </div>
             <div class="agent-card-title">Researcher</div>
@@ -1272,7 +1232,7 @@ bash scripts/wire.sh
 
           <article class="agent-card">
             <div class="agent-card-name">
-              <code>security-reviewer</code>
+              <code>grid-security-reviewer</code>
               <span class="badge badge-specialist" aria-hidden="true">specialist</span>
             </div>
             <div class="agent-card-title">Security Reviewer</div>
@@ -1281,7 +1241,7 @@ bash scripts/wire.sh
 
           <article class="agent-card">
             <div class="agent-card-name">
-              <code>seo</code>
+              <code>grid-seo</code>
               <span class="badge badge-specialist" aria-hidden="true">specialist</span>
             </div>
             <div class="agent-card-title">SEO Specialist</div>
@@ -1290,10 +1250,74 @@ bash scripts/wire.sh
 
         </div>
 
+        <!-- ── finance-desk: the personal finance pipeline ── -->
+        <h3 class="agent-group-heading">
+          finance-desk
+          <span class="badge badge-orchestrator" aria-hidden="true">standalone — not part of the CEO's chain</span>
+        </h3>
+
+        <div class="agent-grid">
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>finance-desk-finance-manager</code>
+              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
+            </div>
+            <div class="agent-card-title">Finance Manager</div>
+            <p class="agent-card-summary">Orchestrates the finance desk pipeline (sentinel → analyst → strategist → risk-officer → approval → scribe). Routes and grades escalation; never sizes a trade, never overrides the Risk Officer, never auto-approves. Standalone — deliberately outside the CEO's delegation chain.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>finance-desk-finance-sentinel</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Finance Sentinel</div>
+            <p class="agent-card-summary">Polls prices, portfolio state, RSS/filings, and FX against threshold rules. 95% deterministic; the model only classifies and flags. Never analyses, never recommends.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>finance-desk-finance-analyst</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Finance Analyst</div>
+            <p class="agent-card-summary">Turns a Sentinel flag (or scheduled review) into an evidence pack: what happened, primary sources, base rates, and the bull AND bear case argued with equal effort. Never recommends — output is evidence, not a proposal.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>finance-desk-finance-strategist</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Finance Strategist</div>
+            <p class="agent-card-summary">Reads an evidence pack + the Investment Policy + portfolio state and produces a proposal (hold/trim/add/rebalance) with position size, an explicit confidence level, and the strongest argument against its own proposal.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>finance-desk-finance-risk-officer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Finance Risk Officer</div>
+            <p class="agent-card-summary">Layer-2 sanity check: verifies the Strategist's arithmetic and checks the proposal against the Investment Policy's text. The hard-limit veto (position caps, drawdown circuit breaker, no leverage) is Layer-1 pure code elsewhere, not this agent.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>finance-desk-finance-scribe</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Finance Scribe</div>
+            <p class="agent-card-summary">Logs every flag, brief, proposal, approval/rejection, and outcome to the vault with full rationale. Runs the monthly post-mortem. Never proposes or judges — records only.</p>
+          </article>
+
+        </div>
+
         <div class="ownership-note" style="margin-top: 1.25rem;">
           <strong>Self-referential note:</strong> the agents that built this very page —
-          <code>tech-lead</code> (orchestrator) and <code>frontend-dev</code> (specialist)
-          — are in this list. <code>backend-dev</code>, <code>qa-engineer</code>, and the
+          <code>grid-tech-lead</code> (orchestrator) and <code>grid-frontend-dev</code> (specialist)
+          — are in this list. <code>grid-backend-dev</code>, <code>grid-qa-engineer</code>, and the
           rest are wired the same way and ready to work any project.
         </div>
 
