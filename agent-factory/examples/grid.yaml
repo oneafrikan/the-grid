@@ -1,7 +1,12 @@
-# grid.yaml — the complete composed team, all 29 ported roles.
+# grid.yaml — the complete PUBLIC composed team, all 28 ported roles.
 # Orchestrators (ceo-orchestrator, tech-lead, growth-hacker, finance-manager)
-# emit as Claude Code skills; the 25 specialists emit as CC subagents. Models
+# emit as Claude Code skills; the 24 specialists emit as CC subagents. Models
 # come from each role.yaml default unless overridden here.
+#
+# A private project can be composed separately, sourcing its roles from
+# GRID_PRIVATE_ROLES_DIR (never committed to this repo) instead of this
+# file's roles/. See compose.py's role_dir() for the mechanism — the private
+# project's own name, roster, and role content live entirely outside here.
 #
 # Delegation topology (drives the generated roster in each orchestrator's
 # AGENTS.md — see compose.py `inject_roster`):
@@ -15,7 +20,7 @@
 # delegates_to entries must name a role present in this team.
 project: grid
 slug: grid
-description: Full composed team — 4 orchestrators + 25 specialists, all 5-file model.
+description: Full composed team — 4 orchestrators + 24 specialists, all 5-file model.
 paperclip: false
 
 agents:
@@ -73,9 +78,6 @@ agents:
   - role: finance-scribe
   # GitHub triage (standalone, cron-driven — not part of any delegation chain)
   - role: gh-triage
-  # fringe-science research desk (standalone, invoked directly — not part of
-  # any delegation chain; three narrow specialists instead of one broad role
-  # because each domain runs on a different evidence standard)
-  - role: consciousness-researcher
-  - role: comparative-religion-researcher
-  - role: uap-researcher
+  # librarian (standalone, invoked directly or via Signal Protocol handoff —
+  # domain-agnostic wiki maintainer; see roles/librarian/SOUL.md)
+  - role: librarian

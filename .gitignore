@@ -6,3 +6,7 @@
 *.sublime-workspace
 .DS_Store
 .claude/settings.json
+
+# Per-machine LOCAL wiring overlay — project:<name> gates that must never enter
+# git history (e.g. a private research desk). See scripts/wire.sh manifest docs.
+machines/*.local.txt

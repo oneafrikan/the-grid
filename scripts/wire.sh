@@ -16,13 +16,16 @@ SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 AGENTS_DIR="${AGENTS_DIR:-$HOME/.claude/agents}"
 GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || echo unknown)}"
 
-# --- Manifest: baseline + per-machine overlay ---------------------------------
-# What gets wired is resolved from two layers, unioned in order:
-#   1. baseline-submodules.txt   — wired on EVERY machine (the baseline)
-#   2. machines/<host>.txt       — THIS machine's overlay (host = GRID_HOST)
+# --- Manifest: baseline + per-machine overlay + local (gitignored) overlay ----
+# What gets wired is resolved from three layers, unioned in order:
+#   1. baseline-submodules.txt   — wired on EVERY machine (the baseline, committed)
+#   2. machines/<host>.txt       — THIS machine's overlay (host = GRID_HOST, committed)
+#   3. machines/<host>.local.txt — THIS machine's LOCAL overlay (gitignored — for
+#      project:<name> gates that must never appear in this repo's git history,
+#      e.g. a private research desk composed from GRID_PRIVATE_ROLES_DIR)
 # catalog.sh reads the BASELINE only, so SKILLS.md stays a deterministic,
-# machine-agnostic index (clean cross-machine diffs); the overlay changes the
-# live symlink set, not the catalogue.
+# machine-agnostic index (clean cross-machine diffs); the overlay layers change
+# the live symlink set, not the catalogue.
 #
 # Entry grammar (identical in both files):
 #   repo                 → wire ALL skills in that submodule
@@ -66,6 +69,7 @@ load_manifest() {
 
 load_manifest "$GRID_DIR/baseline-submodules.txt"
 load_manifest "$GRID_DIR/machines/$GRID_HOST.txt"
+load_manifest "$GRID_DIR/machines/$GRID_HOST.local.txt"
 
 # --- predicates ---------------------------------------------------------------
 repo_is_denied()  { local n="$1" r; for r in "${DENY_REPOS[@]:-}";   do [ "$r" = "$n" ] && return 0; done; return 1; }
