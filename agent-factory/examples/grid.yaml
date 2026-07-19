@@ -1,6 +1,6 @@
-# grid.yaml — the complete composed team, all 26 ported roles.
+# grid.yaml — the complete composed team, all 29 ported roles.
 # Orchestrators (ceo-orchestrator, tech-lead, growth-hacker, finance-manager)
-# emit as Claude Code skills; the 22 specialists emit as CC subagents. Models
+# emit as Claude Code skills; the 25 specialists emit as CC subagents. Models
 # come from each role.yaml default unless overridden here.
 #
 # Delegation topology (drives the generated roster in each orchestrator's
@@ -15,7 +15,7 @@
 # delegates_to entries must name a role present in this team.
 project: grid
 slug: grid
-description: Full composed team — 4 orchestrators + 22 specialists, all 5-file model.
+description: Full composed team — 4 orchestrators + 25 specialists, all 5-file model.
 paperclip: false
 
 agents:
@@ -73,3 +73,9 @@ agents:
   - role: finance-scribe
   # GitHub triage (standalone, cron-driven — not part of any delegation chain)
   - role: gh-triage
+  # fringe-science research desk (standalone, invoked directly — not part of
+  # any delegation chain; three narrow specialists instead of one broad role
+  # because each domain runs on a different evidence standard)
+  - role: consciousness-researcher
+  - role: comparative-religion-researcher
+  - role: uap-researcher
