@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -63,6 +64,22 @@ STACKS_DIR = HERE / "stacks"
 SKILLS_DIR = HERE / "skills"
 CORE_DIR = HERE / "_core"
 PROJECTS_DIR = HERE / "projects"
+
+# A role normally lives under ROLES_DIR (committed, public). GRID_PRIVATE_ROLES_DIR
+# names an optional second roles/ tree — outside this repo, never committed — for
+# roles whose content shouldn't enter public git history. If a role exists in
+# both, the private copy wins (same "most specific wins" precedent as the-grid's
+# root-beats-submodule skill rule).
+_PRIVATE_ROLES_DIR = os.environ.get("GRID_PRIVATE_ROLES_DIR")
+PRIVATE_ROLES_DIR = Path(_PRIVATE_ROLES_DIR).expanduser().resolve() if _PRIVATE_ROLES_DIR else None
+
+
+def role_dir(role: str) -> Path:
+    """Resolve a role's directory: the private override tree first (if set and
+    the role exists there), else the public ROLES_DIR."""
+    if PRIVATE_ROLES_DIR and (PRIVATE_ROLES_DIR / role).is_dir():
+        return PRIVATE_ROLES_DIR / role
+    return ROLES_DIR / role
 OPENCLAW_DIR = HERE / "openclaw"
 OPENCLAW_TEMPLATES_DIR = OPENCLAW_DIR / "templates" / "orchestrator"
 
@@ -152,7 +169,7 @@ def _read(path: Path) -> str:
 
 def role_meta(role: str) -> dict:
     """Parse roles/<role>/role.yaml (defaults to {} if absent)."""
-    path = ROLES_DIR / role / "role.yaml"
+    path = role_dir(role) / "role.yaml"
     if path.is_file():
         return yaml.safe_load(_read(path)) or {}
     return {}
@@ -229,12 +246,12 @@ def load_config(path: Path) -> dict:
         if not role:
             errors.append(f"{where}: missing required key: role")
         else:
-            role_dir = ROLES_DIR / role
-            if not role_dir.is_dir():
-                errors.append(f"{where}: role '{role}' has no dir at {role_dir}")
+            rdir = role_dir(role)
+            if not rdir.is_dir():
+                errors.append(f"{where}: role '{role}' has no dir at {rdir}")
             else:
                 for required in REQUIRED_ROLE_FILES:
-                    if not (role_dir / required).is_file():
+                    if not (rdir / required).is_file():
                         errors.append(f"{where}: role '{role}' is missing {required}")
 
         for stack in agent.get("stacks", []) or []:
@@ -265,8 +282,8 @@ def load_config(path: Path) -> dict:
             if d not in team_roles:
                 errors.append(f"{where}: delegates_to '{d}' is not a role on this team")
 
-        if role and (ROLES_DIR / role).is_dir():
-            agents_md = ROLES_DIR / role / "AGENTS.md"
+        if role and role_dir(role).is_dir():
+            agents_md = role_dir(role) / "AGENTS.md"
             has_token = agents_md.is_file() and ROSTER_TOKEN in _read(agents_md)
             if has_token and delegates is None:
                 errors.append(
@@ -315,7 +332,7 @@ def render_stack_overlay(stacks: list[str]) -> str:
 def _layer(role: str, filename: str, base_path: Path) -> str:
     """A _core base file, merged with the role's layer if the role provides one."""
     base = _read(base_path)
-    role_file = ROLES_DIR / role / filename
+    role_file = role_dir(role) / filename
     return merge_layered(base, _read(role_file)) if role_file.is_file() else base
 
 
@@ -332,7 +349,7 @@ def render_identity(agent: dict) -> str:
     }
 
     text = _read(CORE_DIR / "IDENTITY_base.md")
-    role_identity = ROLES_DIR / role / "IDENTITY.md"
+    role_identity = role_dir(role) / "IDENTITY.md"
     if role_identity.is_file():
         text = text.rstrip() + "\n\n" + _read(role_identity)
     for token, value in subs.items():
@@ -515,7 +532,7 @@ def emit_cc_subagent(agent: dict, slug: str) -> tuple[str, str]:
                        f"Use this subagent for {role} work.",
         "model": resolve_model(agent),
     }
-    procedure = strip_html_comments(_read(ROLES_DIR / role / "SKILL.md"))
+    procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
     bolt_ons = (
         f"\n\nAdditional skills available to you: {', '.join(skills[1:])}."
         if len(skills) > 1 else ""
@@ -549,7 +566,7 @@ def emit_cc_skill(agent: dict, slug: str) -> dict[str, str]:
         "description": f"{title} orchestrator. {role_summary(role)} "
                        f"Invoke with /{slugged_name} or when coordinating a multi-step dev-team feature.",
     }
-    procedure = strip_html_comments(_read(ROLES_DIR / role / "SKILL.md"))
+    procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
     body = (
         f"# {title}\n\n"
         f"When this skill is invoked, **become the {title}**: adopt the identity, "
@@ -778,7 +795,7 @@ def render_openclaw_role(agent: dict, slug: str) -> dict[str, str]:
     # EXPERTISE.md: the role's own SKILL.md, ported verbatim (not from
     # render_agent() — that function has no EXPERTISE.md key).
     expertise_template = _read(OPENCLAW_TEMPLATES_DIR / "EXPERTISE.md")
-    role_skill = _read(ROLES_DIR / role / "SKILL.md")
+    role_skill = _read(role_dir(role) / "SKILL.md")
     files["EXPERTISE.md"] = expertise_template.replace("{{ROLE_SKILL_CONTENT}}", role_skill)
 
     # BOOT/TOOLS/HEARTBEAT: role_meta()-derived tokens (see openclaw/README.md
