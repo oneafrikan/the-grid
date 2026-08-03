@@ -105,8 +105,12 @@ emit_section() {
 # is a repo marker, not a wired skill, so it's excluded from the catalogue too.
 find_skills() {
   local root="${1%/}"
+  local repo_name; repo_name="$(basename "$root")"
   find "$root" -name SKILL.md -not -path '*/.git/*' 2>/dev/null | while IFS= read -r p; do
     [ "$(dirname "$p")" = "$root" ] && continue
+    # Drop `-repo/skill` subtractions so the catalogue matches what wire.sh
+    # actually links (both the per-skill listing and the headline counts).
+    skill_is_denied "$repo_name" "$(basename "$(dirname "$p")")" && continue
     printf '%s\n' "$p"
   done
 }
@@ -123,23 +127,36 @@ done
 # deterministic, machine-agnostic index. Supports two entry formats:
 #   repo-name          → whole-repo wired
 #   repo-name/skill    → only that skill wired (partial)
+#
+# Subtractions (`-repo`, `-repo/skill`) are honoured too — a whole-repo entry
+# minus a specific skill is a real baseline pattern (repos/openspec wires its
+# workflow skills but not the maintainer-only release one), and without this
+# SKILLS.md would advertise a skill wire.sh never links. `project:` entries gate
+# composed agent-factory output, not submodules, so they're skipped.
 WIRE_ALLOWLIST_FILE="$GRID_DIR/baseline-submodules.txt"
 WIRED_REPOS=()
 WIRED_SKILLS=()
+DENY_REPOS=()
+DENY_SKILLS=()
 wire_all_repos=1
 if [ -f "$WIRE_ALLOWLIST_FILE" ]; then
   wire_all_repos=0
   while IFS= read -r line; do
     line="${line%%#*}"; line="$(echo "$line" | tr -d '[:space:]')"
     [ -z "$line" ] && continue
-    if [[ "$line" == */* ]]; then
-      WIRED_SKILLS+=("$line")
-    else
-      WIRED_REPOS+=("$line")
-    fi
+    case "$line" in
+      project:*|-project:*) continue ;;
+      -*/*) DENY_SKILLS+=("${line#-}") ;;
+      -*)   DENY_REPOS+=("${line#-}") ;;
+      */*)  WIRED_SKILLS+=("$line") ;;
+      *)    WIRED_REPOS+=("$line") ;;
+    esac
   done < "$WIRE_ALLOWLIST_FILE"
 fi
+repo_is_denied()  { local n="$1" r; for r in "${DENY_REPOS[@]:-}";    do [ "$r" = "$n" ] && return 0; done; return 1; }
+skill_is_denied() { local e="$1/$2" s; for s in "${DENY_SKILLS[@]:-}"; do [ "$s" = "$e" ] && return 0; done; return 1; }
 repo_is_wired() {
+  repo_is_denied "$1" && return 1
   [ "$wire_all_repos" -eq 1 ] && return 0
   local n="$1" r
   for r in "${WIRED_REPOS[@]:-}"; do [ "$r" = "$n" ] && return 0; done

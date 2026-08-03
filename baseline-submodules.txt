@@ -116,6 +116,21 @@ jeffallan/sql-pro
 jeffallan/test-master
 jeffallan/the-fool
 
+# --- openspec — spec-driven development workflow (12 skills) ---
+# Whole-repo entry (not a per-skill list) because the openspec-* skills are one
+# coherent workflow — explore -> propose -> apply -> archive — and a new upstream
+# workflow skill SHOULD wire automatically rather than silently going missing.
+# The one subtraction is openspec's OWN release skill, which lives outside
+# skills/ (.agents/skills/) and is for maintainers of the openspec repo, not us.
+#
+# HARD DEPENDENCY: every one of these skills declares
+# `allowed-tools: Bash(openspec:*)` and `compatibility: Requires openspec CLI`.
+# They are inert without a global install:
+#   npm install -g @fission-ai/openspec@latest     (needs Node >= 20.19.0)
+# See docs/SOURCES.md and project-factory/templates/_common/SPECS.md.
+openspec
+-openspec/release-openspec
+
 # --- mattpocock — universal dev process (20 skills) ---
 # Design/personal tools (design-an-interface, obsidian-vault, prototype) live in overlays.
 mattpocock/diagnose

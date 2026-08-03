@@ -91,3 +91,6 @@
 [submodule "repos/quant-zero"]
 	path = repos/quant-zero
 	url = https://github.com/marcohwlam/quant-zero
+[submodule "repos/openspec"]
+	path = repos/openspec
+	url = https://github.com/Fission-AI/openspec.git
