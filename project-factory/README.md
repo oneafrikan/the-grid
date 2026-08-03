@@ -29,9 +29,29 @@ handoff shape regardless of stack. That shape lives once, in
 
 - `CONTEXT.md` — domain glossary and architecture decisions.
 - `LEARNINGS.md` — empty ledger; target for the `mine-learnings` skill.
+- `SPECS.md` — the OpenSpec convention (see below).
 - `handoffs/` — dated handoff+context docs between agent sessions.
 - `prompts/autonomous-coding-loop.template.md` — the pre-flight/`{{VERIFY_CMD}}`
   gap `issue-loop` leaves to the project.
+
+### `SPECS.md` — spec-driven development, on by default
+
+Every cut project gets [`SPECS.md`](templates/_common/SPECS.md): the
+[OpenSpec](https://openspec.dev) convention — specs in `openspec/`, proposals
+reviewed before code, deltas folded back on archive. It's in `_common` rather
+than per-template on purpose: **spec-driven development is the default, not a
+per-project decision someone has to remember to make.** A retrofit gets it too,
+so the convention reaches old repos on the same pass as everything else.
+
+`SPECS.md` is documentation and agent instructions only — it does **not** run
+`openspec init`. `cut-project.sh` copies files; the `openspec` CLI owns the
+directory tree it creates, and back-filling specs is a judgement call that
+belongs to the first real change, not to scaffolding. `SPECS.md` spells out both
+the greenfield and brownfield adoption paths and tells agents in the repo to
+stop and propose rather than skip to code.
+
+The 12 `openspec-*` skills are wired on every machine via the-grid's baseline,
+but they shell out to the CLI — `npm i -g @fission-ai/openspec@latest`.
 
 `_common` isn't a template itself (leading underscore, filtered out of
 `cut-project.sh`'s template listing) — it's cut in before every template, using
