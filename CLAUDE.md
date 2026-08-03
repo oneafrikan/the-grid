@@ -48,6 +48,12 @@ submodules into two tiers:
 - `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
   repos as counts, reference (no-skill) repos in a footer. Deterministic output.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
+- `scripts/sources.sh` — regenerates `docs/SOURCES.md` (one upstream URL per
+  submodule, tier from the baseline). `--check` HEADs every URL as a rot detector,
+  non-zero exit on failure. Deterministic; never edit `SOURCES.md` by hand.
+- `docs/model-selection.md` — which model for which job, with prices, independent
+  benchmarks, worked cost maths, and a dated expiry watchlist. Refreshed on demand
+  via `/grid-researcher` using the brief at the bottom of the file.
 - `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
 - `TODO.md` — current outstanding work.
@@ -259,6 +265,30 @@ repo; see compose.py's `role_dir()`.
 > **Rollout note:** `agent-factory/projects/*` is git-ignored (regenerable output). A
 > machine picks up roster/topology changes only after `git pull` **then re-running
 > `compose.py`** (BOOTSTRAP step 4) and `wire.sh` — pulling alone is not enough.
+
+## Spec-driven development (OpenSpec)
+
+the-grid wires [OpenSpec](https://openspec.dev) (`repos/openspec`, MIT) on every
+machine — 12 `openspec-*` workflow skills, gated as a whole-repo baseline entry
+minus the maintainer-only `release-openspec`. **They shell out to a CLI that is
+not vendored**: `npm i -g @fission-ai/openspec@latest` (Node >= 20.19.0). Without
+it every one of those skills is inert.
+
+There is deliberately **no fifth "spec-factory"**. OpenSpec already is the spec
+factory; what the-grid adds is two thin layers:
+
+- `project-factory/templates/_common/SPECS.md` — the convention, both adoption
+  paths (greenfield `openspec init`; brownfield = specs grow per-change, never
+  big-bang back-filled), and agent instructions. In `_common`, so **every** cut
+  project gets it, seed or retrofit — spec-driven is the default, not a
+  per-project decision someone has to remember. It documents only; the CLI owns
+  the `openspec/` tree it creates.
+- `agent-factory/_core/AGENTS_base.md` — a boot-sequence check for `SPECS.md` /
+  `openspec/`. One edit reaches all 28 composed agents across the three projects.
+  Conditional: repos without the markers are untouched.
+
+`skills/spec-scout/` audits adoption and reports spec↔code drift (survey-only,
+mirroring `skill-scout` — never runs `openspec init`, never writes specs).
 
 ## project-factory (project bootstrapping)
 
