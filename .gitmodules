@@ -57,7 +57,7 @@
 	url = git@github.com:sebclawops/openclaw-google-ads.git
 [submodule "repos/nowork-toprank"]
 	path = repos/nowork-toprank
-	url = git@github.com:nowork-studio/toprank.git
+	url = git@github.com:nowork-studio/NotFair.git
 [submodule "repos/mattberman-google-ads"]
 	path = repos/mattberman-google-ads
 	url = git@github.com:TheMattBerman/google-ads-copilot.git
