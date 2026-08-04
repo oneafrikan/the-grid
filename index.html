@@ -796,8 +796,9 @@
         <h2 id="what-heading">What it is</h2>
         <p>
           the-grid is not a framework and not skills-only. It wires skills from
-          across the ecosystem, and it composes and wires AI dev-team agents.
-          Agents, machines, MCP servers, prompts, and configs are already growing in.
+          across the ecosystem, composes and wires AI dev-team agents, and makes
+          spec-driven development the default for the projects it scaffolds.
+          Machines, MCP servers, prompts, and configs are already growing in.
         </p>
         <p>
           The core mechanic: a single script (<code>wire.sh</code>) symlinks skills
@@ -1017,6 +1018,59 @@ bash scripts/wire.sh
           normal step in the resulting repo.
         </p>
       </section><!-- /#project-factory-heading -->
+
+      <!-- 3b. Specs — OpenSpec, deliberately not a fifth factory -->
+      <section aria-labelledby="openspec-heading">
+        <h2 id="openspec-heading">Specs — spec-driven development</h2>
+
+        <p>
+          the-grid wires
+          <a href="https://openspec.dev" rel="noopener">OpenSpec</a>
+          (<a href="https://github.com/Fission-AI/openspec" rel="noopener">Fission-AI/openspec</a>, MIT)
+          on every machine — 12 skills covering
+          <code>explore → propose → apply → verify → archive</code>. Specs live in
+          the repo as plain markdown, so a plan outlives the session that produced
+          it, and a proposal gets reviewed <em>before</em> any code exists.
+        </p>
+
+        <p>
+          There is deliberately <strong>no fifth factory</strong> here. OpenSpec
+          already is the spec factory; rebuilding propose/apply/archive would be
+          reimplementing it badly. the-grid adds two thin layers instead:
+        </p>
+
+        <ul>
+          <li>
+            <code>project-factory/templates/_common/SPECS.md</code> — the
+            convention plus agent instructions, laid down on <strong>every</strong>
+            cut project, seed or retrofit. Spec-driven becomes the default rather
+            than a per-project decision someone has to remember to make.
+          </li>
+          <li>
+            <code>agent-factory/_core/AGENTS_base.md</code> — a boot-sequence check
+            for <code>SPECS.md</code> / <code>openspec/</code>. One edit reaches
+            every composed agent. Conditional: repos without those markers are
+            untouched.
+          </li>
+        </ul>
+
+        <p>
+          <code>/openspec-help</code> is the reference card.
+          <code>/spec-scout</code> audits adoption and reports drift between the
+          specs and what the code actually does — survey-only, it never writes a
+          spec.
+        </p>
+
+        <p>
+          <strong>External dependency.</strong> These skills shell out to a CLI
+          that isn't vendored, and pull their real instructions from it at
+          runtime — without it they load and dead-end immediately:
+          <code>npm install -g @fission-ai/openspec@latest</code> (needs Node
+          ≥&nbsp;20.19.0). <code>openspec init</code> is optional —
+          <code>openspec new change</code> bootstraps the
+          <code>openspec/</code> tree on its own.
+        </p>
+      </section><!-- /#openspec-heading -->
 
       <!-- 4. Agents — who the factory produces -->
       <section aria-labelledby="agents-heading">
@@ -1328,17 +1382,25 @@ bash scripts/wire.sh
         <h2 id="skills-heading">Skills</h2>
 
         <p>
-          <strong>124 wired live</strong> (9 root-owned + 115 from allowlisted repos)
-          across 7 sources — active in every Claude session. Another 82 exist in those
+          <strong>139 wired live</strong> (12 root-owned + 127 from allowlisted repos)
+          across 8 sources — active in every Claude session. Another 82 exist in those
           same partial repos but aren't wired, and a further <strong>~1,267</strong> are
           indexed across 18 dedicated library submodules — all searchable via
           <code>skill-scout</code>, none loaded by default.
         </p>
 
-        <!-- ── Root (owned / edited) — 9 ── -->
+        <p>
+          Not sure which one you want? Three reference cards answer that —
+          <code>/grid-help</code> (the repo as a whole),
+          <code>/openspec-help</code> (the spec workflow), and
+          <code>/ponytail-help</code> (the minimum-diff modes). Each prints once
+          and stops.
+        </p>
+
+        <!-- ── Root (owned / edited) — 12 ── -->
         <h3 class="skills-source-heading">
           Root (owned / edited)
-          <span class="skills-count">9</span>
+          <span class="skills-count">12</span>
           <span class="badge badge-wired" aria-hidden="true">wired</span>
         </h3>
         <ul class="skills-list">
@@ -1347,10 +1409,34 @@ bash scripts/wire.sh
           <li><span class="skill-name">grid-help</span> — <span class="skill-desc">Live in-session guide to using the-grid — which slash command or subagent to reach for.</span></li>
           <li><span class="skill-name">handoff</span> — <span class="skill-desc">Compact the current conversation into a handoff document for another agent to pick up.</span></li>
           <li><span class="skill-name">mine-learnings</span> — <span class="skill-desc">Mine project history for durable technical learnings and fold the highest-value ones into CLAUDE.md.</span></li>
+          <li><span class="skill-name">openspec-help</span> — <span class="skill-desc">Reference card for the 12 openspec skills — which to reach for, the spec format, and how the convention reaches new and existing projects.</span></li>
           <li><span class="skill-name">rubber-duck</span> — <span class="skill-desc">Structured rubber duck debugging.</span></li>
           <li><span class="skill-name">setup-gareth-skills</span> — <span class="skill-desc">Sets up an Agent skills block in AGENTS.md/CLAUDE.md and docs/agents/ so engineering skills know this repo's issue tracker, triage labels, and domain details.</span></li>
           <li><span class="skill-name">skill-scout</span> — <span class="skill-desc">Scout public agent-skill directories (ranked by installs) and propose new skills to add to the-grid, deduped against what's already wired.</span></li>
+          <li><span class="skill-name">spec-scout</span> — <span class="skill-desc">Audit a repo's OpenSpec adoption and report drift between specs and shipped code. Survey-only — never writes specs.</span></li>
           <li><span class="skill-name">standup</span> — <span class="skill-desc">Generate a concise standup summary from recent git activity across repos.</span></li>
+          <li><span class="skill-name">tighten</span> — <span class="skill-desc">Condense verbose prose across project docs — cuts filler and hedging without dropping facts.</span></li>
+        </ul>
+
+        <!-- ── repos/openspec (wired) — 12 ── -->
+        <h3 class="skills-source-heading">
+          repos/openspec
+          <span class="skills-count">12</span>
+          <span class="badge badge-wired" aria-hidden="true">wired</span>
+        </h3>
+        <ul class="skills-list">
+          <li><span class="skill-name">openspec-explore</span> — <span class="skill-desc">Thinking partner for exploring a problem before committing to a direction. Writes nothing.</span></li>
+          <li><span class="skill-name">openspec-propose</span> — <span class="skill-desc">Create a change and generate every artefact in one pass — proposal, spec delta, design, tasks.</span></li>
+          <li><span class="skill-name">openspec-apply-change</span> — <span class="skill-desc">Implement the tasks from an approved change.</span></li>
+          <li><span class="skill-name">openspec-verify-change</span> — <span class="skill-desc">Check the implementation actually matches the change artefacts before archiving.</span></li>
+          <li><span class="skill-name">openspec-archive-change</span> — <span class="skill-desc">Fold the delta into the main specs and move the change to archive.</span></li>
+          <li><span class="skill-name">openspec-new-change</span> — <span class="skill-desc">Step-by-step artefact creation instead of the one-shot propose.</span></li>
+          <li><span class="skill-name">openspec-continue-change</span> — <span class="skill-desc">Pick up a change a previous session left half-built.</span></li>
+          <li><span class="skill-name">openspec-ff-change</span> — <span class="skill-desc">Fast-forward — generate every artefact without stepping through each one.</span></li>
+          <li><span class="skill-name">openspec-update-change</span> — <span class="skill-desc">Revise an existing plan and keep its artefacts coherent. Never edits code.</span></li>
+          <li><span class="skill-name">openspec-sync-specs</span> — <span class="skill-desc">Push a delta into the main specs without archiving the change.</span></li>
+          <li><span class="skill-name">openspec-bulk-archive-change</span> — <span class="skill-desc">Archive several parallel changes at once.</span></li>
+          <li><span class="skill-name">openspec-onboard</span> — <span class="skill-desc">Guided first cycle, narrated, doing real work in your codebase.</span></li>
         </ul>
 
         <!-- ── repos/anthropic (partial) — 9 ── -->
@@ -1621,12 +1707,28 @@ bash scripts/wire.sh
               <td>Per-machine overlay layered on the baseline — adds or subtracts entries for that host only.</td>
             </tr>
             <tr>
+              <td><code>machines/&lt;host&gt;.local.txt</code></td>
+              <td><strong>Gitignored</strong> local overlay. Where a private project's <code>project:&lt;name&gt;</code> gate lives, so even the gate stays out of this repo's history.</td>
+            </tr>
+            <tr>
               <td><code>scripts/catalog.sh</code></td>
               <td>Regenerates <code>SKILLS.md</code>. Deterministic, timestamp-free output. Called automatically by <code>wire.sh</code>.</td>
             </tr>
             <tr>
               <td><code>SKILLS.md</code></td>
               <td>Generated index of the whole ecosystem. Never edit by hand.</td>
+            </tr>
+            <tr>
+              <td><code>scripts/sources.sh</code></td>
+              <td>Regenerates <code>docs/SOURCES.md</code> — one upstream URL per submodule, tier from the baseline. <code>--check</code> HEADs every URL as a rot detector and exits non-zero on failure.</td>
+            </tr>
+            <tr>
+              <td><code>docs/SOURCES.md</code></td>
+              <td>Generated upstream index. Never edit by hand.</td>
+            </tr>
+            <tr>
+              <td><code>docs/model-selection.md</code></td>
+              <td>Which model for which job — prices, independent benchmarks, worked cost maths, a dated expiry watchlist, and an explicit list of what is <em>not</em> known.</td>
             </tr>
             <tr>
               <td><code>scripts/reconcile.sh</code></td>
@@ -1656,9 +1758,18 @@ bash scripts/wire.sh
         </div>
 
         <div class="command-block">
+          <h3>Install the openspec CLI</h3>
+          <pre><code>npm install -g @fission-ai/openspec@latest
+# needs Node >= 20.19.0. The 12 wired openspec-* skills dead-end without it.</code></pre>
+        </div>
+
+        <div class="command-block">
           <h3>Check grid health</h3>
           <pre><code>bash scripts/check-grid.sh
-# runs the bats suite + scans for broken grid-owned symlinks; exits non-zero on failure</code></pre>
+# runs the bats suite + scans for broken grid-owned symlinks; exits non-zero on failure
+
+bash scripts/sources.sh --check
+# link-checks every submodule upstream URL — catches renamed/deleted repos</code></pre>
         </div>
 
         <div class="command-block">
@@ -1686,7 +1797,21 @@ bash scripts/wire.sh
         <div class="command-block">
           <h3>Cut a new project from a template</h3>
           <pre><code>bash project-factory/scripts/cut-project.sh &lt;template&gt; &lt;target-dir&gt;
-# seeds an empty target, or retrofits a non-empty one — never overwrites a differing file</code></pre>
+# seeds an empty target, or retrofits a non-empty one — never overwrites a differing file
+# every cut gets _common/SPECS.md — the OpenSpec convention is on by default</code></pre>
+        </div>
+
+        <div class="command-block">
+          <h3>Compose a private project</h3>
+          <pre><code>cd agent-factory
+GRID_PRIVATE_ROLES_DIR=~/path/to/private/roles \
+  .venv/bin/python compose.py ~/path/to/private/projects/&lt;name&gt;.yaml --target claude-code
+cd .. &amp;&amp; bash scripts/wire.sh
+# gate it with project:&lt;name&gt; in machines/&lt;host&gt;.local.txt (gitignored)
+#
+# WARNING: compose.py overwrites projects/&lt;name&gt;/ wholesale. Recomposing the
+# public projects while a private project's roles are unreachable destroys its
+# composed output, and the next wire.sh removes its symlinks.</code></pre>
         </div>
 
         <div class="command-block">
@@ -1700,6 +1825,66 @@ bash scripts/reconcile.sh --force  # remove + re-wire</code></pre>
           <pre><code>tests/lib/bats-core/bin/bats tests/</code></pre>
         </div>
 
+      </section>
+
+      <!-- 8. Roadmap -->
+      <section aria-labelledby="roadmap-heading">
+        <h2 id="roadmap-heading">Roadmap</h2>
+
+        <p>
+          <code>compose.py</code> is a multi-target compiler: one source — the
+          OpenClaw 5-file identity model
+          (<code>SOUL</code>/<code>IDENTITY</code>/<code>AGENTS</code>/<code>USER</code>/<code>MEMORY</code>
+          + skills) — emitting to different runtimes. Adding a target means
+          writing an emitter, not re-authoring a single agent.
+        </p>
+
+        <p>
+          <strong>Shipped:</strong> the Claude Code target is built and wired
+          live. <code>--target</code> also accepts <code>openclaw</code>,
+          <code>openclaw-native</code>, and <code>paperclip</code>.
+        </p>
+
+        <p><strong>Scoped but not built</strong> — tracked in Issues:</p>
+
+        <table class="files-table">
+          <thead>
+            <tr><th>Direction</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>opencode</code> compose target</td><td>Researched and scoped, not implemented</td></tr>
+            <tr><td>OpenAI Codex CLI target</td><td>Scoped</td></tr>
+            <tr><td>Gemini CLI target</td><td>Scoped</td></tr>
+            <tr><td>Cursor</td><td>Validating whether the claude-code output is reusable as-is</td></tr>
+            <tr><td>Amp</td><td>Blocked — custom-agent mechanism needs verifying first</td></tr>
+            <tr><td>Portable single-file personas for chat-UI Projects</td><td>Scoped</td></tr>
+            <tr><td>OpenSpec <em>stores</em> (cross-repo planning)</td><td>Open decision, deliberately not adopted</td></tr>
+          </tbody>
+        </table>
+
+        <p>
+          Model routing across providers (OpenRouter and friends) is a live
+          question, not a built feature — <code>docs/model-selection.md</code>
+          carries the current price and capability picture, plus the evidence
+          gaps in it.
+        </p>
+      </section>
+
+      <!-- 9. Status & expectations -->
+      <section aria-labelledby="status-heading">
+        <h2 id="status-heading">Status &amp; expectations</h2>
+
+        <p>
+          This is one person's working system, shared because the mechanics are
+          reusable — not a supported product. Concretely:
+        </p>
+
+        <ul>
+          <li><strong>It will change under you.</strong> No versioning, no deprecation cycle.</li>
+          <li><strong>It is opinionated and partly personal.</strong> Machine names, account routing, and a few paths are still Gareth-shaped. Splitting the framework from the personal config is open work, not done.</li>
+          <li><strong>Fork rather than depend.</strong> The wiring model — manifest, symlinks, compose-then-wire — is the transferable part. Copy it and point it at your own skills.</li>
+          <li><strong><code>wire.sh</code> only touches symlinks that point into this repo.</strong> It won't clobber a real directory or a foreign symlink in <code>~/.claude/skills/</code>. Read it before running it anyway — it writes to your home directory.</li>
+        </ul>
       </section>
 
     </main>
