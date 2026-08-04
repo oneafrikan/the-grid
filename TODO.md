@@ -5,31 +5,77 @@
 > This file keeps only the **issue map** (below) + the **Done** history (a log of
 > what shipped, not a tracker). Add new work as an issue, not here.
 
-**Current focus:** `agent-factory/` composes AI dev-team agents from a single
-config. The **Claude Code** target is done. Next, in Gareth's sequencing:
-per-machine manifests (**#1**) + agent naming (**#2**) **before** the OpenClaw /
-Paperclip emitter targets (**#3**, **#4**).
+**Current focus (2026-08-04):** the-grid is being shared with other people. That
+makes **#24** (De-Gareth audit: split framework from personal config) and **#25**
+(public-facing README + quickstart) the gating work — everything else is
+downstream of the repo being usable by someone who isn't Gareth.
+
+Behind that: `agent-factory` is a multi-target compiler with the **Claude Code**
+target shipped. The next targets (**#31** opencode, **#33** Codex, **#32** Gemini,
+**#30** Cursor) are scoped from the 2026-07-24 portability research but not
+built. OpenClaw/Paperclip emitters (**#3**, **#4**) remain the deeper lift.
 
 ---
 
 ## Open issues (map)
 
+Regenerate with:
+`gh issue list --state open --limit 50 --json number,title,labels`
+
+### Public-readiness (gating)
+
 | # | Title | Labels |
 |---|-------|--------|
-| [#1](https://github.com/oneafrikan/the-grid/issues/1) | Per-machine manifests: gate wired skills + composed projects by hostname | agent-factory, wiring |
-| [#2](https://github.com/oneafrikan/the-grid/issues/2) | Composed-agent naming: project-slug prefix for `/` discoverability | agent-factory |
-| [#3](https://github.com/oneafrikan/the-grid/issues/3) | agent-factory target: OpenClaw emitter (guide-server) | agent-factory |
-| [#4](https://github.com/oneafrikan/the-grid/issues/4) | agent-factory target: async/autonomous via Paperclip | agent-factory |
+| [#24](https://github.com/oneafrikan/the-grid/issues/24) | De-Gareth audit: split framework from personal config | ready-for-human, severity:medium |
+| [#25](https://github.com/oneafrikan/the-grid/issues/25) | Public-facing README + adopt-the-grid quickstart | docs, ready-for-agent |
+| [#37](https://github.com/oneafrikan/the-grid/issues/37) | 22 submodules use SSH clone URLs — fresh-machine bootstrap can fail | wiring, infra, ready-for-agent |
 
-Implementation plan for #3/#4, scoped to a curated orchestrator roster (not a full-roster
-port) and chunked into single-session specialist work: `agent-factory/docs/openclaw-paperclip-targets-plan.md`.
-| [#5](https://github.com/oneafrikan/the-grid/issues/5) | agent-factory: flesh stack overlays (LAMP + others) | agent-factory |
-| [#6](https://github.com/oneafrikan/the-grid/issues/6) | agent-factory: populate `skills/` from repos submodules | agent-factory |
-| [#7](https://github.com/oneafrikan/the-grid/issues/7) | Decide fate of the LAMP build prompt (likely superseded) + 4 gaps | docs |
-| [#8](https://github.com/oneafrikan/the-grid/issues/8) | repos/leoyeai out of sync on wilderness (deferred — do not force-sync) | deferred |
-| [#12](https://github.com/oneafrikan/the-grid/issues/12) | Add OpenGAP + soulspec as reference submodules | backlog |
-| [#13](https://github.com/oneafrikan/the-grid/issues/13) | Optional: deepen growth-hacker to marketing-director orchestrator | agent-factory, backlog |
-| [#15](https://github.com/oneafrikan/the-grid/issues/15) | automation-factory: `instantiate.sh` — machine-profiled deployment of issue-loop | automation-factory |
+### agent-factory — new compose targets
+
+| # | Title | Labels |
+|---|-------|--------|
+| [#31](https://github.com/oneafrikan/the-grid/issues/31) | New compose.py target: opencode | ready-for-agent |
+| [#33](https://github.com/oneafrikan/the-grid/issues/33) | New compose.py target: OpenAI Codex CLI | ready-for-human |
+| [#32](https://github.com/oneafrikan/the-grid/issues/32) | New compose.py target: Gemini CLI | ready-for-human |
+| [#30](https://github.com/oneafrikan/the-grid/issues/30) | Cursor: validate zero-cost reuse of claude-code subagent output | ready-for-agent |
+| [#36](https://github.com/oneafrikan/the-grid/issues/36) | New compose.py target: portable single-file personas for chat-UI Projects | ready-for-human |
+| [#34](https://github.com/oneafrikan/the-grid/issues/34) | Amp: verify custom-agent mechanism before scoping a target | deferred, needs-info |
+| [#35](https://github.com/oneafrikan/the-grid/issues/35) | Continue: decide skip or reframe — doesn't map to the roster model | deferred, question |
+| [#3](https://github.com/oneafrikan/the-grid/issues/3) | agent-factory target: OpenClaw emitter (guide-server) | needs-info |
+| [#4](https://github.com/oneafrikan/the-grid/issues/4) | agent-factory target: async/autonomous via Paperclip | needs-info, severity:medium |
+
+Implementation plan for #3/#4, scoped to a curated orchestrator roster (not a
+full-roster port) and chunked into single-session specialist work:
+`agent-factory/docs/openclaw-paperclip-targets-plan.md`.
+
+### agent-factory — everything else
+
+| # | Title | Labels |
+|---|-------|--------|
+| [#5](https://github.com/oneafrikan/the-grid/issues/5) | agent-factory: flesh stack overlays (LAMP + others) | needs-info |
+| [#6](https://github.com/oneafrikan/the-grid/issues/6) | agent-factory: populate `skills/` from repos submodules | needs-human |
+| [#13](https://github.com/oneafrikan/the-grid/issues/13) | Optional: deepen growth-hacker to marketing-director orchestrator | backlog |
+| [#20](https://github.com/oneafrikan/the-grid/issues/20) | Inject LEARNINGS.md into composed agents at compose time | ready-for-human |
+| [#23](https://github.com/oneafrikan/the-grid/issues/23) | compose.py golden-output conformance tests | ready-for-agent |
+
+### Feedback loops & dogfooding
+
+| # | Title | Labels |
+|---|-------|--------|
+| [#18](https://github.com/oneafrikan/the-grid/issues/18) | skill-scout autonomy: scheduled scout → PR proposals against baseline | ready-for-agent |
+| [#19](https://github.com/oneafrikan/the-grid/issues/19) | Close the learnings loop: mine-learnings output → candidate skills | ready-for-agent |
+| [#16](https://github.com/oneafrikan/the-grid/issues/16) | Create agent self-improving capability | needs-info |
+| [#21](https://github.com/oneafrikan/the-grid/issues/21) | Factory chain e2e: one command from idea → staffed, looping project | ready-for-human |
+| [#22](https://github.com/oneafrikan/the-grid/issues/22) | Dogfood milestone: ship one real feature via /grid-ceo-orchestrator | needs-info |
+
+### Specs, docs, backlog
+
+| # | Title | Labels |
+|---|-------|--------|
+| [#38](https://github.com/oneafrikan/the-grid/issues/38) | Evaluate OpenSpec stores for cross-repo planning (+ steal `--remote`) | deferred, ready-for-human |
+| [#7](https://github.com/oneafrikan/the-grid/issues/7) | Decide fate of the LAMP build prompt (likely superseded) + 4 gaps | docs, ready-for-human |
+| [#12](https://github.com/oneafrikan/the-grid/issues/12) | Add OpenGAP + soulspec as reference submodules | ready-for-human |
+| [#29](https://github.com/oneafrikan/the-grid/issues/29) | finance-agents-base: implement Layer-1 guardrail/rules.py (hard-limit veto) | ready-for-human, severity:medium |
 
 ---
 
@@ -59,3 +105,8 @@ port) and chunked into single-session specialist work: `agent-factory/docs/openc
 - [x] **project-factory: `lamp-agent-base` template** — DONE 2026-07-03. Third template, a different family from the two Python agent apps: an agent-injection kit for an *existing* PHP/MySQL/Apache repo, cut in retrofit mode. `CLAUDE.md` (stack conventions) + working, idempotent `scripts/worktree-{setup,teardown}.sh` + `db-migrate.sh` that give each git worktree its own MySQL schema + port (deterministic from worktree path) — closes the "LAMP isolation missing" gap from issue #7.
 - [x] **project-factory: `_common/` session-continuity layer** — DONE 2026-07-03. Refactored `CONTEXT.md`/`LEARNINGS.md`/`handoffs/`/the issue-loop pairing prompt out of `lamp-agent-base` into `templates/_common/`, cut into every template by `cut-project.sh` (common pass, then template pass — same copy-if-absent/skip-if-differs rule; `_common` filtered out of the template picker via leading underscore). Assumes every cut project ends up with a GitHub issue backlog, an `issue-loop` instance, and cross-session handoffs, so that shape is now written once instead of per-template. Added the missing `CLAUDE.md` to `python-agent-base` and `python-astro-content-agent` too (previously had none). Verified seed mode for all three templates, plus a retrofit collision check (`_common`'s `CONTEXT.md` correctly left a pre-existing one untouched). Caught and avoided a footgun: a `_common/README.md` would have collided with every template's own root `README.md` (common copies first) — documented `_common` in `project-factory/README.md` instead.
 - [x] **project-factory: `agents` naming convention + `finance-agents-base` template** — DONE 2026-07-03. Renamed `python-agent-base` → `python-agents-base` and `lamp-agent-base` → `lamp-agents-base` (any real project ends up with more than one operational agent — the name and the `src/` shape should say so); restructured `python-agents-base`'s `src/agent/` into `src/agents/{orchestrator,worker,shared}/`. Left `python-astro-content-agent` singular — genuinely one agent, one job. Fourth template, `finance-agents-base`: a generic personal-finance agent-team scaffold (watcher/analyst/strategist/guardrail/scribe roles, a human approval gate, a versioned `POLICY.template.md`), assessed against an OpenClaw portfolio-monitoring design doc and deliberately generalized rather than templating that doc verbatim — it was one specific instance (retirement portfolio monitoring, OpenClaw-native), not a reusable base; no thresholds or trading logic baked in, `guardrail/rules.py` is pure code loaded from `POLICY.md`. Caught one design mistake before committing: `.gitignore`d `POLICY.md` at first, then corrected it — a version-controlled policy document is the whole point (auditability), unlike `.env`. Verified all four templates seed cleanly (0 skipped) after the rename.
+- [x] **OpenSpec adoption** — DONE 2026-08-03/04 (`f0d3d3f`, `c8d1d1f`, `05d6986`, `ad41cc4`). Tracked `Fission-AI/openspec` as a submodule and wired its 12 workflow skills baseline-wide (whole-repo entry minus the maintainer-only `release-openspec`; `catalog.sh` gained subtraction support so `SKILLS.md` stops advertising skills `wire.sh` won't link). Deliberately **no fifth factory** — OpenSpec already is the spec factory, so the-grid adds two thin layers instead: `project-factory/templates/_common/SPECS.md` (convention + agent instructions, on every seed *and* retrofit, so spec-driven is the default rather than a per-project decision) and a boot-sequence check in `agent-factory/_core/AGENTS_base.md` (one edit → every composed agent, conditional so non-spec repos are untouched). Added `spec-scout` (adoption + drift audit, survey-only) and `openspec-help` (reference card for all 12). CLI installed and verified end-to-end. Two assumptions corrected by testing: `openspec init` is optional (`openspec new change` bootstraps `openspec/` itself), and the `core` profile gates which skills `init` scaffolds locally, not which CLI commands work.
+- [x] **`scripts/sources.sh` + `docs/SOURCES.md`** — DONE 2026-08-03 (`c8d1d1f`). Generated one-line-per-submodule upstream index with tier from the baseline, deterministic like `catalog.sh`. `--check` HEADs every URL as a rot detector (non-zero exit, CI-gateable) — caught `nowork-studio/toprank` renamed to `NotFair` on its first run (fixed `076f0d3`) and surfaced that 22 of 32 submodules use SSH clone URLs (issue **#37**).
+- [x] **`docs/model-selection.md`** — DONE 2026-08-03 (`c8d1d1f`). Decision-first "which model for which job", prices verified against provider primaries, worked cost maths, dated expiry watchlist, explicit known-gaps section. Three findings worth keeping: SWE-bench Verified is contaminated and 100% vendor-self-reported (use Terminal-Bench 2.1 / SWE-bench Pro); the "cheap models burn more turns" thesis has **no** published cross-model study behind it; break-even on the worked example is ~4 retries, not 2. `mine-learnings` now routes model-routing learnings into that doc, since real-history observations are the only data the-grid will ever have on that gap.
+- [x] **Doc resync for sharing** — DONE 2026-08-04 (`ad41cc4`). README/USAGE/BOOTSTRAP brought current: OpenSpec, private projects, help skills, roadmap separating shipped targets from scoped-but-unbuilt ones, and a status section setting fork-don't-depend expectations. BOOTSTRAP gained a prerequisites table (Node >= 20.19.0 was undocumented) and the openspec CLI as an explicit step. Does **not** close #24/#25.
+- [x] **Private-project mechanism documented + hardened** — DONE 2026-08-04. `compose.py` overwrites `projects/<name>/` wholesale, so recomposing the public projects while a private project's roles are unreachable destroys its composed output and the next `wire.sh` removes its symlinks. This happened for real this session. Warning now in CLAUDE.md, README, USAGE and BOOTSTRAP; mechanism documented publicly, names never.
