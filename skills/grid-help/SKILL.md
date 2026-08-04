@@ -40,6 +40,36 @@ reproducing it verbatim — it changes independently of this skill.
   at the repo root. Found something useful in a library repo? Add its name to
   `baseline-submodules.txt` (every machine) or `machines/<host>.txt` (this
   machine only), then `bash scripts/wire.sh`.
+- **Want to plan work so it outlives the session?** the-grid wires
+  [OpenSpec](https://openspec.dev) — 12 `openspec-*` skills,
+  `explore → propose → apply → verify → archive`, specs as markdown in
+  `openspec/`. Point at **`/openspec-help`** rather than explaining it here.
+  `/spec-scout` audits adoption + spec↔code drift. Needs the CLI
+  (`npm i -g @fission-ai/openspec@latest`) or the skills dead-end.
+- **Want to know which model to use for a job?**
+  [docs/model-selection.md](../../docs/model-selection.md) — prices, independent
+  benchmarks, worked cost maths, and an explicit list of what is *not* known.
+
+## Sibling help skills
+
+Don't reproduce their content — hand off:
+
+| Command | Owns |
+|---|---|
+| `/openspec-help` | The 12 openspec skills, spec format, adoption paths |
+| `/ponytail-help` | ponytail modes and intensity levels |
+
+## Answering well
+
+- **Give a pointer, not a tutorial.** One or two lines plus the file to read.
+- **Check before asserting.** [SKILLS.md](../../SKILLS.md) is generated and
+  current; your memory of what's wired is not. Same for which agents exist —
+  read `~/.claude/agents/`.
+- **Private projects: mechanism yes, names never.** A machine may run a project
+  composed from roles outside this repo (`GRID_PRIVATE_ROLES_DIR`, gated in
+  gitignored `machines/<host>.local.txt`). Explain how that works to anyone who
+  asks; never enumerate the roles of a private desk in this repo or in a shared
+  session.
 
 If the question is deeper than a pointer — which template to pick, how a
 pattern composes, how the delegation topology works — read the relevant
