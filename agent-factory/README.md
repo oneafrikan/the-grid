@@ -35,6 +35,7 @@ agent-factory/
 │   ├── SOUL_base.md        universal personality scaffolding
 │   ├── IDENTITY_base.md    nameplate token template (name/role/model/cron_model)
 │   ├── AGENTS_base.md      universal boot sequence + async handoff protocol
+│                           (incl. the spec-driven check — see "Spec-driven repos")
 │   ├── USER_base.md        operator/team skeleton
 │   ├── MEMORY_base.md      universal memory structure
 │   └── agents_base.yaml    universal runtime config template
@@ -86,6 +87,33 @@ produces byte-identical files (the output dir is wiped and rewritten each run).
 > the git-ignored `projects/*`, so the live agents won't reflect the change until
 > you re-run `compose.py` and then `bash scripts/wire.sh`.
 
+> ⚠ **`compose.py` overwrites `projects/<name>/` wholesale.** Recomposing the
+> public projects while a *private* project's roles are unreachable (its repo not
+> cloned, `GRID_PRIVATE_ROLES_DIR` unset) silently destroys that project's
+> composed output — and the next `wire.sh` tears down its symlinks, because
+> wiring rebuilds from whatever `projects/` currently holds. This has already
+> happened once. Before recomposing, check every `project:` gate in
+> `machines/<host>.local.txt` has a config you can actually reach.
+
+### Private projects
+
+A project's roles and compose config don't have to live in this repo.
+`GRID_PRIVATE_ROLES_DIR` points `compose.py` at an external roles directory
+(see `role_dir()` — it's checked before the committed `roles/`), so a project
+can be composed from sources the-grid never sees:
+
+```bash
+GRID_PRIVATE_ROLES_DIR=~/path/to/private/roles \
+  .venv/bin/python compose.py ~/path/to/private/projects/<name>.yaml --target claude-code
+```
+
+Gate it with `project:<name>` in `machines/<host>.local.txt` — gitignored, so
+even the gate stays out of this repo's history. Composed output lands in the
+same `projects/` directory as everything else and wires identically.
+
+The mechanism is public; only the content is private. Nothing about a private
+desk — its name, its roles, its purpose — belongs in this repo.
+
 The `claude-code` target writes to `projects/<name>/_claude-code/`:
 
 ```
@@ -132,6 +160,28 @@ config) and appends the role's `IDENTITY.md` extras.
 Stack overlays (when a stack is named) append to `AGENTS.md` as a trailing
 "Stack overlays" section — stack conventions are operating rules.
 
+## Spec-driven repos (OpenSpec)
+
+`_core/AGENTS_base.md` carries a boot-sequence check for
+[OpenSpec](https://openspec.dev): every composed agent looks for `SPECS.md` or an
+`openspec/` directory at the repo root, and if either is present it treats the
+repo as spec-driven — read the spec before implementing, continue an existing
+change rather than opening a parallel one, propose and stop for review rather
+than skipping to code, and write deltas instead of editing current-truth specs.
+
+Two properties make this cheap:
+
+- **One edit reaches every agent.** It lives in `_core`, not per-role, so all
+  composed agents across every project inherit it on the next recompose.
+- **It's conditional.** A repo with neither marker is untouched — agents behave
+  exactly as before, so this imposes nothing on repos that haven't opted in.
+
+The convention itself is documented in
+`project-factory/templates/_common/SPECS.md`, which `cut-project.sh` lays down on
+every project it seeds or retrofits. the-grid wires the 12 `openspec-*` skills
+that drive the workflow; they need the CLI
+(`npm i -g @fission-ai/openspec@latest`).
+
 ## Rosters & delegation
 
 An orchestrator's roster — the agents it can hand work to — is **generated from the
@@ -168,25 +218,35 @@ Any violation is a hard `compose.py` error. **grid topology:**
 
 ## Status
 
-**Claude Code delivery target is done and live.** All 20 roles are ported to the
-5-file model (`examples/grid.yaml`): 3 orchestrators (`ceo-orchestrator`,
-`tech-lead`, `growth-hacker`) + 17 specialists (product-manager, project-manager,
-backend-dev, frontend-dev, designer, qa-engineer, security-reviewer, devops,
-data-engineer, data-analyst, data-scientist, researcher, copywriter, ad-copy, seo,
-paid-search, paid-social). Orchestrator rosters are generated from each one's
-`delegates_to` (see **Rosters & delegation** above). `compose.py` emits both the
-OpenClaw 5-file shape and the Claude Code skill/subagent shape; `scripts/wire.sh`
-wires the CC output into `~/.claude/`. The full team is wired live on wilderness —
-`/tech-lead` boots and runs end-to-end.
+**Claude Code delivery target is done and live.** Three public projects compose
+independently and are gated independently:
 
-Remaining work (see repo-root `TODO.md`):
+| Config | Roles | Shape |
+|---|---|---|
+| `examples/grid.yaml` | 20 | 3 orchestrators (`ceo-orchestrator`, `tech-lead`, `growth-hacker`) + 17 specialists — the dev team |
+| `examples/finance-desk.yaml` | 6 | `finance-manager` → sentinel/analyst/strategist/risk-officer/scribe. Standalone: deliberately not in anyone's `delegates_to` |
+| `examples/core.yaml` | 2 | `gh-triage`, `librarian` — cross-desk infra, no delegation chain, meant to stay wired everywhere |
+
+Orchestrator rosters are generated from each one's `delegates_to` (see **Rosters
+& delegation** above). `compose.py` emits both the OpenClaw 5-file shape and the
+Claude Code skill/subagent shape; `scripts/wire.sh` wires the CC output into
+`~/.claude/`. Private projects compose the same way from an external roles
+directory (see **Private projects** above).
+
+Remaining work (see repo-root `TODO.md` and the issue tracker):
+- **New CLI targets** — `opencode`, OpenAI Codex CLI, Gemini CLI, Cursor, and
+  portable single-file personas for chat-UI Projects. All scoped from the
+  2026-07-24 portability research; none implemented.
 - **OpenClaw + Paperclip targets** — 5 files → workspace + `openclaw.json`; the
   async/autonomous heartbeat loop. Deferred (Claude Code was built first). Implementation
   plan, scoped to a curated orchestrator roster + chunked into single-session specialist
   work: `docs/openclaw-paperclip-targets-plan.md`.
 - **Stack overlays** — `stacks/*` are still `stack.yaml` stubs with empty `fragments`.
-- **Machine manifest** — gate which composed agents wire on which machine (today
-  `wire.sh` wires every composed project's `_claude-code/` output).
+- **Golden-output conformance tests** — `compose.py` has no regression suite.
+
+*(Machine gating is **done**: `project:<name>` entries in the baseline or a
+per-machine overlay control which composed projects `wire.sh` links. With no
+`project:` entry anywhere it wires all of them — the legacy fallback.)*
 
 ## Runtime assumptions
 
