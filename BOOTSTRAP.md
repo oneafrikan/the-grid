@@ -4,6 +4,16 @@ How to get the-grid running on any machine — new or existing.
 
 ---
 
+## Prerequisites
+
+| Need | For | Check |
+|---|---|---|
+| `git` | everything | `git --version` |
+| `python3` | `agent-factory` compose step | `python3 --version` |
+| **Node >= 20.19.0** | the `openspec` CLI below | `node --version` |
+
+---
+
 ## New machine (fresh Claude Code install)
 
 ```bash
@@ -23,10 +33,37 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python compose.py examples/grid.yaml --target claude-code
 .venv/bin/python compose.py examples/finance-desk.yaml --target claude-code
 cd ~/.the-grid && bash scripts/wire.sh
+
+# 5. External CLI the wired openspec skills depend on
+npm install -g @fission-ai/openspec@latest
 ```
 
 Skills are live after step 3. Agents (subagents + orchestrator skills) are live after step 4.
 No restart needed — Claude picks up symlinks immediately (open a fresh session for new agents/skills).
+
+**Step 5 is not optional if you want the spec workflow.** the-grid wires 12
+`openspec-*` skills on every machine, and every one of them declares
+`allowed-tools: Bash(openspec:*)` and pulls its real instructions from the CLI at
+runtime. Without the binary they load and dead-end on the first step. Verify with
+`openspec --version` — it should match `repos/openspec/package.json`.
+
+Nothing else in the-grid needs it, so skip step 5 if you're not using specs;
+the other ~209 skills are unaffected.
+
+### Private projects (optional)
+
+If you compose a project whose roles live outside this repo, do it after step 4
+and before the final `wire.sh`:
+
+```bash
+cd ~/.the-grid/agent-factory
+GRID_PRIVATE_ROLES_DIR=~/path/to/private/roles \
+  .venv/bin/python compose.py ~/path/to/private/projects/<name>.yaml --target claude-code
+cd ~/.the-grid && bash scripts/wire.sh
+```
+
+Gate it with `project:<name>` in `machines/<host>.local.txt` — gitignored, so
+neither the roles nor the gate enter this repo's history.
 
 ---
 
@@ -62,6 +99,16 @@ not enough. If your pull touched nothing under `agent-factory/`, skip step 3;
 
 > Not sure if agent-factory changed? `git diff --stat HEAD@{1} HEAD -- agent-factory/`
 > after a pull shows it. When in doubt, recomposing is cheap and idempotent.
+
+> ⚠ **Recompose private projects in the same pass.** A change under
+> `agent-factory/_core/` or to `compose.py` affects *every* project, but only the
+> three public configs are listed above. `compose.py` **overwrites**
+> `projects/<name>/` wholesale — so recomposing the public set while a private
+> project's roles are unreachable (repo not cloned, `GRID_PRIVATE_ROLES_DIR`
+> unset) silently destroys that project's composed output, and the next
+> `wire.sh` tears down its symlinks. This has already happened once. Before
+> recomposing, check every `project:` gate in `machines/<host>.local.txt` has a
+> config you can actually reach.
 
 ---
 

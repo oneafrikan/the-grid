@@ -39,6 +39,54 @@ Four sibling scaffolds, each owning a different asset type:
 | `automation-factory/` | Reusable automation patterns (e.g. `issue-loop`) | Cut into a target repo's tracked `loop/` folder |
 | `project-factory/` | Whole new project scaffolds from a template | `scripts/cut-project.sh` (seed or retrofit) |
 
+There is deliberately **no fifth factory for specs** — see below.
+
+## Spec-driven development (OpenSpec)
+
+the-grid wires [OpenSpec](https://openspec.dev) ([Fission-AI/openspec](https://github.com/Fission-AI/openspec), MIT)
+on every machine: 12 `openspec-*` skills covering
+`explore → propose → apply → verify → archive`. Specs live in the repo as plain
+markdown, so a plan survives the session that produced it.
+
+OpenSpec already *is* the spec factory, so the-grid adds only two thin layers:
+
+- `project-factory/templates/_common/SPECS.md` — the convention plus agent
+  instructions, laid down on **every** cut project, seed or retrofit. Spec-driven
+  is the default rather than a per-project decision someone has to remember.
+- `agent-factory/_core/AGENTS_base.md` — a boot-sequence check for `SPECS.md` /
+  `openspec/`. One edit reaches every composed agent. Conditional: repos without
+  those markers are untouched.
+
+`/openspec-help` is the reference card; `/spec-scout` audits adoption and
+reports spec↔code drift.
+
+> **External dependency.** These skills shell out to a CLI that is *not*
+> vendored — without it they dead-end immediately:
+> ```bash
+> npm install -g @fission-ai/openspec@latest   # needs Node >= 20.19.0
+> ```
+> `openspec init` is optional: `openspec new change` bootstraps `openspec/` on
+> its own.
+
+## Private projects
+
+Not everything belongs in a public repo. `agent-factory` can compose a project
+whose **roles and compose config live entirely outside this repo**, via
+`GRID_PRIVATE_ROLES_DIR` (see `compose.py`'s `role_dir()`), gated by a
+`project:<name>` entry in `machines/<host>.local.txt` — which is gitignored, so
+even the gate stays out of git history.
+
+Composed output lands in the same `agent-factory/projects/` as everything else
+and wires identically. Nothing about the mechanism is private; only the content
+is. That separation is the point — fork this repo and your own private desk
+never touches its history.
+
+> ⚠ `compose.py` **overwrites** `projects/<name>/` wholesale. Recomposing the
+> public projects while a private project's roles are unreachable destroys that
+> project's composed output, and the next `wire.sh` removes its symlinks. Check
+> `machines/<host>.local.txt` against `ls agent-factory/projects/` before
+> recomposing.
+
 ## Repo layout
 
 ```
@@ -50,8 +98,12 @@ Four sibling scaffolds, each owning a different asset type:
       SKILL.md
     ...
   agents/               ← hand-authored root-owned agents (personas/behavior-modifiers)
-  machines/             ← per-machine skill/project overlays (machines/<host>.txt)
+  machines/             ← per-machine skill/project overlays
+    <host>.txt          ← committed overlay (adds/subtracts on the baseline)
+    <host>.local.txt    ← GITIGNORED overlay — private project gates
   docs/                 ← reference docs, playbooks, resources
+    SOURCES.md          ← generated: upstream URL per submodule (never edit)
+    model-selection.md  ← which model for which job, with prices + benchmarks
   prompts/              ← reusable prompts
   agent-factory/        ← composes AI dev-team agents (role × stack × skills); live
   skills-factory/       ← scaffolding for generating new skills (early)
@@ -65,6 +117,7 @@ Four sibling scaffolds, each owning a different asset type:
   scripts/
     wire.sh             ← creates ~/.claude/skills/ + ~/.claude/agents/ symlinks (idempotent)
     catalog.sh          ← regenerates SKILLS.md
+    sources.sh          ← regenerates docs/SOURCES.md; --check link-checks every URL
     reconcile.sh        ← removes stale skill shadows on a new machine
     cut-project.sh      ← seeds/retrofits a project-factory template
   tests/
@@ -85,10 +138,21 @@ Four sibling scaffolds, each owning a different asset type:
 
 Once wired, every skill is a slash command (`/standup`, `/skill-scout`, `/ponytail`…)
 and composed orchestrators are too (`/grid-tech-lead`, `/grid-ceo-orchestrator`…) — specialist
-agents are subagents you delegate to, not commands. Ask Claude directly ("how do I…")
-or run `/grid-help` for a live pointer. Full walkthrough — orchestrators vs
-specialists, the four factories in practice, promoting a library skill to wired:
-**[USAGE.md](USAGE.md)**.
+agents are subagents you delegate to, not commands.
+
+**Lost? The help skills are the entry point:**
+
+| Command | Answers |
+|---|---|
+| `/grid-help` | Which slash command or subagent do I want? How do the factories differ? |
+| `/openspec-help` | Which of the 12 openspec skills do I want? How do I add specs to this repo? |
+| `/ponytail-help` | Which ponytail mode do I want? |
+
+Full walkthrough — orchestrators vs specialists, the four factories in practice,
+promoting a library skill to wired: **[USAGE.md](USAGE.md)**.
+
+Picking a model for a job (prices, independent benchmarks, worked cost maths):
+**[docs/model-selection.md](docs/model-selection.md)**.
 
 ## Bootstrap (new machine)
 
@@ -127,6 +191,13 @@ for broken grid-owned symlinks. Exits non-zero if anything's wrong, so it works
 as a CI / pre-push gate. A `pre-commit` hook (in `.githooks/`, activated by
 `bootstrap.sh`) runs the same tests before every commit; bypass with
 `git commit --no-verify` or `GRID_SKIP_HOOK=1`.
+
+Link rot is checked separately — upstream repos get renamed, deleted, or made
+private with no local symptom until a fresh machine tries to clone:
+
+```bash
+bash scripts/sources.sh --check    # HEADs every submodule URL, non-zero on failure
+```
 
 > **Already set up, just pulled new changes?** See BOOTSTRAP.md →
 > *Updating an existing machine*. Key gotcha: `agent-factory/projects/*` is
@@ -208,3 +279,46 @@ bash scripts/reconcile.sh --force   # remove them (sudo only where needed) + re-
 ```
 
 Idempotent: a fully-wired machine reports "Nothing to reconcile".
+
+## Roadmap
+
+Shipped today: the **Claude Code** target is built and wired live.
+`compose.py --target` also accepts `openclaw`, `openclaw-native`, and
+`paperclip`.
+
+Planned, not built — tracked in [Issues](../../issues):
+
+| Direction | Status |
+|---|---|
+| `opencode` compose target | Researched, scoped, not implemented |
+| OpenAI Codex CLI target | Scoped |
+| Gemini CLI target | Scoped |
+| Cursor | Validating whether the claude-code output is reusable as-is |
+| Amp | Blocked — custom-agent mechanism needs verifying first |
+| Portable single-file personas for chat-UI Projects | Scoped |
+| OpenSpec **stores** (cross-repo planning) | Open decision, deliberately not adopted |
+
+The compose model is a multi-target compiler: one source (the OpenClaw 5-file
+identity model — SOUL/IDENTITY/AGENTS/USER/MEMORY + skills) emitting to
+different runtimes. Adding a target means writing an emitter, not re-authoring
+any agent.
+
+Model routing across providers (OpenRouter and friends) is a live question, not
+a built feature — see [docs/model-selection.md](docs/model-selection.md) for the
+current price/capability picture and the open evidence gaps in it.
+
+## Status & expectations
+
+This is one person's working system, shared because the mechanics are reusable —
+not a supported product. Concretely:
+
+- **It will change under you.** No versioning, no deprecation cycle.
+- **It is opinionated and partly personal.** Machine names, account routing, and
+  a few paths are still Gareth-shaped. Splitting framework from personal config
+  is [open work](../../issues), not done.
+- **Fork rather than depend.** The wiring model — manifest, symlinks,
+  compose-then-wire — is the transferable part. Copy it and point it at your own
+  skills.
+- **`wire.sh` only ever touches symlinks that point into this repo.** It won't
+  clobber a real directory or a foreign symlink in `~/.claude/skills/`. Read it
+  before running it anyway; it writes to your home directory.
