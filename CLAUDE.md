@@ -97,6 +97,17 @@ skills, symlinked into `~/.claude/agents/`).
    examples/finance-desk.yaml --target claude-code && cd ..` (recompose all
    three public projects — cheap even if only one actually changed).
    If it shows nothing: skip this step.
+
+   > ⚠ **Recompose every private project too, in the same pass.** A change to
+   > `agent-factory/_core/` or `compose.py` affects *all* projects, but only the
+   > three public configs are listed above. `compose.py` **overwrites**
+   > `projects/<name>/` wholesale — so recomposing the public set while a
+   > private project's roles are unreachable (repo not cloned,
+   > `GRID_PRIVATE_ROLES_DIR` unset) silently destroys that project's composed
+   > output, and the next `wire.sh` tears down its symlinks. This has already
+   > happened once. Check `ls agent-factory/projects/` against
+   > `machines/<host>.local.txt` **before** recomposing; if a `project:` gate
+   > there has no matching config you can reach, stop and fix that first.
 4. Refresh skills (and agents, and `SKILLS.md`) in one go: `bash scripts/wire.sh`.
    Always safe to run, always run it last.
 
@@ -132,7 +143,7 @@ flag, not permanent documentation.
 Machines with a the-grid clone still on the pre-split names:
 
 - [ ] forge
-- [ ] wilderness
+- [x] wilderness — done 2026-08-04, verified `core-*` / `finance-desk-*` resolve
 - [ ] guide-server
 
 ## Adding a skill
