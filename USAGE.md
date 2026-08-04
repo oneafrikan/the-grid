@@ -21,6 +21,16 @@ Full list: [SKILLS.md](SKILLS.md) (wired skills in detail, library repos as coun
 Don't remember the exact name? Ask Claude directly — "is there a skill for X?" — it
 can see the wired set and will invoke the right one.
 
+### Start here if you're lost
+
+Three reference-card skills, each one-shot — they print and stop:
+
+```
+/grid-help        — which command or subagent do I want? how do the factories differ?
+/openspec-help    — which of the 12 openspec skills? how do I add specs to a repo?
+/ponytail-help    — which ponytail mode?
+```
+
 ## Agents — orchestrators vs subagents
 
 `agent-factory/` composes three public projects (plus any private desk you've
@@ -51,6 +61,54 @@ Three composed projects, each independently wired and gated
 
 A task-specific machine can subtract a whole desk (`-project:grid` or
 `-project:finance-desk`) via its overlay to cut clutter, while keeping `core`.
+
+### Private projects
+
+A fourth kind of project composes from roles that live **outside this repo**
+entirely — `GRID_PRIVATE_ROLES_DIR` points `compose.py` at an external roles
+directory, and the `project:<name>` gate goes in `machines/<host>.local.txt`,
+which is gitignored. Neither the roles nor the gate enter this repo's history.
+
+Composed output lands in `agent-factory/projects/` like any other project and
+wires identically — orchestrator → slash command, specialists → subagents. The
+mechanism is public; only the content is private.
+
+```bash
+GRID_PRIVATE_ROLES_DIR=~/path/to/private/roles \
+  agent-factory/.venv/bin/python agent-factory/compose.py \
+  ~/path/to/private/projects/<name>.yaml --target claude-code
+bash scripts/wire.sh
+```
+
+> ⚠ `compose.py` overwrites `projects/<name>/` wholesale. Recomposing the public
+> projects while a private project's roles are unreachable (repo not cloned, env
+> var unset) destroys that project's composed output, and the next `wire.sh`
+> removes its symlinks. Check `machines/<host>.local.txt` against
+> `ls agent-factory/projects/` before recomposing.
+
+## Specs — planning that outlives the session
+
+Any repo can be spec-driven. Specs live in `openspec/` as plain markdown, and a
+proposal gets reviewed **before** code exists.
+
+```
+/openspec-explore        — think through options, writes nothing
+/openspec-propose        — create the change + all artefacts in one pass
+/openspec-apply-change   — implement the tasks (after review)
+/openspec-verify-change  — does the implementation match the spec?
+/openspec-archive-change — fold the delta into specs/, move to archive/
+```
+
+Twelve skills in total — `/openspec-help` maps the rest. `/spec-scout` audits
+adoption and reports spec↔code drift without writing anything.
+
+Needs the CLI (`npm i -g @fission-ai/openspec@latest`, Node >= 20.19.0). `openspec
+init` is optional — `openspec new change` bootstraps `openspec/` on its own.
+
+Projects cut by `project-factory` get the convention automatically via
+`_common/SPECS.md`, and composed agents check for it at boot — so in a
+spec-driven repo they read the spec before implementing, and propose rather than
+skipping to code.
 
 ## automation-factory — recurring unattended work
 
@@ -91,14 +149,22 @@ repo.
 ```bash
 bash scripts/check-grid.sh      # fast health check — bats suite + broken-symlink scan
 tests/lib/bats-core/bin/bats tests/   # full test suite directly
+bash scripts/sources.sh --check # link-check every submodule upstream URL
 ```
 
 A `pre-commit` hook runs the same tests automatically before every commit in this
 repo (bypass with `git commit --no-verify` or `GRID_SKIP_HOOK=1`).
 
+`sources.sh --check` is the rot detector: upstream repos get renamed, deleted, or
+made private with no local symptom until a fresh machine tries to clone. Run it
+occasionally, not every commit.
+
 ## Where to look next
 
 - [SKILLS.md](SKILLS.md) — generated index of every wired + library skill.
+- [docs/SOURCES.md](docs/SOURCES.md) — generated: upstream URL + tier per submodule.
+- [docs/model-selection.md](docs/model-selection.md) — which model for which job:
+  prices, independent benchmarks, worked cost maths, and what's *not* known.
 - [TODO.md](TODO.md) — open issues (GitHub Issues is the source of truth) + done history.
 - [LEARNINGS.md](LEARNINGS.md) — durable lessons mined from project history.
 - [CLAUDE.md](CLAUDE.md) — full technical context, for Claude sessions and for you.
