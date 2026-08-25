@@ -49,3 +49,10 @@ jeffallan/sre-engineer
 mattpocock/design-an-interface
 mattpocock/obsidian-vault
 mattpocock/prototype
+
+# --- composed agent-factory projects ---
+# Personal finance desk off the work machine: 5 subagents + the
+# /finance-desk-finance-manager skill, none of it work-relevant, all of it
+# loaded into every session. project:core and project:grid stay (baseline).
+# Re-enable by deleting the line below and re-running wire.sh.
+-project:finance-desk
