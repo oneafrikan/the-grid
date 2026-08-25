@@ -4,7 +4,7 @@
 # role.yaml default unless overridden here.
 #
 # Sibling projects, same repo (see examples/): `core.yaml` (gh-triage,
-# librarian — cross-desk infra wired on every machine) and
+# librarian, researcher — cross-desk infra wired on every machine) and
 # `finance-desk.yaml` (the personal finance pipeline, standalone). A private
 # project can also be composed separately, sourcing its roles from
 # GRID_PRIVATE_ROLES_DIR (never committed to this repo) instead of this
@@ -13,12 +13,16 @@
 # Delegation topology (drives the generated roster in each orchestrator's
 # AGENTS.md — see compose.py `inject_roster`):
 #   ceo  → tech-lead, product-manager, growth-hacker          (the three leads)
-#   tech-lead     → engineering + data/research specialists
+#   tech-lead     → engineering + data specialists
 #   growth-hacker → the marketing arm (player-coach lead)
 # delegates_to entries must name a role present in this team.
+#
+# General-purpose research is NOT on this team — the `researcher` role moved
+# to core.yaml so every machine keeps it regardless of desk gating. Tech Lead
+# routes research to core-researcher via the Signal Protocol instead.
 project: grid
 slug: grid
-description: Dev-team project — 3 orchestrators + 17 specialists, all 5-file model.
+description: Dev-team project — 3 orchestrators + 16 specialists, all 5-file model.
 paperclip: false
 
 agents:
@@ -35,7 +39,6 @@ agents:
       - devops
       - data-engineer
       - data-scientist
-      - researcher
       - project-manager
   - role: growth-hacker   # player-coach lead of the marketing arm -> CC skill
     delegates_to: [copywriter, ad-copy, seo, paid-search, paid-social, data-analyst]
@@ -49,11 +52,10 @@ agents:
   - role: qa-engineer
   - role: security-reviewer
   - role: devops
-  # data + research specialists
+  # data specialists
   - role: data-engineer
   - role: data-analyst
   - role: data-scientist
-  - role: researcher
   # marketing specialists (led by growth-hacker)
   - role: copywriter
   - role: ad-copy

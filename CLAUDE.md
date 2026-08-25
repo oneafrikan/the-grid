@@ -126,11 +126,18 @@ skills, symlinked into `~/.claude/agents/`).
 | `grid-finance-strategist` | `finance-desk-finance-strategist` |
 | `grid-finance-risk-officer` | `finance-desk-finance-risk-officer` |
 | `grid-finance-scribe` | `finance-desk-finance-scribe` |
+| `grid-researcher` | `core-researcher` (moved 2026-08-25) |
 
 `baseline-submodules.txt` now gates three projects (`project:core`,
 `project:grid`, `project:finance-desk`) instead of one — this machine's
 manifest also needs a plain `git pull` to pick that up (it's a tracked file,
 not gitignored output).
+
+**2026-08-25 — `researcher` moved `grid` → `core`.** It's a domain-general
+role, so it shouldn't vanish on a machine that subtracts `-project:grid`.
+Tech Lead lost it as a delegate and now routes research to `core-researcher`
+directly (see `roles/tech-lead/AGENTS.md`). Same migration action as the rows
+above: recompose, re-wire, confirm `grid-researcher` is gone.
 
 **If you're a session on a machine in the checklist below**: follow "Existing
 machine" above (which now composes all three projects), confirm the old
@@ -143,7 +150,8 @@ flag, not permanent documentation.
 Machines with a the-grid clone still on the pre-split names:
 
 - [ ] forge
-- [x] wilderness — done 2026-08-04, verified `core-*` / `finance-desk-*` resolve
+- [x] wilderness — done 2026-08-04 (split), 2026-08-25 (researcher move);
+      verified `core-*` / `finance-desk-*` / `core-researcher` resolve
 - [ ] guide-server
 
 ## Adding a skill
@@ -228,7 +236,8 @@ All 38 tests must stay green. Tests use temp dirs — they never touch the real 
   currently pins `project:core`, `project:grid`, and `project:finance-desk` (see
   `agent-factory/` and issue #1) — a task-specific machine can subtract
   `-project:grid` or `-project:finance-desk` via its overlay to trim clutter,
-  but `project:core` (gh-triage, librarian) is meant to stay on every machine.
+  but `project:core` (gh-triage, librarian, researcher) is meant to stay on
+  every machine.
 - **Root-owned agents:** `agents/*.md` at the repo root wires directly into
   `AGENTS_DIR`, same ownership model as root-level `skills/` — for hand-authored
   subagents that aren't a compose.py role (no `delegates_to`, not a team
@@ -254,16 +263,18 @@ that list and injects it at the `{{ROSTER_TABLE}}` token in the role's `AGENTS.m
 is symmetric and loud: a token with no `delegates_to` (or vice-versa), or a delegate not
 on the team, is a hard compose error — so a roster can never silently drift out of sync
 with the team. grid topology: `ceo → tech-lead, product-manager, growth-hacker`;
-`tech-lead → eng + data/research`; `growth-hacker → the marketing arm` (a player-coach
-orchestrator). `examples/grid.yaml` is the **dev-team project** — 20 roles: 3
-orchestrators → CC skills, 17 specialists → CC subagents.
+`tech-lead → eng + data`; `growth-hacker → the marketing arm` (a player-coach
+orchestrator). `examples/grid.yaml` is the **dev-team project** — 19 roles: 3
+orchestrators → CC skills, 16 specialists → CC subagents.
 
 Two sibling public projects, same repo, composed and gated independently:
 `examples/finance-desk.yaml` — `finance-manager → the finance desk pipeline`
 (sentinel → analyst → strategist → risk-officer → scribe), a **standalone**
 top-level orchestrator, deliberately never under the CEO's `delegates_to` — a
 personal desk, not a dev-team initiative. `examples/core.yaml` — cross-desk
-shared infra with no delegation chain (`gh-triage`, `librarian`), gated
+shared infra with no delegation chain (`gh-triage`, `librarian`,
+`researcher` — the general-purpose investigator, domain-general on purpose
+and gated here so it survives `-project:grid`), gated
 `project:core` and meant to stay wired on every machine regardless of which
 desk-specific project (`grid`, `finance-desk`, or a private desk) that
 machine actually runs — the three projects split apart specifically so a
@@ -343,7 +354,12 @@ Durable lessons mined from project history — full context and sources in
   of its **own** — but a shared `core` project for cross-desk infra (roles no
   single desk owns, meant to survive that desk being subtracted on a
   task-specific machine) is a real category, not project-proliferation for
-  its own sake. `gh-triage` and `librarian` both live there now.
+  its own sake. `gh-triage`, `librarian` and `researcher` all live there now.
+- A role only looks team-owned until you ask what happens when that team is
+  gated off. `researcher`'s method was always domain-agnostic — only its
+  membership in `grid.yaml` made it look like a dev-team role. Moving it to
+  `core` cost one `delegates_to` edit and a routing note in the orphaned
+  orchestrator; the role content didn't change at all.
 - Splitting a desk (e.g. `finance-desk`) out of a larger composed project is
   free when that desk's orchestrator was already standalone (not in anyone's
   `delegates_to`) — the delegation topology doesn't change, only which

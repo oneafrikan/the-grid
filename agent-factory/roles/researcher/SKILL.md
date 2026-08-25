@@ -9,33 +9,88 @@
 
 ## Invocation
 
-```
-/researcher <question>
-```
+Delegate to the `core-researcher` subagent, or pick the work up from a Signal
+Protocol entry / an orchestrator's research request.
 
-Or picked up from a Signal Protocol entry / an orchestrator's research request.
-Either way: pin the question before searching. A vague question yields a vague
-answer.
+General-purpose by design: **no subject is out of lane.** Where a desk-specific
+specialist exists for the domain (see the routing table in AGENTS.md) and is
+composed on this machine, hand it over — that specialist carries evidence-tiering
+rules this role doesn't. Otherwise the question is yours.
+
+Either way: **the scoping gate (Step 1) runs first.** A vague question yields a
+vague answer at full price.
 
 > If a `deep-research` (or similar fan-out/verify) skill is wired, use it for the
 > heavy multi-source passes; the steps below are the method either way.
 
 ---
 
-## Step 1 — Frame the question
+## Step 1 — The scoping gate
 
-Before any searching, confirm:
+> **Hard gate. Do not run a single search until the brief below is locked.**
+> Researching the wrong question is the most expensive failure this role has:
+> the cost is paid in full before anyone discovers the answer was to a question
+> nobody asked. Every token spent here saves an order of magnitude downstream.
 
-| Question | Why |
-|---|---|
-| What exactly is being asked? | A bounded question is answerable; a broad one isn't |
-| What decision does this inform? | Tells you the depth and what "enough" looks like |
-| What's the scope — time range, geography, domain? | Bounds the search and the sources |
-| What depth is wanted — quick scan vs deep report? | Sets how many sources / how much verification |
-| What's already known or assumed? | Avoids re-researching settled ground |
+### The brief — six slots
 
-**Rule:** If the question is too broad or ambiguous to bound, ask once. If still
-unclear, escalate — don't burn effort on the wrong question.
+| Slot | What it pins down | Unresolved looks like |
+|---|---|---|
+| **Question** | The single sentence being answered | "AI agents" (a topic, not a question) |
+| **Decision** | What the requester does differently depending on the answer | "just curious" — push once; genuine curiosity is a valid answer, but it sets depth to *scan* |
+| **Scope** | Time range, geography, market, domain boundary | No date bound on a fast-moving topic |
+| **Depth** | Scan (≈5 sources) / Standard (≈15) / Deep (fan-out + adversarial pass) | Unstated — never assume Deep |
+| **Known** | What the requester already believes or has read | Absent — you will re-research settled ground |
+| **Output** | Report / comparison table / short answer / recommendation memo | Unstated — shapes Step 5 |
+
+### How to fill them — in this order
+
+1. **Infer first, ask second.** Fill every slot you can from the request itself,
+   the conversation, the repo, and files already to hand. A slot you can answer
+   is a slot you must not ask about.
+2. **Ask only what's left — one question at a time.** Never present a
+   questionnaire; a wall of questions gets one lazy answer covering none of it.
+3. **Always carry your own recommendation.** Every question ships with the
+   answer you'd pick and why, so "yes" is a complete reply:
+   > *Scope — I'd bound this to the UK, last 18 months, since the regulation
+   > changed in 2025 and anything older describes a different regime. Widen it?*
+4. **Stop at five questions.** Past that you are interviewing, not scoping.
+   Fill what's left with your recommended defaults, state them, and move.
+5. **Lock the brief.** Play it back as a compact block and get a one-word
+   confirm before searching:
+
+```markdown
+**Brief**
+- Question: <one sentence>
+- Decision it informs: <what changes based on the answer>
+- Scope: <time / geography / domain bounds>
+- Depth: <Scan | Standard | Deep> (~<n> sources)
+- Already known: <what to skip>
+- Output: <format>
+
+Researching this unless you say otherwise.
+```
+
+### Skip the gate when
+
+- The request already fills every slot. Say so in one line and go. A precise
+  request must not be taxed with an interview — that punishes the behaviour the
+  gate exists to encourage.
+- The remaining ambiguity cannot change what you'd search. Don't ask for
+  symmetry's sake.
+
+### No human to ask (delegated / autonomous run)
+
+An orchestrator handing over a signal, or a cron/Paperclip run, has nobody to
+interview. **Do not bounce the work back** — a scoping round trip through an
+orchestrator costs more than the ambiguity does.
+
+- Fill every unresolved slot with your best-supported assumption.
+- Put the completed brief at the top of the report, with assumed slots marked
+  `(assumed)`.
+- Repeat every assumption in the **Gaps** section, so the caller sees exactly
+  what you decided on their behalf and can re-run with it corrected.
+- Escalate only if the question is unanswerable as written — not merely broad.
 
 ---
 
@@ -87,6 +142,9 @@ Answer the question. Structure:
 ```markdown
 # Research: <question>
 
+## Brief
+<!-- The locked brief from Step 1. Mark any slot filled without confirmation `(assumed)`. -->
+
 ## Answer / bottom line
 <!-- The direct answer, 1–3 sentences. Lead with it. -->
 
@@ -122,6 +180,7 @@ flag for escalation. Do not present unverified claims as conclusions.
 
 ## Source-quality checklist
 
+- [ ] Scoping gate run — brief locked (or assumptions stated) BEFORE the first search
 - [ ] Primary source consulted where one exists (not just a summary of it)
 - [ ] Each key claim corroborated by an independent source
 - [ ] Counter-evidence actively searched for
