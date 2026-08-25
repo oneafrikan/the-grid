@@ -152,7 +152,9 @@ Machines with a the-grid clone still on the pre-split names:
 - [ ] forge
 - [x] wilderness — done 2026-08-04 (split), 2026-08-25 (researcher move);
       verified `core-*` / `finance-desk-*` / `core-researcher` resolve
-- [ ] guide-server
+- [x] guide-server — done 2026-08-25 (split + researcher move); verified
+      `core-*` / `grid-*` / `finance-desk-*` / `core-researcher` resolve, no
+      pre-split or `grid-researcher` names remain
 
 ## Adding a skill
 
