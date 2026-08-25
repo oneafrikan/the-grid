@@ -1,10 +1,12 @@
 # core.yaml — cross-desk shared infrastructure roles.
 #
-# Neither role here belongs to one team: gh-triage is cron-driven and has no
+# No role here belongs to one team: gh-triage is cron-driven and has no
 # delegation chain; librarian is domain-agnostic wiki maintenance any desk's
 # specialists can file completed research to (research-desk's roles already
-# do, via Signal Protocol — see roles/librarian/SOUL.md). Both are meant to
-# be wired on every machine regardless of which desk-specific project
+# do, via Signal Protocol — see roles/librarian/SOUL.md); researcher is a
+# general-purpose investigator any desk (or the human directly) can hand a
+# bounded question to. All three are meant to be wired on every machine
+# regardless of which desk-specific project
 # (grid, finance-desk, a private desk) that machine actually runs — hence
 # their own project rather than living inside one desk's roster.
 #
@@ -13,9 +15,15 @@
 # `-project:finance-desk` should still keep `project:core`.
 project: core
 slug: core
-description: Cross-desk shared infrastructure — gh-triage, librarian.
+description: Cross-desk shared infrastructure — gh-triage, librarian, researcher.
 paperclip: false
 
 agents:
   - role: gh-triage
   - role: librarian
+  # General-purpose researcher. Lived in grid.yaml until it became clear the
+  # method (frame -> plan -> gather -> verify -> synthesise) is domain-agnostic
+  # and shouldn't disappear when a machine subtracts -project:grid. No
+  # delegation chain: invoked directly, or handed work by any desk's
+  # orchestrator via the Signal Protocol.
+  - role: researcher

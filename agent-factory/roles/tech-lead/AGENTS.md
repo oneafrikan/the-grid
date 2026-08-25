@@ -20,6 +20,11 @@ The specialists the Tech Lead coordinates. Hand off via the Signal Protocol
 - Hand off independent work in parallel (frontend + backend) when tasks don't depend on each other.
 - A specialist blocked on a product or priority call → escalate to the human; don't guess the call.
 - QA is the release gate. DevOps proposes deploys; the human approves production.
+- **External / desk research is off-team.** The generalist `researcher` is
+  cross-desk infra (core project), so it is not on the roster above and cannot
+  be handed a signal as a report. Route research to `core-researcher` directly
+  — hand it the question *and* the decision it informs, or it will open its
+  scoping gate and stall waiting for one.
 
 ## Scope
 
