@@ -16,24 +16,45 @@
 /librarian new-domain <name>
 ```
 
-Or picked up via the Signal Protocol from a researcher's filed report. Either
-way: identify which operation this is (ingest / query / lint / new-domain)
-before doing anything — they have different methods below.
+Ingest triggers three ways, in order of how it's meant to be used:
+
+1. **Inbox drop (primary, standalone use).** A file lands in
+   `<wiki-root>/<domain>/inbox/` — from a human, a sync tool, or any process
+   that can write a file to a folder. The dropper needs no knowledge of this
+   agent, OpenClaw, or any signal convention. Whatever's watching the inbox
+   (a cron poll or a filesystem watcher — mechanism injected per deployment,
+   see STACK note below) invokes ingest per new/changed file.
+2. **Direct invocation** — `/librarian ingest <source>` run by hand.
+3. **Signal Protocol pickup** — an OpenClaw teammate hands off a filed
+   research report via `signals/→librarian.md`. This is agent-to-agent
+   coordination internal to OpenClaw, not something a human dropping a file
+   needs to know about, and not the inbox's job.
+
+Either way: identify which operation this is (ingest / query / lint /
+new-domain) before doing anything — they have different methods below.
 
 <!-- STACK: wiki root path(s) and per-domain directory layout injected here.
      Default assumed shape (one root per domain, or a single root with a
      subdirectory per domain — either works, injected at setup time):
-       <wiki-root>/<domain>/sources/   — raw, immutable, never edited by you
+       <wiki-root>/<domain>/inbox/     — drop zone: new/updated files land
+                                          here to trigger ingest
+       <wiki-root>/<domain>/sources/   — raw, immutable archive; a file moves
+                                          here from inbox/ once ingested
        <wiki-root>/<domain>/wiki/      — your pages (entities, concepts, comparisons)
        <wiki-root>/<domain>/index.md   — catalog of every page + one-line summary
        <wiki-root>/<domain>/log.md     — append-only, greppable operations log
+     How the inbox is watched (cron poll interval vs. a filesystem watcher
+     like fswatch/launchd/inotify) is also injected here per deployment —
+     this file assumes only that ingest gets triggered per new/changed file,
+     not how.
 -->
 
 ---
 
 ## Operation: Ingest
 
-Triggered by a filed research report or a raw source.
+Triggered by a file in the inbox, a direct invocation, or a filed research
+report (see Invocation above).
 
 1. **Identify the domain.** Which existing domain wiki does this belong to?
    If none fits, escalate — propose `new-domain` rather than force-fitting.
@@ -59,6 +80,11 @@ Triggered by a filed research report or a raw source.
    metadata.
 6. **Append to `log.md`**:
    `## [YYYY-MM-DD] ingest | <source title> — <N> pages created/updated`
+7. **If triggered by an inbox drop, move the file from `inbox/` to
+   `sources/`** once ingested. This is what makes re-polling the inbox
+   idempotent — a file already sitting in `sources/` is never re-ingested,
+   so a watcher can safely re-check the inbox on every run without risking a
+   duplicate ingest.
 
 ---
 
