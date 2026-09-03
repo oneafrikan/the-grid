@@ -155,6 +155,13 @@ Machines with a the-grid clone still on the pre-split names:
 - [x] guide-server — done 2026-08-25 (split + researcher move); verified
       `core-*` / `grid-*` / `finance-desk-*` / `core-researcher` resolve, no
       pre-split or `grid-researcher` names remain
+- [x] scout — done 2026-09-03 (split + researcher move; also initialized the
+      `repos/openspec` submodule and installed its CLI, which had never been
+      pulled in); recomposed and re-wired all four projects (`core`, `grid`,
+      `finance-desk`, and the private `research-desk`); verified `core-*` /
+      `grid-*` / `finance-desk-*` / `research-desk-*` / `core-researcher`
+      resolve, no pre-split or `grid-researcher` names remain, 38/38 tests
+      green
 
 ## Adding a skill
 
