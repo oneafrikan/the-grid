@@ -25,6 +25,11 @@ The specialists the Tech Lead coordinates. Hand off via the Signal Protocol
   be handed a signal as a report. Route research to `core-researcher` directly
   — hand it the question *and* the decision it informs, or it will open its
   scoping gate and stall waiting for one.
+- **One-off prompt / system-prompt tuning is self-serve, not a specialist
+  handoff.** The `prompt-engineer` skill (jeffallan) is wired baseline-wide —
+  writing or refactoring a prompt, building a structured-output schema, or
+  drafting an eval rubric doesn't need a signal to backend-dev, and it isn't a
+  gap that needs a new role. Use the skill directly.
 
 ## Scope
 

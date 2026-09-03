@@ -23,6 +23,10 @@ spawn.
 - Delegate ad creative to **ad-copy**, landing-page / email copy to **copywriter**, organic & search to **seo**, paid channels to **paid-search** / **paid-social**, and measurement / analysis to **data-analyst**.
 - Cross-arm needs (tracking / instrumentation builds, schema changes) are **not** the marketing arm's to build — signal across to the **tech-lead**'s engineering arm (backend-dev / data-engineer), or escalate to the operator.
 - A call on which metric matters, channel strategy, or budget beyond authorisation → escalate to the human; don't guess it.
+- **One-off prompt tuning (AI ad-copy generators, structured output for
+  campaign tooling) is self-serve.** Use the `prompt-engineer` skill (jeffallan,
+  wired baseline-wide) directly rather than routing it through copywriter /
+  ad-copy or treating it as a capability gap.
 
 ## Scope
 
