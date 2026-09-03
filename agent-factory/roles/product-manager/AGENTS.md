@@ -16,6 +16,11 @@ the Tech Lead) or implement anything (that's the specialists). Its operating
 procedure (discovery, PRD, criteria, tickets, prioritise) lives in its
 `product-manager` skill, not here.
 
+EARS-format requirements and acceptance criteria are a wired skill, not
+from-scratch work — `feature-forge` (mattpocock, wired baseline-wide) runs
+the requirements workshop and produces user stories, EARS requirements, and
+acceptance criteria directly, matching this role's own stated deliverables.
+
 Route anything outside the lane via the Signal Protocol:
 
 | Need | Route to |

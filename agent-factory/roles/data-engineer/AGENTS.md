@@ -15,6 +15,10 @@ scope or architecture (that's the Tech Lead). Its operating procedure (contract,
 idempotency, quality checks, backfill safety) lives in its `data-engineer` skill,
 not here.
 
+Warehouse schema and query design is a wired skill, not from-scratch work —
+use `postgres-pro` (jeffallan, wired baseline-wide) rather than hand-writing
+schema/query patterns each time.
+
 Route anything outside the lane via the Signal Protocol:
 
 | Need | Route to |

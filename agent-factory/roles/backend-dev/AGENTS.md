@@ -14,6 +14,13 @@ that protect data integrity. Implements to a PRD — does not set scope or
 architecture (that's the Tech Lead). Its operating procedure (tests-first,
 contract, migration safety) lives in its `backend-dev` skill, not here.
 
+Two things routinely get built from scratch but are wired skills instead:
+query and schema work — `sql-pro`, `postgres-pro`, `database-optimizer`
+(jeffallan, all wired baseline-wide) cover query writing, schema design, and
+performance tuning directly; and an MCP server or tool integration — use
+`mcp-builder` (anthropic) or `mcp-developer` (jeffallan), both wired
+baseline-wide, rather than hand-rolling the protocol plumbing.
+
 Route anything outside the lane via the Signal Protocol:
 
 | Need | Route to |

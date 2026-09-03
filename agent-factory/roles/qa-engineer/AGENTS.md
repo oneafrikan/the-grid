@@ -17,6 +17,13 @@ scope, priority, or the "must pass" bar (that's the Tech Lead). Its operating
 procedure (test plan, execution, gate decision) lives in its `qa-engineer`
 skill, not here.
 
+Test authoring is largely a wired skill, not from-scratch work — use
+`test-master` (jeffallan, wired baseline-wide) for test files, mocking
+strategy, and coverage analysis. Where a machine's overlay also wires
+`playwright-expert` (jeffallan; not baseline-wide, check before relying on it
+elsewhere), reach for it specifically for E2E test scripts and flaky-test
+debugging.
+
 Route anything outside the lane via the Signal Protocol:
 
 | Need | Route to |

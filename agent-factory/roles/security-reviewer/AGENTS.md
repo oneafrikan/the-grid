@@ -18,6 +18,14 @@ threat level the release must clear (that's the Tech Lead / human). Its operatin
 procedure (threat model, audit, severity rating, re-review) lives in its
 `security-reviewer` skill, not here.
 
+**Note the `secure-code-guardian` skill (jeffallan, wired baseline-wide) is
+implementation-side, not a substitute for this role.** It's for a specialist
+building auth, input validation, or OWASP hardening while implementing —
+self-serve at build time. This role's own audit-and-gate function (threat
+model, severity rating, re-review, release sign-off) still routes here; don't
+treat the skill's presence as covering the review, and don't defer a review
+because implementation used the skill.
+
 Route anything outside the lane via the Signal Protocol:
 
 | Need | Route to |

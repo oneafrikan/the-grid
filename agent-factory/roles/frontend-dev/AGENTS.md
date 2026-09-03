@@ -15,6 +15,10 @@ does not set scope or architecture (that's the Tech Lead) and does not define th
 contract (that's backend-dev). Its operating procedure (tests-first, state
 coverage, a11y) lives in its `frontend-dev` skill, not here.
 
+If a task calls for building an MCP client or tool-use surface into the UI,
+use `mcp-builder` (anthropic) or `mcp-developer` (jeffallan) — both wired
+baseline-wide — rather than hand-rolling the protocol plumbing.
+
 Route anything outside the lane via the Signal Protocol:
 
 | Need | Route to |

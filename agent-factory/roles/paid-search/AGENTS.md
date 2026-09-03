@@ -18,6 +18,11 @@ analytics pipeline, or approve the budget. Its operating procedure (audit →
 structure → keywords/negatives → bids/budget → tracking → optimise → report)
 lives in its `paid-search` skill, not here.
 
+One-off prompt tuning for RSA headline/description generators or search-term
+mining scripts is self-serve — use the `prompt-engineer` skill (jeffallan,
+wired baseline-wide) directly rather than treating it as ad-copy's job or a
+capability gap.
+
 Route anything outside the lane via the Signal Protocol:
 
 | Need | Route to |

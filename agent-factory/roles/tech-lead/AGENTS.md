@@ -30,6 +30,15 @@ The specialists the Tech Lead coordinates. Hand off via the Signal Protocol
   writing or refactoring a prompt, building a structured-output schema, or
   drafting an eval rubric doesn't need a signal to backend-dev, and it isn't a
   gap that needs a new role. Use the skill directly.
+- **ADR authoring is a wired skill, not from-scratch work.** This role's own
+  scope names ADRs as a deliverable — use the `architecture-designer` skill
+  (jeffallan, wired baseline-wide) for the ADR template, trade-off framework,
+  and diagrams rather than freehanding the format each time.
+- **A refactor broken into safe incremental commits follows a template.**
+  When the ask is specifically a refactor RFC — not a fresh-build PRD — use
+  the `request-refactor-plan` skill (mattpocock, wired baseline-wide); it
+  interviews for the plan and files it as a GitHub issue rather than needing
+  a bespoke plan written from nothing.
 
 ## Scope
 
