@@ -26,9 +26,8 @@ cd ~/.the-grid && git submodule update --init --recursive
 # 3. Wire skills into Claude
 bash ~/.the-grid/scripts/wire.sh
 
-# 4. (Optional) Set your identity — appears on every composed agent's
-#    IDENTITY nameplate (Machine/Operator/Channels). Blank/absent is fine:
-#    Machine falls back to this host's hostname, Operator/Channels stay blank.
+# 4. Set your identity — appears on every composed agent's IDENTITY
+#    nameplate (Machine/Operator/Channels). Skip if user.yaml already exists.
 cp ~/.the-grid/agent-factory/user.yaml.example ~/.the-grid/agent-factory/user.yaml
 # then edit agent-factory/user.yaml
 
@@ -50,6 +49,13 @@ No restart needed — Claude picks up symlinks immediately (open a fresh session
 **Step 4 applies to every composed project, present and future** — `user.yaml`
 is install-level config, not per-project. Edit it once; recompose (step 5)
 after any change to pick it up.
+
+**A Claude session running this step should ask, not fill in silently or
+skip it as "just optional."** If `agent-factory/user.yaml` doesn't already
+exist, ask the human who the operator is (name + contact), what channels
+they're reachable on, and any other field the template asks for, then write
+the answers in. This is asked once per install — check whether `user.yaml`
+already exists before asking again.
 
 **Step 6 is not optional if you want the spec workflow.** the-grid wires 12
 `openspec-*` skills on every machine, and every one of them declares
