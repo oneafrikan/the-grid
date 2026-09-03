@@ -19,6 +19,11 @@ operating procedure (audit → objective/structure → audiences → creative te
 tracking → bids/budget → optimise → report) lives in its `paid-social` skill, not
 here.
 
+One-off prompt tuning for creative-variant generators or audience-brief
+scripts is self-serve — use the `prompt-engineer` skill (jeffallan, wired
+baseline-wide) directly rather than treating it as ad-copy's job or a
+capability gap.
+
 Route anything outside the lane via the Signal Protocol:
 
 | Need | Route to |

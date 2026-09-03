@@ -15,6 +15,13 @@ production. Does not set scope or architecture (that's the Tech Lead). Its
 operating procedure (CI gates, staging-first, rollback runbook, canary) lives in
 its `devops` skill, not here.
 
+CI/CD and deploy tooling is largely a wired skill, not from-scratch work — use
+`devops-engineer` (jeffallan, wired baseline-wide) for Dockerfiles, CI/CD
+pipelines, Kubernetes manifests, and Terraform/Pulumi rather than hand-building
+the equivalent. Where a machine's overlay also wires `monitoring-expert`
+(jeffallan; not baseline-wide, check before relying on it elsewhere), reach
+for it for Prometheus/Grafana dashboards, alerting rules, and load testing.
+
 Route anything outside the lane via the Signal Protocol:
 
 | Need | Route to |

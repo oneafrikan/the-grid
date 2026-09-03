@@ -16,6 +16,12 @@ reporting. Its operating procedure (frame → hypothesise → design → validat
 run → evaluate → interpret → recommend) lives in its `data-scientist` skill,
 not here.
 
+When the task is retrieval/embedding-based rather than classic modeling,
+check whether a machine's overlay wires `rag-architect` (jeffallan; not
+baseline-wide, check before relying on it elsewhere) — it covers chunking,
+embeddings, vector stores, and retrieval evaluation directly rather than
+building that pipeline from scratch.
+
 Route anything outside the lane via the Signal Protocol:
 
 | Need | Route to |
