@@ -26,7 +26,12 @@ cd ~/.the-grid && git submodule update --init --recursive
 # 3. Wire skills into Claude
 bash ~/.the-grid/scripts/wire.sh
 
-# 4. Build the composed agent teams (three public projects) and wire into Claude
+# 4. Set your identity — appears on every composed agent's IDENTITY
+#    nameplate (Machine/Operator/Channels). Skip if user.yaml already exists.
+cp ~/.the-grid/agent-factory/user.yaml.example ~/.the-grid/agent-factory/user.yaml
+# then edit agent-factory/user.yaml
+
+# 5. Build the composed agent teams (three public projects) and wire into Claude
 cd ~/.the-grid/agent-factory
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python compose.py examples/core.yaml --target claude-code
@@ -34,25 +39,36 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python compose.py examples/finance-desk.yaml --target claude-code
 cd ~/.the-grid && bash scripts/wire.sh
 
-# 5. External CLI the wired openspec skills depend on
+# 6. External CLI the wired openspec skills depend on
 npm install -g @fission-ai/openspec@latest
 ```
 
-Skills are live after step 3. Agents (subagents + orchestrator skills) are live after step 4.
+Skills are live after step 3. Agents (subagents + orchestrator skills) are live after step 5.
 No restart needed — Claude picks up symlinks immediately (open a fresh session for new agents/skills).
 
-**Step 5 is not optional if you want the spec workflow.** the-grid wires 12
+**Step 4 applies to every composed project, present and future** — `user.yaml`
+is install-level config, not per-project. Edit it once; recompose (step 5)
+after any change to pick it up.
+
+**A Claude session running this step should ask, not fill in silently or
+skip it as "just optional."** If `agent-factory/user.yaml` doesn't already
+exist, ask the human who the operator is (name + contact), what channels
+they're reachable on, and any other field the template asks for, then write
+the answers in. This is asked once per install — check whether `user.yaml`
+already exists before asking again.
+
+**Step 6 is not optional if you want the spec workflow.** the-grid wires 12
 `openspec-*` skills on every machine, and every one of them declares
 `allowed-tools: Bash(openspec:*)` and pulls its real instructions from the CLI at
 runtime. Without the binary they load and dead-end on the first step. Verify with
 `openspec --version` — it should match `repos/openspec/package.json`.
 
-Nothing else in the-grid needs it, so skip step 5 if you're not using specs;
+Nothing else in the-grid needs it, so skip step 6 if you're not using specs;
 the other ~209 skills are unaffected.
 
 ### Private projects (optional)
 
-If you compose a project whose roles live outside this repo, do it after step 4
+If you compose a project whose roles live outside this repo, do it after step 5
 and before the final `wire.sh`:
 
 ```bash
@@ -237,5 +253,5 @@ cd ~/.the-grid && git submodule update --init --recursive
 
 **Agents not showing up in Claude:**
 - Check `~/.claude/agents/` contains `.md` symlinks pointing into `agent-factory/projects/`
-- If `agent-factory/projects/` is empty, compose hasn't been run — see step 4 above
+- If `agent-factory/projects/` is empty, compose hasn't been run — see step 5 above
 - Re-running `bash scripts/wire.sh` is always safe (idempotent)

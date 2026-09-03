@@ -6,3 +6,8 @@ __pycache__/
 # so it is not tracked. The dir itself is kept via .gitkeep.
 projects/*
 !projects/.gitkeep
+
+# This install's local identity for the IDENTITY nameplate (operator/machine/
+# channels) — personal, machine-specific, never tracked. Copy user.yaml.example
+# to user.yaml and fill it in; compose.py falls back sanely if it's absent.
+user.yaml
