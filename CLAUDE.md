@@ -373,6 +373,22 @@ Durable lessons mined from project history — full context and sources in
   free when that desk's orchestrator was already standalone (not in anyone's
   `delegates_to`) — the delegation topology doesn't change, only which
   compose config file it's read from.
+- A composed role's own bundled `SKILL.md` ("its operating procedure") can
+  share a bare name with an unrelated wired ecosystem skill (e.g. the
+  `security-reviewer` role's procedure vs. jeffallan's wired `security-reviewer`
+  skill) — that's a naming coincidence, not a relationship, and reads as one
+  in prose ("lives in its `security-reviewer` skill") unless a role's AGENTS.md
+  says explicitly which one it means. Check for this collision whenever a role
+  name and a wired skill name match.
+- Before pointing a role at a wired skill for some capability, check whether
+  another wired skill already covers the same ground — `jeffallan/debugging-wizard`
+  and `superpowers/systematic-debugging` both do hypothesis-driven root-cause
+  debugging, but they're not duplicates: `debugging-wizard` explicitly credits
+  and incorporates `systematic-debugging`'s phase methodology as one of its own
+  reference docs, adding stack-trace/log-correlation tooling and per-language
+  debugger commands on top, while `systematic-debugging` is already the
+  universal default everywhere via `superpowers`' `using-superpowers` skill —
+  so neither needs a role-specific routing note on its own.
 
 ## About
 
