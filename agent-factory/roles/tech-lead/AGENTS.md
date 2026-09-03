@@ -39,6 +39,12 @@ The specialists the Tech Lead coordinates. Hand off via the Signal Protocol
   the `request-refactor-plan` skill (mattpocock, wired baseline-wide); it
   interviews for the plan and files it as a GitHub issue rather than needing
   a bespoke plan written from nothing.
+- **A PR-gate security review always delegates to `security-reviewer`
+  (the role), never just runs the wired `security-reviewer` skill
+  (jeffallan) and calls it done.** The two share a name by coincidence, not
+  design — the skill is a quick, ungated scan; the role is the actual
+  audit-and-gate function (threat model, severity rating, re-review, sign-off)
+  and is the only one of the two that satisfies a release gate.
 
 ## Scope
 

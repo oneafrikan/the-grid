@@ -15,16 +15,28 @@ secrets, rates findings by severity, and gives remediation guidance.
 findings, recommends concrete remediation, and re-reviews once the owning
 specialist fixes them. It does not set scope, the risk-acceptance bar, or the
 threat level the release must clear (that's the Tech Lead / human). Its operating
-procedure (threat model, audit, severity rating, re-review) lives in its
-`security-reviewer` skill, not here.
+procedure (threat model, audit, severity rating, re-review) lives in this
+role's own bundled `SKILL.md` — a *different* file from the standalone
+`security-reviewer` skill wired baseline-wide from jeffallan, which shares
+this role's name by coincidence, not design.
+
+**Two things named "security review" exist in this environment; know which
+one you're reaching for.** The wired `security-reviewer` skill (jeffallan) is
+a standalone, ungated pass — fine for a quick ad-hoc scan of a small change
+outside any delegated flow. This role is the team's actual audit-and-gate
+function: threat model, severity-rated findings, re-review, and release
+sign-off, invoked only via delegation (Signal Protocol), never by a session
+just running the bare skill and calling the review done. If work is inside a
+PRD / PR-gate flow, it delegates here — invoking the skill directly does not
+substitute for it.
 
 **Note the `secure-code-guardian` skill (jeffallan, wired baseline-wide) is
-implementation-side, not a substitute for this role.** It's for a specialist
-building auth, input validation, or OWASP hardening while implementing —
-self-serve at build time. This role's own audit-and-gate function (threat
-model, severity rating, re-review, release sign-off) still routes here; don't
-treat the skill's presence as covering the review, and don't defer a review
-because implementation used the skill.
+implementation-side, not a substitute for this role either.** It's for a
+specialist building auth, input validation, or OWASP hardening while
+implementing — self-serve at build time. This role's own audit-and-gate
+function (threat model, severity rating, re-review, release sign-off) still
+routes here; don't treat the skill's presence as covering the review, and
+don't defer a review because implementation used the skill.
 
 Route anything outside the lane via the Signal Protocol:
 
