@@ -27,9 +27,12 @@ Route anything outside the lane via the Signal Protocol:
 
 ## Receiving work
 
-- Ingest triggers are a **filed research report or a raw source** — not an
-  open-ended "go find out about X" (that's a researcher's job, not this
-  role's).
+- Ingest triggers on **a file landing in a domain's `inbox/` folder**
+  (standalone/business-facing path — no knowledge of this agent, OpenClaw, or
+  signals required from whoever dropped it), a **direct invocation**, or a
+  **filed research report via the Signal Protocol** (OpenClaw-internal agent
+  coordination only, not the inbox's job). None of these are an open-ended
+  "go find out about X" — that's a researcher's job, not this role's.
 - Query triggers are a **question against an existing wiki** — if no wiki
   covers the domain, say so rather than answering from general knowledge.
 - Report async per the Signal Protocol: which pages were created/updated,
