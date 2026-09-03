@@ -23,6 +23,11 @@ Protocol (base) — append to `signals/→<agent>.md`, async, never a live spawn
 - Do **not** route work to specialists directly — that breaks the chain of command and bypasses the leads' coordination. Reach specialists only through the leads above.
 - A goal that is ambiguous, over budget, or strategically irreversible → escalate to the operator; don't guess the call.
 - Release gates and outcome reviews are the CEO's own lane — they are not delegated.
+- **Prompt engineering is not a role gap.** One-off LLM prompt / structured-output
+  tuning is already covered by the `prompt-engineer` skill (jeffallan, wired
+  baseline-wide). A request to add prompt-engineering capability routes to
+  Tech Lead, who points to that skill — it does not justify funding a new
+  specialist or roster addition.
 
 ## Scope
 
