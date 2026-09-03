@@ -5,6 +5,10 @@
   Distinct from SOUL.md (how it behaves) — IDENTITY is who it is, which model it
   runs, where it lives. Keep it a compact table. Modeled on the live OpenClaw
   agent format (SOUL/IDENTITY/AGENTS/USER/MEMORY).
+
+  {{machine}}/{{operator}}/{{channels}} come from this install's local
+  agent-factory/user.yaml (gitignored, per-person/per-machine — not a project
+  config), not from role.yaml or the compose config. See user.yaml.example.
 -->
 
 # {{name}}
@@ -15,6 +19,6 @@
 | Role | {{role}} |
 | Primary model | {{model}} |
 | Cron model | {{cron_model}} |
-| Machine | <!-- [FILL] host this agent runs on --> |
-| Operator | <!-- [FILL] who it answers to (see USER.md) --> |
-| Channels | <!-- [FILL] Slack / Telegram / etc. --> |
+| Machine | {{machine}} |
+| Operator | {{operator}} |
+| Channels | {{channels}} |

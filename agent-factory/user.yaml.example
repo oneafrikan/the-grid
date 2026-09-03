@@ -1,0 +1,23 @@
+# user.yaml.example — this install's local identity for composed agents.
+#
+# Copy this file to user.yaml (gitignored — personal, never tracked) and fill
+# in what applies. Every field is optional: compose.py falls back sanely if
+# user.yaml doesn't exist at all, or if a field is left blank.
+#
+#   cp agent-factory/user.yaml.example agent-factory/user.yaml
+#
+# Re-run compose.py (all projects) + wire.sh after editing to pick up changes
+# — the values land in every composed agent's IDENTITY nameplate (the
+# Machine/Operator/Channels row of its identity table).
+
+# Who these agents answer to primarily. Free text — name, contact, whatever's
+# useful on a nameplate. Example: "Gareth Knight <gareth.knight@gmail.com>"
+operator: ""
+
+# Which machine this install's composed agents run on. Blank falls back to
+# this machine's hostname — override only if the raw hostname isn't a useful
+# label (e.g. you'd rather see "wilderness" than a generated macOS hostname).
+machine: ""
+
+# Where these agents are reachable — Slack, Telegram, etc. Free text.
+channels: ""

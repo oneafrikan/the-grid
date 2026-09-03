@@ -70,7 +70,17 @@ skills, symlinked into `~/.claude/agents/`).
 1. Clone the-grid to `~/.the-grid`.
 2. Pull in submodules: `git submodule update --init --recursive`.
 3. Wire skills: `bash scripts/wire.sh` — skills are live now.
-4. Build the agent teams: `cd agent-factory && python3 -m venv .venv &&
+4. Set up install identity — **only if `agent-factory/user.yaml` doesn't
+   already exist** (once per install, not once per session): copy it from
+   `agent-factory/user.yaml.example`, then **ask the human** who the
+   operator is (name + contact), what channels they're reachable on, and
+   any other field the template asks for — don't guess, don't leave it
+   silently blank, and don't skip asking just because every field is
+   technically optional. Write their answers into `agent-factory/user.yaml`.
+   This is install-level config: it lands on every composed agent's
+   IDENTITY nameplate (see agent-factory section below). `machine` alone
+   can be left blank — it falls back to the local hostname.
+5. Build the agent teams: `cd agent-factory && python3 -m venv .venv &&
    .venv/bin/pip install -r requirements.txt && .venv/bin/python compose.py
    examples/core.yaml --target claude-code && .venv/bin/python compose.py
    examples/grid.yaml --target claude-code && .venv/bin/python compose.py
@@ -78,9 +88,11 @@ skills, symlinked into `~/.claude/agents/`).
    composed independently — a private desk, if you have one, composes the
    same way with `GRID_PRIVATE_ROLES_DIR` set; see the agent-factory section
    below.)
-5. Wire again from the repo root: `bash scripts/wire.sh` — agents are live now.
+6. Wire again from the repo root: `bash scripts/wire.sh` — agents are live now.
 
-(Steps 2–5 are exactly what `scripts/bootstrap.sh --with-agents` does in one shot.)
+(Steps 2, 3, 5, and 6 — everything except the optional identity config in step 4,
+which needs a human to fill it in — are exactly what `scripts/bootstrap.sh
+--with-agents` does in one shot.)
 
 ### Existing machine (already set up, just did `git fetch && git pull`)
 
