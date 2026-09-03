@@ -19,7 +19,9 @@ Render model:
         roles/<role>/<X>.md. Shared level-2 (`## `) headings unify under one
         heading (base body first, then role seed); unique sections kept in order.
     IDENTITY = _core/IDENTITY_base.md token-substituted ({{name}}, {{role}},
-        {{model}}, {{cron_model}}) + roles/<role>/IDENTITY.md appended.
+        {{model}}, {{cron_model}}, {{machine}}, {{operator}}, {{channels}} — the
+        latter three from this install's local agent-factory/user.yaml, not the
+        compose config) + roles/<role>/IDENTITY.md appended.
     skills = the role's own operating skill (named after the role) + any bolt-on
         skills from the config, listed by name in agents.yaml (OpenClaw wires
         skills by name from a shared skills dir — they are not copied per agent).
@@ -42,10 +44,12 @@ Requires PyYAML — install into the project venv:
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import re
 import shutil
+import socket
 import sys
 from pathlib import Path
 
@@ -64,6 +68,7 @@ STACKS_DIR = HERE / "stacks"
 SKILLS_DIR = HERE / "skills"
 CORE_DIR = HERE / "_core"
 PROJECTS_DIR = HERE / "projects"
+USER_CONFIG_PATH = HERE / "user.yaml"
 
 # A role normally lives under ROLES_DIR (committed, public). GRID_PRIVATE_ROLES_DIR
 # names an optional second roles/ tree — outside this repo, never committed — for
@@ -183,6 +188,26 @@ def resolve_model(agent: dict) -> str:
 def resolve_cron_model(agent: dict) -> str:
     """Cron model precedence: config > role.yaml cron_model > haiku."""
     return agent.get("cron_model") or role_meta(agent["role"]).get("cron_model") or DEFAULT_CRON_MODEL
+
+
+@functools.lru_cache(maxsize=1)
+def load_user_config() -> dict[str, str]:
+    """Load this install's local identity (user.yaml, gitignored) for the
+    IDENTITY nameplate. Every field is optional and every project reads the
+    same file, regardless of which compose config is being run — this is
+    per-install config, not per-project. `machine` falls back to the local
+    hostname so a fresh install with no user.yaml still gets a sane value."""
+    cfg: dict = {}
+    if USER_CONFIG_PATH.is_file():
+        cfg = yaml.safe_load(_read(USER_CONFIG_PATH)) or {}
+    machine = str(cfg.get("machine") or "").strip()
+    if not machine:
+        machine = socket.gethostname().split(".")[0]
+    return {
+        "operator": str(cfg.get("operator") or "").strip(),
+        "machine": machine,
+        "channels": str(cfg.get("channels") or "").strip(),
+    }
 
 
 def agent_skills(agent: dict) -> list[str]:
@@ -341,11 +366,15 @@ def render_identity(agent: dict) -> str:
     role = agent["role"]
     meta = role_meta(role)
     title = meta.get("title") or role
+    user_cfg = load_user_config()
     subs = {
         "{{name}}": agent.get("name") or title,
         "{{role}}": title,
         "{{model}}": resolve_model(agent),
         "{{cron_model}}": resolve_cron_model(agent),
+        "{{machine}}": user_cfg["machine"],
+        "{{operator}}": user_cfg["operator"],
+        "{{channels}}": user_cfg["channels"],
     }
 
     text = _read(CORE_DIR / "IDENTITY_base.md")
