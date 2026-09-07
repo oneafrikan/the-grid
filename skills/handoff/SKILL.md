@@ -46,6 +46,14 @@ Determine save location by matching the current working directory path:
 | Obsidian vault (`Gareth_SovereignOS`) | `LOGS/` |
 | All others | `LOGS/` — ask before creating if it doesn't exist |
 
+**Case handling:** match case-insensitively — if a directory matching the
+table's name already exists on disk in any casing (`logs`, `Logs`, `LOGS`),
+write there as-is. Do not compare on-disk casing against git's tracked
+casing, do not check `core.ignorecase`, do not investigate or flag a
+mismatch — that's out of scope for this skill and wastes tokens. Only
+create a new directory (using the table's casing) when nothing matching
+exists at all.
+
 ---
 
 ## After writing
