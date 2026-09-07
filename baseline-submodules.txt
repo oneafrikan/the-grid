@@ -131,13 +131,16 @@ jeffallan/the-fool
 openspec
 -openspec/release-openspec
 
-# --- mattpocock — universal dev process (20 skills) ---
+# --- mattpocock — universal dev process (21 skills) ---
 # Design/personal tools (design-an-interface, obsidian-vault, prototype) live in overlays.
 mattpocock/diagnose
 mattpocock/edit-article
 mattpocock/git-guardrails-claude-code
 mattpocock/grill-me
 mattpocock/grill-with-docs
+# grilling: the interview skill grill-me dispatches to via `Call the Skill
+# tool with "grilling"` — required for grill-me to do anything (issue #41).
+mattpocock/grilling
 mattpocock/improve-codebase-architecture
 mattpocock/request-refactor-plan
 mattpocock/scaffold-exercises
