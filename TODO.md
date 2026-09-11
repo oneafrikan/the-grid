@@ -5,9 +5,9 @@
 > This file keeps only the **issue map** (below) + the **Done** history (a log of
 > what shipped, not a tracker). Add new work as an issue, not here.
 
-**Current focus (2026-08-04):** the-grid is being shared with other people. That
-makes **#24** (De-Gareth audit: split framework from personal config) and **#25**
-(public-facing README + quickstart) the gating work — everything else is
+**Current focus (2026-09-11):** the-grid is being shared with other people.
+**#24**/**#39** (de-Gareth audit) closed 2026-09-11. **#25** (public-facing
+README + quickstart) is the remaining gating work — everything else is
 downstream of the repo being usable by someone who isn't Gareth.
 
 Behind that: `agent-factory` is a multi-target compiler with the **Claude Code**
@@ -26,7 +26,6 @@ Regenerate with:
 
 | # | Title | Labels |
 |---|-------|--------|
-| [#24](https://github.com/oneafrikan/the-grid/issues/24) | De-Gareth audit: split framework from personal config | ready-for-human, severity:medium |
 | [#25](https://github.com/oneafrikan/the-grid/issues/25) | Public-facing README + adopt-the-grid quickstart | docs, ready-for-agent |
 | [#37](https://github.com/oneafrikan/the-grid/issues/37) | 22 submodules use SSH clone URLs — fresh-machine bootstrap can fail | wiring, infra, ready-for-agent |
 
@@ -110,4 +109,4 @@ full-roster port) and chunked into single-session specialist work:
 - [x] **`docs/model-selection.md`** — DONE 2026-08-03 (`c8d1d1f`). Decision-first "which model for which job", prices verified against provider primaries, worked cost maths, dated expiry watchlist, explicit known-gaps section. Three findings worth keeping: SWE-bench Verified is contaminated and 100% vendor-self-reported (use Terminal-Bench 2.1 / SWE-bench Pro); the "cheap models burn more turns" thesis has **no** published cross-model study behind it; break-even on the worked example is ~4 retries, not 2. `mine-learnings` now routes model-routing learnings into that doc, since real-history observations are the only data the-grid will ever have on that gap.
 - [x] **Doc resync for sharing** — DONE 2026-08-04 (`ad41cc4`). README/USAGE/BOOTSTRAP brought current: OpenSpec, private projects, help skills, roadmap separating shipped targets from scoped-but-unbuilt ones, and a status section setting fork-don't-depend expectations. BOOTSTRAP gained a prerequisites table (Node >= 20.19.0 was undocumented) and the openspec CLI as an explicit step. Does **not** close #24/#25.
 - [x] **Private-project mechanism documented + hardened** — DONE 2026-08-04. `compose.py` overwrites `projects/<name>/` wholesale, so recomposing the public projects while a private project's roles are unreachable destroys its composed output and the next `wire.sh` removes its symlinks. This happened for real this session. Warning now in CLAUDE.md, README, USAGE and BOOTSTRAP; mechanism documented publicly, names never.
-- [x] **#24/#39 de-Gareth audit: LOGS/ + personal manifests** — DONE 2026-09-11. `LOGS/` (dev journal) moved to a separate private repo (`~/.the-grid-private/LOGS/`), symlinked back locally, stripped from this repo's git history entirely (`git filter-repo --path LOGS --invert-paths`, force-pushed). `baseline-submodules.txt` and `machines/{forge,guide-server,scout,wilderness}.txt` untracked going forward (still present on disk; seeded on a new machine from the now-tracked `baseline-submodules.example.txt` / `machines/example.txt`) — history left as-is, judged low-sensitivity. `setup-gareth-skills` renamed to `setup-repo-skills` (cosmetic, never actually personal). `BOOTSTRAP.md`/`scripts/bootstrap.sh`/`CLAUDE.md` updated to match; 38/38 tests green. Every other the-grid clone (forge, scout, guide-server) needs `git fetch && git reset --hard origin/main` before its next commit — tracked in `CLAUDE.md`'s pending-migration checklist. Not yet done: closing #24/#39 on GitHub (separate explicit step).
+- [x] **#24/#39 de-Gareth audit: LOGS/ + personal manifests** — DONE 2026-09-11. `LOGS/` (dev journal) moved to a separate private repo (`~/.the-grid-private/LOGS/`), symlinked back locally, stripped from this repo's git history entirely (`git filter-repo --path LOGS --invert-paths`, force-pushed). `baseline-submodules.txt` and `machines/{forge,guide-server,scout,wilderness}.txt` untracked going forward (still present on disk; seeded on a new machine from the now-tracked `baseline-submodules.example.txt` / `machines/example.txt`) — history left as-is, judged low-sensitivity. `setup-gareth-skills` renamed to `setup-repo-skills` (cosmetic, never actually personal). `BOOTSTRAP.md`/`scripts/bootstrap.sh`/`CLAUDE.md` updated to match; 38/38 tests green. Every other the-grid clone (forge, scout, guide-server) needs `git fetch && git reset --hard origin/main` before its next commit — tracked in `CLAUDE.md`'s pending-migration checklist. #24/#39 closed on GitHub 2026-09-11.
