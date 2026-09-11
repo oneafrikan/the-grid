@@ -57,4 +57,14 @@ exists at all.
 ---
 
 ## After writing
-Commit both files with the session's other changes if the project is a git repo.
+
+Resolve the save directory to its real path first (`realpath <dir>` /
+`readlink -f <dir>`) — it may be a symlink into a **different** git repo than
+the one you're working in (e.g. the-grid's `LOGS/` symlinks to a separate
+private repo). Commit — and push, if a remote is configured — inside
+whichever repo actually contains the resolved path, not necessarily the
+project repo. If the resolved path isn't inside a git repo at all, leave the
+files on disk and say so; don't invent a repo to commit to.
+
+Otherwise: commit both files with the session's other changes if the project
+is a git repo.
