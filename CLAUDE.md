@@ -16,7 +16,9 @@ submodules into two tiers:
   `~/.claude/skills/`. The allowlist is **layered**: a shared
   `baseline-submodules.txt` (wired on every machine) plus an optional per-machine
   overlay at `machines/<hostname>.txt` (host = `hostname -s`) that adds or
-  subtracts entries. wire.sh unions baseline + overlay.
+  subtracts entries. wire.sh unions baseline + overlay. Both are **personal
+  curation, not tracked in this repo** (see #24) — each machine keeps its own,
+  seeded from `baseline-submodules.example.txt` / `machines/example.txt`.
 - **Library** — everything else: indexed in `SKILLS.md` and searchable by
   `skill-scout`, but **not** wired (so a session isn't drowned in thousands of
   skills). Promote a library repo to wired by adding its name to the baseline.
@@ -41,10 +43,18 @@ submodules into two tiers:
   and rebuilds the wired set each run (so un-wiring a repo actually removes it).
 - `baseline-submodules.txt` — the baseline allowlist of submodules whose skills are
   wired live on **every** machine. Anything not listed is library-only. Also gates
-  composed projects via `project:<name>` entries. Delete the file to wire everything (legacy).
+  composed projects via `project:<name>` entries. Delete the file to wire everything
+  (legacy). **Gitignored, not tracked** (#24) — personal curation. A fresh machine
+  seeds its own from the tracked `baseline-submodules.example.txt`; edit the local
+  copy, not the example, for day-to-day changes.
 - `machines/<hostname>.txt` — per-machine overlay layered on the baseline (`hostname -s`).
   Adds (`repo`, `repo/skill`, `project:<name>`) or subtracts (`-repo`, `-repo/skill`,
-  `-project:<name>`) for that host only. Absent overlay → baseline as-is.
+  `-project:<name>`) for that host only. Absent overlay → baseline as-is. **Gitignored,
+  not tracked** (#24) — seed from `machines/example.txt` on a new machine.
+- `LOGS/` — dev journal (handoffs/context from the `handoff` skill). **Gitignored,
+  not tracked** (#24/#39) — personal and not useful to a fork. On machines that want
+  it, it's a symlink into a separate private repo; nothing in the-grid requires it
+  to exist.
 - `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
   repos as counts, reference (no-skill) repos in a footer. Deterministic output.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
@@ -69,8 +79,12 @@ skills, symlinked into `~/.claude/agents/`).
 
 1. Clone the-grid to `~/.the-grid`.
 2. Pull in submodules: `git submodule update --init --recursive`.
-3. Wire skills: `bash scripts/wire.sh` — skills are live now.
-4. Set up install identity — **only if `agent-factory/user.yaml` doesn't
+3. Seed your wiring manifest (gitignored, personal — see #24): `cp
+   baseline-submodules.example.txt baseline-submodules.txt && cp
+   machines/example.txt machines/"$(hostname -s)".txt`, then edit both to
+   taste. Skip a file that already exists.
+4. Wire skills: `bash scripts/wire.sh` — skills are live now.
+5. Set up install identity — **only if `agent-factory/user.yaml` doesn't
    already exist** (once per install, not once per session): copy it from
    `agent-factory/user.yaml.example`, then **ask the human** who the
    operator is (name + contact), what channels they're reachable on, and
@@ -80,7 +94,7 @@ skills, symlinked into `~/.claude/agents/`).
    This is install-level config: it lands on every composed agent's
    IDENTITY nameplate (see agent-factory section below). `machine` alone
    can be left blank — it falls back to the local hostname.
-5. Build the agent teams: `cd agent-factory && python3 -m venv .venv &&
+6. Build the agent teams: `cd agent-factory && python3 -m venv .venv &&
    .venv/bin/pip install -r requirements.txt && .venv/bin/python compose.py
    examples/core.yaml --target claude-code && .venv/bin/python compose.py
    examples/grid.yaml --target claude-code && .venv/bin/python compose.py
@@ -88,10 +102,10 @@ skills, symlinked into `~/.claude/agents/`).
    composed independently — a private desk, if you have one, composes the
    same way with `GRID_PRIVATE_ROLES_DIR` set; see the agent-factory section
    below.)
-6. Wire again from the repo root: `bash scripts/wire.sh` — agents are live now.
+7. Wire again from the repo root: `bash scripts/wire.sh` — agents are live now.
 
-(Steps 2, 3, 5, and 6 — everything except the optional identity config in step 4,
-which needs a human to fill it in — are exactly what `scripts/bootstrap.sh
+(Steps 2, 3, 4, 6, and 7 — everything except the optional identity config in
+step 5, which needs a human to fill it in — are exactly what `scripts/bootstrap.sh
 --with-agents` does in one shot.)
 
 ### Existing machine (already set up, just did `git fetch && git pull`)
@@ -141,9 +155,11 @@ which needs a human to fill it in — are exactly what `scripts/bootstrap.sh
 | `grid-researcher` | `core-researcher` (moved 2026-08-25) |
 
 `baseline-submodules.txt` now gates three projects (`project:core`,
-`project:grid`, `project:finance-desk`) instead of one — this machine's
-manifest also needs a plain `git pull` to pick that up (it's a tracked file,
-not gitignored output).
+`project:grid`, `project:finance-desk`) instead of one. **Since #24,
+`baseline-submodules.txt` is gitignored, personal config** — a plain `git
+pull` no longer touches it. If your local copy predates the three-project
+split, add the three `project:` lines yourself (or diff against
+`baseline-submodules.example.txt`, which already has them).
 
 **2026-08-25 — `researcher` moved `grid` → `core`.** It's a domain-general
 role, so it shouldn't vanish on a machine that subtracts `-project:grid`.
@@ -174,6 +190,49 @@ Machines with a the-grid clone still on the pre-split names:
       `grid-*` / `finance-desk-*` / `research-desk-*` / `core-researcher`
       resolve, no pre-split or `grid-researcher` names remain, 38/38 tests
       green
+
+### ⚠ Pending: LOGS history rewrite + personal-manifest untracking (2026-09-11)
+
+Part of the de-Gareth audit (#24, folded in #39). Three changes landed in one
+push, and the first one rewrote history:
+
+1. **`git filter-repo --path LOGS --invert-paths`** stripped every `LOGS/*`
+   file from every commit (LOGS/ is personal dev journal, moved to a private
+   repo — see the `LOGS/` entry under "Key files" above). This rewrote every
+   commit hash on `main` and force-pushed. **Does not** touch the residual
+   fringe-researcher-role-name mentions still sitting in `agent-factory/examples/grid.yaml`'s
+   history — left alone deliberately, judged not worth a second rewrite.
+2. `baseline-submodules.txt` and `machines/{forge,guide-server,scout,wilderness}.txt`
+   were untracked (still present on disk, `wire.sh` unaffected) — personal
+   curation, not framework. History left as-is (low sensitivity, not worth a
+   rewrite) — only the *forward* tracking changed.
+3. `skills/setup-gareth-skills` renamed to `setup-repo-skills` (cosmetic —
+   it was never actually personal).
+
+**If you're a session on a machine in the checklist below**: the rewrite means
+your clone's history has diverged from `origin/main`. Back up or commit any
+local work first, then:
+
+```bash
+git fetch origin
+git reset --hard origin/main
+```
+
+Then confirm `baseline-submodules.txt` and `machines/<host>.txt` still exist
+locally (they will, untracking doesn't delete working-tree files) and that
+`bash scripts/wire.sh` still reports `setup-repo-skills`, not
+`setup-gareth-skills`. Delete your machine's line below and commit that edit.
+**Once the checklist is empty, delete this entire subsection** (including
+this sentence) and commit that too.
+
+Machines with a the-grid clone still on the pre-rewrite history:
+
+- [x] wilderness — done 2026-09-11 (ran the rewrite + force-push from here);
+      verified zero `LOGS` paths/blobs in history, `setup-repo-skills` wired,
+      38/38 tests green
+- [ ] forge
+- [ ] scout
+- [ ] guide-server
 
 ## Adding a skill
 
@@ -274,7 +333,7 @@ emits to different runtimes via `--target`. The **Claude Code** target is built 
 wired live: orchestrator roles (`role.yaml orchestrator: true`) → CC **skills**
 (invoke with `/<role>`); specialist roles → CC **subagents** (delegate to them, or
 an orchestrator hands off). OpenClaw + Paperclip (autonomous) targets are the next
-work. See `agent-factory/README.md` and `LOGS/2026-06-16-handoff-agent-factory.md`.
+work. See `agent-factory/README.md`.
 
 **Orchestrator rosters are generated, not hand-written.** Each orchestrator declares
 its reports via `delegates_to:` in the compose config (the delegation topology lives
