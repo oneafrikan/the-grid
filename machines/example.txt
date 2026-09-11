@@ -1,0 +1,19 @@
+# Machine overlay — example. Copy this to machines/<hostname>.txt (host =
+# `hostname -s`) and edit for your own setup.
+#
+# Layered ON TOP of baseline-submodules.txt. wire.sh resolves the file by
+# hostname. Same entry grammar as the baseline:
+#
+#   repo-name            → also wire ALL skills in that submodule (additive)
+#   repo-name/skill       → also wire ONLY that skill (additive)
+#   project:<name>       → also wire a composed agent-factory project
+#   -repo | -repo/skill  → REMOVE a baseline entry on this machine
+#   -project:<name>      → un-gate a baseline project on this machine
+#
+# Apply with: bash ~/.the-grid/scripts/wire.sh
+
+# --- example: add a library-tier repo's skills on this machine only ---
+# jeffallan/cloud-architect
+
+# --- example: drop a desk you don't run on this machine ---
+# -project:finance-desk
