@@ -24,13 +24,46 @@ I got in.
 ```
 
 # the-grid
-the-grid is a personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw, Paperclip, and friends. It's not a framework; it's one person's opinionated system for organising and activating skills, agents, and machines. Fork it for your own. Skills are the first asset type it manages, but the remit is broader: agents, machines, MCP servers, prompts, and reusable automations are already growing in.
 
-The core mechanic: a single script (`scripts/wire.sh`) symlinks skills — and agents composed by `agent-factory/` — into `~/.claude/skills/` and `~/.claude/agents/` so Claude picks them up automatically — no installs, no config files.
+the-grid is a personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw, Paperclip, and friends. It's not a framework; it's one person's opinionated system for organising and activating skills, agents, and machines. Fork it for your own.
 
-## The four factories
+## What you get
 
-Four sibling scaffolds, each owning a different asset type:
+**238 skills indexed, 136 wired live** (13 built by Gareth, 123 from curated
+upstream repos) **+ 102 more in a searchable library** — plus 28 composed AI
+agents across 3 ready-to-run teams (4 orchestrators, 24 specialists).
+
+A sample across domains:
+
+| Domain | Examples |
+|---|---|
+| Engineering & review | `code-reviewer`, `debugging-wizard`, `architecture-designer`, `security-reviewer` |
+| Spec-driven planning | 12 `openspec-*` skills — explore → propose → apply → verify → archive |
+| Process & planning | `brainstorming`, `to-prd`, `triage`, `feature-forge` |
+| Workflow & quality gates | `review`, `qa`, `ship`, `design-review`, `benchmark` |
+| Docs & office formats | `docx`, `pptx`, `xlsx`, `internal-comms` |
+| Anti-overengineering | the `ponytail` family — minimum-diff implementer mode |
+| Navigating the-grid itself | `skill-scout`, `grid-help`, `mine-learnings`, `handoff` |
+
+Composed agent teams (built by `agent-factory/`, invoked as slash commands or
+delegated subagents): **`core`** — cross-desk infra (issue triage, a librarian,
+a general researcher); **`grid`** — a full dev team, three orchestrators
+(`/grid-tech-lead`, `/grid-ceo-orchestrator`, `/grid-growth-hacker`) delegating
+to specialists like backend-dev, security-reviewer, qa-engineer, and
+data-scientist; **`finance-desk`** — a personal-finance pipeline. Compose your
+own team from the same roles.
+
+This is a sample, not the full list — browse everything in
+**[SKILLS.md](SKILLS.md)**, or ask **`/skill-scout`** to search it for you.
+
+## How it works
+
+One script, `scripts/wire.sh`, symlinks skills — and agents composed by
+`agent-factory/` — into `~/.claude/skills/` and `~/.claude/agents/` so Claude
+picks them up automatically. No installs, no config files.
+
+Everything above is produced by one of four sibling factories, each owning a
+different asset type:
 
 | Factory | Produces | Deployed via |
 |---------|----------|---------------|
@@ -39,7 +72,54 @@ Four sibling scaffolds, each owning a different asset type:
 | `automation-factory/` | Reusable automation patterns (e.g. `issue-loop`) | Cut into a target repo's tracked `loop/` folder |
 | `project-factory/` | Whole new project scaffolds from a template | `scripts/cut-project.sh` (seed or retrofit) |
 
-There is deliberately **no fifth factory for specs** — see below.
+There is deliberately **no fifth factory for specs** — OpenSpec already fills
+that role; see "Spec-driven development" below.
+
+## Getting started
+
+One command — clone, then run `bootstrap.sh` (syncs submodules → wires skills):
+
+```bash
+git clone https://github.com/<your-username>/the-grid.git ~/.the-grid \
+  && bash ~/.the-grid/scripts/bootstrap.sh
+```
+
+Add `--with-agents` to also compose **and** wire the agent team in the same run:
+
+```bash
+bash ~/.the-grid/scripts/bootstrap.sh --with-agents
+```
+
+Prefer the manual steps? They're equivalent:
+
+```bash
+cd ~/.the-grid
+git submodule update --init --recursive
+bash scripts/wire.sh
+```
+
+That's it. Skills are live immediately. For the full sequence (including the
+agent-factory compose step), see **[BOOTSTRAP.md](BOOTSTRAP.md)**.
+
+## Daily usage
+
+Once wired, every skill is a slash command (`/standup`, `/skill-scout`, `/ponytail`…)
+and composed orchestrators are too (`/grid-tech-lead`, `/grid-ceo-orchestrator`…) — specialist
+agents are subagents you delegate to, not commands.
+
+**Lost? The help skills are the entry point:**
+
+| Command | Answers |
+|---|---|
+| `/grid-help` | Which slash command or subagent do I want? How do the factories differ? |
+| `/openspec-help` | Which of the 12 openspec skills do I want? How do I add specs to this repo? |
+| `/ponytail-help` | Which ponytail mode do I want? |
+
+Full walkthrough — orchestrators vs specialists, the four factories in practice,
+promoting a library skill to wired: **[USAGE.md](USAGE.md)**.
+
+Picking a model for a job (prices, independent benchmarks, worked cost maths):
+**[docs/model-selection.md](docs/model-selection.md)**.
 
 ## Spec-driven development (OpenSpec)
 
@@ -138,52 +218,6 @@ never touches its history.
 
 `LOGS/` (a dev-journal convention some skills write to) is gitignored too —
 nothing in the-grid requires it, and it isn't part of the layout above.
-
-## Daily usage
-
-Once wired, every skill is a slash command (`/standup`, `/skill-scout`, `/ponytail`…)
-and composed orchestrators are too (`/grid-tech-lead`, `/grid-ceo-orchestrator`…) — specialist
-agents are subagents you delegate to, not commands.
-
-**Lost? The help skills are the entry point:**
-
-| Command | Answers |
-|---|---|
-| `/grid-help` | Which slash command or subagent do I want? How do the factories differ? |
-| `/openspec-help` | Which of the 12 openspec skills do I want? How do I add specs to this repo? |
-| `/ponytail-help` | Which ponytail mode do I want? |
-
-Full walkthrough — orchestrators vs specialists, the four factories in practice,
-promoting a library skill to wired: **[USAGE.md](USAGE.md)**.
-
-Picking a model for a job (prices, independent benchmarks, worked cost maths):
-**[docs/model-selection.md](docs/model-selection.md)**.
-
-## Bootstrap (new machine)
-
-One command — clone, then run `bootstrap.sh` (syncs submodules → wires skills):
-
-```bash
-git clone https://github.com/<your-username>/the-grid.git ~/.the-grid \
-  && bash ~/.the-grid/scripts/bootstrap.sh
-```
-
-Add `--with-agents` to also compose **and** wire the agent team in the same run:
-
-```bash
-bash ~/.the-grid/scripts/bootstrap.sh --with-agents
-```
-
-Prefer the manual steps? They're equivalent:
-
-```bash
-cd ~/.the-grid
-git submodule update --init --recursive
-bash scripts/wire.sh
-```
-
-That's it. Skills are live immediately. For the full sequence (including the
-agent-factory compose step), see **[BOOTSTRAP.md](BOOTSTRAP.md)**.
 
 ## Checking grid health
 
