@@ -129,10 +129,15 @@ never touches its history.
   CLAUDE.md               ← full project context for Claude sessions
   SKILLS.md               ← generated skill index (never edit by hand)
   LEARNINGS.md            ← durable lessons mined from project history
-  baseline-submodules.txt ← baseline allowlist: wired on every machine
-  machines/<host>.txt     ← per-machine overlay (adds/subtracts on the baseline)
+  baseline-submodules.example.txt ← tracked starting point; copy to the line below
+  baseline-submodules.txt ← GITIGNORED, personal — your own baseline allowlist
+  machines/example.txt    ← tracked starting point; copy to machines/<host>.txt
+  machines/<host>.txt     ← GITIGNORED, personal — your own per-machine overlay
   TODO.md                 ← issue map; open work lives in GitHub Issues
 ```
+
+`LOGS/` (a dev-journal convention some skills write to) is gitignored too —
+nothing in the-grid requires it, and it isn't part of the layout above.
 
 ## Daily usage
 
@@ -313,9 +318,13 @@ This is one person's working system, shared because the mechanics are reusable �
 not a supported product. Concretely:
 
 - **It will change under you.** No versioning, no deprecation cycle.
-- **It is opinionated and partly personal.** Machine names, account routing, and
-  a few paths are still Gareth-shaped. Splitting framework from personal config
-  is [open work](../../issues), not done.
+- **It is opinionated.** The wiring model, the four factories, and the compose
+  format are all one person's choices, not a consensus design.
+- **Personal config is gitignored, not mixed in.** `baseline-submodules.txt`,
+  `machines/<host>.txt`, and the dev-journal `LOGS/` convention are all personal
+  and untracked — you get a generic `.example` starting point for the first two
+  and owe nothing for the third. A fork never inherits Gareth's machine names,
+  account routing, or notes.
 - **Fork rather than depend.** The wiring model — manifest, symlinks,
   compose-then-wire — is the transferable part. Copy it and point it at your own
   skills.
