@@ -10,3 +10,13 @@
 # Per-machine LOCAL wiring overlay — project:<name> gates that must never enter
 # git history (e.g. a private research desk). See scripts/wire.sh manifest docs.
 machines/*.local.txt
+
+# Dev journal — personal, not useful to downstream forkers. Lives in
+# ~/.the-grid-private/LOGS/ (symlinked back as LOGS/ for local use). See #24.
+LOGS
+
+# Personal curation, not framework — see baseline-submodules.example.txt and
+# machines/example.txt for the shape a fork starts from. See #24.
+baseline-submodules.txt
+machines/*.txt
+!machines/example.txt
