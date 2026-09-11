@@ -37,21 +37,28 @@ done
 cd "$GRID_DIR"
 
 # 1. Sync every skill submodule to the pointer this commit records.
-echo "==> [1/3] Syncing submodules (git submodule update --init --recursive)"
+echo "==> [1/4] Syncing submodules (git submodule update --init --recursive)"
 git submodule update --init --recursive
 
 # Activate the in-repo git hooks (pre-commit runs bats). Idempotent; only
 # affects commits made in this repo, so it's harmless on consumer machines.
 git config core.hooksPath .githooks
 
-# 2. Wire skills (and any already-composed agents) into Claude.
-echo "==> [2/3] Wiring skills (scripts/wire.sh)"
+# 2. Seed the wiring manifest (personal curation, gitignored — see #24).
+#    Skip a file that already exists; without this, wire.sh falls back to
+#    wiring every repo (harmless but noisy) instead of the curated baseline.
+echo "==> [2/4] Seeding wiring manifest from examples (baseline-submodules.txt, machines/$(hostname -s).txt)"
+[[ -f "$GRID_DIR/baseline-submodules.txt" ]] || cp "$GRID_DIR/baseline-submodules.example.txt" "$GRID_DIR/baseline-submodules.txt"
+[[ -f "$GRID_DIR/machines/$(hostname -s).txt" ]] || cp "$GRID_DIR/machines/example.txt" "$GRID_DIR/machines/$(hostname -s).txt"
+
+# 3. Wire skills (and any already-composed agents) into Claude.
+echo "==> [3/4] Wiring skills (scripts/wire.sh)"
 bash "$GRID_DIR/scripts/wire.sh"
 
-# 3. Optionally build the composed agent team, then re-wire so the freshly
+# 4. Optionally build the composed agent team, then re-wire so the freshly
 #    compiled orchestrator skills + specialist subagents go live.
 if [[ "$WITH_AGENTS" == "1" ]]; then
-  echo "==> [3/3] Composing agent-factory teams (core, grid, finance-desk) + re-wiring"
+  echo "==> [4/4] Composing agent-factory teams (core, grid, finance-desk) + re-wiring"
   cd "$GRID_DIR/agent-factory"
   # Create the venv on first run; reuse it afterwards (idempotent).
   if [[ ! -x .venv/bin/python ]]; then
@@ -64,7 +71,7 @@ if [[ "$WITH_AGENTS" == "1" ]]; then
   cd "$GRID_DIR"
   bash "$GRID_DIR/scripts/wire.sh"
 else
-  echo "==> [3/3] Skipping agent-factory (pass --with-agents to compose + wire the team)"
+  echo "==> [4/4] Skipping agent-factory (pass --with-agents to compose + wire the team)"
 fi
 
 echo "==> Bootstrap complete. Open a fresh Claude session to pick up new skills/agents."
