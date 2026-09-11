@@ -71,9 +71,9 @@ upstream changes. Also documented in `~/paperclip/CLAUDE.md`.
   — confirmed via `resolveManagedSkillsRoot()` / `materializeRuntimeSkillFiles()`.
 - **`PAPERCLIP_HOME`** resolves to `~/.paperclip` by default, but scout's
   Docker deployment sets it to `/paperclip` inside the container, bind-mounted
-  from `/home/gareth/paperclip/data/docker-paperclip` on the host — so on
-  scout, the real host-side instructions path is
-  `/home/gareth/paperclip/data/docker-paperclip/instances/default/companies/<companyId>/agents/<agentId>/instructions/`.
+  from a host directory (e.g. `~/paperclip/data/docker-paperclip`) — so the
+  real host-side instructions path is whatever that bind-mount root is, plus
+  `/instances/default/companies/<companyId>/agents/<agentId>/instructions/`.
 - **Practical implication for `deploy_paperclip.py`**: the existing-agent 403
   blocker (item #1 in the 2026-07-05 handoff) only affects the *disk-backed*
   instructions-bundle PUT — it has no bearing on the DB-backed skills sync

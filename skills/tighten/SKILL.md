@@ -37,11 +37,12 @@ Docs only. Never apply email/message conventions — no shorthand ("pls",
 
 Load two sources each run:
 
-1. `/Users/garethknight/Obsidian/Wilderness/__INBOX/Jarvis/gareth-email-style.md`
-   — use only the conciseness principles (the core "if it can be said in one
-   sentence, do that" rule, short sentences, bullets over prose, no
-   fluff/filler/jargon). Ignore its VOICE section's informalities and skip
-   the ENDING section entirely — those are email-specific. If this file is
+1. A personal email-style reference, if you keep one (e.g. in a notes vault
+   under something like `<vault>/email-style.md`) — use only the conciseness
+   principles (the core "if it can be said in one sentence, do that" rule,
+   short sentences, bullets over prose, no fluff/filler/jargon). Ignore its
+   VOICE section's informalities and skip the ENDING section entirely — those
+   are email-specific. If this file is
    missing or unreadable, skip it and note that in the final report.
 2. `~/.dev-env/claude/rules.md`'s communication-style section — the banned
    jargon words and banned filler phrases. Always available; treat as the
