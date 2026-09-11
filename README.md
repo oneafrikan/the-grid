@@ -331,3 +331,9 @@ not a supported product. Concretely:
 - **`wire.sh` only ever touches symlinks that point into this repo.** It won't
   clobber a real directory or a foreign symlink in `~/.claude/skills/`. Read it
   before running it anyway; it writes to your home directory.
+
+## License
+
+[MIT](LICENSE) — covers the-grid's own code (`scripts/`, `agent-factory/`,
+root-owned `skills/`, etc.). Submodules under `repos/` are separate upstream
+projects with their own licenses.
