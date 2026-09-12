@@ -218,20 +218,56 @@ git fetch origin
 git reset --hard origin/main
 ```
 
-Then confirm `baseline-submodules.txt` and `machines/<host>.txt` still exist
-locally (they will, untracking doesn't delete working-tree files) and that
-`bash scripts/wire.sh` still reports `setup-repo-skills`, not
-`setup-gareth-skills`. Delete your machine's line below and commit that edit.
-**Once the checklist is empty, delete this entire subsection** (including
-this sentence) and commit that too.
+**Correction (found on scout 2026-09-12): the claim above is wrong for any
+machine other than wilderness.** `reset --hard` deletes a file that was
+tracked in your old HEAD and is absent from `origin/main`'s tree, regardless
+of `.gitignore` — untracking only leaves the working-tree file alone on the
+machine that *made* that commit (its working copy already matched). On every
+other machine, `baseline-submodules.txt` and `machines/<host>.txt` **will be
+deleted** by the reset. Before running it, save them:
+
+```bash
+cp baseline-submodules.txt /tmp/baseline-submodules.txt.bak
+cp machines/"$(hostname -s)".txt /tmp/"$(hostname -s)".txt.bak
+```
+
+If you already ran the reset and lost them, recover from reflog instead of
+re-seeding from `.example`:
+
+```bash
+git show HEAD@{1}:baseline-submodules.txt > baseline-submodules.txt
+git show HEAD@{1}:machines/"$(hostname -s)".txt > machines/"$(hostname -s)".txt
+```
+
+(`HEAD@{1}` is the pre-reset tip — check `git reflog` if another op happened
+in between.) Also recreate the `LOGS` symlink, which the reset removes
+outright since it's not a symlink in `origin/main`'s tree:
+
+```bash
+ln -s ~/.the-grid-private/LOGS LOGS
+```
+
+That requires `~/.the-grid-private` cloned and pulled first
+(`git@github.com:oneafrikan/the-grid-private.git`) — it now carries `LOGS/`
+as of its `f0e310e` commit.
+
+Then confirm `bash scripts/wire.sh` still reports `setup-repo-skills`, not
+`setup-gareth-skills`, and run the test suite. Delete your machine's line
+below and commit that edit. **Once the checklist is empty, delete this
+entire subsection** (including this sentence) and commit that too.
 
 Machines with a the-grid clone still on the pre-rewrite history:
 
 - [x] wilderness — done 2026-09-11 (ran the rewrite + force-push from here);
       verified zero `LOGS` paths/blobs in history, `setup-repo-skills` wired,
       38/38 tests green
+- [x] scout — done 2026-09-12; reset deleted `baseline-submodules.txt` and
+      `machines/scout.txt` as described in the correction above, recovered
+      both from `HEAD@{1}` via reflog; recreated the `LOGS` symlink into
+      `~/.the-grid-private` (pulled first — it was 2 commits behind and had
+      the 2026-09-11 wilderness handoff notes); `setup-repo-skills` wired,
+      38/38 tests green
 - [ ] forge
-- [ ] scout
 - [ ] guide-server
 
 ## Adding a skill
