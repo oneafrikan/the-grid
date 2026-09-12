@@ -137,60 +137,6 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 4. Refresh skills (and agents, and `SKILLS.md`) in one go: `bash scripts/wire.sh`.
    Always safe to run, always run it last.
 
-### ⚠ Pending: agent rename migration (2026-07-19)
-
-`grid.yaml` was split into three sibling projects (`core`, `grid`,
-`finance-desk`) — some agent names changed as a result:
-
-| Old name | New name |
-|---|---|
-| `grid-librarian` | `core-librarian` |
-| `grid-gh-triage` | `core-gh-triage` |
-| `grid-finance-manager` (skill) | `finance-desk-finance-manager` |
-| `grid-finance-sentinel` | `finance-desk-finance-sentinel` |
-| `grid-finance-analyst` | `finance-desk-finance-analyst` |
-| `grid-finance-strategist` | `finance-desk-finance-strategist` |
-| `grid-finance-risk-officer` | `finance-desk-finance-risk-officer` |
-| `grid-finance-scribe` | `finance-desk-finance-scribe` |
-| `grid-researcher` | `core-researcher` (moved 2026-08-25) |
-
-`baseline-submodules.txt` now gates three projects (`project:core`,
-`project:grid`, `project:finance-desk`) instead of one. **Since #24,
-`baseline-submodules.txt` is gitignored, personal config** — a plain `git
-pull` no longer touches it. If your local copy predates the three-project
-split, add the three `project:` lines yourself (or diff against
-`baseline-submodules.example.txt`, which already has them).
-
-**2026-08-25 — `researcher` moved `grid` → `core`.** It's a domain-general
-role, so it shouldn't vanish on a machine that subtracts `-project:grid`.
-Tech Lead lost it as a delegate and now routes research to `core-researcher`
-directly (see `roles/tech-lead/AGENTS.md`). Same migration action as the rows
-above: recompose, re-wire, confirm `grid-researcher` is gone.
-
-**If you're a session on a machine in the checklist below**: follow "Existing
-machine" above (which now composes all three projects), confirm the old
-names are gone from `~/.claude/agents` / `~/.claude/skills` and the new ones
-resolve, then delete your machine's line from the checklist and commit that
-edit. **Once the checklist is empty, delete this entire subsection**
-(including this sentence) and commit that too — this is a one-time migration
-flag, not permanent documentation.
-
-Machines with a the-grid clone still on the pre-split names:
-
-- [ ] forge
-- [x] wilderness — done 2026-08-04 (split), 2026-08-25 (researcher move);
-      verified `core-*` / `finance-desk-*` / `core-researcher` resolve
-- [x] guide-server — done 2026-08-25 (split + researcher move); verified
-      `core-*` / `grid-*` / `finance-desk-*` / `core-researcher` resolve, no
-      pre-split or `grid-researcher` names remain
-- [x] scout — done 2026-09-03 (split + researcher move; also initialized the
-      `repos/openspec` submodule and installed its CLI, which had never been
-      pulled in); recomposed and re-wired all four projects (`core`, `grid`,
-      `finance-desk`, and the private `research-desk`); verified `core-*` /
-      `grid-*` / `finance-desk-*` / `research-desk-*` / `core-researcher`
-      resolve, no pre-split or `grid-researcher` names remain, 38/38 tests
-      green
-
 ### ⚠ Pending: LOGS history rewrite + personal-manifest untracking (2026-09-11)
 
 Part of the de-Gareth audit (#24, folded in #39). Three changes landed in one
@@ -267,7 +213,18 @@ Machines with a the-grid clone still on the pre-rewrite history:
       `~/.the-grid-private` (pulled first — it was 2 commits behind and had
       the 2026-09-11 wilderness handoff notes); `setup-repo-skills` wired,
       38/38 tests green
-- [ ] forge
+- [x] forge — done 2026-09-12, hit the same data loss as scout (reset deleted
+      `wired-submodules.txt`) but from further back: forge's clone was 3
+      months stale, pre-dating the per-machine `machines/<host>.txt` split
+      entirely, so there was no `baseline-submodules.txt`/`machines/forge.txt`
+      to lose — only the legacy single-file `wired-submodules.txt`. Recovered
+      its content from the pre-reset tip (`git show HEAD@{1}:wired-submodules.txt`)
+      and split it into `baseline-submodules.txt` (from the new tracked
+      example) + a `machines/forge.txt` overlay for the entries the shared
+      baseline doesn't carry. `~/.the-grid-private` didn't exist on forge at
+      all yet (never set up here before) — cloned it fresh and symlinked
+      `LOGS`. `setup-repo-skills` wired, `setup-gareth-skills` gone, 38/38
+      tests green.
 - [ ] guide-server
 
 ## Adding a skill
