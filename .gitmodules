@@ -94,3 +94,12 @@
 [submodule "repos/openspec"]
 	path = repos/openspec
 	url = https://github.com/Fission-AI/openspec.git
+[submodule "repos/avoid-ai-writing"]
+	path = repos/avoid-ai-writing
+	url = https://github.com/conorbronsdon/avoid-ai-writing.git
+[submodule "repos/humanize-writing"]
+	path = repos/humanize-writing
+	url = https://github.com/jpeggdev/humanize-writing.git
+[submodule "repos/removing-ai-isms"]
+	path = repos/removing-ai-isms
+	url = https://github.com/gvsg-rs/removing-ai-isms.git
