@@ -176,6 +176,7 @@ Not enumerated per-skill here (too many) — browse the repo or search with skil
 - **repos/amekala-ads-mcp** — 24 skills
 - **repos/automattic** — 13 skills
 - **repos/automattic-wordpress** — 4 skills
+- **repos/avoid-ai-writing** — 8 skills
 - **repos/clawhub** — 12 skills
 - **repos/deanpeters** — 49 skills
 - **repos/hubspot** — 15 skills
@@ -196,7 +197,9 @@ Not enumerated per-skill here (too many) — browse the repo or search with skil
 Kept for reference — these are indexes/awesome-lists, not skill collections:
 
 - **repos/hesamsheikh**
+- **repos/humanize-writing**
 - **repos/quant-zero**
+- **repos/removing-ai-isms**
 - **repos/sebclawops**
 - **repos/sjkncs**
 - **repos/voltagent**
