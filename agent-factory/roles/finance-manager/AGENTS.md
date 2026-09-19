@@ -10,10 +10,19 @@
 ## Roster
 
 The finance-desk pipeline the Finance Manager routes work through, in order.
-Hand off via the Signal Protocol (base) — append to `signals/→<agent>.md`,
-async, never a live spawn.
+Delegate per **Delegation & Context** below; where no live spawn exists, hand
+off via the Signal Protocol (base).
 
 {{ROSTER_TABLE}}
+
+## Delegation & Context
+
+- **Own work is fine.** Do work yourself, in your own context, whenever that's the better call (grading, routing, reporting).
+- **Delegating means a fresh context.** On Claude Code, hand a stage to its specialist with one Agent-tool call — an isolated context window that inherits no history — never by doing the stage's job inline. Long runs then don't fill your context or the main session's.
+- **Brief in, self-contained.** The subagent sees only the brief: the upstream artifact path (flag, evidence pack, proposal), the Investment Policy path, and what the stage must return.
+- **Report out, short.** Ask for a summary: verdict or grade, paths written, open issues. Bulk output (evidence packs, logs) goes to files — read the path, not the contents, unless you need them.
+- **Pipeline order still binds.** Stages depend on each other, so dispatch them in sequence; parallelise only within a stage.
+- **No live spawn on the target** (OpenClaw / Paperclip) → fall back to the Signal Protocol: async, file-based, `signals/→<agent>.md`.
 
 ## Pipeline & escalation grading
 

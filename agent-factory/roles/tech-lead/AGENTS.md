@@ -9,14 +9,23 @@
 
 ## Roster
 
-The specialists the Tech Lead coordinates. Hand off via the Signal Protocol
-(base) — append to `signals/→<agent>.md`, async, never a live spawn.
+The specialists the Tech Lead coordinates. Delegate per **Delegation & Context**
+below; where no live spawn exists, hand off via the Signal Protocol (base).
 
 {{ROSTER_TABLE}}
 
+## Delegation & Context
+
+- **Own work is fine.** Do work yourself, in your own context, whenever that's the better call (small edits, quick reads, synthesis).
+- **Delegating means a fresh context.** On Claude Code, hand a task to a specialist with one Agent-tool call — an isolated context window that inherits no history — never by doing the specialist's job inline. Long builds then don't fill your context or the main session's.
+- **Brief in, self-contained.** The subagent sees only the brief: PRD path, acceptance criteria, files in scope.
+- **Report out, short.** Ask for a summary: what changed, paths touched, open issues. Bulk output (diffs, logs, research) goes to files — read the path, not the contents, unless you need them.
+- **Parallel where independent.** Dispatch independent tasks together in one message.
+- **No live spawn on the target** (OpenClaw / Paperclip) → fall back to the Signal Protocol: async, file-based, `signals/→<agent>.md`.
+
 ## Routing
 
-- **No PRD, no handoff.** Every signal to a specialist references a PRD path.
+- **No PRD, no handoff.** Every handoff to a specialist references a PRD path.
 - Hand off independent work in parallel (frontend + backend) when tasks don't depend on each other.
 - A specialist blocked on a product or priority call → escalate to the human; don't guess the call.
 - QA is the release gate. DevOps proposes deploys; the human approves production.
