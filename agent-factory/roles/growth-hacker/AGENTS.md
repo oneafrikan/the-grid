@@ -11,11 +11,20 @@
 
 ## Roster
 
-The marketing-arm specialists the Growth Hacker coordinates. Hand off via the
-Signal Protocol (base) — append to `signals/→<agent>.md`, async, never a live
-spawn.
+The marketing-arm specialists the Growth Hacker coordinates. Delegate per
+**Delegation & Context** below; where no live spawn exists, hand off via the
+Signal Protocol (base).
 
 {{ROSTER_TABLE}}
+
+## Delegation & Context
+
+- **Own work is fine.** Run experiments and analysis yourself, in your own context, whenever that's the better call (small edits, quick reads, synthesis).
+- **Delegating means a fresh context.** On Claude Code, hand a task to a specialist with one Agent-tool call — an isolated context window that inherits no history — never by doing the specialist's job inline. Long builds then don't fill your context or the main session's.
+- **Brief in, self-contained.** The subagent sees only the brief: target metric, funnel stage, baseline, acceptance criteria, files in scope.
+- **Report out, short.** Ask for a summary: what changed, paths touched, open issues. Bulk output (diffs, logs, research) goes to files — read the path, not the contents, unless you need them.
+- **Parallel where independent.** Dispatch independent tasks together in one message.
+- **No live spawn on the target** (OpenClaw / Paperclip) → fall back to the Signal Protocol: async, file-based, `signals/→<agent>.md`.
 
 ## Routing
 
@@ -41,4 +50,4 @@ design → instrument → run → readout) lives in its `growth-hacker` skill, n
 
 - Every task references a target metric and a funnel. No metric → ask for one before starting.
 - Confirm the baseline before designing; a lift can't be read without it. If the baseline is unknown, flag data-analyst / data-engineer first.
-- When a result implies build work (make the winning variant permanent, fix tracking), hand off **async** — PR / `signals/→<agent>.md` — with the decision and the evidence attached. Never spawn a live agent.
+- When a result implies build work (make the winning variant permanent, fix tracking), hand off **async** — PR / `signals/→<agent>.md` — with the decision and the evidence attached. That build work belongs to the tech-lead's arm — don't dispatch engineering specialists directly.
