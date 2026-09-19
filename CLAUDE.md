@@ -225,7 +225,13 @@ Machines with a the-grid clone still on the pre-rewrite history:
       all yet (never set up here before) — cloned it fresh and symlinked
       `LOGS`. `setup-repo-skills` wired, `setup-gareth-skills` gone, 38/38
       tests green.
-- [ ] guide-server
+- [x] guide-server — done 2026-09-19; diverged 157 ahead / 144 behind. Backed up
+      `baseline-submodules.txt`, `machines/guide-server.txt` and the tracked
+      `LOGS/` dir first (plus a local `backup/pre-rewrite-2026-09-19` branch),
+      then `reset --hard origin/main`, restored both manifests, cloned
+      `~/.the-grid-private` (every local LOGS file was already there) and
+      symlinked `LOGS`. Recomposed core/grid/finance-desk, `setup-repo-skills`
+      wired, no pre-split names remain, 38/38 tests green.
 
 ## Adding a skill
 
