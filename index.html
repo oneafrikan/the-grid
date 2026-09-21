@@ -839,7 +839,7 @@
             </tr>
             <tr>
               <td><strong>Subagent</strong> (specialist)</td>
-              <td>the other 24 roles</td>
+              <td>the other 25 roles</td>
               <td>Not a slash command. Delegate: <em>"Use the grid-backend-dev subagent to…"</em>, or let an orchestrator hand off automatically.</td>
             </tr>
           </tbody>
@@ -977,12 +977,12 @@ bash scripts/wire.sh
         <h2 id="agents-heading">Agents</h2>
 
         <p>
-          agent-factory produces 28 roles across three independently composed
+          agent-factory produces 29 roles across three independently composed
           and gated public projects (plus any private desk composed the same
           way, sourcing roles from outside this repo — see CLAUDE.md). Four
           roles are <strong>orchestrators</strong> — they become Claude Code
           skills invoked as slash commands and can coordinate the rest of
-          their team. The other 24 are <strong>specialists</strong> —
+          their team. The other 25 are <strong>specialists</strong> —
           subagents delegated to by an orchestrator or called directly.
         </p>
 
@@ -1010,6 +1010,15 @@ bash scripts/wire.sh
             </div>
             <div class="agent-card-title">Librarian</div>
             <p class="agent-card-summary">Maintains persistent, cross-linked markdown wikis compiled from other agents' research — one wiki per domain. Runs the ingest / query / lint cycle, preserving every page's evidence tier and provenance. Never asserts a claim itself.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>core-platform-engineer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Platform Engineer</div>
+            <p class="agent-card-summary">Makes a personal developer environment — dotfiles, shell functions, bootstrap scripts, per-machine overlays — work on macOS, Ubuntu and Arch from one repo. Small, dry-run-verified changes on a branch; the human tests the other OSes and decides on merge.</p>
           </article>
 
         </div>

@@ -315,7 +315,7 @@ All 38 tests must stay green. Tests use temp dirs — they never touch the real 
   currently pins `project:core`, `project:grid`, and `project:finance-desk` (see
   `agent-factory/` and issue #1) — a task-specific machine can subtract
   `-project:grid` or `-project:finance-desk` via its overlay to trim clutter,
-  but `project:core` (gh-triage, librarian, researcher) is meant to stay on
+  but `project:core` (gh-triage, librarian, researcher, platform-engineer) is meant to stay on
   every machine.
 - **Root-owned agents:** `agents/*.md` at the repo root wires directly into
   `AGENTS_DIR`, same ownership model as root-level `skills/` — for hand-authored
@@ -353,7 +353,8 @@ top-level orchestrator, deliberately never under the CEO's `delegates_to` — a
 personal desk, not a dev-team initiative. `examples/core.yaml` — cross-desk
 shared infra with no delegation chain (`gh-triage`, `librarian`,
 `researcher` — the general-purpose investigator, domain-general on purpose
-and gated here so it survives `-project:grid`), gated
+and gated here so it survives `-project:grid`; `platform-engineer` — personal
+dev-environment portability across macOS/Ubuntu/Arch, likewise), gated
 `project:core` and meant to stay wired on every machine regardless of which
 desk-specific project (`grid`, `finance-desk`, or a private desk) that
 machine actually runs — the three projects split apart specifically so a
@@ -385,7 +386,7 @@ factory; what the-grid adds is two thin layers:
   per-project decision someone has to remember. It documents only; the CLI owns
   the `openspec/` tree it creates.
 - `agent-factory/_core/AGENTS_base.md` — a boot-sequence check for `SPECS.md` /
-  `openspec/`. One edit reaches all 28 composed agents across the three projects.
+  `openspec/`. One edit reaches all 29 composed agents across the three projects.
   Conditional: repos without the markers are untouched.
 
 `skills/spec-scout/` audits adoption and reports spec↔code drift (survey-only,
@@ -433,7 +434,7 @@ Durable lessons mined from project history — full context and sources in
   of its **own** — but a shared `core` project for cross-desk infra (roles no
   single desk owns, meant to survive that desk being subtracted on a
   task-specific machine) is a real category, not project-proliferation for
-  its own sake. `gh-triage`, `librarian` and `researcher` all live there now.
+  its own sake. `gh-triage`, `librarian`, `researcher` and `platform-engineer` all live there now.
 - A role only looks team-owned until you ask what happens when that team is
   gated off. `researcher`'s method was always domain-agnostic — only its
   membership in `grid.yaml` made it look like a dev-team role. Moving it to
