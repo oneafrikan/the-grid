@@ -63,7 +63,7 @@ submodules into two tiers:
   non-zero exit on failure. Deterministic; never edit `SOURCES.md` by hand.
 - `docs/model-selection.md` — which model for which job, with prices, independent
   benchmarks, worked cost maths, and a dated expiry watchlist. Refreshed on demand
-  via `/grid-researcher` using the brief at the bottom of the file.
+  via the `core-researcher` subagent using the brief at the bottom of the file.
 - `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
 - `TODO.md` — current outstanding work.
