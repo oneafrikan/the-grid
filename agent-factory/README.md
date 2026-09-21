@@ -141,7 +141,7 @@ invoke a composed agent in Claude Code:
 | Form | Roles (current) | How to invoke |
 |------|-----------------|---------------|
 | **Skill** (orchestrator) | `ceo-orchestrator`, `tech-lead`, `growth-hacker` | Slash command: `/ceo-orchestrator`, `/tech-lead`, `/growth-hacker`. Transforms the session into that role. |
-| **Subagent** (specialist) | the other 17 | **Not** a slash command. Delegate to it: *"Use the backend-dev subagent to …"*, or let an orchestrator hand off to it. Claude can also auto-delegate based on the subagent's `description`. |
+| **Subagent** (specialist) | the other 16 | **Not** a slash command. Delegate to it: *"Use the backend-dev subagent to …"*, or let an orchestrator hand off to it. Claude can also auto-delegate based on the subagent's `description`. |
 
 Typical flow: invoke `/tech-lead`, give it a feature → it writes a PRD and hands
 off (async) to the specialist subagents. You rarely call a specialist directly.
@@ -223,7 +223,7 @@ independently and are gated independently:
 
 | Config | Roles | Shape |
 |---|---|---|
-| `examples/grid.yaml` | 20 | 3 orchestrators (`ceo-orchestrator`, `tech-lead`, `growth-hacker`) + 17 specialists — the dev team |
+| `examples/grid.yaml` | 19 | 3 orchestrators (`ceo-orchestrator`, `tech-lead`, `growth-hacker`) + 16 specialists — the dev team |
 | `examples/finance-desk.yaml` | 6 | `finance-manager` → sentinel/analyst/strategist/risk-officer/scribe. Standalone: deliberately not in anyone's `delegates_to` |
 | `examples/core.yaml` | 4 | `gh-triage`, `librarian`, `researcher`, `platform-engineer` — cross-desk infra, no delegation chain, meant to stay wired everywhere |
 
