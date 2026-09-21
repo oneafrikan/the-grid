@@ -225,7 +225,7 @@ independently and are gated independently:
 |---|---|---|
 | `examples/grid.yaml` | 20 | 3 orchestrators (`ceo-orchestrator`, `tech-lead`, `growth-hacker`) + 17 specialists — the dev team |
 | `examples/finance-desk.yaml` | 6 | `finance-manager` → sentinel/analyst/strategist/risk-officer/scribe. Standalone: deliberately not in anyone's `delegates_to` |
-| `examples/core.yaml` | 2 | `gh-triage`, `librarian` — cross-desk infra, no delegation chain, meant to stay wired everywhere |
+| `examples/core.yaml` | 4 | `gh-triage`, `librarian`, `researcher`, `platform-engineer` — cross-desk infra, no delegation chain, meant to stay wired everywhere |
 
 Orchestrator rosters are generated from each one's `delegates_to` (see **Rosters
 & delegation** above). `compose.py` emits both the OpenClaw 5-file shape and the

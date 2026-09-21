@@ -40,7 +40,7 @@ CLAUDE.md). Two different invocation shapes:
 | Form | Roles | How to invoke |
 |------|-------|----------------|
 | **Skill** (orchestrator) | `grid-ceo-orchestrator`, `grid-tech-lead`, `grid-growth-hacker`, `finance-desk-finance-manager` | Slash command, e.g. `/grid-tech-lead`. Transforms the session into that role for the rest of the conversation. |
-| **Subagent** (specialist) | the other 24 roles | Not a slash command. Either delegate explicitly — *"use the grid-backend-dev subagent to implement this"* — or let an orchestrator hand off automatically once you've invoked it. |
+| **Subagent** (specialist) | the other 25 roles | Not a slash command. Either delegate explicitly — *"use the grid-backend-dev subagent to implement this"* — or let an orchestrator hand off automatically once you've invoked it. |
 
 Typical flow: `/grid-ceo-orchestrator` to scope a business goal → it delegates
 to `grid-tech-lead` / `grid-product-manager` / `grid-growth-hacker` → those
