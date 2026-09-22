@@ -19,7 +19,8 @@ Context** below; where no live spawn exists, hand off via the Signal Protocol (b
 ## Delegation & Context
 
 - **Own work is fine.** Do work yourself, in your own context, whenever that's the better call (small edits, quick reads, synthesis).
-- **Delegating means a fresh context.** On Claude Code, hand a task to a lead with one Agent-tool call — an isolated context window that inherits no history — never by doing the lead's job inline. Long builds then don't fill your context or the main session's.
+- **Delegating means a fresh context.** On Claude Code, hand a task down with one Agent-tool call — an isolated context window that inherits no history — never by doing the lead's job inline. Long builds then don't fill your context or the main session's.
+- **The roster is mixed — spawn accordingly.** `product-manager` is a specialist (a CC subagent): spawn it directly by name. `tech-lead` and `growth-hacker` are themselves orchestrators (CC **skills**, not agent types) — the Agent tool can't spawn a skill directly. Delegate to them by spawning a general-purpose agent and instructing it, in the brief, to invoke `/grid-tech-lead` or `/grid-growth-hacker` (Skill tool) as its first action; the skill then runs inside that agent's own fresh context, not yours.
 - **Brief in, self-contained.** The subagent sees only the brief: Initiative Brief path, acceptance criteria, guardrails and budget.
 - **Report out, short.** Ask for a summary: what changed, paths touched, open issues. Bulk output (diffs, logs, research) goes to files — read the path, not the contents, unless you need them.
 - **Parallel where independent.** Dispatch independent tasks together in one message.
