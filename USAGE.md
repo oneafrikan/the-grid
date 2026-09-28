@@ -40,7 +40,7 @@ CLAUDE.md). Two different invocation shapes:
 | Form | Roles | How to invoke |
 |------|-------|----------------|
 | **Skill** (orchestrator) | `grid-ceo-orchestrator`, `grid-tech-lead`, `grid-growth-hacker`, `finance-desk-finance-manager` | Slash command, e.g. `/grid-tech-lead`. Transforms the session into that role for the rest of the conversation. |
-| **Subagent** (specialist) | the other 24 roles | Not a slash command. Either delegate explicitly — *"use the grid-backend-dev subagent to implement this"* — or let an orchestrator hand off automatically once you've invoked it. |
+| **Subagent** (specialist) | the other 25 roles | Not a slash command. Either delegate explicitly — *"use the grid-backend-dev subagent to implement this"* — or let an orchestrator hand off automatically once you've invoked it. |
 
 Typical flow: `/grid-ceo-orchestrator` to scope a business goal → it delegates
 to `grid-tech-lead` / `grid-product-manager` / `grid-growth-hacker` → those
@@ -55,9 +55,9 @@ Three composed projects, each independently wired and gated
 - **`finance-desk`** — the personal finance pipeline
   (`finance-desk-finance-manager` → sentinel/analyst/strategist/risk-officer/
   scribe). Standalone, not part of the CEO's chain — invoke directly.
-- **`core`** — cross-desk shared infra (`core-gh-triage`, `core-librarian`),
-  meant to stay wired regardless of which desk-specific project a machine
-  runs.
+- **`core`** — cross-desk shared infra (`core-gh-triage`, `core-librarian`,
+  `core-researcher`, `core-platform-engineer`), meant to stay wired regardless
+  of which desk-specific project a machine runs.
 
 A task-specific machine can subtract a whole desk (`-project:grid` or
 `-project:finance-desk`) via its overlay to cut clutter, while keeping `core`.

@@ -28,9 +28,9 @@
 # NO project: entry exists anywhere, ALL composed projects are wired.
 
 # --- composed agent-factory projects ---
-# project:core is cross-desk shared infra (gh-triage, librarian) — a machine
-# trimming to a single desk via -project:grid or -project:finance-desk
-# should still keep project:core.
+# project:core is cross-desk shared infra (gh-triage, librarian, researcher,
+# platform-engineer) — a machine trimming to a single desk via -project:grid
+# or -project:finance-desk should still keep project:core.
 project:core
 project:grid
 project:finance-desk

@@ -1,6 +1,6 @@
 # Model selection — which model for which job
 
-**Prices verified: 2026-08-03.** Refresh with `/grid-researcher` — see
+**Prices verified: 2026-08-03.** Refresh with the `core-researcher` subagent — see
 [Refreshing this document](#refreshing-this-document) at the bottom for the
 exact brief to hand it.
 
@@ -265,7 +265,7 @@ Stated explicitly so nobody fills them with a plausible guess.
 
 ## Refreshing this document
 
-Run `/grid-researcher` with the brief below. Then update: the pricing tables,
+Delegate to the `core-researcher` subagent with the brief below. Then update: the pricing tables,
 the benchmark table, the watchlist, and the verification date at the top. Rework
 the decision table only if a benchmark or price change actually moves a
 recommendation — the decision table is the point of the document, not a

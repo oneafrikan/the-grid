@@ -5,7 +5,9 @@
 # specialists can file completed research to (research-desk's roles already
 # do, via Signal Protocol — see roles/librarian/SOUL.md); researcher is a
 # general-purpose investigator any desk (or the human directly) can hand a
-# bounded question to. All three are meant to be wired on every machine
+# bounded question to; platform-engineer keeps the personal dev environment
+# (dotfiles, bootstrap scripts, per-machine overlays) portable across
+# macOS/Ubuntu/Arch. All four are meant to be wired on every machine
 # regardless of which desk-specific project
 # (grid, finance-desk, a private desk) that machine actually runs — hence
 # their own project rather than living inside one desk's roster.
@@ -15,7 +17,7 @@
 # `-project:finance-desk` should still keep `project:core`.
 project: core
 slug: core
-description: Cross-desk shared infrastructure — gh-triage, librarian, researcher.
+description: Cross-desk shared infrastructure — gh-triage, librarian, researcher, platform-engineer.
 paperclip: false
 
 agents:
@@ -27,3 +29,8 @@ agents:
   # delegation chain: invoked directly, or handed work by any desk's
   # orchestrator via the Signal Protocol.
   - role: researcher
+  # Personal dev-environment portability (dotfiles, bootstrap, per-machine
+  # overlays). Domain-agnostic infrastructure work any desk can hand off to, and
+  # tied to the machine rather than a team — so it belongs here, not in grid.yaml,
+  # and survives a machine subtracting -project:grid. No delegation chain.
+  - role: platform-engineer
