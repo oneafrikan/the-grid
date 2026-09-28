@@ -12,6 +12,9 @@
 set -euo pipefail
 
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+# find_skill_mds: tracked-only SKILL.md discovery, shared with catalog.sh.
+# shellcheck source=lib/find-skill-mds.sh
+. "$(dirname "$0")/lib/find-skill-mds.sh"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 AGENTS_DIR="${AGENTS_DIR:-$HOME/.claude/agents}"
 GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || echo unknown)}"
@@ -184,7 +187,7 @@ if [ -d "$GRID_DIR/repos" ]; then
         [ "$skill_dir" = "$repo_dir" ] && continue
         skill_is_denied "$repo_name" "$(basename "$skill_dir")" && continue
         wire_skill "$skill_dir"
-      done < <(find "$repo_dir" -name "SKILL.md" -not -path "*/.git/*")
+      done < <(find_skill_mds "$repo_dir")
     elif repo_has_skill_entries "$repo_name"; then
       # Wire only the skills explicitly listed (per-skill entries).
       while IFS= read -r skill_md; do
@@ -192,7 +195,7 @@ if [ -d "$GRID_DIR/repos" ]; then
         [ "$skill_dir" = "$repo_dir" ] && continue
         skill_is_wired "$repo_name" "$(basename "$skill_dir")" || continue
         wire_skill "$skill_dir"
-      done < <(find "$repo_dir" -name "SKILL.md" -not -path "*/.git/*")
+      done < <(find_skill_mds "$repo_dir")
     fi
     # else: library-only — don't wire anything
   done

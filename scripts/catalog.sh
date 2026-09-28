@@ -17,6 +17,9 @@ set -euo pipefail
 
 # Repo root: parent of scripts/ unless GRID_DIR overrides it.
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# find_skill_mds: tracked-only SKILL.md discovery, shared with wire.sh.
+# shellcheck source=lib/find-skill-mds.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/find-skill-mds.sh"
 OUT="${1:-$GRID_DIR/SKILLS.md}"
 
 # --- Parse one SKILL.md → prints "name<TAB>summary" ------------------------
@@ -106,7 +109,7 @@ emit_section() {
 find_skills() {
   local root="${1%/}"
   local repo_name; repo_name="$(basename "$root")"
-  find "$root" -name SKILL.md -not -path '*/.git/*' 2>/dev/null | while IFS= read -r p; do
+  find_skill_mds "$root" | while IFS= read -r p; do
     [ "$(dirname "$p")" = "$root" ] && continue
     # Drop `-repo/skill` subtractions so the catalogue matches what wire.sh
     # actually links (both the per-skill listing and the headline counts).
