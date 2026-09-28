@@ -15,6 +15,17 @@ target shipped. The next targets (**#31** opencode, **#33** Codex, **#32** Gemin
 **#30** Cursor) are scoped from the 2026-07-24 portability research but not
 built. OpenClaw/Paperclip emitters (**#3**, **#4**) remain the deeper lift.
 
+**Pending rollout (2026-09-28):** `main` is at the merge of `platform-engineer` +
+the tracked-only SKILL.md discovery fix. Only **wilderness** has pulled,
+recomposed and re-wired. **Not yet updated:** guide-server (still pre-merge, so
+its next `wire.sh` regenerates `SKILLS.md` at 725 until it pulls the fix), forge,
+scout, daily, and the Omarchy box. Per machine: `git pull` →
+`git submodule update --init --recursive` → recompose `core`/`grid`/`finance-desk`
+→ `bash scripts/wire.sh` (check `ls agent-factory/projects/` first if it has a
+private desk). Also open: the Omarchy box has pushed **no script changes** — if
+any Arch portability edits exist there they still need pushing. Move this to a
+GitHub issue if it outlives the rollout.
+
 ---
 
 ## Open issues (map)
@@ -110,3 +121,5 @@ full-roster port) and chunked into single-session specialist work:
 - [x] **Doc resync for sharing** — DONE 2026-08-04 (`ad41cc4`). README/USAGE/BOOTSTRAP brought current: OpenSpec, private projects, help skills, roadmap separating shipped targets from scoped-but-unbuilt ones, and a status section setting fork-don't-depend expectations. BOOTSTRAP gained a prerequisites table (Node >= 20.19.0 was undocumented) and the openspec CLI as an explicit step. Does **not** close #24/#25.
 - [x] **Private-project mechanism documented + hardened** — DONE 2026-08-04. `compose.py` overwrites `projects/<name>/` wholesale, so recomposing the public projects while a private project's roles are unreachable destroys its composed output and the next `wire.sh` removes its symlinks. This happened for real this session. Warning now in CLAUDE.md, README, USAGE and BOOTSTRAP; mechanism documented publicly, names never.
 - [x] **#24/#39 de-Gareth audit: LOGS/ + personal manifests** — DONE 2026-09-11. `LOGS/` (dev journal) moved to a separate private repo (`~/.the-grid-private/LOGS/`), symlinked back locally, stripped from this repo's git history entirely (`git filter-repo --path LOGS --invert-paths`, force-pushed). `baseline-submodules.txt` and `machines/{forge,guide-server,scout,wilderness}.txt` untracked going forward (still present on disk; seeded on a new machine from the now-tracked `baseline-submodules.example.txt` / `machines/example.txt`) — history left as-is, judged low-sensitivity. `setup-gareth-skills` renamed to `setup-repo-skills` (cosmetic, never actually personal). `BOOTSTRAP.md`/`scripts/bootstrap.sh`/`CLAUDE.md` updated to match; 38/38 tests green. Every other the-grid clone (forge, scout, guide-server) needs `git fetch && git reset --hard origin/main` before its next commit — tracked in `CLAUDE.md`'s pending-migration checklist. #24/#39 closed on GitHub 2026-09-11.
+\n- [x] **`platform-engineer` role merged into `core`** — DONE 2026-09-28 (`7f892ca`). Cross-OS (macOS/Ubuntu/Arch) dev-environment role authored on the Omarchy machine on branch `role-platform-engineer`; lives in `core` (not `grid`) because it is tied to machines, not a team, and must survive `-project:grid`. Tested on wilderness before merge: compose, `wire.sh` into temp dirs (idempotent on 2nd run), bats 38/38 on the merged tree. Wired live here as `core-platform-engineer`. Branch deleted from the remote (already gone by the time we tried).
+- [x] **`SKILLS.md` count no longer depends on which machine ran it** — DONE 2026-09-28 (`a7d54b2`). guide-server's regen jumped the headline 239 → 725: gstack setup writes gitignored per-host copies of its skills (`.slate/`, `.opencode/`, `.kiro/`, `.hermes/`, `.gbrain/`, ...), 547 `SKILL.md` on disk vs 65 tracked, and a raw `find` counted them. New shared `scripts/lib/find-skill-mds.sh` lists **tracked** files for submodules that are their own git checkout (still honours tracked dot-dir skills in openspec/ponytail) and falls back to `find` for non-git dirs. Two new bats tests fail without the fix; suite is 40/40.
