@@ -79,3 +79,15 @@ teardown() {
   [ -f "$MOCK_GRID/SKILLS.md" ]
   grep -q -- '- \*\*skill-alpha\*\*' "$MOCK_GRID/SKILLS.md"
 }
+
+@test "git-checkout repo: catalogue counts tracked skills only, not generated copies" {
+  local r="$MOCK_GRID/repos/gen"
+  make_skill "$r/real-skill" "real-skill"
+  printf '.slate/\n' > "$r/.gitignore"
+  git -C "$r" init -q
+  git -C "$r" add -A
+  make_skill "$r/.slate/skills/stray-generated" "stray-generated"
+  GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
+  grep -q -- '- \*\*real-skill\*\*' "$OUT"
+  ! grep -q 'stray-generated' "$OUT"
+}

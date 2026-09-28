@@ -292,7 +292,7 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 38 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`.
+All 40 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`.
 
 ## wire.sh contract
 
@@ -303,6 +303,10 @@ All 38 tests must stay green. Tests use temp dirs — they never touch the real 
 - Skills in `repos/*/` are discovered at **any depth** via `find` (flat, `skills/`,
   `skills/<category>/`, etc.) — wire.sh symlinks each dir containing a `SKILL.md`,
   skipping a `SKILL.md` sitting at a repo root.
+  Discovery goes through `scripts/lib/find-skill-mds.sh` (shared with `catalog.sh`):
+  in a submodule that is its own git checkout it lists **tracked** files only, so
+  gitignored generated copies (gstack writes ~54 per host into `.slate/`, `.kiro/`,
+  ...) are never wired or counted; a non-git dir falls back to plain `find`.
 - Only submodules in the manifest (`baseline-submodules.txt` + `machines/<host>.txt`
   overlay) are wired; the rest are library-only. If no manifest exists, all repos are
   wired (legacy fallback). `catalog.sh` reads the **baseline only** (machine-agnostic,

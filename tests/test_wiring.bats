@@ -203,3 +203,27 @@ teardown() {
   [ -L "$MOCK_AGENTS/grid-ponytail.md" ]
   grep -q "from: root" "$MOCK_AGENTS/grid-ponytail.md"
 }
+
+# --- tracked-only discovery in git-checkout submodules (gstack host dirs) ----
+
+# Build repos/gen as its own git checkout: one tracked skill, one tracked skill
+# inside a dot-dir (openspec/ponytail style), and one gitignored generated copy
+# (gstack setup writes these per host — they must never be wired or counted).
+make_gen_repo() {
+  local r="$MOCK_GRID/repos/gen"
+  make_skill "$r/real-skill" "real-skill"
+  make_skill "$r/.claude/skills/dot-tracked" "dot-tracked"
+  printf '.slate/\n' > "$r/.gitignore"
+  git -C "$r" init -q
+  git -C "$r" add -A
+  make_skill "$r/.slate/skills/stray-generated" "stray-generated"
+}
+
+@test "git-checkout repo: wires tracked skills, ignores gitignored generated copies" {
+  make_gen_repo
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/real-skill" ]
+  [ -L "$MOCK_SKILLS/dot-tracked" ]
+  [ ! -e "$MOCK_SKILLS/stray-generated" ]
+}
