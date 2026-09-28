@@ -22,8 +22,10 @@ its next `wire.sh` regenerates `SKILLS.md` at 725 until it pulls the fix), forge
 scout, daily, and the Omarchy box. Per machine: `git pull` →
 `git submodule update --init --recursive` → recompose `core`/`grid`/`finance-desk`
 → `bash scripts/wire.sh` (check `ls agent-factory/projects/` first if it has a
-private desk). Also open: the Omarchy box has pushed **no script changes** — if
-any Arch portability edits exist there they still need pushing. Move this to a
+private desk). **Omarchy box: done 2026-09-28** — pulled, recomposed, re-wired,
+40/40 tests green (its own Arch-portability work, `portable-arch` in the
+dev-env repos, was separately pushed and merged this session too — see
+`LOGS/2026-09-28-omarchy-platform-engineer-sync-*` for detail). Move this to a
 GitHub issue if it outlives the rollout.
 
 ---
