@@ -26,7 +26,7 @@ teardown() {
   make_skill "$MOCK_GRID/skills/skill-new" "skill-new"
   GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/catalog.sh" --check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"stale"* ]]
+  [[ "$output" == *"stale"* ]] || false
 }
 
 @test "catalog --check writes nothing" {
@@ -50,7 +50,7 @@ teardown() {
   rm "$MOCK_SKILLS/skill-alpha"
   GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/wire.sh" --check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"skill-alpha"* ]]
+  [[ "$output" == *"skill-alpha"* ]] || false
   [ ! -e "$MOCK_SKILLS/skill-alpha" ]   # still missing: --check never repairs
 }
 
@@ -59,7 +59,7 @@ teardown() {
   ln -s "$MOCK_GRID/skills/gone" "$MOCK_SKILLS/gone"
   GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/wire.sh" --check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"gone"* ]]
+  [[ "$output" == *"gone"* ]] || false
 }
 
 @test "wire --check ignores foreign symlinks" {
@@ -72,10 +72,10 @@ teardown() {
 # --- sandbox tripwire ---------------------------------------------------------
 
 @test "tripwire refuses a target inside the real ~/.claude" {
-  mkdir -p "$HOME/.claude"
-  SKILLS_DIR="$HOME/.claude" run assert_sandboxed
+  fake_home=$(mktemp -d); mkdir -p "$fake_home/.claude"
+  REAL_HOME="$fake_home" SKILLS_DIR="$fake_home/.claude" run assert_sandboxed
   [ "$status" -eq 1 ]
-  [[ "$output" == *"REFUSING"* ]]
+  [[ "$output" == *"REFUSING"* ]] || false
 }
 
 @test "tripwire accepts the sandbox dirs" {
@@ -89,4 +89,14 @@ teardown() {
   mkdir "$MOCK_SKILLS/skill-alpha"          # user's own real dir shadows the grid skill
   GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/wire.sh" --check
   [ "$status" -eq 0 ]
+}
+
+@test "wire --check detects agent-side drift" {
+  mkdir -p "$MOCK_GRID/agents"
+  printf -- '---\nname: a1\n---\n' > "$MOCK_GRID/agents/a1.md"
+  GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/wire.sh"
+  rm "$MOCK_AGENTS/a1.md"
+  GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"a1.md"* ]] || false
 }

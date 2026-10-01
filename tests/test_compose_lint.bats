@@ -39,7 +39,7 @@ make_role() {
   sed -i.bak 's/^name: bad/name: other/' "$PRIV/bad/role.yaml"
   run "$PY" "$COMPOSE" --lint-roles
   [ "$status" -eq 1 ]
-  [[ "$output" == *"E_NAME_MISMATCH: bad/role.yaml"* ]]
+  [[ "$output" == *"E_NAME_MISMATCH: bad/role.yaml"* ]] || false
 }
 
 @test "lint-roles: invalid model is E_MODEL_INVALID" {
@@ -47,7 +47,7 @@ make_role() {
   sed -i.bak 's/sonnet/gpt9/' "$PRIV/bad/role.yaml"
   run "$PY" "$COMPOSE" --lint-roles
   [ "$status" -eq 1 ]
-  [[ "$output" == *"E_MODEL_INVALID: bad/role.yaml"* ]]
+  [[ "$output" == *"E_MODEL_INVALID: bad/role.yaml"* ]] || false
 }
 
 @test "lint-roles: typo'd key is E_FIELD_UNKNOWN" {
@@ -55,7 +55,7 @@ make_role() {
   echo 'sumary: oops' >> "$PRIV/bad/role.yaml"
   run "$PY" "$COMPOSE" --lint-roles
   [ "$status" -eq 1 ]
-  [[ "$output" == *"E_FIELD_UNKNOWN"* ]]
+  [[ "$output" == *"E_FIELD_UNKNOWN"* ]] || false
 }
 
 @test "lint-roles: missing and empty required files are named" {
@@ -64,8 +64,8 @@ make_role() {
   : > "$PRIV/bad/SKILL.md"
   run "$PY" "$COMPOSE" --lint-roles
   [ "$status" -eq 1 ]
-  [[ "$output" == *"E_FILE_MISSING: bad/SOUL.md"* ]]
-  [[ "$output" == *"E_FILE_EMPTY: bad/SKILL.md"* ]]
+  [[ "$output" == *"E_FILE_MISSING: bad/SOUL.md"* ]] || false
+  [[ "$output" == *"E_FILE_EMPTY: bad/SKILL.md"* ]] || false
 }
 
 @test "lint-roles: unresolved placeholder is E_TOKEN_UNRESOLVED" {
@@ -73,7 +73,7 @@ make_role() {
   echo 'Hello {{NAME}}' >> "$PRIV/bad/SOUL.md"
   run "$PY" "$COMPOSE" --lint-roles
   [ "$status" -eq 1 ]
-  [[ "$output" == *"E_TOKEN_UNRESOLVED: bad/SOUL.md"* ]]
+  [[ "$output" == *"E_TOKEN_UNRESOLVED: bad/SOUL.md"* ]] || false
 }
 
 @test "compose aborts naming the broken role when a config uses it" {
@@ -82,7 +82,7 @@ make_role() {
   printf 'project: t\nagents:\n  - role: bad\n' > "$OTHER_DIR/c.yaml"
   run "$PY" "$COMPOSE" "$OTHER_DIR/c.yaml" --target claude-code --out "$OTHER_DIR/out"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"E_FILE_EMPTY"* ]]
+  [[ "$output" == *"E_FILE_EMPTY"* ]] || false
   [ ! -e "$OTHER_DIR/out" ]    # fail-closed: nothing half-written
 }
 
@@ -95,7 +95,7 @@ make_role() {
   echo "tampered" >> "$OTHER_DIR/out/t/_claude-code/agents/t-r1.md"
   run "$PY" "$COMPOSE" "$OTHER_DIR/c.yaml" --target claude-code --out "$OTHER_DIR/out" --check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"stale"* ]]
+  [[ "$output" == *"stale"* ]] || false
   grep -q tampered "$OTHER_DIR/out/t/_claude-code/agents/t-r1.md"   # still tampered
 }
 

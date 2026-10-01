@@ -22,7 +22,10 @@ common_setup() {
 
 # Abort the test (loudly) if a wire/catalog target points at the real ~/.claude.
 assert_sandboxed() {
-  local real="${REAL_HOME:-$HOME}/.claude" d
+  local real d
+  real="${REAL_HOME:-$HOME}/.claude"
+  # Resolve symlinks on both sides (macOS /var -> /private/var) so spelling can't dodge the guard.
+  real="$(cd "$real" 2>/dev/null && pwd -P || echo "$real")"
   for d in "${SKILLS_DIR:-}" "${AGENTS_DIR:-}"; do
     [ -n "$d" ] || continue
     case "$(cd "$d" 2>/dev/null && pwd -P)" in
