@@ -897,6 +897,23 @@ def write_project(name: str, config: dict, out_dir: Path) -> Path:
     return project_dir
 
 
+# ── drift check ───────────────────────────────────────────────────────────────
+def _tree(root: Path) -> dict[str, bytes]:
+    """{relative path: bytes} for every file under root ({} if root is absent)."""
+    if not root.is_dir():
+        return {}
+    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def diff_trees(expected: Path, actual: Path) -> list[str]:
+    """Human-readable differences between a freshly rendered tree and the one on disk."""
+    exp, act = _tree(expected), _tree(actual)
+    problems = [f"missing   {rel}" for rel in sorted(exp.keys() - act.keys())]
+    problems += [f"unexpected {rel}" for rel in sorted(act.keys() - exp.keys())]
+    problems += [f"stale     {rel}" for rel in sorted(exp.keys() & act.keys()) if exp[rel] != act[rel]]
+    return problems
+
+
 # ── cli ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -914,6 +931,11 @@ def main() -> None:
              "5 orchestrator roles (whichever are present in this config)",
     )
     parser.add_argument(
+        "--check", action="store_true",
+        help="render into a temp dir and diff against what is on disk; write nothing, "
+             "exit 1 if the composed output is missing or stale",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="render + report what would be written, but write nothing",
     )
@@ -926,6 +948,25 @@ def main() -> None:
 
     name = config["project"]
     agents = config["agents"]
+
+    if args.check:
+        import tempfile
+        writers = {
+            "claude-code": write_claude_code, "paperclip": write_paperclip,
+            "openclaw-native": write_openclaw, "openclaw": write_project,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            rendered = writers[args.target](name, config, Path(tmp))
+            on_disk = args.out / rendered.relative_to(tmp)
+            problems = diff_trees(rendered, on_disk)
+        if problems:
+            print(f"STALE '{name}' ({args.target}): {on_disk}", file=sys.stderr)
+            for line in problems:
+                print(f"  {line}", file=sys.stderr)
+            print("  fix: re-run compose.py without --check", file=sys.stderr)
+            sys.exit(1)
+        print(f"up to date '{name}' ({args.target})")
+        return
 
     if args.dry_run:
         slug = config.get("slug") or name
