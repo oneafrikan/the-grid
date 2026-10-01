@@ -108,4 +108,7 @@ fi
 
 echo ""
 echo "Done. ${#WROTE[@]} file(s) written, ${#SKIPPED[@]} skipped."
-[[ ${#SKIPPED[@]} -gt 0 ]] && echo "Review the SKIPPED list above before assuming the retrofit is complete."
+# `if`, not `[[ ]] && echo`: the && form made a clean run (nothing skipped) exit 1.
+if [[ ${#SKIPPED[@]} -gt 0 ]]; then
+  echo "Review the SKIPPED list above before assuming the retrofit is complete."
+fi
