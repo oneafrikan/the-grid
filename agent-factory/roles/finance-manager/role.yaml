@@ -12,3 +12,4 @@ summary: >-
 owns: Finance desk — market monitoring, evidence, proposals, risk veto, memory
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: true    # player-coach lite: fronts the pipeline, delegates every stage
+unattended: true      # the one composed role designed to run without a human in the loop

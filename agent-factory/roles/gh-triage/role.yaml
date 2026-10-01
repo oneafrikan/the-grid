@@ -9,3 +9,4 @@ summary: >-
   human-required ones. Runs on cron; does not initiate CC loops (Phase 2).
 base_skills: [triage]
 orchestrator: false
+unattended: true      # runs on cron with no human watching (see docs/agent-retro.md for the run record)

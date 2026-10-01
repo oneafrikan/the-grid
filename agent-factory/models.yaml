@@ -1,0 +1,15 @@
+# models.yaml — the one place a model tier becomes the string in generated agents' `model:` line.
+#
+# Default: each tier maps to itself, and Claude Code resolves the tier word to that tier's
+# CURRENT release. A retirement or alias move therefore changes every role on the tier at once.
+#
+# To pin a tier, write an exact model id and recompose, e.g.
+#   sonnet: claude-sonnet-5-5
+# (current ids and retirement dates: docs/model-selection.md). Changing a line here changes
+# every role on that tier; `compose.py <cfg> --check` and `deploy.py <project> --check` show the drift.
+# Applies to generated Claude Code agents only; OpenClaw/Paperclip output still carries the tier word.
+tiers:
+  opus: opus
+  sonnet: sonnet
+  haiku: haiku
+  fable: fable
