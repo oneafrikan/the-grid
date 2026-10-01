@@ -4,8 +4,8 @@
 # Checks (each runs even if an earlier one fails; one PASS/FAIL summary at the end):
 #   lint         shellcheck warnings and errors in scripts/ and .githooks/
 #   catalog      SKILLS.md is current           (catalog.sh --check)
-#   compose      composed agent output is current for every public project
-#                (compose.py --check; skipped with a notice if the venv is absent)
+#   compose      every role lints clean (compose.py --lint-roles) and composed
+#                output is current for every public project (compose.py --check; skipped with a notice if the venv is absent)
 #   bats         the test suite
 #
 # Modes:
@@ -61,6 +61,7 @@ run_shellcheck() {
 run_compose_check() {
   local py=agent-factory/.venv/bin/python rc=0 cfg
   [ -x "$py" ] || { echo "    agent-factory venv absent — skipped"; return 0; }
+  "$py" agent-factory/compose.py --lint-roles || rc=1
   for cfg in core grid finance-desk; do
     # Not yet composed on this machine is not a commit-time failure; stale output is.
     [ -d "agent-factory/projects/$cfg" ] || { echo "    $cfg not composed here — skipped"; continue; }
