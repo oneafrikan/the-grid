@@ -536,7 +536,67 @@ def _flattened_identity(agent: dict, slug: str | None = None) -> str:
     return "\n\n---\n\n".join(strip_html_comments(rendered[fn]) for fn in FLATTEN_ORDER)
 
 
-def emit_cc_subagent(agent: dict, slug: str) -> tuple[str, str]:
+# ── lean profile ──────────────────────────────────────────────────────────────
+# One source, two renderings. "full" is the flattened five-file identity (persona,
+# memory seed, boot sequence). "lean" is a deterministic selection from the SAME
+# role files — no second copy of anything to drift:
+#   keep  SOUL.md (role layer only): role identity, decision-making, escalation
+#         rules, "What the X is NOT"            — the role's judgement and lane
+#   keep  AGENTS.md (role layer only): every section — scope, receiving work,
+#         routing, and any hard rules / ranked priorities the role defines
+#   keep  SKILL.md — the operating procedure (the actual job)
+#   keep  project context, if the deploy supplies one
+#   drop  _core base scaffolding, IDENTITY nameplate, USER, MEMORY seed, boot
+#         sequence, signal-file handoff protocol (runtime plumbing a one-project
+#         Claude Code session does not use)
+PROFILES = ("full", "lean")
+
+
+def _soul_keep(heading: str) -> bool:
+    """Is this SOUL.md '## ' heading part of the lean cut? Matches on the name
+    with any trailing '(role layer)' qualifier removed."""
+    h = re.sub(r"\s*\(.*?\)\s*$", "", heading[3:].strip()).lower()
+    return h in ("role identity", "decision-making", "escalation rules") or (
+        h.startswith("what ") and h.endswith(" is not")
+    )
+
+
+def render_lean_body(agent: dict, slug: str, project_context: str = "") -> str:
+    """The lean system-prompt body for one agent (no frontmatter)."""
+    role = agent["role"]
+    title = role_meta(role).get("title") or role
+    rdir = role_dir(role)
+
+    parts = [f"You are the **{title}**. {role_summary(role)}"]
+
+    _, soul_secs = split_sections(strip_html_comments(_read(rdir / "SOUL.md")))
+    parts += [f"{h}\n{b.strip()}" for h, b in soul_secs if _soul_keep(h)]
+
+    agents_path = rdir / "AGENTS.md"
+    if agents_path.is_file():
+        agents_md = inject_roster(strip_html_comments(_read(agents_path)), agent, slug=slug)
+        _, agent_secs = split_sections(agents_md)
+        parts += [f"{h}\n{b.strip()}" for h, b in agent_secs]
+    overlay = render_stack_overlay(agent.get("stacks", []) or []).strip()
+    if overlay:
+        parts.append(overlay)
+
+    parts.append(
+        "## Hand-offs in this project\n\n"
+        "Role names in routing tables and escalation rules above are grid agents, "
+        "deployed here as `grid-<role>`. If the agent you would route to is not "
+        "available in this project, tell the user which role should take the work "
+        "instead of improvising it. Signal-file hand-offs (`signals/`) do not apply."
+    )
+    if project_context.strip():
+        parts.append("## Project context\n\n" + project_context.strip())
+
+    parts.append("## Operating procedure\n\n" + strip_html_comments(_read(rdir / "SKILL.md")))
+    return "\n\n".join(parts) + "\n"
+
+
+def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
+                     project_context: str = "") -> tuple[str, str]:
     """A specialist role → one Claude Code subagent `.md` (spawnable).
 
     Frontmatter (name/description/model) + a body that adopts the flattened
@@ -555,22 +615,27 @@ def emit_cc_subagent(agent: dict, slug: str) -> tuple[str, str]:
                        f"Use this subagent for {role} work.",
         "model": resolve_model(agent),
     }
+    if profile == "lean":
+        return f"{slugged_name}.md", _frontmatter(fields) + "\n" + render_lean_body(agent, slug, project_context)
     procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
     bolt_ons = (
         f"\n\nAdditional skills available to you: {', '.join(skills[1:])}."
         if len(skills) > 1 else ""
     )
+    context = f"## Project context\n\n{project_context.strip()}\n\n---\n\n" if project_context.strip() else ""
     body = (
         f"You are the **{title}**, a specialist agent on a composed dev team. "
         f"Adopt the identity, behaviour, and operating rules below as your own.\n\n"
         f"{_flattened_identity(agent, slug=slug)}\n\n---\n\n"
+        f"{context}"
         f"## Operating procedure\n\n"
         f"{procedure}{bolt_ons}\n"
     )
     return f"{slugged_name}.md", _frontmatter(fields) + "\n" + body
 
 
-def emit_cc_skill(agent: dict, slug: str) -> dict[str, str]:
+def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
+                  project_context: str = "") -> dict[str, str]:
     """An orchestrator role → a Claude Code skill folder (transforms the session).
 
     SKILL.md = frontmatter + a "become the <role>" boot body + the flattened
@@ -589,7 +654,17 @@ def emit_cc_skill(agent: dict, slug: str) -> dict[str, str]:
         "description": f"{title} orchestrator. {role_summary(role)} "
                        f"Invoke with /{slugged_name} or when coordinating a multi-step dev-team feature.",
     }
+    if profile == "lean":
+        body = (
+            f"# {title}\n\n"
+            f"When this skill is invoked, **become the {title}**: follow the role "
+            f"and operating procedure below. This transforms the current session "
+            f"into the {title} orchestrator.\n\n"
+            f"{render_lean_body(agent, slug, project_context)}"
+        )
+        return {"SKILL.md": _frontmatter(fields) + "\n" + body}
     procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
+    context = f"## Project context\n\n{project_context.strip()}\n\n---\n\n" if project_context.strip() else ""
     body = (
         f"# {title}\n\n"
         f"When this skill is invoked, **become the {title}**: adopt the identity, "
@@ -597,7 +672,7 @@ def emit_cc_skill(agent: dict, slug: str) -> dict[str, str]:
         f"This transforms the current session into the {title} orchestrator.\n\n"
         f"## Boot — adopt this identity\n\n"
         f"{_flattened_identity(agent, slug=slug)}\n\n"
-        f"---\n\n## Operating procedure\n\n"
+        f"---\n\n{context}## Operating procedure\n\n"
         f"{procedure}\n"
     )
     return {"SKILL.md": _frontmatter(fields) + "\n" + body}
