@@ -16,15 +16,20 @@ target shipped. The next targets (**#31** opencode, **#33** Codex, **#32** Gemin
 built. OpenClaw/Paperclip emitters (**#3**, **#4**) remain the deeper lift.
 
 **Pending rollout (2026-09-28):** `main` is at the merge of `platform-engineer` +
-the tracked-only SKILL.md discovery fix. Only **wilderness** has pulled,
-recomposed and re-wired. **Not yet updated:** guide-server (still pre-merge, so
-its next `wire.sh` regenerates `SKILLS.md` at 725 until it pulls the fix), forge,
-scout, daily, and the Omarchy box. Per machine: `git pull` →
+the tracked-only SKILL.md discovery fix. **Wilderness, Omarchy box, and forge**
+have pulled, recomposed and re-wired. **Not yet updated:** guide-server (still
+pre-merge, so its next `wire.sh` regenerates `SKILLS.md` at 725 until it pulls
+the fix), scout, daily. Per machine: `git pull` →
 `git submodule update --init --recursive` → recompose `core`/`grid`/`finance-desk`
 → `bash scripts/wire.sh` (check `ls agent-factory/projects/` first if it has a
-private desk). Also open: the Omarchy box has pushed **no script changes** — if
-any Arch portability edits exist there they still need pushing. Move this to a
-GitHub issue if it outlives the rollout.
+private desk). **Omarchy box: done 2026-09-28** — pulled, recomposed, re-wired,
+40/40 tests green (its own Arch-portability work, `portable-arch` in the
+dev-env repos, was separately pushed and merged this session too — see
+`LOGS/2026-09-28-omarchy-platform-engineer-sync-*` for detail). **forge: done
+2026-09-28** — submodules synced (3 previously uninitialized), all four
+projects recomposed (core, grid, finance-desk, private research-desk via
+`GRID_PRIVATE_ROLES_DIR`), `wire.sh` re-run, 239 skills / 40/40 tests green,
+no broken symlinks. Move this to a GitHub issue if it outlives the rollout.
 
 ---
 
