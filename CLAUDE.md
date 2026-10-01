@@ -64,6 +64,7 @@ submodules into two tiers:
 - `docs/model-selection.md` — which model for which job, with prices, independent
   benchmarks, worked cost maths, and a dated expiry watchlist. Refreshed on demand
   via the `core-researcher` subagent using the brief at the bottom of the file.
+- `evals/` + `agent-factory/run_evals.py` — golden cases for roles (opt-in, capped, tool-less runs; `--validate` runs in the gate). See `evals/README.md`.
 - `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
 - `TODO.md` — current outstanding work.
