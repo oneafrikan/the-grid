@@ -146,6 +146,13 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
   `wire.sh --check`, `agent-factory/compose.py <cfg> --target claude-code --check`,
   `compose.py --lint-roles` (every role; stable `E_*` codes; `roles/_retired/` is an
   archive that is never linted/composed/deployed).
+- **Role authoring contract:** `agent-factory/docs/role-authoring.md` ("facts, not
+  persona"). Roles listed in `agent-factory/authored-roles.txt` are held to it by
+  `compose.py --lint-roles` (required `AGENTS.md` sections, ranked list, hard rules,
+  `SOUL.md` headings, ≤4KB). Enrol a role there once it has been through the pass.
+- **Private roles:** `compose.py` reads `GRID_PRIVATE_ROLES_DIR`, else falls back to
+  `~/.the-grid-private/roles` if that directory exists (set the var to empty to
+  disable). A private role of the same name wins over a public one.
 - `wire.sh` writes `.wired.manifest` (gitignored; kind/name/target/status/reason) —
   rewritten only when it changes.
 - **Per-project agents:** `agent-factory/deploy.py <project> --roles a,b [--profile lean|full]`
