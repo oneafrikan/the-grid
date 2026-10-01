@@ -158,7 +158,8 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 - **Per-project agents:** `agent-factory/deploy.py <project> --roles a,b [--profile lean|full]`
   writes `grid-<role>` agents/skills into `<project>/.claude/` from the same role
   sources (lean = role judgement + scope + procedure, no persona/memory/boot
-  sequence). Project facts come from `<project>/.grid/project.yaml`, never from the
+  sequence; the SKILL's template/checklist sections are written to
+  `.claude/grid-reference/grid-<role>.md` and read on demand, not inlined). Project facts come from `<project>/.grid/project.yaml`, never from the
   grid. Generated files carry a marker; hand-written files are never overwritten;
   `.claude/grid-agents.lock` records roles/profile/hashes; `--check` reports drift.
   Seeded into new projects by project-factory (`AGENTS-SETUP.md`, `.grid/project.yaml`).
