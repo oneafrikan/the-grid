@@ -22,7 +22,7 @@
 # routes research to core-researcher via the Signal Protocol instead.
 project: grid
 slug: grid
-description: Dev-team project — 3 orchestrators + 16 specialists, all 5-file model.
+description: Dev-team project — 3 orchestrators + 21 specialists, all 5-file model.
 paperclip: false
 
 agents:
@@ -33,8 +33,13 @@ agents:
     delegates_to:
       - backend-dev
       - frontend-dev
+      - fullstack-engineer
       - designer
+      - prompt-engineer
+      - ai-engineer
       - qa-engineer
+      - sdet
+      - technical-writer
       - security-reviewer
       - devops
       - data-engineer
@@ -48,8 +53,13 @@ agents:
   # engineering specialists -> CC subagents
   - role: backend-dev
   - role: frontend-dev
+  - role: fullstack-engineer
   - role: designer
+  - role: prompt-engineer
+  - role: ai-engineer
   - role: qa-engineer
+  - role: sdet
+  - role: technical-writer
   - role: security-reviewer
   - role: devops
   # data specialists

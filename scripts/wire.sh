@@ -150,6 +150,9 @@ project_is_wired() {
 
 mkdir -p "$SKILLS_DIR" "$AGENTS_DIR"
 
+# Audit trail for the manifest written at the end: one row per decision.
+MANIFEST_ROWS=()
+
 # --- 1. Tear down ALL grid-owned symlinks (rebuilt below) ---
 # A symlink is grid-owned if its target is under GRID_DIR. We remove every one
 # and recreate only the wired set, so moving a repo to library-only actually
@@ -178,11 +181,13 @@ wire_skill() {
 
   if [ -d "$target" ] && [ ! -L "$target" ]; then
     echo "  skip (real dir, not managed): $name"
+    MANIFEST_ROWS+=("skill	$name	$skill_dir	skipped	real dir, not managed")
     return
   fi
 
   # ln -sfn: -s symlink, -f force-replace, -n treat existing symlink-to-dir as file
   ln -sfn "$skill_dir" "$target"
+  MANIFEST_ROWS+=("skill	$name	$skill_dir	wired	")
   echo "  wired: $name"
 }
 
@@ -196,10 +201,12 @@ wire_agent() {
 
   if [ -e "$target" ] && [ ! -L "$target" ]; then
     echo "  skip (real file, not managed): $name"
+    MANIFEST_ROWS+=("agent	$name	$agent_file	skipped	real file, not managed")
     return
   fi
 
   ln -sfn "$agent_file" "$target"
+  MANIFEST_ROWS+=("agent	$name	$agent_file	wired	")
   echo "  wired agent: $name"
 }
 
@@ -279,6 +286,19 @@ if [ -d "$GRID_DIR/agents" ]; then
     [ -f "$agent_file" ] || continue
     wire_agent "$agent_file"
   done
+fi
+
+# --- 3d. Write the wiring manifest (audit trail) ---
+# One row per decision (kind, name, target, status, reason), sorted, no
+# timestamp — so an unchanged wiring leaves the file byte-identical and it is
+# only rewritten when it actually differs. Gitignored: it is per-machine state.
+# Skipped under --check's throwaway run (GRID_SKIP_CATALOG) so a check never writes.
+if [ -z "${GRID_SKIP_CATALOG:-}" ]; then
+  MANIFEST="$GRID_DIR/.wired.manifest"
+  new_manifest="$(printf '%s\n' "${MANIFEST_ROWS[@]:-}" | LC_ALL=C sort)"
+  if [ ! -f "$MANIFEST" ] || [ "$(cat "$MANIFEST")" != "$new_manifest" ]; then
+    printf '%s\n' "$new_manifest" > "$MANIFEST"
+  fi
 fi
 
 # --- 4. Refresh the skill catalogue so wiring and SKILLS.md never drift ---

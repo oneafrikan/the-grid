@@ -1029,9 +1029,13 @@ def lint_role(role: str) -> list[str]:
 
 def all_roles() -> list[str]:
     """Every role dir name visible to the factory (private tree merged over public)."""
-    names = {d.name for d in ROLES_DIR.iterdir() if d.is_dir()}
+    # Dirs starting with '_' or '.' (e.g. roles/_retired/) are an archive: kept for
+    # history and rollback, never linted, composed or deployed.
+    def live(root: Path) -> set[str]:
+        return {d.name for d in root.iterdir() if d.is_dir() and not d.name.startswith(("_", "."))}
+    names = live(ROLES_DIR)
     if PRIVATE_ROLES_DIR and PRIVATE_ROLES_DIR.is_dir():
-        names |= {d.name for d in PRIVATE_ROLES_DIR.iterdir() if d.is_dir()}
+        names |= live(PRIVATE_ROLES_DIR)
     return sorted(names)
 
 

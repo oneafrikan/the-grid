@@ -98,3 +98,9 @@ make_role() {
   [[ "$output" == *"stale"* ]]
   grep -q tampered "$OTHER_DIR/out/t/_claude-code/agents/t-r1.md"   # still tampered
 }
+
+@test "lint-roles ignores an archive dir (_retired) so retired roles can't break the gate" {
+  mkdir -p "$PRIV/_retired/old-role"          # deliberately malformed: empty dir
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 0 ]
+}
