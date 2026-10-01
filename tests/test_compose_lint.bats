@@ -16,7 +16,7 @@ setup() {
 
 teardown() {
   rm -rf "$PRIV"
-  unset GRID_PRIVATE_ROLES_DIR
+  unset GRID_PRIVATE_ROLES_DIR GRID_AUTHORED_ROLES_FILE
   common_teardown
 }
 
@@ -103,4 +103,113 @@ make_role() {
   mkdir -p "$PRIV/_retired/old-role"          # deliberately malformed: empty dir
   run "$PY" "$COMPOSE" --lint-roles
   [ "$status" -eq 0 ]
+}
+
+# --- authoring contract (docs/role-authoring.md) --------------------------------
+
+# make_authored_role <name> — a role that satisfies the authoring contract
+make_authored_role() {
+  make_role "$1"
+  cat > "$PRIV/$1/AGENTS.md" <<EOT
+# Operating Rules
+## Scope
+Owns things.
+## What to get right hardest
+1. a
+2. b
+3. c
+4. d
+## Hard rules
+- one
+- two
+- three
+- four
+## Receiving work
+- x
+EOT
+  cat > "$PRIV/$1/SOUL.md" <<EOT
+# Soul
+## Role identity
+x
+## Core character (role layer)
+x
+## Decision-making (role layer)
+x
+## Escalation rules (role layer)
+x
+## Working style (role layer)
+x
+## What the T is NOT
+x
+EOT
+  printf '%s\n' "$1" > "$OTHER_DIR/authored.txt"
+  export GRID_AUTHORED_ROLES_FILE="$OTHER_DIR/authored.txt"
+}
+
+@test "authoring lint passes a role that meets the contract" {
+  make_authored_role good
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 0 ]
+}
+
+@test "authoring lint: missing Hard rules section is E_SECTION_MISSING" {
+  make_authored_role bad
+  sed -i.bak '/^## Hard rules/,/^- four/d' "$PRIV/bad/AGENTS.md"
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_SECTION_MISSING: bad/AGENTS.md"* ]] || false
+}
+
+@test "authoring lint: ranked list shorter than 4 is E_SECTION_SHAPE" {
+  make_authored_role bad
+  sed -i.bak '/^4\. d$/d' "$PRIV/bad/AGENTS.md"
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_SECTION_SHAPE"* ]] || false
+}
+
+@test "authoring lint: oversized AGENTS.md is E_SIZE" {
+  make_authored_role bad
+  head -c 5000 /dev/zero | tr '\0' 'x' >> "$PRIV/bad/AGENTS.md"
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_SIZE"* ]] || false
+}
+
+@test "authoring lint: missing SOUL heading is named" {
+  make_authored_role bad
+  sed -i.bak '/^## Working style/,/^x$/d' "$PRIV/bad/SOUL.md"
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_SECTION_MISSING: bad/SOUL.md"* ]] || false
+}
+
+@test "authoring lint ignores roles not on the authored list" {
+  make_role loose                     # no AGENTS.md at all
+  printf 'someone-else\n' > "$OTHER_DIR/authored.txt"
+  export GRID_AUTHORED_ROLES_FILE="$OTHER_DIR/authored.txt"
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 0 ]
+}
+
+# --- private roles default location ---------------------------------------------
+
+@test "private roles are picked up from ~/.the-grid-private/roles when the env var is unset" {
+  fakehome=$(mktemp -d)
+  mkdir -p "$fakehome/.the-grid-private/roles/zz-private"
+  printf 'name: zz-private\ntitle: T\nsummary: S.\ndefault_model: sonnet\n' > "$fakehome/.the-grid-private/roles/zz-private/role.yaml"
+  # no SOUL.md/SKILL.md: if the dir is picked up, lint must complain about it
+  unset GRID_PRIVATE_ROLES_DIR
+  HOME="$fakehome" run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"zz-private"* ]] || false
+  rm -rf "$fakehome"
+}
+
+@test "an EMPTY GRID_PRIVATE_ROLES_DIR disables the fallback" {
+  fakehome=$(mktemp -d)
+  mkdir -p "$fakehome/.the-grid-private/roles/zz-private"
+  GRID_PRIVATE_ROLES_DIR= HOME="$fakehome" run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 0 ]
+  rm -rf "$fakehome"
 }

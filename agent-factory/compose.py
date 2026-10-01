@@ -75,7 +75,13 @@ USER_CONFIG_PATH = HERE / "user.yaml"
 # roles whose content shouldn't enter public git history. If a role exists in
 # both, the private copy wins (same "most specific wins" precedent as the-grid's
 # root-beats-submodule skill rule).
+# Resolution: GRID_PRIVATE_ROLES_DIR if set (an EMPTY value disables private roles
+# entirely — tests use this); else ~/.the-grid-private/roles if that dir exists; else none.
+# The fallback means a machine with the private repo cloned needs no per-machine env
+# setup (which also dodges the non-login-shell env trap over ssh).
 _PRIVATE_ROLES_DIR = os.environ.get("GRID_PRIVATE_ROLES_DIR")
+if _PRIVATE_ROLES_DIR is None and (Path.home() / ".the-grid-private" / "roles").is_dir():
+    _PRIVATE_ROLES_DIR = str(Path.home() / ".the-grid-private" / "roles")
 PRIVATE_ROLES_DIR = Path(_PRIVATE_ROLES_DIR).expanduser().resolve() if _PRIVATE_ROLES_DIR else None
 
 
@@ -1027,6 +1033,60 @@ def lint_role(role: str) -> list[str]:
     return out
 
 
+# ── authoring-contract lint ───────────────────────────────────────────────────
+# Roles listed in authored-roles.txt (one per line, '#' comments) have been through
+# the pass described in docs/role-authoring.md and must keep meeting its contract.
+# Opt-in by list, not by role.yaml, so converting a role never touches role.yaml.
+AUTHORED_ROLES_FILE = Path(os.environ.get("GRID_AUTHORED_ROLES_FILE") or HERE / "authored-roles.txt")
+AGENTS_MAX_BYTES = 4096
+SOUL_HEADINGS_RE = [
+    r"Role identity", r"Core character \(role layer\)", r"Decision-making \(role layer\)",
+    r"Escalation rules \(role layer\)", r"Working style \(role layer\)", r"What (?:the )?.+ is NOT",
+]
+
+
+def authored_roles() -> set[str]:
+    if not AUTHORED_ROLES_FILE.is_file():
+        return set()
+    lines = (ln.split("#", 1)[0].strip() for ln in AUTHORED_ROLES_FILE.read_text(encoding="utf-8").splitlines())
+    return {ln for ln in lines if ln}
+
+
+def lint_authoring(role: str) -> list[str]:
+    """Contract problems for an authored role (see docs/role-authoring.md)."""
+    rdir = role_dir(role)
+    out: list[str] = []
+
+    def bad(code: str, fname: str, detail: str) -> None:
+        out.append(f"{code}: {role}/{fname}: {detail}")
+
+    agents = rdir / "AGENTS.md"
+    if not agents.is_file():
+        return [f"E_SECTION_MISSING: {role}/AGENTS.md: required for authored roles"]
+    text = agents.read_text(encoding="utf-8")
+    if len(text.encode("utf-8")) > AGENTS_MAX_BYTES:
+        bad("E_SIZE", "AGENTS.md", f"over {AGENTS_MAX_BYTES} bytes (a role this big is two roles)")
+    _, secs = split_sections(strip_html_comments(text))
+    heads = {h[3:].strip(): b for h, b in secs}
+    for need in ("Scope", "Receiving work", "Hard rules"):
+        if need not in heads:
+            bad("E_SECTION_MISSING", "AGENTS.md", f"'## {need}'")
+    hardest = [b for h, b in heads.items() if re.fullmatch(r"What to .+ hardest", h)]
+    if not hardest:
+        bad("E_SECTION_MISSING", "AGENTS.md", "'## What to get right hardest' (or 'What to <verb> hardest')")
+    elif len(re.findall(r"^\s*\d+\.\s", hardest[0], re.M)) < 4:
+        bad("E_SECTION_SHAPE", "AGENTS.md", "'What to … hardest' needs a ranked numbered list of at least 4 items")
+    if "Hard rules" in heads and len(re.findall(r"^\s*(?:[-*]|\d+\.)\s", heads["Hard rules"], re.M)) < 4:
+        bad("E_SECTION_SHAPE", "AGENTS.md", "'Hard rules' needs at least 4 rules (the shared four plus role-specific)")
+
+    soul = rdir / "SOUL.md"
+    soul_heads = [h[3:].strip() for h, _ in split_sections(strip_html_comments(_read(soul)))[1]] if soul.is_file() else []
+    for pat in SOUL_HEADINGS_RE:
+        if not any(re.fullmatch(pat, h) for h in soul_heads):
+            bad("E_SECTION_MISSING", "SOUL.md", f"heading matching '## {pat}'")
+    return out
+
+
 def all_roles() -> list[str]:
     """Every role dir name visible to the factory (private tree merged over public)."""
     # Dirs starting with '_' or '.' (e.g. roles/_retired/) are an archive: kept for
@@ -1090,6 +1150,7 @@ def main() -> None:
 
     if args.lint_roles:
         problems = [p for r in all_roles() for p in lint_role(r)]
+        problems += [p for r in sorted(authored_roles() & set(all_roles())) for p in lint_authoring(r)]
         for p in problems:
             print(p, file=sys.stderr)
         print(f"lint-roles: {len(all_roles())} roles, {len(problems)} problem(s)")

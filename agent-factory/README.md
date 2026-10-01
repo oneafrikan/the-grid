@@ -97,6 +97,10 @@ produces byte-identical files (the output dir is wiped and rewritten each run).
 
 ### Private projects
 
+> Default location: if `GRID_PRIVATE_ROLES_DIR` is unset, `compose.py` uses
+> `~/.the-grid-private/roles` when that directory exists, so a machine with the private
+> repo cloned needs no extra setup. Set the variable to an empty string to disable it.
+
 A project's roles and compose config don't have to live in this repo.
 `GRID_PRIVATE_ROLES_DIR` points `compose.py` at an external roles directory
 (see `role_dir()` — it's checked before the committed `roles/`), so a project
