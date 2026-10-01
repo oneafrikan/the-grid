@@ -65,6 +65,7 @@ submodules into two tiers:
   benchmarks, worked cost maths, and a dated expiry watchlist. Refreshed on demand
   via the `core-researcher` subagent using the brief at the bottom of the file.
 - `evals/` + `agent-factory/run_evals.py` — golden cases for roles (opt-in, capped, tool-less runs; `--validate` runs in the gate). See `evals/README.md`.
+- `scripts/run-record.sh` — appends one JSON line per agent run to a local private log (`${GRID_RUN_LOG:-~/.grid/runs.jsonl}`); `docs/agent-retro.md` is the review loop that starts from it.
 - `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
 - `TODO.md` — current outstanding work.
