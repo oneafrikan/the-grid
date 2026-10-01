@@ -2,7 +2,7 @@
 # gate.sh — the commit gate: everything that must be true before a commit lands.
 #
 # Checks (each runs even if an earlier one fails; one PASS/FAIL summary at the end):
-#   shellcheck   warnings and errors in scripts/ and .githooks/
+#   lint         shellcheck warnings and errors in scripts/ and .githooks/
 #   catalog      SKILLS.md is current           (catalog.sh --check)
 #   compose      composed agent output is current for every public project
 #                (compose.py --check; skipped with a notice if the venv is absent)
@@ -39,6 +39,11 @@ if [ "${1:-}" = "--pre-commit" ] && ! git diff --quiet; then
   echo "      git stash push --keep-index" >&2
   exit 1
 fi
+
+# git exports GIT_INDEX_FILE / GIT_DIR into hooks; inherited, they make the git
+# calls the checks run inside submodules (catalog's tracked-file discovery) look
+# at the parent repo's index and fail. The checks must see a plain environment.
+unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_PREFIX GIT_EXEC_PATH
 
 FAILED=()
 # check <name> <cmd...> — run, print status, remember failures.
