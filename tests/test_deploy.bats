@@ -164,7 +164,7 @@ teardown() {
 
 @test "deployed files are world-readable (0644), not mkstemp's 0600" {
   "$PY" "$DEPLOY" "$PROJ" --roles sdet
-  [ "$(stat -f %Lp "$PROJ/.claude/agents/grid-sdet.md" 2>/dev/null || stat -c %a "$PROJ/.claude/agents/grid-sdet.md")" = "644" ]
+  [ "$(stat -c %a "$PROJ/.claude/agents/grid-sdet.md" 2>/dev/null || stat -f %Lp "$PROJ/.claude/agents/grid-sdet.md")" = "644" ]
 }
 
 @test "a symlinked grid-* skill dir cannot redirect writes outside the project" {
