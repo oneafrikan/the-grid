@@ -20,3 +20,6 @@ LOGS
 baseline-submodules.txt
 machines/*.txt
 !machines/example.txt
+
+# wire.sh audit trail — per-machine state
+.wired.manifest

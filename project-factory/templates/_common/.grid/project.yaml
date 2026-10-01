@@ -1,0 +1,19 @@
+# .grid/project.yaml — project facts for grid agents deployed into this repo.
+#
+# `agent-factory/deploy.py <this-repo> --roles ...` injects these into every
+# deployed agent as a "Project context" section. Keep it to FACTS an agent
+# can't get from the role itself: real paths, real commands, hard invariants,
+# and what exists vs. what is only planned. See AGENTS-SETUP.md.
+#
+# Everything is optional; this file as shipped (all comments) is valid.
+
+# context: |
+#   - Run the app:      <command>
+#   - Run the tests:    <command>   (state which suites exist and which are NOT in the pre-commit hook)
+#   - Hard invariants:  <e.g. never call the real model API in tests; logs carry ids/codes, never user content>
+#   - Hand-synced mirrors (change both sides together): <fileA> <-> <fileB>
+#   - Exists vs planned: <e.g. "CI: not yet", "eval harness: tooling only, no labelled set">
+
+# roles:                       # extra facts for one deployed role only
+#   sdet: |
+#     - Test suites live in <path>; fixtures in <path>.

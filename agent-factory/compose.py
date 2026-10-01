@@ -271,13 +271,7 @@ def load_config(path: Path) -> dict:
         if not role:
             errors.append(f"{where}: missing required key: role")
         else:
-            rdir = role_dir(role)
-            if not rdir.is_dir():
-                errors.append(f"{where}: role '{role}' has no dir at {rdir}")
-            else:
-                for required in REQUIRED_ROLE_FILES:
-                    if not (rdir / required).is_file():
-                        errors.append(f"{where}: role '{role}' is missing {required}")
+            errors.extend(f"{where}: {p}" for p in lint_role(role))
 
         for stack in agent.get("stacks", []) or []:
             if not (STACKS_DIR / stack).is_dir():
@@ -542,7 +536,67 @@ def _flattened_identity(agent: dict, slug: str | None = None) -> str:
     return "\n\n---\n\n".join(strip_html_comments(rendered[fn]) for fn in FLATTEN_ORDER)
 
 
-def emit_cc_subagent(agent: dict, slug: str) -> tuple[str, str]:
+# ── lean profile ──────────────────────────────────────────────────────────────
+# One source, two renderings. "full" is the flattened five-file identity (persona,
+# memory seed, boot sequence). "lean" is a deterministic selection from the SAME
+# role files — no second copy of anything to drift:
+#   keep  SOUL.md (role layer only): role identity, decision-making, escalation
+#         rules, "What the X is NOT"            — the role's judgement and lane
+#   keep  AGENTS.md (role layer only): every section — scope, receiving work,
+#         routing, and any hard rules / ranked priorities the role defines
+#   keep  SKILL.md — the operating procedure (the actual job)
+#   keep  project context, if the deploy supplies one
+#   drop  _core base scaffolding, IDENTITY nameplate, USER, MEMORY seed, boot
+#         sequence, signal-file handoff protocol (runtime plumbing a one-project
+#         Claude Code session does not use)
+PROFILES = ("full", "lean")
+
+
+def _soul_keep(heading: str) -> bool:
+    """Is this SOUL.md '## ' heading part of the lean cut? Matches on the name
+    with any trailing '(role layer)' qualifier removed."""
+    h = re.sub(r"\s*\(.*?\)\s*$", "", heading[3:].strip()).lower()
+    return h in ("role identity", "decision-making", "escalation rules") or (
+        h.startswith("what ") and h.endswith(" is not")
+    )
+
+
+def render_lean_body(agent: dict, slug: str, project_context: str = "") -> str:
+    """The lean system-prompt body for one agent (no frontmatter)."""
+    role = agent["role"]
+    title = role_meta(role).get("title") or role
+    rdir = role_dir(role)
+
+    parts = [f"You are the **{title}**. {role_summary(role)}"]
+
+    _, soul_secs = split_sections(strip_html_comments(_read(rdir / "SOUL.md")))
+    parts += [f"{h}\n{b.strip()}" for h, b in soul_secs if _soul_keep(h)]
+
+    agents_path = rdir / "AGENTS.md"
+    if agents_path.is_file():
+        agents_md = inject_roster(strip_html_comments(_read(agents_path)), agent, slug=slug)
+        _, agent_secs = split_sections(agents_md)
+        parts += [f"{h}\n{b.strip()}" for h, b in agent_secs]
+    overlay = render_stack_overlay(agent.get("stacks", []) or []).strip()
+    if overlay:
+        parts.append(overlay)
+
+    parts.append(
+        "## Hand-offs in this project\n\n"
+        "Role names in routing tables and escalation rules above are grid agents, "
+        "deployed here as `grid-<role>`. If the agent you would route to is not "
+        "available in this project, tell the user which role should take the work "
+        "instead of improvising it. Signal-file hand-offs (`signals/`) do not apply."
+    )
+    if project_context.strip():
+        parts.append("## Project context\n\n" + project_context.strip())
+
+    parts.append("## Operating procedure\n\n" + strip_html_comments(_read(rdir / "SKILL.md")))
+    return "\n\n".join(parts) + "\n"
+
+
+def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
+                     project_context: str = "") -> tuple[str, str]:
     """A specialist role → one Claude Code subagent `.md` (spawnable).
 
     Frontmatter (name/description/model) + a body that adopts the flattened
@@ -561,22 +615,27 @@ def emit_cc_subagent(agent: dict, slug: str) -> tuple[str, str]:
                        f"Use this subagent for {role} work.",
         "model": resolve_model(agent),
     }
+    if profile == "lean":
+        return f"{slugged_name}.md", _frontmatter(fields) + "\n" + render_lean_body(agent, slug, project_context)
     procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
     bolt_ons = (
         f"\n\nAdditional skills available to you: {', '.join(skills[1:])}."
         if len(skills) > 1 else ""
     )
+    context = f"## Project context\n\n{project_context.strip()}\n\n---\n\n" if project_context.strip() else ""
     body = (
         f"You are the **{title}**, a specialist agent on a composed dev team. "
         f"Adopt the identity, behaviour, and operating rules below as your own.\n\n"
         f"{_flattened_identity(agent, slug=slug)}\n\n---\n\n"
+        f"{context}"
         f"## Operating procedure\n\n"
         f"{procedure}{bolt_ons}\n"
     )
     return f"{slugged_name}.md", _frontmatter(fields) + "\n" + body
 
 
-def emit_cc_skill(agent: dict, slug: str) -> dict[str, str]:
+def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
+                  project_context: str = "") -> dict[str, str]:
     """An orchestrator role → a Claude Code skill folder (transforms the session).
 
     SKILL.md = frontmatter + a "become the <role>" boot body + the flattened
@@ -595,7 +654,17 @@ def emit_cc_skill(agent: dict, slug: str) -> dict[str, str]:
         "description": f"{title} orchestrator. {role_summary(role)} "
                        f"Invoke with /{slugged_name} or when coordinating a multi-step dev-team feature.",
     }
+    if profile == "lean":
+        body = (
+            f"# {title}\n\n"
+            f"When this skill is invoked, **become the {title}**: follow the role "
+            f"and operating procedure below. This transforms the current session "
+            f"into the {title} orchestrator.\n\n"
+            f"{render_lean_body(agent, slug, project_context)}"
+        )
+        return {"SKILL.md": _frontmatter(fields) + "\n" + body}
     procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
+    context = f"## Project context\n\n{project_context.strip()}\n\n---\n\n" if project_context.strip() else ""
     body = (
         f"# {title}\n\n"
         f"When this skill is invoked, **become the {title}**: adopt the identity, "
@@ -603,7 +672,7 @@ def emit_cc_skill(agent: dict, slug: str) -> dict[str, str]:
         f"This transforms the current session into the {title} orchestrator.\n\n"
         f"## Boot — adopt this identity\n\n"
         f"{_flattened_identity(agent, slug=slug)}\n\n"
-        f"---\n\n## Operating procedure\n\n"
+        f"---\n\n{context}## Operating procedure\n\n"
         f"{procedure}\n"
     )
     return {"SKILL.md": _frontmatter(fields) + "\n" + body}
@@ -897,11 +966,101 @@ def write_project(name: str, config: dict, out_dir: Path) -> Path:
     return project_dir
 
 
+# ── role lint ─────────────────────────────────────────────────────────────────
+# Fail-closed validation of a role's source files, independent of any compose
+# config. Every finding carries a stable code so tests (and humans grepping CI
+# output) can match the exact failure mode, and every finding names the file.
+ROLE_YAML_KEYS = {"name", "title", "summary", "owns", "default_model", "cron_model",
+                  "base_skills", "orchestrator"}
+ROLE_MODELS = {"opus", "sonnet", "haiku", "fable"}
+
+
+def lint_role(role: str) -> list[str]:
+    """All problems with one role's source files, as 'CODE: role/file: detail'."""
+    rdir = role_dir(role)
+    if not rdir.is_dir():
+        return [f"E_ROLE_MISSING: {role}: no directory at {rdir}"]
+    out: list[str] = []
+
+    def bad(code: str, fname: str, detail: str) -> None:
+        out.append(f"{code}: {role}/{fname}: {detail}")
+
+    for fname in REQUIRED_ROLE_FILES:
+        f = rdir / fname
+        if not f.is_file():
+            bad("E_FILE_MISSING", fname, "required file absent")
+        elif not f.read_text(encoding="utf-8").strip():
+            bad("E_FILE_EMPTY", fname, "required file is empty")
+
+    ry = rdir / "role.yaml"
+    if not ry.is_file():
+        bad("E_YAML_MISSING", "role.yaml", "required file absent")
+    else:
+        try:
+            meta = yaml.safe_load(ry.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as exc:
+            bad("E_YAML_PARSE", "role.yaml", str(exc).splitlines()[0])
+            meta = None
+        if meta is not None and not isinstance(meta, dict):
+            bad("E_YAML_SHAPE", "role.yaml", "must be a mapping")
+        elif meta is not None:
+            if meta.get("name") != role:
+                bad("E_NAME_MISMATCH", "role.yaml", f"name {meta.get('name')!r} != directory {role!r}")
+            for key in ("title", "summary"):
+                if not str(meta.get(key) or "").strip():
+                    bad("E_FIELD_MISSING", "role.yaml", f"'{key}' is required")
+            for key in sorted(set(meta) - ROLE_YAML_KEYS):
+                bad("E_FIELD_UNKNOWN", "role.yaml", f"unknown key '{key}' (typo?)")
+            for key in ("default_model", "cron_model"):
+                if key in meta and meta[key] not in ROLE_MODELS:
+                    bad("E_MODEL_INVALID", "role.yaml", f"{key} {meta[key]!r} not in {sorted(ROLE_MODELS)}")
+            if not isinstance(meta.get("orchestrator", False), bool):
+                bad("E_FIELD_TYPE", "role.yaml", "'orchestrator' must be true/false")
+            if not isinstance(meta.get("base_skills", []) or [], list):
+                bad("E_FIELD_TYPE", "role.yaml", "'base_skills' must be a list")
+
+    # Unresolved {{TOKENS}}: only AGENTS.md may carry the roster slot.
+    for f in sorted(rdir.glob("*.md")):
+        for tok in sorted(set(re.findall(r"\{\{[A-Za-z_]+\}\}", strip_html_comments(f.read_text(encoding="utf-8"))))):
+            if not (f.name == "AGENTS.md" and tok == "{{ROSTER_TABLE}}"):
+                bad("E_TOKEN_UNRESOLVED", f.name, f"unresolved placeholder {tok}")
+    return out
+
+
+def all_roles() -> list[str]:
+    """Every role dir name visible to the factory (private tree merged over public)."""
+    # Dirs starting with '_' or '.' (e.g. roles/_retired/) are an archive: kept for
+    # history and rollback, never linted, composed or deployed.
+    def live(root: Path) -> set[str]:
+        return {d.name for d in root.iterdir() if d.is_dir() and not d.name.startswith(("_", "."))}
+    names = live(ROLES_DIR)
+    if PRIVATE_ROLES_DIR and PRIVATE_ROLES_DIR.is_dir():
+        names |= live(PRIVATE_ROLES_DIR)
+    return sorted(names)
+
+
+# ── drift check ───────────────────────────────────────────────────────────────
+def _tree(root: Path) -> dict[str, bytes]:
+    """{relative path: bytes} for every file under root ({} if root is absent)."""
+    if not root.is_dir():
+        return {}
+    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def diff_trees(expected: Path, actual: Path) -> list[str]:
+    """Human-readable differences between a freshly rendered tree and the one on disk."""
+    exp, act = _tree(expected), _tree(actual)
+    problems = [f"missing   {rel}" for rel in sorted(exp.keys() - act.keys())]
+    problems += [f"unexpected {rel}" for rel in sorted(act.keys() - exp.keys())]
+    problems += [f"stale     {rel}" for rel in sorted(exp.keys() & act.keys()) if exp[rel] != act[rel]]
+    return problems
+
+
 # ── cli ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compose an AI dev-team agent.")
-    parser.add_argument("config", type=Path, help="path to the compose config yaml")
+    parser.add_argument("config", type=Path, nargs="?", help="path to the compose config yaml")
     parser.add_argument("--out", type=Path, default=PROJECTS_DIR, help="output dir")
     parser.add_argument(
         "--target",
@@ -914,10 +1073,29 @@ def main() -> None:
              "5 orchestrator roles (whichever are present in this config)",
     )
     parser.add_argument(
+        "--lint-roles", action="store_true",
+        help="lint every role's source files (config argument is ignored); "
+             "exit 1 if any role is malformed",
+    )
+    parser.add_argument(
+        "--check", action="store_true",
+        help="render into a temp dir and diff against what is on disk; write nothing, "
+             "exit 1 if the composed output is missing or stale",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="render + report what would be written, but write nothing",
     )
     args = parser.parse_args()
+
+    if args.lint_roles:
+        problems = [p for r in all_roles() for p in lint_role(r)]
+        for p in problems:
+            print(p, file=sys.stderr)
+        print(f"lint-roles: {len(all_roles())} roles, {len(problems)} problem(s)")
+        sys.exit(1 if problems else 0)
+    if args.config is None:
+        parser.error("config is required (unless --lint-roles)")
 
     try:
         config = load_config(args.config)
@@ -926,6 +1104,25 @@ def main() -> None:
 
     name = config["project"]
     agents = config["agents"]
+
+    if args.check:
+        import tempfile
+        writers = {
+            "claude-code": write_claude_code, "paperclip": write_paperclip,
+            "openclaw-native": write_openclaw, "openclaw": write_project,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            rendered = writers[args.target](name, config, Path(tmp))
+            on_disk = args.out / rendered.relative_to(tmp)
+            problems = diff_trees(rendered, on_disk)
+        if problems:
+            print(f"STALE '{name}' ({args.target}): {on_disk}", file=sys.stderr)
+            for line in problems:
+                print(f"  {line}", file=sys.stderr)
+            print("  fix: re-run compose.py without --check", file=sys.stderr)
+            sys.exit(1)
+        print(f"up to date '{name}' ({args.target})")
+        return
 
     if args.dry_run:
         slug = config.get("slug") or name
