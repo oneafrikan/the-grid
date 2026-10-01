@@ -10,6 +10,7 @@
 # Usage:
 #   bash catalog.sh            # write SKILLS.md in the repo root
 #   bash catalog.sh /tmp/x.md  # write somewhere else (used by tests)
+#   bash catalog.sh --check    # write nothing; exit 1 if SKILLS.md is stale
 #
 # Re-run after adding, editing, or updating skills — same idea as wire.sh.
 
@@ -20,7 +21,16 @@ GRID_DIR="${GRID_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # find_skill_mds: tracked-only SKILL.md discovery, shared with wire.sh.
 # shellcheck source=lib/find-skill-mds.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/find-skill-mds.sh"
-OUT="${1:-$GRID_DIR/SKILLS.md}"
+# --check: render to a temp file and diff against the committed SKILLS.md
+# instead of overwriting it. Read-only drift detector for hooks / CI.
+CHECK=0
+if [ "${1:-}" = "--check" ]; then
+  CHECK=1
+  OUT="$(mktemp)"
+  trap 'rm -f "$OUT"' EXIT
+else
+  OUT="${1:-$GRID_DIR/SKILLS.md}"
+fi
 
 # --- Parse one SKILL.md → prints "name<TAB>summary" ------------------------
 # Handles inline, quoted, folded (>) and block (|) YAML scalars for the
@@ -273,5 +283,14 @@ total=$((wired_live + library_skill_count))
     printf '\n'
   fi
 } > "$OUT"
+
+if [ "$CHECK" = 1 ]; then
+  if diff -u "$GRID_DIR/SKILLS.md" "$OUT" >&2; then
+    echo "SKILLS.md is up to date ($total skills)."
+    exit 0
+  fi
+  echo "SKILLS.md is stale — run: bash scripts/catalog.sh" >&2
+  exit 1
+fi
 
 echo "Wrote $OUT ($total skills)."
