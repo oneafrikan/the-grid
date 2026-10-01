@@ -30,7 +30,10 @@ handoff shape regardless of stack. That shape lives once, in
 - `CONTEXT.md` — domain glossary and architecture decisions.
 - `LEARNINGS.md` — empty ledger; target for the `mine-learnings` skill.
 - `SPECS.md` — the OpenSpec convention (see below).
-- `handoffs/` — dated handoff+context docs between agent sessions.
+- `handoffs/` — dated handoff+context docs between agent sessions (`TEMPLATE.md` is the format).
+- `AGENTS-SETUP.md` — optional: how to deploy a lean set of grid agents into the
+  project (`agent-factory/deploy.py`) and the CLAUDE.md block to adopt.
+- `.grid/project.yaml` — commented skeleton for the project facts those agents get.
 - `prompts/autonomous-coding-loop.template.md` — the pre-flight/`{{VERIFY_CMD}}`
   gap `issue-loop` leaves to the project.
 
