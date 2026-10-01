@@ -18,18 +18,20 @@ have their own shapes; this guide does not change them.
 - Lean deploys keep every `AGENTS.md` section and `SOUL.md`'s Role identity,
   Decision-making, Escalation rules and "What the X is NOT". Those must stand alone.
 
-## The contract (what lint will eventually enforce)
+## The contract (`compose.py --lint-roles` enforces this for roles in `authored-roles.txt`)
 
-`AGENTS.md` must contain, in this order, after the title:
+`AGENTS.md` must contain these sections after the title (lint checks presence, not order;
+use this order by convention):
 
 1. `## Scope` — what the role owns, in 3–6 lines, plus the routing table
    (`Need | Route to`). Draw lanes by **which artifact the role owns**, not by title.
-2. `## What to get right hardest` — a **ranked numbered list, 4–6 items**. Rank 1 is
+2. `## What to get right hardest` (or `What to <verb> hardest`, e.g. `What to test hardest`) — a **ranked numbered list, 4–6 items** (lint enforces ≥ 4). Rank 1 is
    the failure that costs most when wrong *for this role*. Each item is concrete
    ("contract shape agreed before the client builds against it"), never a virtue
    ("quality", "attention to detail").
 3. `## Hard rules` — **imperatives**, one per line, each checkable by someone reading
-   the output. Every role gets the shared four below, plus 3–6 role-specific ones.
+   the output. Every role gets the shared four below, plus 3–6 role-specific ones
+   (lint enforces ≥ 4 rules; the shared-four wording and the upper bounds are convention).
 4. `## Receiving work` — keep what exists; add what the role must have before starting
    and what the hand-off must contain.
 
@@ -64,6 +66,11 @@ have their own shapes; this guide does not change them.
   says so.
 
 ## Size
+
+Enforced: `AGENTS.md` ≤ 4096 bytes. Convention: `SOUL.md` does not grow.
+
+Roles enrolled in `authored-roles.txt` that were written to this contract from the start
+(sdet, fullstack-engineer, prompt-engineer, ai-engineer, technical-writer) needed no pass.
 
 `AGENTS.md` ≤ 4 KB after the pass. `SOUL.md` does not grow. If a role cannot meet
 the contract without exceeding that, the role is two roles — flag it, don't cram.
