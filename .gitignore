@@ -23,3 +23,6 @@ machines/*.txt
 
 # wire.sh audit trail — per-machine state
 .wired.manifest
+
+# Golden-case results are per-run local output (agent-factory/run_evals.py); never committed.
+evals/results/
