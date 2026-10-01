@@ -35,7 +35,7 @@ scout for skills worth promoting to wired:
 - **repos/voltagent**, **repos/sjkncs**, **repos/hesamsheikh** — awesome-list
   indexes (markdown link lists, often `categories/*.md`), pointing at clawskills.sh
   etc. **Not install-ranked** — browse-by-topic.
-- **repos/leoyeai**, **repos/clawhub**, and the rest of the library tier — actual
+- **repos/clawhub** and the rest of the library tier — actual
   `SKILL.md` collections (sometimes 1000s). Grep their frontmatter locally for
   topics, then dedupe against what's already wired.
 - Keep any of them fresh with `git submodule update --remote repos/<name>` before
