@@ -1,0 +1,23 @@
+# Roles that have been through the authoring pass (docs/role-authoring.md).
+# compose.py --lint-roles holds each one to the contract. One role per line.
+qa-engineer
+backend-dev
+sdet
+fullstack-engineer
+prompt-engineer
+ai-engineer
+technical-writer
+frontend-dev
+designer
+devops
+security-reviewer
+data-engineer
+data-scientist
+data-analyst
+product-manager
+project-manager
+copywriter
+ad-copy
+seo
+paid-search
+paid-social

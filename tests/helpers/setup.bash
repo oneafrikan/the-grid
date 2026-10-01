@@ -17,6 +17,9 @@ common_setup() {
   # forgets an inline override cannot reach the real ~/.claude, then refuse to
   # run at all if either target still resolves into it.
   export SKILLS_DIR="$MOCK_SKILLS"
+  # Likewise isolate from the real private roles (~/.the-grid-private/roles is picked
+  # up by default); an EMPTY value disables the fallback. Tests inject their own.
+  export GRID_PRIVATE_ROLES_DIR=
   assert_sandboxed
 }
 
@@ -36,7 +39,7 @@ assert_sandboxed() {
 
 common_teardown() {
   rm -rf "$MOCK_GRID" "$MOCK_SKILLS" "$OTHER_DIR" "$MOCK_AGENTS"
-  unset AGENTS_DIR SKILLS_DIR
+  unset AGENTS_DIR SKILLS_DIR GRID_PRIVATE_ROLES_DIR
 }
 
 # Write a minimal valid skill dir to a given path
