@@ -47,7 +47,7 @@ A sample across domains:
 
 Composed agent teams (built by `agent-factory/`, invoked as slash commands or
 delegated subagents): **`core`** — cross-desk infra (issue triage, a librarian,
-a general researcher, a platform engineer); **`grid`** — a full dev team, three orchestrators
+a general researcher, a platform engineer); **`grid`** — a dev-team roster (not yet benchmarked), three orchestrators
 (`/grid-tech-lead`, `/grid-ceo-orchestrator`, `/grid-growth-hacker`) delegating
 to specialists like backend-dev, security-reviewer, qa-engineer, and
 data-scientist; **`finance-desk`** — a personal-finance pipeline. Compose your
