@@ -117,8 +117,11 @@ def split_sections(md: str) -> tuple[str, list[tuple[str, str]]]:
     preamble: list[str] = []
     sections: list[list] = []  # [[heading, [body lines]], ...]
     current: list | None = None
+    in_fence = False
     for line in md.splitlines():
-        if line.startswith("## "):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence      # a '## ' inside a code fence is content, not a heading
+        if line.startswith("## ") and not in_fence:
             current = [line, []]
             sections.append(current)
         elif current is None:
@@ -567,8 +570,33 @@ def _soul_keep(heading: str) -> bool:
     )
 
 
-def render_lean_body(agent: dict, slug: str, project_context: str = "") -> str:
-    """The lean system-prompt body for one agent (no frontmatter)."""
+REFERENCE_HEADING_RE = re.compile(r"template|checklist", re.I)
+REFERENCE_REL = ".claude/grid-reference/{name}.md"     # where deploy.py writes it, per agent name
+
+
+def split_skill_reference(skill_md: str) -> tuple[str, str]:
+    """(procedure, reference) from a role's SKILL.md. Reference = the '## ' sections
+    whose heading says template/checklist: fill-in artefacts the agent needs at one
+    step, not in every prompt. Everything else (the procedure) stays inline. Code
+    fences are respected, so a '## ' inside a template block is not a split point."""
+    pre, secs = split_sections(strip_html_comments(skill_md))
+    keep = [pre.rstrip()] if pre.strip() else []
+    ref: list[str] = []
+    for heading, body in secs:
+        block = heading + ("\n" + body.rstrip() if body.strip() else "")
+        (ref if REFERENCE_HEADING_RE.search(heading) else keep).append(block)
+    return "\n\n".join(keep) + "\n", ("\n\n".join(ref) + "\n" if ref else "")
+
+
+def lean_reference(role: str) -> str:
+    """The reference file body for a role's lean deploy ('' if it has none)."""
+    return split_skill_reference(_read(role_dir(role) / "SKILL.md"))[1]
+
+
+def render_lean_body(agent: dict, slug: str, project_context: str = "", reference_path: str = "") -> str:
+    """The lean system-prompt body for one agent (no frontmatter). When reference_path
+    is given, the SKILL's template/checklist sections are NOT inlined — they live in
+    that file (written by deploy.py) and the prompt points at it."""
     role = agent["role"]
     title = role_meta(role).get("title") or role
     rdir = role_dir(role)
@@ -597,12 +625,21 @@ def render_lean_body(agent: dict, slug: str, project_context: str = "") -> str:
     if project_context.strip():
         parts.append("## Project context\n\n" + project_context.strip())
 
-    parts.append("## Operating procedure\n\n" + strip_html_comments(_read(rdir / "SKILL.md")))
+    skill = _read(rdir / "SKILL.md")
+    if reference_path and lean_reference(role):
+        procedure, _ = split_skill_reference(skill)
+        procedure = procedure.rstrip() + (
+            f"\n\n## Reference material\n\nThe templates and checklists for this procedure are in "
+            f"`{reference_path}`. Read that file when a step calls for one; do not work from memory."
+        )
+    else:
+        procedure = strip_html_comments(skill)
+    parts.append("## Operating procedure\n\n" + procedure)
     return "\n\n".join(parts) + "\n"
 
 
 def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
-                     project_context: str = "") -> tuple[str, str]:
+                     project_context: str = "", reference_path: str = "") -> tuple[str, str]:
     """A specialist role → one Claude Code subagent `.md` (spawnable).
 
     Frontmatter (name/description/model) + a body that adopts the flattened
@@ -622,7 +659,7 @@ def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
         "model": resolve_model(agent),
     }
     if profile == "lean":
-        return f"{slugged_name}.md", _frontmatter(fields) + "\n" + render_lean_body(agent, slug, project_context)
+        return f"{slugged_name}.md", _frontmatter(fields) + "\n" + render_lean_body(agent, slug, project_context, reference_path)
     procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
     bolt_ons = (
         f"\n\nAdditional skills available to you: {', '.join(skills[1:])}."
@@ -641,7 +678,7 @@ def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
 
 
 def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
-                  project_context: str = "") -> dict[str, str]:
+                  project_context: str = "", reference_path: str = "") -> dict[str, str]:
     """An orchestrator role → a Claude Code skill folder (transforms the session).
 
     SKILL.md = frontmatter + a "become the <role>" boot body + the flattened
@@ -666,7 +703,7 @@ def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
             f"When this skill is invoked, **become the {title}**: follow the role "
             f"and operating procedure below. This transforms the current session "
             f"into the {title} orchestrator.\n\n"
-            f"{render_lean_body(agent, slug, project_context)}"
+            f"{render_lean_body(agent, slug, project_context, reference_path)}"
         )
         return {"SKILL.md": _frontmatter(fields) + "\n" + body}
     procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))

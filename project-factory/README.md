@@ -34,6 +34,8 @@ handoff shape regardless of stack. That shape lives once, in
 - `AGENTS-SETUP.md` — optional: how to deploy a lean set of grid agents into the
   project (`agent-factory/deploy.py`) and the CLAUDE.md block to adopt.
 - `.grid/project.yaml` — commented skeleton for the project facts those agents get.
+- `.claude/skills/project-review/SKILL.md` — a project-aware review skill seed: generic
+  correctness + invariants passes, with this repo's own invariants left as `<fill>` markers.
 - `prompts/autonomous-coding-loop.template.md` — the pre-flight/`{{VERIFY_CMD}}`
   gap `issue-loop` leaves to the project.
 
