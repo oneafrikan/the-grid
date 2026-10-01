@@ -1,0 +1,12 @@
+# role.yaml — fullstack-engineer
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md (+ identity layers) beside it carry the actual content.
+name: fullstack-engineer
+title: Fullstack Engineer   # human-readable role for IDENTITY.md nameplate
+default_model: sonnet
+summary: >-
+  Builds vertical slices across client and server in one pass (UI, API
+  endpoint, application-level data access) and keeps the shared contract in sync.
+owns: thin end-to-end feature slices and the client/server contract between them
+base_skills: []
+orchestrator: false

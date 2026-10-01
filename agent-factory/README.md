@@ -223,7 +223,7 @@ independently and are gated independently:
 
 | Config | Roles | Shape |
 |---|---|---|
-| `examples/grid.yaml` | 19 | 3 orchestrators (`ceo-orchestrator`, `tech-lead`, `growth-hacker`) + 16 specialists — the dev team |
+| `examples/grid.yaml` | 24 | 3 orchestrators (`ceo-orchestrator`, `tech-lead`, `growth-hacker`) + 21 specialists — the dev team |
 | `examples/finance-desk.yaml` | 6 | `finance-manager` → sentinel/analyst/strategist/risk-officer/scribe. Standalone: deliberately not in anyone's `delegates_to` |
 | `examples/core.yaml` | 4 | `gh-triage`, `librarian`, `researcher`, `platform-engineer` — cross-desk infra, no delegation chain, meant to stay wired everywhere |
 
@@ -263,3 +263,11 @@ per-machine overlay control which composed projects `wire.sh` links. With no
 - `compose.py` is a multi-target compiler: one 5-file source → OpenClaw agent
   (near-native), Claude Code subagent (flattened `.md`), or Claude Code skill
   (boots via the AGENTS.md sequence).
+
+## Profiles and per-project deploy
+
+`compose.py` renders **full** agents (persona, memory seed, boot sequence). `deploy.py`
+renders **lean** ones by default — a deterministic selection from the same role files — and
+writes them into a chosen project's `.claude/`. See the "Drift checks, the commit gate, and
+per-project agents" section of the repo `CLAUDE.md`. `compose.py --lint-roles` and
+`--check` keep roles and composed output honest.
