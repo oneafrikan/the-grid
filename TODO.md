@@ -96,6 +96,7 @@ full-roster port) and chunked into single-session specialist work:
 
 ## Status: Done (history — not a tracker)
 
+- [x] 2026-10-01 call-scoring patterns: `--check` drift detectors (catalog/wire/compose), `compose.py --lint-roles` (stable E_* codes), commit gate (`scripts/gate.sh` + `.githooks/pre-commit`), test sandbox tripwire, `.wired.manifest`, lean profile + `agent-factory/deploy.py` (per-project agent deploy), 5 new roles (fullstack-engineer, prompt-engineer, ai-engineer, sdet, technical-writer), project-factory agent setup + handoff template. Reviewed by grid qa/security/platform/technical-writer/sdet agents. **Rollout:** other machines need pull → recompose grid → wire.
 - [x] Write README.md and CLAUDE.md
 - [x] Audit and scrub repo for personal info before going public
 - [x] Restructure into `skills/`, `agents/`, `machines/`, `scripts/`

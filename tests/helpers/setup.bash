@@ -13,11 +13,30 @@ common_setup() {
   # even though test lines only set GRID_DIR/SKILLS_DIR inline.
   MOCK_AGENTS=$(mktemp -d)
   export AGENTS_DIR="$MOCK_AGENTS"
+  # Isolation tripwire: default every target dir to a sandbox so a test that
+  # forgets an inline override cannot reach the real ~/.claude, then refuse to
+  # run at all if either target still resolves into it.
+  export SKILLS_DIR="$MOCK_SKILLS"
+  assert_sandboxed
+}
+
+# Abort the test (loudly) if a wire/catalog target points at the real ~/.claude.
+assert_sandboxed() {
+  local real d
+  real="${REAL_HOME:-$HOME}/.claude"
+  # Resolve symlinks on both sides (macOS /var -> /private/var) so spelling can't dodge the guard.
+  real="$(cd "$real" 2>/dev/null && pwd -P || echo "$real")"
+  for d in "${SKILLS_DIR:-}" "${AGENTS_DIR:-}"; do
+    [ -n "$d" ] || continue
+    case "$(cd "$d" 2>/dev/null && pwd -P)" in
+      "$real"|"$real"/*) echo "REFUSING: test target $d is inside the real $real" >&2; return 1 ;;
+    esac
+  done
 }
 
 common_teardown() {
   rm -rf "$MOCK_GRID" "$MOCK_SKILLS" "$OTHER_DIR" "$MOCK_AGENTS"
-  unset AGENTS_DIR
+  unset AGENTS_DIR SKILLS_DIR
 }
 
 # Write a minimal valid skill dir to a given path

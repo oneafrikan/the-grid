@@ -137,6 +137,25 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 4. Refresh skills (and agents, and `SKILLS.md`) in one go: `bash scripts/wire.sh`.
    Always safe to run, always run it last.
 
+## Drift checks, the commit gate, and per-project agents
+
+- `scripts/gate.sh` — commit gate; `.githooks/pre-commit` delegates to it and it
+  self-installs `core.hooksPath` on first run. `--pre-commit` aborts on unstaged
+  changes. `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
+- Read-only drift detectors (exit 1 on drift, write nothing): `catalog.sh --check`,
+  `wire.sh --check`, `agent-factory/compose.py <cfg> --target claude-code --check`,
+  `compose.py --lint-roles` (every role; stable `E_*` codes; `roles/_retired/` is an
+  archive that is never linted/composed/deployed).
+- `wire.sh` writes `.wired.manifest` (gitignored; kind/name/target/status/reason) —
+  rewritten only when it changes.
+- **Per-project agents:** `agent-factory/deploy.py <project> --roles a,b [--profile lean|full]`
+  writes `grid-<role>` agents/skills into `<project>/.claude/` from the same role
+  sources (lean = role judgement + scope + procedure, no persona/memory/boot
+  sequence). Project facts come from `<project>/.grid/project.yaml`, never from the
+  grid. Generated files carry a marker; hand-written files are never overwritten;
+  `.claude/grid-agents.lock` records roles/profile/hashes; `--check` reports drift.
+  Seeded into new projects by project-factory (`AGENTS-SETUP.md`, `.grid/project.yaml`).
+
 ## Adding a skill
 
 Create a directory at the repo root with a `SKILL.md` inside it. Frontmatter requires `name:` and `description:`. Then run `bash scripts/wire.sh`.
@@ -196,7 +215,7 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 40 tests must stay green. Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`.
+All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint + `compose.py --check`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`.
 
 ## wire.sh contract
 
@@ -251,8 +270,8 @@ is symmetric and loud: a token with no `delegates_to` (or vice-versa), or a dele
 on the team, is a hard compose error — so a roster can never silently drift out of sync
 with the team. grid topology: `ceo → tech-lead, product-manager, growth-hacker`;
 `tech-lead → eng + data`; `growth-hacker → the marketing arm` (a player-coach
-orchestrator). `examples/grid.yaml` is the **dev-team project** — 19 roles: 3
-orchestrators → CC skills, 16 specialists → CC subagents.
+orchestrator). `examples/grid.yaml` is the **dev-team project** — 24 roles: 3
+orchestrators → CC skills, 21 specialists → CC subagents.
 
 Two sibling public projects, same repo, composed and gated independently:
 `examples/finance-desk.yaml` — `finance-manager → the finance desk pipeline`
@@ -294,7 +313,7 @@ factory; what the-grid adds is two thin layers:
   per-project decision someone has to remember. It documents only; the CLI owns
   the `openspec/` tree it creates.
 - `agent-factory/_core/AGENTS_base.md` — a boot-sequence check for `SPECS.md` /
-  `openspec/`. One edit reaches all 29 composed agents across the three projects.
+  `openspec/`. One edit reaches all 34 composed agents across the three projects.
   Conditional: repos without the markers are untouched.
 
 `skills/spec-scout/` audits adoption and reports spec↔code drift (survey-only,
