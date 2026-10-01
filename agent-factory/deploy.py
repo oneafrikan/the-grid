@@ -149,7 +149,7 @@ def render_all(roles: list[str], profile: str, index: dict[str, dict],
 
 # ── lock file ─────────────────────────────────────────────────────────────────
 # Paths a lock may legitimately list: exactly what render_all produces.
-LOCK_PATH_RE = re.compile(r"^\.claude/(agents/grid-[a-z0-9-]+\.md|skills/grid-[a-z0-9-]+/SKILL\.md)$")
+LOCK_PATH_RE = re.compile(r"\.claude/(agents/grid-[a-z0-9-]+\.md|skills/grid-[a-z0-9-]+/SKILL\.md)")
 
 
 def read_lock(project: Path) -> dict | None:
@@ -158,6 +158,8 @@ def read_lock(project: Path) -> dict | None:
     path must match the exact shape deploy.py writes, so a tampered lock can
     never point stale-file removal outside <project>/.claude/{agents,skills}."""
     path = project / LOCK_REL
+    if path.is_symlink():
+        die(f"refusing: {path} is a symlink")
     if not path.is_file():
         return None
     try:
@@ -173,10 +175,25 @@ def read_lock(project: Path) -> dict | None:
         die(f"{path}: corrupt lock file (unknown profile {lock.get('profile')!r})")
     if not isinstance(files, dict):
         die(f"{path}: corrupt lock file ('files' must be an object)")
-    bad = [k for k in files if not (isinstance(k, str) and LOCK_PATH_RE.match(k))]
+    bad = [k for k in files if not (isinstance(k, str) and LOCK_PATH_RE.fullmatch(k))]
     if bad:
         die(f"{path}: refusing lock file with out-of-bounds path(s): {', '.join(map(repr, bad))}")
     return lock
+
+
+def assert_inside(project: Path, target: Path) -> None:
+    """Die if any existing component between <project> and <target> (target's own
+    name included) is a symlink. Called immediately before every write, unlink and
+    rmdir, so a symlinked grid-* skill dir committed into a repo can't redirect
+    them outside the project. (A racing local attacker could still swap a path
+    between this check and the syscall; that needs a concurrent process on the
+    same machine and is accepted.)"""
+    rel = target.relative_to(project)
+    cur = project
+    for part in rel.parts:
+        cur = cur / part
+        if cur.is_symlink():
+            die(f"refusing: {cur} is a symlink (would write/delete outside the project)")
 
 
 def check_no_symlinks(project: Path) -> None:
@@ -273,6 +290,8 @@ def main() -> None:
     stale = sorted(set(old_files) - set(files))
 
     # --- validate everything before touching anything -------------------------
+    for rel in list(files) + stale:
+        assert_inside(project, project / rel)       # before ANY write, so nothing is half-applied
     refused = [rel for rel in files if (project / rel).exists() and not is_generated(project / rel)]
     if refused:
         die("refusing to overwrite hand-written file(s) (no GENERATED marker):\n  "
@@ -320,20 +339,23 @@ def main() -> None:
     changed = 0
     for rel, txt in sorted(files.items()):
         p = project / rel
+        assert_inside(project, p)
         if p.exists() and p.read_text(encoding="utf-8") == txt:
             continue
         atomic_write(p, txt)
         changed += 1
     for rel in stale:
         p = project / rel
+        assert_inside(project, p)
         if p.exists() and is_generated(p):          # never delete a hand-edited file
             p.unlink()
             changed += 1
-            if p.parent.name.startswith(PREFIX + "-") and not any(p.parent.iterdir()):
+            if p.parent.name.startswith(PREFIX + "-") and not p.parent.is_symlink() and not any(p.parent.iterdir()):
                 p.parent.rmdir()
     # Rewrite the lock only when its content (ignoring the commit hash) changed,
     # so a no-op re-run leaves every byte untouched.
     if lock_drift:
+        assert_inside(project, lock_path)
         atomic_write(lock_path, new_lock)
         changed += 1
     print(f"deploy: {project}  profile={profile}  {len(files)} agent file(s), {changed} written.")
