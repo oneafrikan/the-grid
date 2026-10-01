@@ -17,6 +17,8 @@ Usage:
 What lands in <project-dir>:
     .claude/agents/grid-<role>.md          specialist roles (subagents)
     .claude/skills/grid-<role>/SKILL.md    orchestrator roles (skills)
+    .claude/grid-reference/grid-<role>.md  lean only: the SKILL's templates/checklists,
+                                           read on demand instead of riding in the prompt
     .claude/grid-agents.lock               JSON: profile, roles, per-file sha256,
                                            grid commit — makes re-runs auditable
 
@@ -138,18 +140,27 @@ def render_all(roles: list[str], profile: str, index: dict[str, dict],
             agent["delegates_to"] = [d for d in base["delegates_to"] if d in selected]
         ctx = "\n\n".join(x.strip() for x in (shared_ctx, role_ctx.get(role, "")) if x.strip())
         name = f"{PREFIX}-{role}"
+        # Lean: template/checklist sections of the SKILL move to a reference file the
+        # agent reads on demand, instead of riding in every prompt.
+        ref_text = compose.lean_reference(role) if profile == "lean" else ""
+        ref_rel = compose.REFERENCE_REL.format(name=name) if ref_text else ""
+        if ref_text:
+            title = compose.role_meta(role).get("title") or role
+            files[ref_rel] = MARKER + f"\n# Reference — {title}\n\nTemplates and checklists for the `{name}` procedure.\n\n" + ref_text
         if compose.is_orchestrator(role):
-            body = compose.emit_cc_skill(agent, PREFIX, profile, ctx)["SKILL.md"]
+            body = compose.emit_cc_skill(agent, PREFIX, profile, ctx, ref_rel)["SKILL.md"]
             files[f".claude/skills/{name}/SKILL.md"] = with_marker(body)
         else:
-            fname, body = compose.emit_cc_subagent(agent, PREFIX, profile, ctx)
+            fname, body = compose.emit_cc_subagent(agent, PREFIX, profile, ctx, ref_rel)
             files[f".claude/agents/{fname}"] = with_marker(body)
     return files
 
 
 # ── lock file ─────────────────────────────────────────────────────────────────
 # Paths a lock may legitimately list: exactly what render_all produces.
-LOCK_PATH_RE = re.compile(r"\.claude/(agents/grid-[a-z0-9-]+\.md|skills/grid-[a-z0-9-]+/SKILL\.md)")
+LOCK_PATH_RE = re.compile(
+    r"\.claude/(agents/grid-[a-z0-9-]+\.md|skills/grid-[a-z0-9-]+/SKILL\.md|grid-reference/grid-[a-z0-9-]+\.md)"
+)
 
 
 def read_lock(project: Path) -> dict | None:
@@ -350,7 +361,8 @@ def main() -> None:
         if p.exists() and is_generated(p):          # never delete a hand-edited file
             p.unlink()
             changed += 1
-            if p.parent.name.startswith(PREFIX + "-") and not p.parent.is_symlink() and not any(p.parent.iterdir()):
+            if (p.parent.name.startswith(PREFIX + "-") or p.parent.name == "grid-reference") \
+                    and not p.parent.is_symlink() and not any(p.parent.iterdir()):
                 p.parent.rmdir()
     # Rewrite the lock only when its content (ignoring the commit hash) changed,
     # so a no-op re-run leaves every byte untouched.

@@ -46,3 +46,10 @@ Paste into this repo's `CLAUDE.md` and fill it in. Keep it terse and factual.
 Draw agent lanes by who owns which artifact, not by job title. Treat agent
 briefs and this block as documentation: when code changes, they go stale like
 any other doc.
+
+## Project review skill
+
+`.claude/skills/project-review/SKILL.md` is seeded with the generic review passes. Fill its
+"Invariants" and "Known deliberate gaps" sections from this repo's `CLAUDE.md`
+"Conventions and constraints" block; until you do, it says so and reviews generically.
+It is named `project-review` so it never shadows a globally wired `review` skill.
