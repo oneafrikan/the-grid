@@ -46,6 +46,7 @@ fi
 unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_PREFIX GIT_EXEC_PATH
 
 FAILED=()
+SKIPPED=()
 # check <name> <cmd...> — run, print status, remember failures.
 check() {
   local name="$1"; shift
@@ -54,13 +55,13 @@ check() {
 }
 
 run_shellcheck() {
-  command -v shellcheck >/dev/null || { echo "    shellcheck not installed — skipped"; return 0; }
+  command -v shellcheck >/dev/null || { echo "    shellcheck not installed — skipped"; SKIPPED+=(shellcheck); return 0; }
   shellcheck -S warning scripts/*.sh scripts/lib/*.sh .githooks/pre-commit
 }
 
 run_compose_check() {
   local py=agent-factory/.venv/bin/python rc=0 cfg
-  [ -x "$py" ] || { echo "    agent-factory venv absent — skipped"; return 0; }
+  [ -x "$py" ] || { echo "    agent-factory venv absent — skipped"; SKIPPED+=(compose); return 0; }
   "$py" agent-factory/compose.py --lint-roles || rc=1
   for cfg in core grid finance-desk; do
     # Not yet composed on this machine is not a commit-time failure; stale output is.
@@ -71,13 +72,33 @@ run_compose_check() {
 }
 
 check shellcheck run_shellcheck
-check catalog    bash scripts/catalog.sh --check
+# SKILLS.md is generated from the PERSONAL (gitignored) baseline + whichever
+# submodules are initialised, so comparing it only means something on a machine
+# that has both. Elsewhere the check is skipped loudly, not failed.
+run_catalog_check() {
+  if [ ! -f baseline-submodules.txt ]; then
+    echo "    no baseline-submodules.txt on this machine — skipped"; SKIPPED+=(catalog); return 0
+  fi
+  if git submodule status 2>/dev/null | grep -q '^-'; then
+    echo "    uninitialised submodules — skipped (git submodule update --init)"; SKIPPED+=(catalog); return 0
+  fi
+  bash scripts/catalog.sh --check
+}
+
+run_bats() {
+  if [ ! -x tests/lib/bats-core/bin/bats ]; then
+    echo "    bats missing — run: git submodule update --init" >&2; return 1
+  fi
+  tests/lib/bats-core/bin/bats tests/
+}
+
+check catalog    run_catalog_check
 check compose    run_compose_check
-check bats       tests/lib/bats-core/bin/bats tests/
+check bats       run_bats
 
 echo
 if [ "${#FAILED[@]}" -eq 0 ]; then
-  echo "gate: PASS"
+  if [ "${#SKIPPED[@]}" -gt 0 ]; then echo "gate: PASS (skipped: ${SKIPPED[*]})"; else echo "gate: PASS"; fi
 else
   echo "gate: FAIL — ${FAILED[*]}" >&2
   exit 1
