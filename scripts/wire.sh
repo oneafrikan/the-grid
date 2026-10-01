@@ -9,6 +9,12 @@
 #   SKILLS_DIR  — Claude skills directory (default: ~/.claude/skills)
 #   AGENTS_DIR  — Claude subagents directory (default: ~/.claude/agents)
 #   GRID_HOST   — machine key for the overlay (default: hostname -s)
+#   GRID_SKIP_CATALOG=1 — don't regenerate SKILLS.md at the end (used by --check)
+#
+# Usage:
+#   bash wire.sh           # wire (idempotent)
+#   bash wire.sh --check   # change nothing; exit 1 if live links differ from
+#                          # what a fresh wire would create
 set -euo pipefail
 
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -18,6 +24,36 @@ GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 AGENTS_DIR="${AGENTS_DIR:-$HOME/.claude/agents}"
 GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || echo unknown)}"
+
+# --- --check: dry-run drift detector ----------------------------------------
+# Wires into throwaway dirs with the same inputs, then compares the grid-owned
+# symlinks (name -> target) against the live SKILLS_DIR / AGENTS_DIR. Foreign
+# links and real dirs are ignored, exactly as the real run ignores them.
+if [ "${1:-}" = "--check" ]; then
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+  mkdir -p "$tmp/skills" "$tmp/agents"
+  GRID_SKIP_CATALOG=1 SKILLS_DIR="$tmp/skills" AGENTS_DIR="$tmp/agents" \
+    GRID_DIR="$GRID_DIR" GRID_HOST="$GRID_HOST" bash "$0" >/dev/null
+  # "name -> target" lines for grid-owned links only, sorted (C locale: stable).
+  links() { # $1 = dir
+    [ -d "$1" ] || return 0
+    find "$1" -maxdepth 1 -type l | while IFS= read -r l; do
+      t="$(readlink "$l")"
+      case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$(basename "$l")" "$t" ;; esac
+    done | LC_ALL=C sort
+  }
+  rc=0
+  for kind in skills agents; do
+    live="$SKILLS_DIR"; [ "$kind" = agents ] && live="$AGENTS_DIR"
+    if ! diff <(links "$tmp/$kind") <(links "$live") >"$tmp/$kind.diff"; then
+      echo "wire --check: $kind drift in $live ('<' = should exist, '>' = stale):" >&2
+      cat "$tmp/$kind.diff" >&2
+      rc=1
+    fi
+  done
+  [ "$rc" = 0 ] && echo "wire --check: live links match a fresh wire."
+  exit "$rc"
+fi
 
 # --- Manifest: baseline + per-machine overlay + local (gitignored) overlay ----
 # What gets wired is resolved from three layers, unioned in order:
@@ -248,7 +284,9 @@ fi
 # --- 4. Refresh the skill catalogue so wiring and SKILLS.md never drift ---
 # Coupled on purpose: any change to what's wired re-renders the catalogue.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/catalog.sh" ]; then
+if [ -f "$SCRIPT_DIR/catalog.sh" ] && [ -z "${GRID_SKIP_CATALOG:-}" ]; then
+  # env prefix is intentional; value is identical in the parent shell
+  # shellcheck disable=SC2097,SC2098
   GRID_DIR="$GRID_DIR" bash "$SCRIPT_DIR/catalog.sh" "$GRID_DIR/SKILLS.md"
 fi
 
