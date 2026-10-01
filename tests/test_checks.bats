@@ -82,3 +82,11 @@ teardown() {
   run assert_sandboxed
   [ "$status" -eq 0 ]
 }
+
+@test "wire --check does not flag a name shadowed by a real (unmanaged) dir" {
+  GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/wire.sh"
+  rm "$MOCK_SKILLS/skill-alpha"
+  mkdir "$MOCK_SKILLS/skill-alpha"          # user's own real dir shadows the grid skill
+  GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 0 ]
+}

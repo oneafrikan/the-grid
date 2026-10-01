@@ -23,7 +23,7 @@ GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 . "$(dirname "$0")/lib/find-skill-mds.sh"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 AGENTS_DIR="${AGENTS_DIR:-$HOME/.claude/agents}"
-GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || echo unknown)}"
+GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || uname -n 2>/dev/null | cut -d. -f1 || echo unknown)}"
 
 # --- --check: dry-run drift detector ----------------------------------------
 # Wires into throwaway dirs with the same inputs, then compares the grid-owned
@@ -35,17 +35,20 @@ if [ "${1:-}" = "--check" ]; then
   GRID_SKIP_CATALOG=1 SKILLS_DIR="$tmp/skills" AGENTS_DIR="$tmp/agents" \
     GRID_DIR="$GRID_DIR" GRID_HOST="$GRID_HOST" bash "$0" >/dev/null
   # "name -> target" lines for grid-owned links only, sorted (C locale: stable).
-  links() { # $1 = dir
+  # $2 (optional) = live dir: names shadowed there by a REAL dir/file are skipped,
+  # because a real wire skips them too ("not managed") — they can never be drift.
+  links() { # $1 = dir to list, $2 = live dir for the shadow filter
     [ -d "$1" ] || return 0
     find "$1" -maxdepth 1 -type l | while IFS= read -r l; do
-      t="$(readlink "$l")"
-      case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$(basename "$l")" "$t" ;; esac
+      t="$(readlink "$l")"; n="$(basename "$l")"
+      if [ -n "${2:-}" ] && [ -e "$2/$n" ] && [ ! -L "$2/$n" ]; then continue; fi
+      case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
     done | LC_ALL=C sort
   }
   rc=0
   for kind in skills agents; do
     live="$SKILLS_DIR"; [ "$kind" = agents ] && live="$AGENTS_DIR"
-    if ! diff <(links "$tmp/$kind") <(links "$live") >"$tmp/$kind.diff"; then
+    if ! diff <(links "$tmp/$kind" "$live") <(links "$live") >"$tmp/$kind.diff"; then
       echo "wire --check: $kind drift in $live ('<' = should exist, '>' = stale):" >&2
       cat "$tmp/$kind.diff" >&2
       rc=1
@@ -295,7 +298,10 @@ fi
 # Skipped under --check's throwaway run (GRID_SKIP_CATALOG) so a check never writes.
 if [ -z "${GRID_SKIP_CATALOG:-}" ]; then
   MANIFEST="$GRID_DIR/.wired.manifest"
-  new_manifest="$(printf '%s\n' "${MANIFEST_ROWS[@]:-}" | LC_ALL=C sort)"
+  new_manifest=""
+  if [ "${#MANIFEST_ROWS[@]}" -gt 0 ]; then
+    new_manifest="$(printf '%s\n' "${MANIFEST_ROWS[@]}" | LC_ALL=C sort)"
+  fi
   if [ ! -f "$MANIFEST" ] || [ "$(cat "$MANIFEST")" != "$new_manifest" ]; then
     printf '%s\n' "$new_manifest" > "$MANIFEST"
   fi
