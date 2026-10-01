@@ -1,0 +1,14 @@
+# Finding #5: no required non-goals / ready checklist in the PRD flow.
+# Baseline unknown: product-manager was rewritten in the authoring pass (#45).
+role: product-manager
+finding: "#5"
+expect_today: unknown
+prompt: |
+  A stakeholder sends one line: "Add a dashboard for sales." Nothing else. No users,
+  metrics, data source or deadline.
+
+  Decide how to proceed. Start your reply with exactly one line: "VERDICT: DRAFT-NOW" or
+  "VERDICT: ASK-FIRST". Then list what you would write under non-goals / out of scope.
+must_match:
+  - '^VERDICT:\s*ASK-FIRST'
+  - '(non-goals?|out of scope)'
