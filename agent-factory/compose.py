@@ -271,13 +271,7 @@ def load_config(path: Path) -> dict:
         if not role:
             errors.append(f"{where}: missing required key: role")
         else:
-            rdir = role_dir(role)
-            if not rdir.is_dir():
-                errors.append(f"{where}: role '{role}' has no dir at {rdir}")
-            else:
-                for required in REQUIRED_ROLE_FILES:
-                    if not (rdir / required).is_file():
-                        errors.append(f"{where}: role '{role}' is missing {required}")
+            errors.extend(f"{where}: {p}" for p in lint_role(role))
 
         for stack in agent.get("stacks", []) or []:
             if not (STACKS_DIR / stack).is_dir():
@@ -897,6 +891,75 @@ def write_project(name: str, config: dict, out_dir: Path) -> Path:
     return project_dir
 
 
+# ── role lint ─────────────────────────────────────────────────────────────────
+# Fail-closed validation of a role's source files, independent of any compose
+# config. Every finding carries a stable code so tests (and humans grepping CI
+# output) can match the exact failure mode, and every finding names the file.
+ROLE_YAML_KEYS = {"name", "title", "summary", "owns", "default_model", "cron_model",
+                  "base_skills", "orchestrator"}
+ROLE_MODELS = {"opus", "sonnet", "haiku", "fable"}
+
+
+def lint_role(role: str) -> list[str]:
+    """All problems with one role's source files, as 'CODE: role/file: detail'."""
+    rdir = role_dir(role)
+    if not rdir.is_dir():
+        return [f"E_ROLE_MISSING: {role}: no directory at {rdir}"]
+    out: list[str] = []
+
+    def bad(code: str, fname: str, detail: str) -> None:
+        out.append(f"{code}: {role}/{fname}: {detail}")
+
+    for fname in REQUIRED_ROLE_FILES:
+        f = rdir / fname
+        if not f.is_file():
+            bad("E_FILE_MISSING", fname, "required file absent")
+        elif not f.read_text(encoding="utf-8").strip():
+            bad("E_FILE_EMPTY", fname, "required file is empty")
+
+    ry = rdir / "role.yaml"
+    if not ry.is_file():
+        bad("E_YAML_MISSING", "role.yaml", "required file absent")
+    else:
+        try:
+            meta = yaml.safe_load(ry.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as exc:
+            bad("E_YAML_PARSE", "role.yaml", str(exc).splitlines()[0])
+            meta = None
+        if meta is not None and not isinstance(meta, dict):
+            bad("E_YAML_SHAPE", "role.yaml", "must be a mapping")
+        elif meta is not None:
+            if meta.get("name") != role:
+                bad("E_NAME_MISMATCH", "role.yaml", f"name {meta.get('name')!r} != directory {role!r}")
+            for key in ("title", "summary"):
+                if not str(meta.get(key) or "").strip():
+                    bad("E_FIELD_MISSING", "role.yaml", f"'{key}' is required")
+            for key in sorted(set(meta) - ROLE_YAML_KEYS):
+                bad("E_FIELD_UNKNOWN", "role.yaml", f"unknown key '{key}' (typo?)")
+            for key in ("default_model", "cron_model"):
+                if key in meta and meta[key] not in ROLE_MODELS:
+                    bad("E_MODEL_INVALID", "role.yaml", f"{key} {meta[key]!r} not in {sorted(ROLE_MODELS)}")
+            if not isinstance(meta.get("orchestrator", False), bool):
+                bad("E_FIELD_TYPE", "role.yaml", "'orchestrator' must be true/false")
+            if not isinstance(meta.get("base_skills", []) or [], list):
+                bad("E_FIELD_TYPE", "role.yaml", "'base_skills' must be a list")
+
+    # Unresolved {{TOKENS}}: only AGENTS.md may carry the roster slot.
+    for f in sorted(rdir.glob("*.md")):
+        for tok in sorted(set(re.findall(r"\{\{[A-Za-z_]+\}\}", strip_html_comments(f.read_text(encoding="utf-8"))))):
+            if not (f.name == "AGENTS.md" and tok == "{{ROSTER_TABLE}}"):
+                bad("E_TOKEN_UNRESOLVED", f.name, f"unresolved placeholder {tok}")
+    return out
+
+
+def all_roles() -> list[str]:
+    """Every role dir name visible to the factory (private tree merged over public)."""
+    names = {d.name for d in ROLES_DIR.iterdir() if d.is_dir()}
+    if PRIVATE_ROLES_DIR and PRIVATE_ROLES_DIR.is_dir():
+        names |= {d.name for d in PRIVATE_ROLES_DIR.iterdir() if d.is_dir()}
+    return sorted(names)
+
+
 # ── drift check ───────────────────────────────────────────────────────────────
 def _tree(root: Path) -> dict[str, bytes]:
     """{relative path: bytes} for every file under root ({} if root is absent)."""
@@ -918,7 +981,7 @@ def diff_trees(expected: Path, actual: Path) -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compose an AI dev-team agent.")
-    parser.add_argument("config", type=Path, help="path to the compose config yaml")
+    parser.add_argument("config", type=Path, nargs="?", help="path to the compose config yaml")
     parser.add_argument("--out", type=Path, default=PROJECTS_DIR, help="output dir")
     parser.add_argument(
         "--target",
@@ -931,6 +994,11 @@ def main() -> None:
              "5 orchestrator roles (whichever are present in this config)",
     )
     parser.add_argument(
+        "--lint-roles", action="store_true",
+        help="lint every role's source files (config argument is ignored); "
+             "exit 1 if any role is malformed",
+    )
+    parser.add_argument(
         "--check", action="store_true",
         help="render into a temp dir and diff against what is on disk; write nothing, "
              "exit 1 if the composed output is missing or stale",
@@ -940,6 +1008,15 @@ def main() -> None:
         help="render + report what would be written, but write nothing",
     )
     args = parser.parse_args()
+
+    if args.lint_roles:
+        problems = [p for r in all_roles() for p in lint_role(r)]
+        for p in problems:
+            print(p, file=sys.stderr)
+        print(f"lint-roles: {len(all_roles())} roles, {len(problems)} problem(s)")
+        sys.exit(1 if problems else 0)
+    if args.config is None:
+        parser.error("config is required (unless --lint-roles)")
 
     try:
         config = load_config(args.config)
