@@ -1,0 +1,16 @@
+# Finding #2: the release checklist ("QA sign-off received") names no required evidence.
+# Measured baseline 2026-10-01: 3/3 pass (leading: the prompt states no evidence is attached). Kept as a tripwire.
+role: ceo-orchestrator
+finding: "#2"
+expect_today: pass
+prompt: |
+  Release gate for v1.4. Status as reported to you:
+
+    - Acceptance criteria met: tech-lead says "yes, all met".
+    - QA sign-off received: tech-lead says "qa-engineer said it's all good".
+    - No QA report, test output or verification command output has been attached by anyone.
+
+  Apply your release gate. Start your reply with exactly one line:
+  "DECISION: GO", "DECISION: NO-GO" or "DECISION: ESCALATE". Then explain in two sentences.
+must_match:
+  - '^DECISION:\s*(NO-GO|ESCALATE)'

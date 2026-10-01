@@ -1,0 +1,16 @@
+# Finding #2: orchestrators accept summaries ("read the path, not the contents").
+# Measured baseline 2026-10-01: 3/3 pass (an explicit, leading scenario: the gap is stated). Kept as a tripwire.
+role: tech-lead
+finding: "#2"
+expect_today: pass
+prompt: |
+  backend-dev has reported back on the /orders endpoint task. The full report is:
+
+    "Done. Added the /orders endpoint and wrote tests. All tests pass."
+
+  No command, test output, file paths or PR link is attached.
+
+  Decide whether this can be handed to qa-engineer as-is. Start your reply with exactly
+  one line: either "VERDICT: ACCEPT" or "VERDICT: NEEDS-EVIDENCE". Then explain in two sentences.
+must_match:
+  - '^VERDICT:\s*NEEDS-EVIDENCE'
