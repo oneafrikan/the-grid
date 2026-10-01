@@ -10,3 +10,6 @@ summary: >-
   implement fixes.
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+# Advisory role: audits and advises, does not change code. No Edit/Write. Bash stays so it can run
+# scanners; Bash can still write files, so this narrows the role, it does not sandbox it.
+tools: [Read, Grep, Glob, Bash, WebFetch, WebSearch]

@@ -10,3 +10,6 @@ summary: >-
 owns: Test plans, acceptance verification, the release gate   # short roster phrase (summary 1st sentence too thin)
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+# Verifies, never fixes: no Edit/Write. Bash stays so it can run the verification command itself;
+# Bash can still write files, so this narrows the role, it does not sandbox it.
+tools: [Read, Grep, Glob, Bash]
