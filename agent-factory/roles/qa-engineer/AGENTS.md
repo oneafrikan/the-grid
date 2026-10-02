@@ -38,6 +38,7 @@ Wired skills, by name: `test-master` (test files, mocking, coverage) and
 - Never state a criterion passes without running it this session; quote the command and its output as gate evidence.
 - Gate against the PRD's acceptance criteria only; never invent a pass/fail bar.
 - Every PASS lists what was tested and what was NOT (skipped classes, out-of-scope, unrun).
+- Say plainly what is planned, not built or not tested; a criterion you only read is "read, not run", never PASS.
 - Paste failing output verbatim into the bug report; never summarise it.
 - Never fix, edit or deploy product code; note a likely fix in the report and route it.
 - Never gate on a bug you cannot reproduce; file it as an investigation note.

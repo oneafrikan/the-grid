@@ -1131,6 +1131,20 @@ def lint_models() -> list[str]:
 # Opt-in by list, not by role.yaml, so converting a role never touches role.yaml.
 AUTHORED_ROLES_FILE = Path(os.environ.get("GRID_AUTHORED_ROLES_FILE") or HERE / "authored-roles.txt")
 AGENTS_MAX_BYTES = 4096
+ORCHESTRATOR_MAX_BYTES = 5120   # orchestrators carry Roster + Delegation + Routing as well; rules stay inline, not in a linked file
+# The shared four, as keyword groups checked against a role's "Hard rules" text. Presence only: wording is
+# the role's own (see docs/role-authoring.md), so this catches a deleted rule, not a badly worded one.
+SHARED_FOUR = [
+    ("verify before claiming (or accepting)", r"verif|evidence"),
+    ("exists vs planned", r"planned|not (?:yet )?(?:built|tested|measured|shipped)"),
+    ("failures verbatim", r"verbatim"),
+    ("independent check / not your own homework", r"independent|different role|homework|self-check"),
+]
+# Extra rules for a role that sets `unattended: true`.
+UNATTENDED_RULES = [
+    ("a safe-target step (dry run / preview) before any outward write", r"dry[- ]run|safe[- ]target|preview"),
+    ("one run-record line per run (scripts/run-record.sh)", r"run[- ]record"),
+]
 SOUL_HEADINGS_RE = [
     r"Role identity", r"Core character \(role layer\)", r"Decision-making \(role layer\)",
     r"Escalation rules \(role layer\)", r"Working style \(role layer\)", r"What (?:the )?.+ is NOT",
@@ -1156,11 +1170,14 @@ def lint_authoring(role: str) -> list[str]:
     if not agents.is_file():
         return [f"E_SECTION_MISSING: {role}/AGENTS.md: required for authored roles"]
     text = agents.read_text(encoding="utf-8")
-    if len(text.encode("utf-8")) > AGENTS_MAX_BYTES:
-        bad("E_SIZE", "AGENTS.md", f"over {AGENTS_MAX_BYTES} bytes (a role this big is two roles)")
+    meta = role_meta(role)
+    orchestrator = bool(meta.get("orchestrator", False))   # orchestrator variant: gates others' work; no 'Receiving work', bigger cap
+    max_bytes = ORCHESTRATOR_MAX_BYTES if orchestrator else AGENTS_MAX_BYTES
+    if len(text.encode("utf-8")) > max_bytes:
+        bad("E_SIZE", "AGENTS.md", f"over {max_bytes} bytes (a role this big is two roles)")
     _, secs = split_sections(strip_html_comments(text))
     heads = {h[3:].strip(): b for h, b in secs}
-    for need in ("Scope", "Receiving work", "Hard rules"):
+    for need in ("Scope", "Hard rules") + (() if orchestrator else ("Receiving work",)):
         if need not in heads:
             bad("E_SECTION_MISSING", "AGENTS.md", f"'## {need}'")
     hardest = [b for h, b in heads.items() if re.fullmatch(r"What to .+ hardest", h)]
@@ -1170,6 +1187,15 @@ def lint_authoring(role: str) -> list[str]:
         bad("E_SECTION_SHAPE", "AGENTS.md", "'What to … hardest' needs a ranked numbered list of at least 4 items")
     if "Hard rules" in heads and len(re.findall(r"^\s*(?:[-*]|\d+\.)\s", heads["Hard rules"], re.M)) < 4:
         bad("E_SECTION_SHAPE", "AGENTS.md", "'Hard rules' needs at least 4 rules (the shared four plus role-specific)")
+    if "Hard rules" in heads:
+        rules = heads["Hard rules"]
+        for label, pat in SHARED_FOUR:
+            if not re.search(pat, rules, re.I):
+                bad("E_SHARED_RULE_MISSING", "AGENTS.md", f"'Hard rules' no longer covers: {label}")
+        if meta.get("unattended", False):
+            for label, pat in UNATTENDED_RULES:
+                if not re.search(pat, rules, re.I):
+                    bad("E_UNATTENDED_RULE_MISSING", "AGENTS.md", f"unattended role's 'Hard rules' needs: {label}")
 
     soul = rdir / "SOUL.md"
     soul_heads = [h[3:].strip() for h, _ in split_sections(strip_html_comments(_read(soul)))[1]] if soul.is_file() else []
