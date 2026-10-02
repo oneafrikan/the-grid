@@ -41,8 +41,14 @@ fi
 # identical on every machine — without this, macOS (C collation) and Linux
 # (UTF-8 dictionary collation) order punctuation differently (e.g. "web-…"
 # vs "webapp-…"), causing spurious cross-machine diffs on every re-run.
+#
+# The awk is pinned to LC_ALL=C too: substr()/length() count BYTES under mawk
+# (Ubuntu default) but CHARACTERS under gawk/macOS awk in a UTF-8 locale, so
+# the 200-char cap cut multibyte descriptions (em dashes etc.) at different
+# points per machine. Under LC_ALL=C every awk counts bytes; the cut is then
+# backed off to a UTF-8 character boundary so it never splits a character.
 parse_skill() {
-  awk '
+  LC_ALL=C awk '
     function trim(s){ sub(/^[[:space:]]+/,"",s); sub(/[[:space:]]+$/,"",s); return s }
     BEGIN { fm=0; coll=0; name=""; desc="" }
     {
@@ -78,7 +84,13 @@ parse_skill() {
       if (match(desc, /\. /)) summary=substr(desc, 1, RSTART)
       summary=trim(summary)
       # Cap length so the catalogue stays skimmable.
-      if (length(summary) > 200) summary=substr(summary,1,199) "\xe2\x80\xa6"
+      if (length(summary) > 200) {
+        n=199
+        # Back off while the first dropped byte is a UTF-8 continuation byte
+        # (0x80-0xBF) — i.e. the cut would land mid-character.
+        while (n>0 && substr(summary,n+1,1) ~ /[\200-\277]/) n--
+        summary=substr(summary,1,n) "\xe2\x80\xa6"
+      }
       print name "\t" summary
     }
   ' "$1"
