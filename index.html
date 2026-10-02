@@ -891,9 +891,10 @@ bash scripts/wire.sh
 
         <div class="ownership-note">
           The template is what the-grid owns; the instance lives in the project it serves.
-          <code>scripts/instantiate.sh</code> (planned, see TODO.md issue #15) will add a
-          machine-profiled cut: copy into <code>loop/</code> + placeholder-fill + settings
-          wiring, plus worktree/PR sandboxing and launchd vs cloud scheduling.
+          <code>scripts/instantiate.sh &lt;pattern&gt; &lt;target-repo&gt; --profile &lt;personal|work|mac-mini&gt;</code>
+          does the machine-profiled cut: copy into <code>loop/</code> + placeholder-fill + settings
+          wiring, plus worktree/PR sandboxing on the <code>work</code> profile and a launchd
+          nightly run on <code>mac-mini</code>.
         </div>
       </section><!-- /#automation-factory-heading -->
 
@@ -1336,10 +1337,10 @@ bash scripts/wire.sh
         <h2 id="skills-heading">Skills</h2>
 
         <p>
-          <strong>139 wired live</strong> (12 root-owned + 127 from allowlisted repos)
-          across 8 sources — active in every Claude session. Another 82 exist in those
-          same partial repos but aren't wired, and a further <strong>~1,267</strong> are
-          indexed across 18 dedicated library submodules — all searchable via
+          <strong>137 wired live</strong> (14 root-owned + 123 from allowlisted repos)
+          across 8 sources — active in every Claude session. Another 102 exist in those
+          same partial repos but aren't wired, and a further <strong>~1,275</strong> are
+          indexed across 19 dedicated library submodules — all searchable via
           <code>skill-scout</code>, none loaded by default.
         </p>
 
@@ -1351,16 +1352,17 @@ bash scripts/wire.sh
           and stops.
         </p>
 
-        <!-- ── Root (owned / edited) — 12 ── -->
+        <!-- ── Root (owned / edited) — 14 ── -->
         <h3 class="skills-source-heading">
           Root (owned / edited)
-          <span class="skills-count">12</span>
+          <span class="skills-count">14</span>
           <span class="badge badge-wired" aria-hidden="true">wired</span>
         </h3>
         <ul class="skills-list">
           <li><span class="skill-name">caveman</span> — <span class="skill-desc">Ultra-compressed communication mode.</span></li>
           <li><span class="skill-name">gh-issues-by-severity</span> — <span class="skill-desc">List open GitHub issues grouped by severity, discovering whatever severity:* label scheme the repo actually uses.</span></li>
           <li><span class="skill-name">grid-help</span> — <span class="skill-desc">Live in-session guide to using the-grid — which slash command or subagent to reach for.</span></li>
+          <li><span class="skill-name">grill-me</span> — <span class="skill-desc">A relentless interview to sharpen a plan or design.</span></li>
           <li><span class="skill-name">handoff</span> — <span class="skill-desc">Compact the current conversation into a handoff document for another agent to pick up.</span></li>
           <li><span class="skill-name">mine-learnings</span> — <span class="skill-desc">Mine project history for durable technical learnings and fold the highest-value ones into CLAUDE.md.</span></li>
           <li><span class="skill-name">openspec-help</span> — <span class="skill-desc">Reference card for the 12 openspec skills — which to reach for, the spec format, and how the convention reaches new and existing projects.</span></li>
@@ -1370,27 +1372,31 @@ bash scripts/wire.sh
           <li><span class="skill-name">spec-scout</span> — <span class="skill-desc">Audit a repo's OpenSpec adoption and report drift between specs and shipped code. Survey-only — never writes specs.</span></li>
           <li><span class="skill-name">standup</span> — <span class="skill-desc">Generate a concise standup summary from recent git activity across repos.</span></li>
           <li><span class="skill-name">tighten</span> — <span class="skill-desc">Condense verbose prose across project docs — cuts filler and hedging without dropping facts.</span></li>
+          <li><span class="skill-name">unclaudish</span> — <span class="skill-desc">Post-processing editor that purges Claude-isms, rhetorical tropes, AI cadence, and em-dash saturation to convert drafts into crisp, executive business prose.</span></li>
         </ul>
 
-        <!-- ── repos/openspec (wired) — 12 ── -->
+        <!-- ── repos/openspec (wired) — 15 ── -->
         <h3 class="skills-source-heading">
           repos/openspec
-          <span class="skills-count">12</span>
+          <span class="skills-count">15</span>
           <span class="badge badge-wired" aria-hidden="true">wired</span>
         </h3>
         <ul class="skills-list">
-          <li><span class="skill-name">openspec-explore</span> — <span class="skill-desc">Thinking partner for exploring a problem before committing to a direction. Writes nothing.</span></li>
-          <li><span class="skill-name">openspec-propose</span> — <span class="skill-desc">Create a change and generate every artefact in one pass — proposal, spec delta, design, tasks.</span></li>
+          <li><span class="skill-name">draft-openspec-docs</span> — <span class="skill-desc">Collaborative page-drafting mode for the OpenSpec docs.</span></li>
           <li><span class="skill-name">openspec-apply-change</span> — <span class="skill-desc">Implement the tasks from an approved change.</span></li>
-          <li><span class="skill-name">openspec-verify-change</span> — <span class="skill-desc">Check the implementation actually matches the change artefacts before archiving.</span></li>
           <li><span class="skill-name">openspec-archive-change</span> — <span class="skill-desc">Fold the delta into the main specs and move the change to archive.</span></li>
-          <li><span class="skill-name">openspec-new-change</span> — <span class="skill-desc">Step-by-step artefact creation instead of the one-shot propose.</span></li>
-          <li><span class="skill-name">openspec-continue-change</span> — <span class="skill-desc">Pick up a change a previous session left half-built.</span></li>
-          <li><span class="skill-name">openspec-ff-change</span> — <span class="skill-desc">Fast-forward — generate every artefact without stepping through each one.</span></li>
-          <li><span class="skill-name">openspec-update-change</span> — <span class="skill-desc">Revise an existing plan and keep its artefacts coherent. Never edits code.</span></li>
-          <li><span class="skill-name">openspec-sync-specs</span> — <span class="skill-desc">Push a delta into the main specs without archiving the change.</span></li>
           <li><span class="skill-name">openspec-bulk-archive-change</span> — <span class="skill-desc">Archive several parallel changes at once.</span></li>
+          <li><span class="skill-name">openspec-continue-change</span> — <span class="skill-desc">Pick up a change a previous session left half-built.</span></li>
+          <li><span class="skill-name">openspec-explore</span> — <span class="skill-desc">Thinking partner for exploring a problem before committing to a direction. Writes nothing.</span></li>
+          <li><span class="skill-name">openspec-ff-change</span> — <span class="skill-desc">Fast-forward — generate every artefact without stepping through each one.</span></li>
+          <li><span class="skill-name">openspec-new-change</span> — <span class="skill-desc">Step-by-step artefact creation instead of the one-shot propose.</span></li>
           <li><span class="skill-name">openspec-onboard</span> — <span class="skill-desc">Guided first cycle, narrated, doing real work in your codebase.</span></li>
+          <li><span class="skill-name">openspec-propose</span> — <span class="skill-desc">Create a change and generate every artefact in one pass — proposal, spec delta, design, tasks.</span></li>
+          <li><span class="skill-name">openspec-sync-specs</span> — <span class="skill-desc">Push a delta into the main specs without archiving the change.</span></li>
+          <li><span class="skill-name">openspec-update-change</span> — <span class="skill-desc">Revise an existing plan and keep its artefacts coherent. Never edits code.</span></li>
+          <li><span class="skill-name">openspec-verify-change</span> — <span class="skill-desc">Check the implementation actually matches the change artefacts before archiving.</span></li>
+          <li><span class="skill-name">verify-openspec-docs</span> — <span class="skill-desc">Fact-checks OpenSpec user documentation with a fresh-context subagent that re-runs commands and checks claims against source.</span></li>
+          <li><span class="skill-name">write-openspec-docs</span> — <span class="skill-desc">Switches into OpenSpec docs-writing mode; loads the house style guide and drafts or revises pages in its voice (action-first, no preamble, scannable).</span></li>
         </ul>
 
         <!-- ── repos/anthropic (partial) — 9 ── -->
@@ -1504,50 +1510,49 @@ bash scripts/wire.sh
           live in machine overlays, not the baseline.
         </p>
 
-        <!-- ── repos/mattpocock (partial) — 20 ── -->
+        <!-- ── repos/mattpocock (partial) — 13 ── -->
         <h3 class="skills-source-heading">
           repos/mattpocock
-          <span class="skills-count">20</span>
+          <span class="skills-count">13</span>
           <span class="badge badge-wired" aria-hidden="true">wired</span>
         </h3>
         <ul class="skills-list">
-          <li><span class="skill-name">diagnose</span> — <span class="skill-desc">Disciplined diagnosis loop for hard bugs and performance regressions.</span></li>
-          <li><span class="skill-name">edit-article</span> — <span class="skill-desc">Edit and improve articles by restructuring sections, improving clarity, and tightening prose.</span></li>
           <li><span class="skill-name">git-guardrails-claude-code</span> — <span class="skill-desc">Set up Claude Code hooks to block dangerous git commands before they execute.</span></li>
           <li><span class="skill-name">grill-me</span> — <span class="skill-desc">Interview the user relentlessly about a plan or design until reaching shared understanding.</span></li>
           <li><span class="skill-name">grill-with-docs</span> — <span class="skill-desc">Grilling session that challenges your plan against the existing domain model and updates documentation inline as decisions crystallise.</span></li>
+          <li><span class="skill-name">grilling</span> — <span class="skill-desc">Grill the user relentlessly about a plan, decision, or idea.</span></li>
           <li><span class="skill-name">improve-codebase-architecture</span> — <span class="skill-desc">Find deepening opportunities in a codebase, informed by CONTEXT.md and docs/adr/.</span></li>
-          <li><span class="skill-name">request-refactor-plan</span> — <span class="skill-desc">Create a detailed refactor plan with tiny commits via user interview, then file it as a GitHub issue.</span></li>
           <li><span class="skill-name">scaffold-exercises</span> — <span class="skill-desc">Create exercise directory structures with sections, problems, solutions, and explainers that pass linting.</span></li>
           <li><span class="skill-name">setup-pre-commit</span> — <span class="skill-desc">Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo.</span></li>
           <li><span class="skill-name">tdd</span> — <span class="skill-desc">Test-driven development with red-green-refactor loop.</span></li>
           <li><span class="skill-name">teach</span> — <span class="skill-desc">Teach the user a new skill or concept, within this workspace.</span></li>
-          <li><span class="skill-name">to-issues</span> — <span class="skill-desc">Break a plan, spec, or PRD into independently-grabbable issues on the project issue tracker using tracer-bullet vertical slices.</span></li>
-          <li><span class="skill-name">to-prd</span> — <span class="skill-desc">Turn the current conversation context into a PRD and publish it to the project issue tracker.</span></li>
           <li><span class="skill-name">triage</span> — <span class="skill-desc">Triage issues through a state machine driven by triage roles.</span></li>
-          <li><span class="skill-name">ubiquitous-language</span> — <span class="skill-desc">Extract a DDD-style ubiquitous language glossary from the current conversation, flagging ambiguities and proposing canonical terms.</span></li>
-          <li><span class="skill-name">write-a-skill</span> — <span class="skill-desc">Create new agent skills with proper structure, progressive disclosure, and bundled resources.</span></li>
           <li><span class="skill-name">writing-beats</span> — <span class="skill-desc">Shape an article as a journey of beats, choose-your-own-adventure style.</span></li>
           <li><span class="skill-name">writing-fragments</span> — <span class="skill-desc">Mine the user for fragments — heterogeneous nuggets of writing — and append them to a single document as raw material.</span></li>
           <li><span class="skill-name">writing-shape</span> — <span class="skill-desc">Take a markdown file of raw material and shape it into an article through a conversational session.</span></li>
-          <li><span class="skill-name">zoom-out</span> — <span class="skill-desc">Tell the agent to zoom out and give broader context or a higher-level perspective.</span></li>
         </ul>
         <p style="font-size: 0.85rem; color: var(--text-dim); margin-top: -0.5rem;">
           Design/personal tools (design-an-interface, obsidian-vault, prototype) live in machine overlays.
         </p>
 
-        <!-- ── repos/ponytail (wired) — 6 ── -->
+        <!-- ── repos/ponytail (wired) — 12 ── -->
         <h3 class="skills-source-heading">
           repos/ponytail
-          <span class="skills-count">6</span>
+          <span class="skills-count">12</span>
           <span class="badge badge-wired" aria-hidden="true">wired</span>
         </h3>
         <ul class="skills-list">
           <li><span class="skill-name">ponytail</span> — <span class="skill-desc">Forces the laziest solution that actually works — simplest, shortest, most minimal.</span></li>
+          <li><span class="skill-name">ponytail</span> — <span class="skill-desc">Forces the laziest solution that actually works — simplest, shortest, most minimal.</span></li>
+          <li><span class="skill-name">ponytail-audit</span> — <span class="skill-desc">Whole-repo audit for over-engineering — a ranked list of what to delete, simplify, or replace.</span></li>
           <li><span class="skill-name">ponytail-audit</span> — <span class="skill-desc">Whole-repo audit for over-engineering — a ranked list of what to delete, simplify, or replace.</span></li>
           <li><span class="skill-name">ponytail-debt</span> — <span class="skill-desc">Harvest every `ponytail:` comment into a debt ledger, so deferrals get tracked instead of forgotten.</span></li>
+          <li><span class="skill-name">ponytail-debt</span> — <span class="skill-desc">Harvest every `ponytail:` comment into a debt ledger, so deferrals get tracked instead of forgotten.</span></li>
+          <li><span class="skill-name">ponytail-gain</span> — <span class="skill-desc">Show ponytail's measured impact as a compact scoreboard: less code, less cost, more speed.</span></li>
           <li><span class="skill-name">ponytail-gain</span> — <span class="skill-desc">Show ponytail's measured impact as a compact scoreboard: less code, less cost, more speed.</span></li>
           <li><span class="skill-name">ponytail-help</span> — <span class="skill-desc">Quick-reference card for all ponytail modes, skills, and commands.</span></li>
+          <li><span class="skill-name">ponytail-help</span> — <span class="skill-desc">Quick-reference card for all ponytail modes, skills, and commands.</span></li>
+          <li><span class="skill-name">ponytail-review</span> — <span class="skill-desc">Review a diff for over-engineering.</span></li>
           <li><span class="skill-name">ponytail-review</span> — <span class="skill-desc">Review a diff for over-engineering.</span></li>
         </ul>
         <p style="font-size: 0.85rem; color: var(--text-dim); margin-top: -0.5rem;">
@@ -1579,11 +1584,11 @@ bash scripts/wire.sh
 
         <!-- ── Library + Reference summary ── -->
         <div class="library-summary">
-          <strong>~1,267 more skills across 18 library submodules</strong> — indexed, not wired.
+          <strong>~1,275 more skills across 19 library submodules</strong> — indexed, not wired.
           Browse any repo as a submodule under <code>repos/</code>, or search across
           all of them with <code>skill-scout</code>. Promote a repo to wired by adding
           its name to <code>baseline-submodules.txt</code> and running <code>bash scripts/wire.sh</code>.
-          Six more repos are reference-only (awesome-lists/indexes, no <code>SKILL.md</code> files).
+          Seven more repos are reference-only (awesome-lists/indexes, no <code>SKILL.md</code> files).
 
           <table class="lib-table">
             <thead>
@@ -1602,6 +1607,7 @@ bash scripts/wire.sh
               <tr><td><code>repos/amekala-ads-mcp</code></td><td>24</td><td>Library</td></tr>
               <tr><td><code>repos/wordpress</code></td><td>17</td><td>Library</td></tr>
               <tr><td><code>repos/nowork-toprank</code></td><td>18</td><td>Library</td></tr>
+              <tr><td><code>repos/avoid-ai-writing</code></td><td>8</td><td>Library</td></tr>
               <tr><td><code>repos/hubspot</code></td><td>15</td><td>Library</td></tr>
               <tr><td><code>repos/mattberman-google-ads</code></td><td>16</td><td>Library</td></tr>
               <tr><td><code>repos/mozilla-bq-etl</code></td><td>13</td><td>Library</td></tr>
@@ -1613,6 +1619,8 @@ bash scripts/wire.sh
               <tr><td><code>repos/sarai-wp-openclaw</code></td><td>2</td><td>Library</td></tr>
               <tr><td><code>repos/spillwave-astro</code></td><td>1</td><td>Library</td></tr>
               <tr><td><code>repos/hesamsheikh</code></td><td>—</td><td>Reference (index)</td></tr>
+              <tr><td><code>repos/humanize-writing</code></td><td>—</td><td>Reference (index)</td></tr>
+              <tr><td><code>repos/removing-ai-isms</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/quant-zero</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/sebclawops</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/sjkncs</code></td><td>—</td><td>Reference (index)</td></tr>

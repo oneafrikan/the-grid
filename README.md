@@ -41,7 +41,7 @@ A sample across domains:
 |---|---|
 | Engineering & review | `code-reviewer`, `debugging-wizard`, `architecture-designer`, `security-reviewer` |
 | Spec-driven planning | 12 `openspec-*` skills — explore → propose → apply → verify → archive |
-| Process & planning | `brainstorming`, `to-prd`, `triage`, `feature-forge` |
+| Process & planning | `brainstorming`, `grill-me`, `triage`, `feature-forge` |
 | Workflow & quality gates | `review`, `qa`, `ship`, `design-review`, `benchmark` |
 | Docs & office formats | `docx`, `pptx`, `xlsx`, `internal-comms` |
 | Anti-overengineering | the `ponytail` family — minimum-diff implementer mode |
@@ -186,6 +186,9 @@ never touches its history.
   docs/                 ← reference docs, playbooks, resources
     SOURCES.md          ← generated: upstream URL per submodule (never edit)
     model-selection.md  ← which model for which job, with prices + benchmarks
+    agent-retro.md      ← review loop that starts from the run record
+    playbook-ai-dev-team.md, openclaw-portfolio-desk-blueprint.md ← design playbooks
+    reference-repos.md, reference-resources.md ← curated external references
   prompts/              ← reusable prompts
   agent-factory/        ← composes AI dev-team agents (role × stack × skills); live
     models.yaml         ← the one tier-to-model map for generated agents
@@ -200,18 +203,21 @@ never touches its history.
     paperclip/
     ...
   scripts/
+    bootstrap.sh        ← one-shot setup: submodules → wire (--with-agents: compose too)
     wire.sh             ← creates ~/.claude/skills/ + ~/.claude/agents/ symlinks (idempotent)
     catalog.sh          ← regenerates SKILLS.md
     sources.sh          ← regenerates docs/SOURCES.md; --check link-checks every URL
     reconcile.sh        ← removes stale skill shadows on a new machine
+    check-grid.sh       ← bats suite + broken-symlink scan (CI / pre-push gate)
+    instantiate.sh      ← cuts an automation-factory pattern into a target repo
     cut-project.sh      ← seeds/retrofits a project-factory template
     gate.sh             ← the commit gate: shellcheck, catalog, role lint, composed output, tests
     run-record.sh       ← appends one line per agent run to a local private log
   tests/
-    test_wiring.bats
-    test_skill_format.bats
-    test_catalog.bats
-    test_repo_health.bats
+    test_wiring.bats, test_catalog.bats, test_skill_format.bats, test_repo_health.bats
+    test_compose_lint.bats, test_authoring_variants.bats, test_schema_tools_models.bats
+    test_deploy.bats, test_eval_cases.bats, test_run_record.bats
+    test_project_factory.bats, test_checks.bats, test_gate.bats
     lib/bats-core/      ← test runner (submodule, no install needed)
   CLAUDE.md               ← full project context for Claude sessions
   SKILLS.md               ← generated skill index (never edit by hand)
