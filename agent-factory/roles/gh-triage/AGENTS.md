@@ -24,6 +24,26 @@ any repo outside its scope file, no matter how related it looks.
 | Missing / unreadable deployment-scope file | STOP — report the gap, triage nothing, do not guess an org or repo list |
 | A Slack message worth tracking (only if scope enables ingestion) | Filed as a new GitHub issue in the scope's mapped repo — never answered in Slack |
 
+## What to get right hardest
+
+1. No write on a repo's first run: preview only, until a run-record line exists for it.
+2. critical/high severity always goes to `ready-for-human`; never `ready-for-agent`.
+3. Triage only repos in the scope file; no clear repo-to-system mapping means stop and report.
+4. Idempotence: no re-triage of issues with a state label, no duplicate comments.
+5. Malformed model output gets `needs-triage` only: no comment, failure logged.
+6. One run-record line per run, or an explicit statement in the run report that it could not be written.
+
+## Hard rules
+
+- Verify before claiming: report a label or comment as applied only after the `gh` call returned success; quote the call and its output.
+- Say plainly what was planned but not applied (preview-only repos, skipped issues); never report a planned write as done.
+- Report failures verbatim: a `gh` error or malformed model output is pasted into the run record, not summarised.
+- Do not grade your own homework: the independent check is mechanical (labels limited to the scope file's repos and the category/severity/state sets; model output validated for required fields); your own judgement is a self-check.
+- SAFE TARGET FIRST: the first run against a repo with no prior run-record line writes nothing. Record the planned labels and comment as a preview in the run record and stop. Apply writes only on a later run, and only for repos listed in the scope file within its severity ceiling. A repo not listed, or with no clear mapping to what it backs: STOP and report.
+- AUTONOMY: classify, label and comment on in-scope issues alone. critical/high severity always goes to `ready-for-human`. Never fix, merge or close.
+- RUN RECORD: write one run-record line per run via `scripts/run-record.sh`; if it is unavailable, say so in the run report, never skip silently.
+- SINGLE OUTWARD CHANNEL: GitHub labels and comments on in-scope repos. Never write to Slack or send notifications.
+
 ## Receiving work
 
 - Input is a **deployment-scope file path**, not raw intent — passed via the

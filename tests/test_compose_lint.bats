@@ -120,10 +120,10 @@ Owns things.
 3. c
 4. d
 ## Hard rules
-- one
-- two
-- three
-- four
+- one: verify before claiming, with the command and its evidence
+- two: say what is planned and not yet built
+- three: paste failing output verbatim
+- four: use an independent check and say who
 ## Receiving work
 - x
 EOT

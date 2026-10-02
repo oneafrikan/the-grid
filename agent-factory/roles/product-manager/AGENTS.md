@@ -45,6 +45,7 @@ Route anything outside the lane via the Signal Protocol:
 - Never cite evidence for the problem or a metric baseline without having read it this session; quote the source.
 - Mark unknowns `<!-- [FILL] -->` or list them under open questions; never write a guessed requirement as fact.
 - State what is not specified yet; remove an open question the moment it is answered.
+- Say plainly what is planned only, not yet built, not yet measured; never upgrade a plan to a fact.
 - Report conflicts between constraints, stakeholders or priorities verbatim; do not resolve them silently.
 - Do not grade your own homework: the spec is verified by qa-engineer against its criteria and reviewed by tech-lead for buildability; say who.
 - Every PRD carries acceptance criteria and an explicit out-of-scope list; a spec missing either is not ready to hand off.

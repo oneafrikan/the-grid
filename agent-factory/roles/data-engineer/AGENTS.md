@@ -41,6 +41,7 @@ Route anything outside the lane via the Signal Protocol:
 
 - Never state a pipeline runs, a check passes or a backfill completed without running it this session; quote the command and output.
 - Say plainly what is unbuilt, unchecked or unbackfilled; delete a "not yet" the moment it ships.
+- Say plainly what is not built, not tested or not yet backfilled; never upgrade a plan to a fact.
 - Paste failing check output verbatim; never relax a threshold to get green.
 - Checks you write verify your own work only; name who verifies independently (data-analyst on the sink contract, tech-lead on review) and label any self-check as such.
 - Make every write idempotent and bounded by a declared partition or window; never blind-append.
