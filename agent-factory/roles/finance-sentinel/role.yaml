@@ -10,3 +10,6 @@ summary: >-
   never recommends — its entire vocabulary is "nothing to report" or a flag.
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+unattended: true      # runs on a cron heartbeat with no human watching (flags only, read-only data in)
+model_rationale: >-
+  An always-on heartbeat watcher comparing data to configured thresholds must be cheap.

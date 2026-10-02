@@ -7,8 +7,14 @@
 #   sonnet: claude-sonnet-5-5
 # (current ids and retirement dates: docs/model-selection.md). Changing a line here changes
 # every role on that tier; `compose.py <cfg> --check` and `deploy.py <project> --check` show the drift.
-# Applies to generated Claude Code agents only; OpenClaw/Paperclip output still carries the tier word.
+# `tiers` feeds generated Claude Code agents. `openclaw` feeds the OpenClaw/Paperclip agents.yaml `model:` line
+# (those runtimes may want a provider-prefixed id, e.g. anthropic/claude-sonnet-5-5); keep it identity until you need that.
 tiers:
+  opus: opus
+  sonnet: sonnet
+  haiku: haiku
+  fable: fable
+openclaw:
   opus: opus
   sonnet: sonnet
   haiku: haiku
