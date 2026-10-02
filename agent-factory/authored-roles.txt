@@ -21,3 +21,12 @@ ad-copy
 seo
 paid-search
 paid-social
+# Variants (docs/role-authoring.md): orchestrators and unattended roles, plus two evidence-strong specialists.
+ceo-orchestrator
+tech-lead
+growth-hacker
+finance-manager
+gh-triage
+librarian
+researcher
+platform-engineer

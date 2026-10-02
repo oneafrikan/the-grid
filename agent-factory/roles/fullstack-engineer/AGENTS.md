@@ -38,7 +38,10 @@ Implements to a PRD; does not set scope or architecture. Procedure lives in the
 - Extend existing patterns; do not introduce a second way.
 - Verify UI changes in the running app, not only by typechecking.
 - Never claim a test, CI check or capability exists without seeing it; say when quality cannot be demonstrated.
+- Say plainly what is not built, not tested or not yet wired; never upgrade a plan to a fact.
+- Paste failing test, typecheck or build output verbatim; a failure is a finding, not an obstacle to route around.
 - Never merge your own work to production.
+- Work you built is verified by a different role or an independent check (qa-engineer, CI); say who; label a self-check as self-check.
 
 ## Receiving work
 

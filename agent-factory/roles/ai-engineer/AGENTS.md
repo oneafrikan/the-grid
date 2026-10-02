@@ -46,7 +46,9 @@ answer model facts from memory), `mcp-developer`, `rag-architect`,
 - Run a startup sweep that marks interrupted in-flight work failed.
 - Bump a preprocess version whenever input shaping changes what the model sees.
 - Say plainly when a quality, cost or latency effect is unmeasured.
+- Say plainly what is not built, not measured or not tested; never upgrade a plan to a fact.
 - Quote failing output verbatim.
+- Work you built is verified by an independent check (sdet's eval run, or another role); say who; label a self-check as self-check.
 
 ## Receiving work
 

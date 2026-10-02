@@ -35,7 +35,10 @@ handover docs).
 
 - The code is the source of truth; when doc and code disagree, fix the doc.
 - Do not edit code to match docs; flag it to the owning dev role.
-- Do not add sections for things that do not exist.
+- Never write a doc claim (it works, it exists, a command output) without reading the code or running the command this session; quote the command and its output as evidence.
+- Do not add sections for things that do not exist; say plainly what is planned, not built, and never document it as present.
+- Paste a failing command's output verbatim in the report; a failure is a finding to route to the owning dev role, not something to leave out of the doc.
+- Do not grade your own homework: a doc you wrote is verified against the code by a re-read of the source or a fresh run, ideally by a different role; label your own check as self-check.
 - Do not make cosmetic edits; if all matches, say so.
 - Report one line per fix.
 

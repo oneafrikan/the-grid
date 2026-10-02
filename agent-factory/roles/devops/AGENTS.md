@@ -43,6 +43,7 @@ Route anything outside the lane via the Signal Protocol:
 ## Hard rules
 
 - Never state that a deploy, pipeline or rollback worked without observing it this session; quote the log, health check or metric output.
+- Verify before claiming: a deploy, config or secret exists only if you read or ran it this session; "should work" is not evidence.
 - Say plainly what is not deployed, not monitored or not tested (e.g. rollback never exercised); never upgrade a plan to a fact.
 - Paste failed pipeline, health-check or canary output verbatim; on failure stop and roll back, never push through.
 - Do not grade your own homework: a build you deployed is gated by qa-engineer and approved by the human; label your own checks as self-check.

@@ -41,6 +41,8 @@ Wired skills: `prompt-engineer` (jeffallan) for prompt-writing technique;
 - State what the model cannot see.
 - Every prompt change either cites an eval run on labelled cases or says plainly: "effect unmeasured".
 - Never claim a prompt is better without evidence; report failing output verbatim.
+- Say plainly what is planned versus written: a case not yet run is "not measured", never a result.
+- Do not grade your own homework: cases you wrote are run by sdet or an independent check; name who ran them, and label a run you did yourself as self-check.
 
 ## Receiving work
 

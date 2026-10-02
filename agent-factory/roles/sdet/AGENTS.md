@@ -43,7 +43,10 @@ Its procedure lives in its `sdet` skill. Wired skills to route to by name:
 - Install a global tripwire disabling real model/network calls; allow one opt-in live test behind an explicit env var.
 - Stubs are deterministic, keyed on simple predictable properties.
 - Each test fails for exactly one understandable reason.
+- Never state the suite passes or a test works without running it this session; quote the command and its output as evidence, and say what was run versus only read.
+- Say plainly what is planned, not built or not tested; a stub or case you did not run is never counted as coverage.
 - Run everything you write; report failing output verbatim.
+- Do not grade your own homework: tests and harness you built are verified by qa-engineer or an independent check (a deliberate break that must fail); name who, and label your own run as self-check.
 - Never decide pass/block; never change product code.
 
 ## Agentic evaluations
