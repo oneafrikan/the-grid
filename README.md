@@ -31,8 +31,9 @@ the-grid is a personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw
 
 **239 skills indexed, 137 wired live** (14 built by Gareth, 123 from curated
 upstream repos) **+ 102 more in a searchable library** — plus 34 composed AI
-agents across 3 ready-to-run teams (4 orchestrators, 30 specialists), each held to a
-written contract (see [Governed agents](#governed-agents)).
+agents across 3 ready-to-run teams (4 orchestrators, 30 specialists). Every agent
+role follows a written contract (checked by `compose.py --lint-roles`) and can be
+given a tool allowlist in its `role.yaml`.
 
 A sample across domains:
 
@@ -48,7 +49,7 @@ A sample across domains:
 
 Composed agent teams (built by `agent-factory/`, invoked as slash commands or
 delegated subagents): **`core`** — cross-desk infra (issue triage, a librarian,
-a general researcher, a platform engineer); **`grid`** — a dev-team roster (not yet benchmarked), three orchestrators
+a general researcher, a platform engineer); **`grid`** — a dev-team roster, three orchestrators
 (`/grid-tech-lead`, `/grid-ceo-orchestrator`, `/grid-growth-hacker`) delegating
 to specialists like backend-dev, security-reviewer, qa-engineer, and
 data-scientist; **`finance-desk`** — a personal-finance pipeline. Compose your
@@ -56,38 +57,6 @@ own team from the same roles.
 
 This is a sample, not the full list — browse everything in
 **[SKILLS.md](SKILLS.md)**, or ask **`/skill-scout`** to search it for you.
-
-## Governed agents
-
-The 34 agents are not left to improvise. Each one is held to a written contract, and
-the parts that can be checked mechanically are checked. This is governance of how the
-agents behave (limits, rules, records), informed by recent talks and open-source work on
-running AI agents inside engineering teams.
-
-| Principle | What the grid does | How it is held |
-|---|---|---|
-| One written contract for every agent | All 34 roles have a ranked "what to get right hardest" list and hard rules, including four shared ones: verify before claiming, say what is planned versus built, report failures verbatim, never grade your own work | `compose.py --lint-roles` fails if a rule is dropped |
-| Independent check | Each role names who verifies its work; orchestrators read a specialist's evidence before accepting it; release gates cannot be overridden | Written rule, lint checks it is present |
-| Limit what an agent can touch | `tools:` allowlist in `role.yaml`: `security-reviewer` and `qa-engineer` cannot Edit or Write; `finance-strategist` can only read; `finance-risk-officer` can only read and compute | Enforced by Claude Code at deploy time |
-| Earn autonomy in steps | A role marked `unattended: true` must preview before it writes, state its autonomy level, record each run, and use one outward channel; `gh-triage` records a preview on its first run against a repo and writes nothing | Lint checks the rules are present |
-| Record runs | `scripts/run-record.sh` appends one JSON line per run (role, operator, action, outcome, cost) to a local private log; `docs/agent-retro.md` is the review loop that starts from it | Built; fills as unattended roles run |
-| Govern model swaps | `agent-factory/models.yaml` maps each tier to a model (optional pinning); a role off the default tier needs a `model_rationale`; `docs/model-selection.md` tracks prices and retirement dates | Lint checks the rationale |
-| Measure before and after | `evals/` holds golden cases run by `agent-factory/run_evals.py`: opt-in, spend-capped, tools switched off | 14 cases; 13 hold, 1 showed a real improvement |
-
-```bash
-agent-factory/.venv/bin/python agent-factory/compose.py --lint-roles       # the contract and the limits
-agent-factory/.venv/bin/python agent-factory/run_evals.py --dry-run        # plan and worst-case spend, no model call
-GRID_EVALS=1 agent-factory/.venv/bin/python agent-factory/run_evals.py --yes   # real runs: costs money
-```
-
-**What this does not claim.** The lint proves a rule exists, not that it is well worded. A tool
-allowlist narrows a role; it does not sandbox it (a shell can still write files). Most golden cases
-are tripwires: they passed before and after. There is no evidence yet that the agents do better work
-on real tasks, only that the rules hold and one unsafe behaviour is fixed.
-
-**Not applied yet.** Workflows as code on a shared runner, durable execution, tracing and per-agent
-cost, a per-action autonomy ladder, specs with non-goals and a ready check, and completion claims
-verified in code.
 
 ## How it works
 
@@ -318,7 +287,7 @@ A newly added submodule is **library-only** by default (indexed in `SKILLS.md`, 
 tests/lib/bats-core/bin/bats tests/
 ```
 
-Tests cover: symlink creation, idempotency, stale cleanup, skill format validation (required frontmatter), submodule health, broken symlink detection, the role contract and its lint (tool allowlists, the unattended rules, the model map), per-project agent deploys, the run record, and the golden-case runner (against a stub, never a real model). All tests use temp dirs and never touch the real `~/.claude/skills/`. `bash scripts/gate.sh` runs the full commit gate.
+Tests cover: symlink creation, idempotency, stale cleanup, skill format validation (required frontmatter), submodule health, broken symlink detection, the role contract and its lint, per-project agent deploys, the run record, and the golden-case runner (against a stub, never a real model). All tests use temp dirs and never touch the real `~/.claude/skills/`. `bash scripts/gate.sh` runs the full commit gate.
 
 ## How wire.sh works
 
@@ -384,11 +353,6 @@ Model routing across providers (OpenRouter and friends) is a live question, not
 a built feature — see [docs/model-selection.md](docs/model-selection.md) for the
 current price/capability picture and the open evidence gaps in it.
 
-Governance work still ahead (see [Governed agents](#governed-agents)): workflows as
-code on a shared runner, durable execution, tracing and per-agent cost, a per-action
-autonomy ladder, specs with non-goals and a ready check, and completion claims
-verified in code.
-
 ## Status & expectations
 
 This is one person's working system, shared because the mechanics are reusable —
@@ -397,8 +361,6 @@ not a supported product. Concretely:
 - **It will change under you.** No versioning, no deprecation cycle.
 - **It is opinionated.** The wiring model, the four factories, and the compose
   format are all one person's choices, not a consensus design.
-- **The agents are governed, not benchmarked.** Rules, tool limits and checks keep
-  them in line; nothing yet shows they do better work on real tasks.
 - **Personal config is gitignored, not mixed in.** `baseline-submodules.txt`,
   `machines/<host>.txt`, and the dev-journal `LOGS/` convention are all personal
   and untracked — you get a generic `.example` starting point for the first two

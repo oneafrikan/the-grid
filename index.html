@@ -1331,62 +1331,6 @@ bash scripts/wire.sh
 
       </section><!-- /#agents-heading -->
 
-      <!-- 4b. Governance — how the agents are kept in line -->
-      <section aria-labelledby="governance-heading">
-        <h2 id="governance-heading">Governed agents</h2>
-
-        <p>
-          The 34 agents are not left to improvise. Each is held to a written
-          contract, and the parts that can be checked mechanically are checked.
-          This is governance of how the agents behave (limits, rules, records),
-          informed by recent talks and open-source work on running AI agents
-          inside engineering teams.
-        </p>
-
-        <table class="files-table" style="margin: 1rem 0 1.25rem;">
-          <thead>
-            <tr>
-              <th scope="col">Principle</th>
-              <th scope="col">What the grid does</th>
-              <th scope="col">How it is held</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td><strong>One written contract</strong></td><td>All 34 roles have a ranked "what to get right hardest" list and hard rules, including four shared ones: verify before claiming, say what is planned versus built, report failures verbatim, never grade your own work.</td><td><code>compose.py --lint-roles</code> fails if a rule is dropped.</td></tr>
-            <tr><td><strong>Independent check</strong></td><td>Each role names who verifies its work. Orchestrators read a specialist's evidence before accepting it. Release gates cannot be overridden.</td><td>Written rule; lint checks it is present.</td></tr>
-            <tr><td><strong>Limit what an agent can touch</strong></td><td><code>tools:</code> allowlist in <code>role.yaml</code>: <code>security-reviewer</code> and <code>qa-engineer</code> cannot Edit or Write; <code>finance-strategist</code> can only read; <code>finance-risk-officer</code> can only read and compute.</td><td>Enforced by Claude Code at deploy time.</td></tr>
-            <tr><td><strong>Earn autonomy in steps</strong></td><td>A role marked <code>unattended: true</code> must preview before it writes, state its autonomy level, record each run, and use one outward channel. <code>gh-triage</code> records a preview on its first run against a repo and writes nothing.</td><td>Lint checks the rules are present.</td></tr>
-            <tr><td><strong>Record runs</strong></td><td><code>scripts/run-record.sh</code> appends one JSON line per run (role, operator, action, outcome, cost) to a local private log. <code>docs/agent-retro.md</code> is the review loop that starts from it.</td><td>Built; fills as unattended roles run.</td></tr>
-            <tr><td><strong>Govern model swaps</strong></td><td><code>agent-factory/models.yaml</code> maps each tier to a model (optional pinning). A role off the default tier needs a <code>model_rationale</code>. <code>docs/model-selection.md</code> tracks prices and retirement dates.</td><td>Lint checks the rationale.</td></tr>
-            <tr><td><strong>Measure before and after</strong></td><td><code>evals/</code> holds golden cases run by <code>agent-factory/run_evals.py</code>: opt-in, spend-capped, tools switched off.</td><td>14 cases; 13 hold, 1 showed a real improvement.</td></tr>
-          </tbody>
-        </table>
-
-        <div class="command-block">
-          <h3>Check the contract, plan an eval run</h3>
-          <pre><code>agent-factory/.venv/bin/python agent-factory/compose.py --lint-roles       # the contract and the limits
-agent-factory/.venv/bin/python agent-factory/run_evals.py --dry-run        # plan and worst-case spend, no model call
-GRID_EVALS=1 agent-factory/.venv/bin/python agent-factory/run_evals.py --yes   # real runs: costs money
-</code></pre>
-        </div>
-
-        <div class="ownership-note">
-          <strong>What this does not claim.</strong> The lint proves a rule exists,
-          not that it is well worded. A tool allowlist narrows a role; it does not
-          sandbox it (a shell can still write files). Most golden cases are
-          tripwires that passed before and after. There is no evidence yet that the
-          agents do better work on real tasks, only that the rules hold and one
-          unsafe behaviour is fixed.
-        </div>
-
-        <p>
-          <strong>Not applied yet:</strong> workflows as code on a shared runner,
-          durable execution, tracing and per-agent cost, a per-action autonomy
-          ladder, specs with non-goals and a ready check, and completion claims
-          verified in code.
-        </p>
-      </section><!-- /#governance-heading -->
-
       <!-- 5. Skills — wired catalogue + library summary -->
       <section aria-labelledby="skills-heading">
         <h2 id="skills-heading">Skills</h2>
@@ -1878,14 +1822,6 @@ bash scripts/reconcile.sh --force  # remove + re-wire</code></pre>
           carries the current price and capability picture, plus the evidence
           gaps in it.
         </p>
-
-        <p>
-          <strong>Governance work still ahead</strong> (see
-          <a href="#governance-heading">Governed agents</a>): workflows as code on
-          a shared runner, durable execution, tracing and per-agent cost, a
-          per-action autonomy ladder, specs with non-goals and a ready check, and
-          completion claims verified in code.
-        </p>
       </section>
 
       <!-- 9. Status & expectations -->
@@ -1899,7 +1835,6 @@ bash scripts/reconcile.sh --force  # remove + re-wire</code></pre>
 
         <ul>
           <li><strong>It will change under you.</strong> No versioning, no deprecation cycle.</li>
-          <li><strong>The agents are governed, not benchmarked.</strong> Rules, tool limits and checks keep them in line; nothing yet shows they do better work on real tasks.</li>
           <li><strong>It is opinionated and partly personal.</strong> Machine names, account routing, and a few paths are still Gareth-shaped. Splitting the framework from the personal config is open work, not done.</li>
           <li><strong>Fork rather than depend.</strong> The wiring model — manifest, symlinks, compose-then-wire — is the transferable part. Copy it and point it at your own skills.</li>
           <li><strong><code>wire.sh</code> only touches symlinks that point into this repo.</strong> It won't clobber a real directory or a foreign symlink in <code>~/.claude/skills/</code>. Read it before running it anyway — it writes to your home directory.</li>
