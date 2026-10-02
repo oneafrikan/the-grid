@@ -196,20 +196,23 @@ def role_meta(role: str) -> dict:
     return {}
 
 
-@functools.lru_cache(maxsize=4)
-def _model_map(path: str) -> dict:
-    """tier -> exact string, from models.yaml. An absent file means every tier maps to itself."""
+MODEL_SECTIONS = ("tiers", "openclaw")   # tiers = Claude Code agents; openclaw = OpenClaw/Paperclip agents.yaml
+
+
+@functools.lru_cache(maxsize=8)
+def _model_map(path: str, section: str = "tiers") -> dict:
+    """tier -> exact string for one section of models.yaml. An absent file or section means every tier maps to itself."""
     f = Path(path)
     if not f.is_file():
         return {}
     data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-    tiers = data.get("tiers") if isinstance(data, dict) else None
+    tiers = data.get(section) if isinstance(data, dict) else None
     return tiers if isinstance(tiers, dict) else {}
 
 
-def model_id(tier: str) -> str:
-    """The string to write into a generated agent's `model:` line for a tier."""
-    return str(_model_map(str(MODELS_FILE)).get(tier) or tier)
+def model_id(tier: str, section: str = "tiers") -> str:
+    """The string to write into a generated agent's `model:` line for a tier (section picks the target)."""
+    return str(_model_map(str(MODELS_FILE), section).get(tier) or tier)
 
 
 def resolve_model(agent: dict) -> str:
@@ -444,7 +447,7 @@ def render_agents_yaml(config: dict) -> str:
         {
             "id": agent["role"],          # one agent per role for now
             "role": agent["role"],
-            "model": resolve_model(agent),
+            "model": model_id(resolve_model(agent), "openclaw"),
             "stacks": agent.get("stacks", []) or [],
             "skills": agent_skills(agent),
             "workspace": f"./{agent['role']}",
@@ -1040,7 +1043,7 @@ def write_project(name: str, config: dict, out_dir: Path) -> Path:
 # config. Every finding carries a stable code so tests (and humans grepping CI
 # output) can match the exact failure mode, and every finding names the file.
 ROLE_YAML_KEYS = {"name", "title", "summary", "owns", "default_model", "cron_model",
-                  "base_skills", "orchestrator", "tools", "unattended"}
+                  "base_skills", "orchestrator", "tools", "unattended", "model_rationale"}
 ROLE_MODELS = {"opus", "sonnet", "haiku", "fable"}
 
 
@@ -1087,6 +1090,11 @@ def lint_role(role: str) -> list[str]:
                 bad("E_FIELD_TYPE", "role.yaml", "'orchestrator' must be true/false")
             if not isinstance(meta.get("base_skills", []) or [], list):
                 bad("E_FIELD_TYPE", "role.yaml", "'base_skills' must be a list")
+            if "model_rationale" in meta and not isinstance(meta["model_rationale"], str):
+                bad("E_FIELD_TYPE", "role.yaml", "'model_rationale' must be text")
+            if meta.get("default_model", DEFAULT_MODEL) != DEFAULT_MODEL and not str(meta.get("model_rationale") or "").strip():
+                bad("E_MODEL_RATIONALE_MISSING", "role.yaml",
+                    f"default_model {meta.get('default_model')!r} differs from the {DEFAULT_MODEL!r} default: say why in 'model_rationale'")
             if not isinstance(meta.get("unattended", False), bool):
                 bad("E_FIELD_TYPE", "role.yaml", "'unattended' must be true/false")
             if "tools" in meta:
@@ -1106,22 +1114,28 @@ def lint_role(role: str) -> list[str]:
 
 
 def lint_models() -> list[str]:
-    """Problems with models.yaml: unknown tier names or non-string values."""
+    """Problems with models.yaml: unknown tier names or non-string values, in either section."""
     if not MODELS_FILE.is_file():
         return []
     try:
         data = yaml.safe_load(MODELS_FILE.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         return [f"E_MODELS_FILE: models.yaml: {str(exc).splitlines()[0]}"]
-    tiers = data.get("tiers") if isinstance(data, dict) else None
-    if not isinstance(tiers, dict):
+    if not isinstance(data, dict) or not isinstance(data.get("tiers"), dict):
         return ["E_MODELS_FILE: models.yaml: needs a 'tiers:' mapping"]
     out = []
-    for tier, value in tiers.items():
-        if tier not in ROLE_MODELS:
-            out.append(f"E_MODEL_INVALID: models.yaml: unknown tier {tier!r} (expected one of {sorted(ROLE_MODELS)})")
-        elif not (isinstance(value, str) and value.strip()):
-            out.append(f"E_MODELS_FILE: models.yaml: tier {tier!r} needs a non-empty model string")
+    for section in MODEL_SECTIONS:
+        tiers = data.get(section)
+        if tiers is None:
+            continue
+        if not isinstance(tiers, dict):
+            out.append(f"E_MODELS_FILE: models.yaml: '{section}' must be a mapping")
+            continue
+        for tier, value in tiers.items():
+            if tier not in ROLE_MODELS:
+                out.append(f"E_MODEL_INVALID: models.yaml: unknown tier {tier!r} in '{section}' (expected one of {sorted(ROLE_MODELS)})")
+            elif not (isinstance(value, str) and value.strip()):
+                out.append(f"E_MODELS_FILE: models.yaml: '{section}' tier {tier!r} needs a non-empty model string")
     return out
 
 

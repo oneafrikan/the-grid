@@ -12,3 +12,6 @@ summary: >-
   against the goal.
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: true
+model_rationale: >-
+  Orchestrator whose judgement (sequencing bets, the build-vs-not call, gating releases) is the
+  expensive part; the most capable tier is justified here.

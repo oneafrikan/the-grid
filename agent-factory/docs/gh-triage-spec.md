@@ -1,6 +1,6 @@
 # gh-triage — Design Spec
 
-Autonomous GitHub issue triage agent. Classifies every open issue in the repo set
+Scheduled GitHub issue triage agent. Classifies every open issue in the repo set
 its **deployment scope** defines, applies the mattpocock label schema + severity
 tiers, and writes agent briefs or triage notes as structured comments. No human
 intervention required for classification; machine-doable items are marked

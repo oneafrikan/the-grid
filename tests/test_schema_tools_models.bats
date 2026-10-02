@@ -104,7 +104,7 @@ assert not missing, missing"
   GRID_MODELS_FILE="$PRIV/models.yaml" run "$PY" "$COMPOSE" --lint-roles
   [ "$status" -eq 1 ]
   [[ "$output" == *"E_MODEL_INVALID: models.yaml: unknown tier 'gpt'"* ]]
-  [[ "$output" == *"E_MODELS_FILE: models.yaml: tier 'haiku' needs a non-empty model string"* ]]
+  [[ "$output" == *"E_MODELS_FILE: models.yaml: 'tiers' tier 'haiku' needs a non-empty model string"* ]]
 }
 
 @test "the hand-kept OpenClaw roster.json agrees with role.yaml on every orchestrator's model" {
@@ -121,4 +121,55 @@ assert not bad, bad"
 @test "gh-triage and finance-manager are marked unattended" {
   grep -q '^unattended: true' "$REPO_ROOT/agent-factory/roles/gh-triage/role.yaml"
   grep -q '^unattended: true' "$REPO_ROOT/agent-factory/roles/finance-manager/role.yaml"
+}
+
+@test "a non-default model tier needs a model_rationale; the default tier does not" {
+  make_role opusrole
+  sed -i.bak 's/^default_model: sonnet/default_model: opus/' "$PRIV/opusrole/role.yaml"
+  make_role plain
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_MODEL_RATIONALE_MISSING: opusrole/role.yaml"* ]]
+  [[ "$output" != *"plain/role.yaml"* ]]
+}
+
+@test "a model_rationale satisfies the rule, and must be text" {
+  make_role opusrole "model_rationale: judgement is the expensive part"
+  sed -i.bak 's/^default_model: sonnet/default_model: opus/' "$PRIV/opusrole/role.yaml"
+  make_role bad "model_rationale: [a, b]"
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"opusrole/role.yaml"* ]]
+  [[ "$output" == *"E_FIELD_TYPE: bad/role.yaml"*"model_rationale"* ]]
+}
+
+@test "the OpenClaw agents.yaml model goes through the openclaw section, not the Claude Code one" {
+  printf 'tiers:\n  sonnet: claude-sonnet-5-5\nopenclaw:\n  sonnet: anthropic/claude-sonnet-5-5\n' > "$PRIV/models.yaml"
+  run env GRID_MODELS_FILE="$PRIV/models.yaml" "$PY" -c "
+import sys; sys.path.insert(0, '$REPO_ROOT/agent-factory')
+import compose, yaml
+out = yaml.safe_load(compose.render_agents_yaml({'project': 't', 'agents': [{'role': 'qa-engineer'}]}))
+print(out['agents'][0]['model'])"
+  [ "$status" -eq 0 ]
+  [ "$output" = "anthropic/claude-sonnet-5-5" ]
+  GRID_MODELS_FILE="$PRIV/models.yaml" "$PY" "$DEPLOY" "$PROJ" --roles qa-engineer
+  grep -q '^model: claude-sonnet-5-5$' "$PROJ/.claude/agents/grid-qa-engineer.md"
+}
+
+@test "without an openclaw section the OpenClaw model is the tier word" {
+  printf 'tiers:\n  sonnet: claude-sonnet-5-5\n' > "$PRIV/models.yaml"
+  run env GRID_MODELS_FILE="$PRIV/models.yaml" "$PY" -c "
+import sys; sys.path.insert(0, '$REPO_ROOT/agent-factory')
+import compose, yaml
+print(yaml.safe_load(compose.render_agents_yaml({'project': 't', 'agents': [{'role': 'qa-engineer'}]}))['agents'][0]['model'])"
+  [ "$status" -eq 0 ]
+  [ "$output" = "sonnet" ]
+}
+
+@test "models lint checks the openclaw section too" {
+  printf 'tiers:\n  sonnet: sonnet\nopenclaw:\n  gpt: x\n  haiku: ""\n' > "$PRIV/models.yaml"
+  GRID_MODELS_FILE="$PRIV/models.yaml" run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unknown tier 'gpt' in 'openclaw'"* ]]
+  [[ "$output" == *"'openclaw' tier 'haiku' needs a non-empty model string"* ]]
 }
