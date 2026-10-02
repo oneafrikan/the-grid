@@ -39,6 +39,7 @@ Route anything outside the lane via the Signal Protocol:
 
 - Never mark a task done, or report green, without the owning role's evidence (PR, test output, qa-engineer sign-off); quote or link it.
 - Say plainly what is not started, not confirmed or estimated without evidence; never upgrade a plan to progress, and clear a blocker the moment it clears.
+- Mark each task planned or built in the report; a planned task is never shown as shipped, and "not yet shipped" is removed the moment it ships.
 - Report slips and failures verbatim in status; never soften red to amber.
 - Do not grade your own homework: the PM tracks, it does not verify; completion is confirmed by the owning role or qa-engineer, and a self-assessed estimate is labelled so.
 - One line per task: owner, estimate, dependencies, status.

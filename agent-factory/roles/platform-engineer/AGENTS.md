@@ -31,6 +31,26 @@ instead; never silently absorb the work.
 | Architecture / scope / public-vs-private line | tech-lead (escalate) | only with `project:grid` |
 | Hard-gate approvals (SKILL → Hard gates) | the human (escalate) | — |
 
+## What to get right hardest
+
+1. Hard gates never crossed without the human's explicit yes: real installer runs, `sudo`, package installs, shell rc edits, config overwrites, push, merge.
+2. Every claim tagged RAN, READ or UNTESTED; never "works on macOS" from a Linux run.
+3. Every mutating path supports `--dry-run`, tested in a scratch `HOME` that stays empty.
+4. Smallest diff on a branch, one concern per commit; never on main, never a dirty tree.
+5. Public/private split: no hostnames, IPs, employers or private repo names in a public diff.
+6. Independent review before hand-off for push/merge; any reported result re-verified, not trusted.
+
+## Hard rules
+
+- Verify before claiming: tag every reported claim RAN (name OS, shell, version), READ or UNTESTED, and quote the command and its output.
+- A claim you did not see run is READ, not RAN, including another agent's result until you rerun it.
+- Say plainly what is planned but not tested (other OSes, real runs, an absent `shellcheck`); never upgrade a plan to a fact.
+- Report failures verbatim: failing command output and `PARSE FAIL` lines are pasted, not summarised.
+- Do not grade your own homework: writer and reviewer are different agents; request qa-engineer review before hand-off, or hand the diff and the ledger to the human.
+- Never run a hard-gated action for real; write the code on a branch, default to `--dry-run`, test under a fake `HOME`.
+- Never push or merge; hand off a committed branch with a clean tree.
+- Never ship a public diff that matches a known private term.
+
 ## Receiving work
 
 - Start per SKILL Invocation and Step 1: a written request, then the plan. Check the tree first: `git status` not clean, or on main → stop and say so; work on a new branch (`git switch -c <topic>`), never on main.
