@@ -104,6 +104,13 @@ REQUIRED_ROLE_FILES = ["SOUL.md", "SKILL.md"]
 DEFAULT_MODEL = "sonnet"
 DEFAULT_CRON_MODEL = "haiku"
 
+# The ONE place a model tier becomes the string written into generated Claude Code
+# agents' `model:` line (models.yaml). By default a tier maps to itself, so Claude Code
+# resolves it to that tier's current release. Pin a tier by writing an exact model id
+# there, then recompose: every role on that tier changes at once and `--check` shows
+# the drift. GRID_MODELS_FILE overrides the path (tests use this).
+MODELS_FILE = Path(os.environ.get("GRID_MODELS_FILE") or Path(__file__).resolve().parent / "models.yaml")
+
 
 # ── markdown section-aware merge ──────────────────────────────────────────────
 
@@ -187,6 +194,22 @@ def role_meta(role: str) -> dict:
     if path.is_file():
         return yaml.safe_load(_read(path)) or {}
     return {}
+
+
+@functools.lru_cache(maxsize=4)
+def _model_map(path: str) -> dict:
+    """tier -> exact string, from models.yaml. An absent file means every tier maps to itself."""
+    f = Path(path)
+    if not f.is_file():
+        return {}
+    data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+    tiers = data.get("tiers") if isinstance(data, dict) else None
+    return tiers if isinstance(tiers, dict) else {}
+
+
+def model_id(tier: str) -> str:
+    """The string to write into a generated agent's `model:` line for a tier."""
+    return str(_model_map(str(MODELS_FILE)).get(tier) or tier)
 
 
 def resolve_model(agent: dict) -> str:
@@ -656,8 +679,11 @@ def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
         "name": slugged_name,
         "description": f"{title}. {role_summary(role)} "
                        f"Use this subagent for {role} work.",
-        "model": resolve_model(agent),
+        "model": model_id(resolve_model(agent)),
     }
+    tools = role_meta(role).get("tools")
+    if tools:   # a role.yaml `tools:` allowlist narrows the subagent; absent = inherits every tool
+        fields = {**{k: v for k, v in fields.items() if k != "model"}, "tools": ", ".join(tools), "model": fields["model"]}
     if profile == "lean":
         return f"{slugged_name}.md", _frontmatter(fields) + "\n" + render_lean_body(agent, slug, project_context, reference_path)
     procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
@@ -1014,7 +1040,7 @@ def write_project(name: str, config: dict, out_dir: Path) -> Path:
 # config. Every finding carries a stable code so tests (and humans grepping CI
 # output) can match the exact failure mode, and every finding names the file.
 ROLE_YAML_KEYS = {"name", "title", "summary", "owns", "default_model", "cron_model",
-                  "base_skills", "orchestrator"}
+                  "base_skills", "orchestrator", "tools", "unattended"}
 ROLE_MODELS = {"opus", "sonnet", "haiku", "fable"}
 
 
@@ -1061,12 +1087,41 @@ def lint_role(role: str) -> list[str]:
                 bad("E_FIELD_TYPE", "role.yaml", "'orchestrator' must be true/false")
             if not isinstance(meta.get("base_skills", []) or [], list):
                 bad("E_FIELD_TYPE", "role.yaml", "'base_skills' must be a list")
+            if not isinstance(meta.get("unattended", False), bool):
+                bad("E_FIELD_TYPE", "role.yaml", "'unattended' must be true/false")
+            if "tools" in meta:
+                tools = meta["tools"]
+                if not (isinstance(tools, list) and tools and all(isinstance(t, str) and t.strip() and "," not in t for t in tools)):
+                    bad("E_FIELD_TYPE", "role.yaml", "'tools' must be a non-empty list of tool names (no commas)")
+                if meta.get("orchestrator", False):
+                    bad("E_TOOLS_ON_ORCHESTRATOR", "role.yaml",
+                        "'tools' only narrows subagents; orchestrators deploy as skills and would silently ignore it")
 
     # Unresolved {{TOKENS}}: only AGENTS.md may carry the roster slot.
     for f in sorted(rdir.glob("*.md")):
         for tok in sorted(set(re.findall(r"\{\{[A-Za-z_]+\}\}", strip_html_comments(f.read_text(encoding="utf-8"))))):
             if not (f.name == "AGENTS.md" and tok == "{{ROSTER_TABLE}}"):
                 bad("E_TOKEN_UNRESOLVED", f.name, f"unresolved placeholder {tok}")
+    return out
+
+
+def lint_models() -> list[str]:
+    """Problems with models.yaml: unknown tier names or non-string values."""
+    if not MODELS_FILE.is_file():
+        return []
+    try:
+        data = yaml.safe_load(MODELS_FILE.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        return [f"E_MODELS_FILE: models.yaml: {str(exc).splitlines()[0]}"]
+    tiers = data.get("tiers") if isinstance(data, dict) else None
+    if not isinstance(tiers, dict):
+        return ["E_MODELS_FILE: models.yaml: needs a 'tiers:' mapping"]
+    out = []
+    for tier, value in tiers.items():
+        if tier not in ROLE_MODELS:
+            out.append(f"E_MODEL_INVALID: models.yaml: unknown tier {tier!r} (expected one of {sorted(ROLE_MODELS)})")
+        elif not (isinstance(value, str) and value.strip()):
+            out.append(f"E_MODELS_FILE: models.yaml: tier {tier!r} needs a non-empty model string")
     return out
 
 
@@ -1188,6 +1243,7 @@ def main() -> None:
     if args.lint_roles:
         problems = [p for r in all_roles() for p in lint_role(r)]
         problems += [p for r in sorted(authored_roles() & set(all_roles())) for p in lint_authoring(r)]
+        problems += lint_models()
         for p in problems:
             print(p, file=sys.stderr)
         print(f"lint-roles: {len(all_roles())} roles, {len(problems)} problem(s)")
