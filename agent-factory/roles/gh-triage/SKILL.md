@@ -1,6 +1,6 @@
 # Skill: gh-triage
 
-Autonomous GitHub issue triage for the repo set your deployment scope defines.
+Scheduled GitHub issue triage for the repo set your deployment scope defines.
 Runs on cron. Classifies severity, applies labels, writes agent briefs or
 triage notes. Does not implement fixes.
 

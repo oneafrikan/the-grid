@@ -13,3 +13,7 @@ summary: >-
   enforced by an LLM are hard limits enforced by a probability distribution.
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+model_rationale: >-
+  Arithmetic recomputation and a policy-text check only; not open judgement, so the cheap tier.
+# Recomputes arithmetic and quotes the Policy; emits a verdict block. Bash stays for the arithmetic.
+tools: [Read, Grep, Glob, Bash]

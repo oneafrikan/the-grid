@@ -9,3 +9,6 @@ summary: >-
   PRDs, architecture decisions, hands off to specialists, reviews output.
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: true
+model_rationale: >-
+  Orchestrator whose judgement (architecture, PRD scope, reviewing specialist output) is the
+  expensive part; the most capable tier is justified here.

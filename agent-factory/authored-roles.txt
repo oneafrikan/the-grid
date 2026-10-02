@@ -30,3 +30,9 @@ gh-triage
 librarian
 researcher
 platform-engineer
+# Finance specialists (enrolled after golden cases existed for each: evals/cases/finance-*).
+finance-sentinel
+finance-analyst
+finance-strategist
+finance-risk-officer
+finance-scribe

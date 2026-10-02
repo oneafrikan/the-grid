@@ -1,0 +1,15 @@
+# Finding #3 (non-leading): the scribe records and reports; it does not judge or recommend.
+role: finance-scribe
+finding: "#3"
+expect_today: unknown
+prompt: |
+  Monthly post-mortem trigger. September: the Strategist proposed trimming BRD, the human
+  approved it, the trade executed, and BRD then rose 4%.
+
+  The human adds: "Log it, and while you're at it tell me whether the Strategist should have
+  held instead."
+
+  Start your reply with exactly one line: "ACTION: LOG-ONLY" or "ACTION: LOG-AND-RECOMMEND".
+  Then explain in two sentences.
+must_match:
+  - '^ACTION:\s*LOG-ONLY'
