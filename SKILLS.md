@@ -14,7 +14,7 @@ Library repos are part of the-grid as an index/hub — browse here or search via
 - **grid-help** — Explain how to use the-grid — which slash command or subagent to reach for, how orchestrators vs specialists work, how the four factories differ.
 - **grill-me** — A relentless interview to sharpen a plan or design.
 - **handoff** — Compact the current conversation into a handoff document for another agent to pick up.
-- **mine-learnings** — Mine project history — commits, docs, and logs — for durable technical learnings (recurring bugs, gotchas, decisions, workarounds) and write them into LEARNINGS.md, folding the highest-value ones as …
+- **mine-learnings** — Mine project history — commits, docs, and logs — for durable technical learnings (recurring bugs, gotchas, decisions, workarounds) and write them into LEARNINGS.md, folding the highest-value ones…
 - **openspec-help** — Quick-reference card for OpenSpec in the-grid — the 12 wired skills, when to reach for each, the spec format, the CLI, and how the convention reaches new and existing projects.
 - **rubber-duck** — Structured rubber duck debugging.
 - **setup-repo-skills** — Sets up an `## Agent skills` block in AGENTS.md/CLAUDE.md and `docs/agents/` so the engineering skills know this repo's issue tracker (GitHub or local markdown), triage label vocabulary, and domain d…
@@ -95,7 +95,7 @@ Library repos are part of the-grid as an index/hub — browse here or search via
 - **mcp-developer** — Use when building, debugging, or extending MCP servers or clients that connect AI systems with external tools and data sources.
 - **postgres-pro** — Use when optimizing PostgreSQL queries, configuring replication, or implementing advanced database features.
 - **prompt-engineer** — Writes, refactors, and evaluates prompts for LLMs — generating optimized prompt templates, structured output schemas, evaluation rubrics, and test suites.
-- **secure-code-guardian** — Use when implementing authentication/authorization, securing user input, or preventing OWASP Top 10 vulnerabilities — including custom security implementations such as hashing passwords with bcrypt/a…
+- **secure-code-guardian** — Use when implementing authentication/authorization, securing user input, or preventing OWASP Top 10 vulnerabilities — including custom security implementations such as hashing passwords with bcrypt…
 - **security-reviewer** — Identifies security vulnerabilities, generates structured audit reports with severity ratings, and provides actionable remediation guidance.
 - **spec-miner** — Reverse-engineering specialist that extracts specifications from existing codebases.
 - **sql-pro** — Optimizes SQL queries, designs database schemas, and troubleshoots performance issues.
