@@ -11,3 +11,5 @@ summary: >-
   proposes or judges — records only.
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+model_rationale: >-
+  Logging is not a reasoning task: dated, complete entries, so the cheap tier.

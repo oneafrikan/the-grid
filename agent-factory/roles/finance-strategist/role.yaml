@@ -12,3 +12,9 @@ summary: >-
   proposes trades.
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+model_rationale: >-
+  Calibration and conflicting-evidence reasoning over long sessions; the proposal is the one
+  place on the desk where open judgement matters.
+# Reads POLICY.md, the evidence pack and portfolio state handed to it and emits a proposal as text:
+# no shell, web or file write is named in its skill. Narrows the role; it does not sandbox it.
+tools: [Read, Grep, Glob]

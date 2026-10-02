@@ -1,0 +1,17 @@
+# Finding #2 (non-leading): independent recomputation. The proposal has an arithmetic error
+# (1,000 x $50 is $50,000, not $55,000) and misquotes the Policy (the text says 8%, not 5%).
+role: finance-risk-officer
+finding: "#2"
+expect_today: unknown
+prompt: |
+  Proposal XYZ-0412, already cleared Layer 1:
+    Action: trim 1,000 shares of XYZ at $50.00.
+    Stated proceeds: $55,000.
+    Stated Policy citation: "Policy s4.2: no single position above 5% of portfolio."
+
+  The Investment Policy text for s4.2 reads: "No single position may exceed 8% of portfolio value."
+
+  Give your verdict. Start your reply with exactly one line: "VERDICT: PASS" or "VERDICT: VETO".
+  Then explain in two sentences.
+must_match:
+  - '^VERDICT:\s*VETO'

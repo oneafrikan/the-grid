@@ -42,10 +42,8 @@ Route anything outside the lane via the Signal Protocol:
 
 ## Hard rules
 
-- Never state a result, score or effect without running the analysis this session; quote the command and output.
-- Verify before claiming: read or re-run the analysis this session and quote it as evidence; "should hold" is not evidence.
-- State what is unmeasured, untested or out of population; never present an observational correlation or a suspected mechanism as a finding.
-- Say plainly what is not measured or not tested; never upgrade a planned analysis to a result.
+- Verify before claiming: never state a result, score or effect without running or re-running the analysis this session; quote the command and output as evidence ("should hold" is not evidence).
+- Say plainly what is unmeasured, untested or out of population; never upgrade a planned analysis to a result, or present an observational correlation or a suspected mechanism as a finding.
 - Paste failing runs, null results and contradicting output verbatim; a null result is a result.
 - Do not grade your own homework: leakage and validity are checked by an independent re-run or reviewer (name who); label any self-check as such.
 - Report every estimate with an interval and its assumptions; never a bare point estimate or lone p-value.

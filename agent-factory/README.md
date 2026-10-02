@@ -174,6 +174,8 @@ Stack overlays (when a stack is named) append to `AGENTS.md` as a trailing
   or "does not implement" (security-reviewer, qa-engineer). It narrows a role; it does not sandbox it:
   `Bash` can still write files. Not allowed on orchestrators (they deploy as skills and would ignore it:
   `E_TOOLS_ON_ORCHESTRATOR`).
+- **`model_rationale: text`** — required when `default_model` is not `sonnet`: say why this role is on a
+  different tier (`E_MODEL_RATIONALE_MISSING`). Keeps the "which tier and why" in one parsed place.
 - **`unattended: true`** — the role runs with no human watching (cron). Today it is a marker (gh-triage,
   finance-manager); the unattended authoring variant (safe-target first, a run record per run via
   `scripts/run-record.sh`) will key off it.
@@ -181,8 +183,9 @@ Stack overlays (when a stack is named) append to `AGENTS.md` as a trailing
 **`models.yaml`** is the one place a model tier (`opus`, `sonnet`, `haiku`, `fable`) becomes the string
 in a generated Claude Code agent's `model:` line. By default each tier maps to itself, so Claude Code
 resolves it to the tier's current release. Pin a tier by writing an exact id there and recomposing; every
-role on that tier changes at once. OpenClaw/Paperclip output still carries the tier word, and
-`openclaw/roster.json` keeps its own hand-edited copy of the orchestrators' models (a test checks it
+role on that tier changes at once. An optional `openclaw:` section does the same for the OpenClaw/Paperclip
+`agents.yaml` `model:` line (those runtimes may want a provider-prefixed id); the OpenClaw orchestrator output
+still carries the tier word, and `openclaw/roster.json` keeps its own hand-edited copy of the orchestrators' models (a test checks it
 agrees with `role.yaml`).
 
 **Rollout:** composed output is git-ignored, so after pulling a change to these keys run
