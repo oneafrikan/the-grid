@@ -164,6 +164,31 @@ config) and appends the role's `IDENTITY.md` extras.
 Stack overlays (when a stack is named) append to `AGENTS.md` as a trailing
 "Stack overlays" section — stack conventions are operating rules.
 
+## role.yaml keys, tool allowlists and the model map
+
+`role.yaml` keys (lint rejects any other, `E_FIELD_UNKNOWN`): `name`, `title`, `summary`,
+`owns`, `default_model`, `cron_model`, `base_skills`, `orchestrator`, plus:
+
+- **`tools: [Read, Grep, ...]`** — optional allowlist written to the subagent's `tools:` frontmatter
+  line. Absent means the subagent inherits every tool. Use it for roles whose prose says "advisory"
+  or "does not implement" (security-reviewer, qa-engineer). It narrows a role; it does not sandbox it:
+  `Bash` can still write files. Not allowed on orchestrators (they deploy as skills and would ignore it:
+  `E_TOOLS_ON_ORCHESTRATOR`).
+- **`unattended: true`** — the role runs with no human watching (cron). Today it is a marker (gh-triage,
+  finance-manager); the unattended authoring variant (safe-target first, a run record per run via
+  `scripts/run-record.sh`) will key off it.
+
+**`models.yaml`** is the one place a model tier (`opus`, `sonnet`, `haiku`, `fable`) becomes the string
+in a generated Claude Code agent's `model:` line. By default each tier maps to itself, so Claude Code
+resolves it to the tier's current release. Pin a tier by writing an exact id there and recomposing; every
+role on that tier changes at once. OpenClaw/Paperclip output still carries the tier word, and
+`openclaw/roster.json` keeps its own hand-edited copy of the orchestrators' models (a test checks it
+agrees with `role.yaml`).
+
+**Rollout:** composed output is git-ignored, so after pulling a change to these keys run
+`compose.py <cfg> --target claude-code` for each public project and `scripts/wire.sh`; per-project deploys
+pick it up on the next `deploy.py <project>` (its `--check` reports the drift).
+
 ## Spec-driven repos (OpenSpec)
 
 `_core/AGENTS_base.md` carries a boot-sequence check for
