@@ -839,7 +839,7 @@
             </tr>
             <tr>
               <td><strong>Subagent</strong> (specialist)</td>
-              <td>the other 25 roles</td>
+              <td>the other 30 roles</td>
               <td>Not a slash command. Delegate: <em>"Use the grid-backend-dev subagent to…"</em>, or let an orchestrator hand off automatically.</td>
             </tr>
           </tbody>
@@ -977,12 +977,12 @@ bash scripts/wire.sh
         <h2 id="agents-heading">Agents</h2>
 
         <p>
-          agent-factory produces 29 roles across three independently composed
+          agent-factory produces 34 roles across three independently composed
           and gated public projects (plus any private desk composed the same
           way, sourcing roles from outside this repo — see CLAUDE.md). Four
           roles are <strong>orchestrators</strong> — they become Claude Code
           skills invoked as slash commands and can coordinate the rest of
-          their team. The other 25 are <strong>specialists</strong> —
+          their team. The other 30 are <strong>specialists</strong> —
           subagents delegated to by an orchestrator or called directly.
         </p>
 
@@ -1209,6 +1209,51 @@ bash scripts/wire.sh
             </div>
             <div class="agent-card-title">SEO Specialist</div>
             <p class="agent-card-summary">Technical, on-page, and content SEO: audits, schema/JSON-LD, sitemaps, Core Web Vitals, GSC, keyword/intent strategy. Recommends; does not deploy.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-ai-engineer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">AI Engineer</div>
+            <p class="agent-card-summary">The LLM runtime around the prompts: token budgets, caching, model choice, structured-output plumbing, failure handling, agent loops, tools/MCP, async execution, retrieval, cost tracking.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-fullstack-engineer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Fullstack Engineer</div>
+            <p class="agent-card-summary">Builds vertical slices across client and server in one pass (UI, API endpoint, application-level data access) and keeps the shared contract in sync.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-prompt-engineer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Prompt Engineer</div>
+            <p class="agent-card-summary">The text that drives an LLM: system prompts, rubrics, instructions, few-shot examples, output schemas, and their versioning. Defines what good output is.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-sdet</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">SDET</div>
+            <p class="agent-card-summary">Test infrastructure and strategy: suites, fixtures, isolation, contract tests, mocks for external and LLM calls, flaky-test diagnosis, and the eval harness for LLM features. Builds the machinery; does not decide pass/block.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>grid-technical-writer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Technical Writer</div>
+            <p class="agent-card-summary">Keeps a repo's documentation true to its code: README, agent guidance files, references, onboarding, changelogs, agent briefs.</p>
           </article>
 
         </div>

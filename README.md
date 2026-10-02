@@ -29,9 +29,11 @@ the-grid is a personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw
 
 ## What you get
 
-**238 skills indexed, 136 wired live** (13 built by Gareth, 123 from curated
+**239 skills indexed, 137 wired live** (14 built by Gareth, 123 from curated
 upstream repos) **+ 102 more in a searchable library** — plus 34 composed AI
-agents across 3 ready-to-run teams (4 orchestrators, 30 specialists).
+agents across 3 ready-to-run teams (4 orchestrators, 30 specialists). Every agent
+role follows a written contract (checked by `compose.py --lint-roles`) and can be
+given a tool allowlist in its `role.yaml`.
 
 A sample across domains:
 
@@ -47,7 +49,7 @@ A sample across domains:
 
 Composed agent teams (built by `agent-factory/`, invoked as slash commands or
 delegated subagents): **`core`** — cross-desk infra (issue triage, a librarian,
-a general researcher, a platform engineer); **`grid`** — a dev-team roster (not yet benchmarked), three orchestrators
+a general researcher, a platform engineer); **`grid`** — a dev-team roster, three orchestrators
 (`/grid-tech-lead`, `/grid-ceo-orchestrator`, `/grid-growth-hacker`) delegating
 to specialists like backend-dev, security-reviewer, qa-engineer, and
 data-scientist; **`finance-desk`** — a personal-finance pipeline. Compose your
@@ -186,6 +188,9 @@ never touches its history.
     model-selection.md  ← which model for which job, with prices + benchmarks
   prompts/              ← reusable prompts
   agent-factory/        ← composes AI dev-team agents (role × stack × skills); live
+    models.yaml         ← the one tier-to-model map for generated agents
+    run_evals.py        ← runs the golden cases in evals/ (opt-in, spend-capped)
+  evals/                ← golden cases that check how agent roles behave
   skills-factory/       ← scaffolding for generating new skills (early)
   automation-factory/   ← reusable automation patterns (e.g. issue-loop), cut into target repos
   project-factory/      ← scaffolds brand-new projects from a template
@@ -200,6 +205,8 @@ never touches its history.
     sources.sh          ← regenerates docs/SOURCES.md; --check link-checks every URL
     reconcile.sh        ← removes stale skill shadows on a new machine
     cut-project.sh      ← seeds/retrofits a project-factory template
+    gate.sh             ← the commit gate: shellcheck, catalog, role lint, composed output, tests
+    run-record.sh       ← appends one line per agent run to a local private log
   tests/
     test_wiring.bats
     test_skill_format.bats
@@ -280,7 +287,7 @@ A newly added submodule is **library-only** by default (indexed in `SKILLS.md`, 
 tests/lib/bats-core/bin/bats tests/
 ```
 
-Tests cover: symlink creation, idempotency, stale cleanup, skill format validation (required frontmatter), submodule health, and broken symlink detection. All tests use temp dirs and never touch the real `~/.claude/skills/`.
+Tests cover: symlink creation, idempotency, stale cleanup, skill format validation (required frontmatter), submodule health, broken symlink detection, the role contract and its lint, per-project agent deploys, the run record, and the golden-case runner (against a stub, never a real model). All tests use temp dirs and never touch the real `~/.claude/skills/`. `bash scripts/gate.sh` runs the full commit gate.
 
 ## How wire.sh works
 
