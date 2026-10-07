@@ -11,7 +11,7 @@
 #                 [--operator NAME] [--cost-usd 0.02] [--note "free text, max 500 chars"]
 #   outcome is one of: ok | error | stopped | skipped
 #
-# The log is local and private to the machine: ${GRID_RUN_LOG:-$HOME/.grid/runs.jsonl}
+# The log is local and private to the machine: ${GRID_RUN_LOG:-$HOME/.the-grid-private/runs.jsonl}
 # (directory 0700, file 0600). Nothing here sends the record anywhere.
 # Operator = who started the run (--operator, else $GRID_OPERATOR, else $USER); role = which
 # agent persona acted. They are different things and both are recorded.
@@ -40,7 +40,7 @@ done
 case "$outcome" in ok|error|stopped|skipped) ;; *) die "--outcome must be ok, error, stopped or skipped" ;; esac
 if [ -n "$cost" ] && ! [[ "$cost" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then die "--cost-usd must be a number"; fi
 
-log="${GRID_RUN_LOG:-$HOME/.grid/runs.jsonl}"
+log="${GRID_RUN_LOG:-$HOME/.the-grid-private/runs.jsonl}"
 mkdir -p "$(dirname "$log")"
 chmod 700 "$(dirname "$log")" 2>/dev/null || true   # only tighten; a shared dir we do not own is left alone
 

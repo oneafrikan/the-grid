@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Tests for scripts/run-record.sh (the per-run record). Every test logs to a temp file
-# via GRID_RUN_LOG — never the real ~/.grid/runs.jsonl.
+# via GRID_RUN_LOG — never the real ~/.the-grid-private/runs.jsonl.
 
 load helpers/setup
 

@@ -9,8 +9,8 @@ One sentence, the way you would say it to a colleague: "gh-triage labelled the l
 without a preview." Not "the model hallucinated".
 
 ## 2. Inspect — find the run
-- Unattended roles: find the line in the run log (`${GRID_RUN_LOG:-~/.grid/runs.jsonl}`).
-  `python3 -c "import json,sys; [print(l.rstrip()) for l in open(sys.argv[1]) if json.loads(l)['role']=='gh-triage']" ~/.grid/runs.jsonl`
+- Unattended roles: find the line in the run log (`${GRID_RUN_LOG:-~/.the-grid-private/runs.jsonl}`).
+  `python3 -c "import json,sys; [print(l.rstrip()) for l in open(sys.argv[1]) if json.loads(l)['role']=='gh-triage']" ~/.the-grid-private/runs.jsonl`
 - Interactive roles: the Claude Code transcript for that session.
 - Note: which role acted, and who started the run (the record keeps both).
 
