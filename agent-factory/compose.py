@@ -745,7 +745,9 @@ def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
     fields = {
         "name": slugged_name,
         "description": f"{title} orchestrator. {role_summary(role)} "
-                       f"Invoke with /{slugged_name} or when coordinating a multi-step dev-team feature.",
+                       f"Invoke with /{slugged_name}"
+                       # Only team orchestrators (those with reports) coordinate dev-team work.
+                       + (" or when coordinating a multi-step dev-team feature." if agent.get("delegates_to") else "."),
     }
     if profile == "lean":
         body = (
