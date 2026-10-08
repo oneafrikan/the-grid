@@ -290,6 +290,8 @@ def load_config(path: Path) -> dict:
     slug = config.get("slug")
     if slug is not None and not re.match(r'^[a-z][a-z0-9-]+$', str(slug)):
         errors.append("slug must be lowercase kebab-case (e.g. 'full-team')")
+    if not isinstance(config.get("bare_names", False), bool):
+        errors.append("bare_names must be true/false")
 
     agents = config.get("agents")
     if agents is not None and not isinstance(agents, list):
@@ -664,6 +666,17 @@ def render_lean_body(agent: dict, slug: str, project_context: str = "", referenc
     return "\n\n".join(parts) + "\n"
 
 
+def cc_slug(config: dict, name: str) -> str:
+    """Prefix for Claude Code agent/skill names. Empty when the project sets
+    `bare_names: true`, so a role is invoked as /<role> rather than /<slug>-<role>."""
+    return "" if config.get("bare_names") else (config.get("slug") or name)
+
+
+def slugged(slug: str, role: str) -> str:
+    """The Claude Code name for a role: '<slug>-<role>', or just '<role>' when slug is empty."""
+    return f"{slug}-{role}" if slug else role
+
+
 def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
                      project_context: str = "", reference_path: str = "") -> tuple[str, str]:
     """A specialist role → one Claude Code subagent `.md` (spawnable).
@@ -674,7 +687,7 @@ def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
     collision-safe and discoverable as a group.
     """
     role = agent["role"]
-    slugged_name = f"{slug}-{role}"
+    slugged_name = slugged(slug, role)
     title = role_meta(role).get("title") or role
     skills = agent_skills(agent)
 
@@ -718,7 +731,7 @@ def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
     in the / menu clusters the whole team and prevents cross-project collisions.
     """
     role = agent["role"]
-    slugged_name = f"{slug}-{role}"
+    slugged_name = slugged(slug, role)
     title = role_meta(role).get("title") or role
 
     fields = {
@@ -758,7 +771,7 @@ def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
     symlinks skills/* into ~/.claude/skills/ and agents/* into ~/.claude/agents/.
     Slug defaults to the project name when not set in the config.
     """
-    slug = config.get("slug") or name
+    slug = cc_slug(config, name)
     cc_dir = (out_dir / name / "_claude-code")
     if cc_dir.is_symlink():
         raise ValueError(f"refusing to write: {cc_dir} is a symlink, not a dir")
@@ -769,7 +782,7 @@ def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
 
     for agent in config["agents"]:
         role = agent["role"]
-        slugged_name = f"{slug}-{role}"
+        slugged_name = slugged(slug, role)
         if is_orchestrator(role):
             skill_dir = cc_dir / "skills" / slugged_name
             skill_dir.mkdir()
@@ -1342,7 +1355,7 @@ def main() -> None:
         for agent in agents:
             role = agent["role"]
             if args.target == "claude-code":
-                slugged_name = f"{slug}-{role}"
+                slugged_name = slugged(cc_slug(config, name), role)
                 shape = "skill (orchestrator)" if is_orchestrator(role) else "subagent (specialist)"
                 print(f"  - {slugged_name:<32} model={resolve_model(agent):<8} -> CC {shape}")
             else:
@@ -1355,11 +1368,11 @@ def main() -> None:
 
     if args.target == "claude-code":
         cc_dir = write_claude_code(name, config, args.out)
-        slug = config.get("slug") or name
+        slug = cc_slug(config, name)
         print(f"composed '{name}' (claude-code): {len(agents)} agents -> {cc_dir}")
         for agent in agents:
             role = agent["role"]
-            slugged_name = f"{slug}-{role}"
+            slugged_name = slugged(slug, role)
             shape = "skill" if is_orchestrator(role) else "subagent"
             print(f"  - {slugged_name} ({resolve_model(agent)}) -> CC {shape}")
         return

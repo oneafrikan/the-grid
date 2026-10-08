@@ -213,3 +213,18 @@ EOT
   [ "$status" -eq 0 ]
   rm -rf "$fakehome"
 }
+
+# bare_names: true names Claude Code skills/agents '<role>'; default keeps '<slug>-<role>'.
+@test "bare_names drops the slug prefix for claude-code output; default keeps it" {
+  cfg=$(mktemp -d)
+  out=$(mktemp -d)
+  printf 'project: bn\nslug: bn\nbare_names: true\nagents:\n  - role: morpheus\n' > "$cfg/bare.yaml"
+  printf 'project: pfx\nslug: pfx\nagents:\n  - role: morpheus\n' > "$cfg/pfx.yaml"
+  run "$PY" "$COMPOSE" "$cfg/bare.yaml" --target claude-code --out "$out"
+  [ "$status" -eq 0 ]
+  [ -f "$out/bn/_claude-code/skills/morpheus/SKILL.md" ]
+  run "$PY" "$COMPOSE" "$cfg/pfx.yaml" --target claude-code --out "$out"
+  [ "$status" -eq 0 ]
+  [ -f "$out/pfx/_claude-code/skills/pfx-morpheus/SKILL.md" ]
+  rm -rf "$cfg" "$out"
+}
