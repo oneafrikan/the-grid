@@ -33,7 +33,7 @@ Three reference-card skills, each one-shot — they print and stop:
 
 ## Agents — orchestrators vs subagents
 
-`agent-factory/` composes three public projects (plus any private desk you've
+`agent-factory/` composes four public projects (plus any private desk you've
 set up separately — composed the same way from `GRID_PRIVATE_ROLES_DIR`, see
 CLAUDE.md). Two different invocation shapes:
 

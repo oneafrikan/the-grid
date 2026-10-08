@@ -68,6 +68,7 @@ if [[ "$WITH_AGENTS" == "1" ]]; then
   .venv/bin/python compose.py examples/core.yaml --target claude-code
   .venv/bin/python compose.py examples/grid.yaml --target claude-code
   .venv/bin/python compose.py examples/finance-desk.yaml --target claude-code
+  .venv/bin/python compose.py examples/learning-desk.yaml --target claude-code
   cd "$GRID_DIR"
   bash "$GRID_DIR/scripts/wire.sh"
 else

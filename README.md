@@ -30,7 +30,7 @@ the-grid is a personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw
 ## What you get
 
 **239 skills indexed, 137 wired live** (14 built by Gareth, 123 from curated
-upstream repos) **+ 102 more in a searchable library** — plus 34 composed AI
+upstream repos) **+ 102 more in a searchable library** — plus 38 composed AI
 agents across 3 ready-to-run teams (4 orchestrators, 30 specialists). Every agent
 role follows a written contract (checked by `compose.py --lint-roles`) and can be
 given a tool allowlist in its `role.yaml`.
@@ -70,7 +70,7 @@ different asset type:
 | Factory | Produces | Deployed via |
 |---------|----------|---------------|
 | `skills-factory/` | New skills (built via a Karpathy loop elsewhere, dropped into `skills/`) | `scripts/wire.sh` symlinks |
-| `agent-factory/` | Composed AI agents (`role × stack × skills`) — 3 public projects (`core`, `grid`, `finance-desk`; 34 roles, 4 orchestrators + 30 specialists) plus any private desk composed separately | `scripts/wire.sh` (Claude Code target); OpenClaw + Paperclip targets next |
+| `agent-factory/` | Composed AI agents (`role × stack × skills`) — 4 public projects (`core`, `grid`, `finance-desk`, `learning-desk`; 38 roles, 7 orchestrators + 31 specialists) plus any private desk composed separately | `scripts/wire.sh` (Claude Code target); OpenClaw + Paperclip targets next |
 | `automation-factory/` | Reusable automation patterns (e.g. `issue-loop`) | Cut into a target repo's tracked `loop/` folder |
 | `project-factory/` | Whole new project scaffolds from a template | `scripts/cut-project.sh` (seed or retrofit) |
 
