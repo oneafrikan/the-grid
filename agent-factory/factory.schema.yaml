@@ -10,6 +10,9 @@
 # project      (str, required)   slug for the output folder: projects/<project>/
 # description  (str, optional)   one-line human description
 # paperclip    (bool, optional)  wire Paperclip heartbeat skills into every agent
+# bare_names   (bool, optional)  Claude Code target only: name agents/skills '<role>' not
+#                               '<slug>-<role>' (so /morpheus, not /learning-desk-morpheus).
+#                               Role names must then be unique across all wired projects.
 # agents       (list, required)  one entry per agent on the team
 #
 # ── per-agent entry ──────────────────────────────────────────────────────────
