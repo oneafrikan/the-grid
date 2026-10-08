@@ -37,3 +37,5 @@ finance-strategist
 finance-risk-officer
 finance-scribe
 morpheus
+oracle
+tank

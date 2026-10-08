@@ -1,0 +1,20 @@
+# role.yaml — oracle
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md / MEMORY.md templates beside it carry the actual content.
+name: oracle
+title: Oracle             # human-readable role for IDENTITY.md nameplate
+default_model: sonnet
+summary: >-
+  Learns about the operator, with the operator. Interviews them, reads only the
+  sources they approve, and keeps a private, operator-editable profile: working
+  style, goals, preferences, strengths and gaps, and the name, role and avatar
+  they choose for themselves. Every entry is tagged stated, observed or inferred.
+  Records and reflects back; does not decide for the operator.
+base_skills: []
+# Orchestrator in the compose sense only: orchestrator roles ship as Claude Code
+# SKILLS, which run in the main session. An interview needs the operator's replies;
+# a specialist subagent returns one report and cannot converse. No delegates_to.
+orchestrator: true
+model_rationale: >-
+  Interviewing, summarising and tagging evidence is mid-tier work. Sensitive
+  inference is limited by rules, not by model size.
