@@ -17,7 +17,7 @@
 # `-project:finance-desk` should still keep `project:core`.
 project: core
 slug: core
-description: Cross-desk shared infrastructure — gh-triage, librarian, researcher, platform-engineer.
+description: Cross-desk shared infrastructure — gh-triage, librarian, researcher, platform-engineer, tron.
 paperclip: false
 
 agents:
@@ -34,3 +34,9 @@ agents:
   # tied to the machine rather than a team — so it belongs here, not in grid.yaml,
   # and survives a machine subtracting -project:grid. No delegation chain.
   - role: platform-engineer
+  # The grid's front door. Lives in core (not learning-desk) so it stays wired on every
+  # machine even when a desk is subtracted. `bare: true` makes it /tron rather than
+  # /core-tron; the rest of core keeps the core- prefix. No delegation chain: it
+  # recommends and hands off, and reads what is wired at run time.
+  - role: tron
+    bare: true
