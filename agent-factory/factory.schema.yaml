@@ -19,6 +19,8 @@
 # role        (str, required)   must match a folder in roles/<role>/
 # name        (str, optional)   agent's persona name for IDENTITY.md; defaults to
 #                               the role's title (role.yaml `title`) or the slug
+# bare        (bool, optional)  Claude Code target only: name just this agent '<role>' even
+#                               when the project is slugged (e.g. /tron inside `core`)
 # stacks      (list, optional)  overlays from stacks/<stack>/; []=stack-agnostic
 # skills      (list, optional)  bolt-on skills from skills/<skill>/ (the role's own
 #                               operating skill is always included automatically)

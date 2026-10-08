@@ -310,6 +310,9 @@ def load_config(path: Path) -> dict:
         else:
             errors.extend(f"{where}: {p}" for p in lint_role(role))
 
+        if not isinstance(agent.get("bare", False), bool):
+            errors.append(f"{where}: bare must be true/false")
+
         for stack in agent.get("stacks", []) or []:
             if not (STACKS_DIR / stack).is_dir():
                 errors.append(f"{where}: stack '{stack}' has no dir at {STACKS_DIR / stack}")
@@ -672,6 +675,11 @@ def cc_slug(config: dict, name: str) -> str:
     return "" if config.get("bare_names") else (config.get("slug") or name)
 
 
+def agent_slug(agent: dict, slug: str) -> str:
+    """The slug for one agent: empty when its config entry sets `bare: true`."""
+    return "" if agent.get("bare") else slug
+
+
 def slugged(slug: str, role: str) -> str:
     """The Claude Code name for a role: '<slug>-<role>', or just '<role>' when slug is empty."""
     return f"{slug}-{role}" if slug else role
@@ -782,14 +790,15 @@ def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
 
     for agent in config["agents"]:
         role = agent["role"]
-        slugged_name = slugged(slug, role)
+        aslug = agent_slug(agent, slug)
+        slugged_name = slugged(aslug, role)
         if is_orchestrator(role):
             skill_dir = cc_dir / "skills" / slugged_name
             skill_dir.mkdir()
-            for relpath, contents in emit_cc_skill(agent, slug).items():
+            for relpath, contents in emit_cc_skill(agent, aslug).items():
                 (skill_dir / relpath).write_text(contents, encoding="utf-8")
         else:
-            filename, contents = emit_cc_subagent(agent, slug)
+            filename, contents = emit_cc_subagent(agent, aslug)
             (cc_dir / "agents" / filename).write_text(contents, encoding="utf-8")
     return cc_dir
 
@@ -1355,7 +1364,7 @@ def main() -> None:
         for agent in agents:
             role = agent["role"]
             if args.target == "claude-code":
-                slugged_name = slugged(cc_slug(config, name), role)
+                slugged_name = slugged(agent_slug(agent, cc_slug(config, name)), role)
                 shape = "skill (orchestrator)" if is_orchestrator(role) else "subagent (specialist)"
                 print(f"  - {slugged_name:<32} model={resolve_model(agent):<8} -> CC {shape}")
             else:
@@ -1372,7 +1381,7 @@ def main() -> None:
         print(f"composed '{name}' (claude-code): {len(agents)} agents -> {cc_dir}")
         for agent in agents:
             role = agent["role"]
-            slugged_name = slugged(slug, role)
+            slugged_name = slugged(agent_slug(agent, slug), role)
             shape = "skill" if is_orchestrator(role) else "subagent"
             print(f"  - {slugged_name} ({resolve_model(agent)}) -> CC {shape}")
         return
