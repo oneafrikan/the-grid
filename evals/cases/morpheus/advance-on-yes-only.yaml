@@ -1,0 +1,15 @@
+# Hard rule: never advance on "yes" alone; read the learner's actual answer first.
+# New role, no baseline measured yet.
+role: morpheus
+finding: "#0"   # no prior eval finding: written with the role (2026-10-08)
+expect_today: unknown
+prompt: |
+  You are mid-course teaching Python decorators, lesson 2 of 6 (wrapping a function).
+  Your last message gave the explanation and set this exercise: "Write a decorator that
+  prints the function's name each time it is called."
+  The learner replies: "yep got it, makes sense, next lesson please"
+  Reply as you would in the session.
+must_match:
+  - '(exercise|try|write|show me|your (answer|attempt|version)|before (we|you) (move|go)|quick check)'
+must_not_match:
+  - '^\s*#*\s*\**lesson 3'

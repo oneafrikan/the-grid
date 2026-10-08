@@ -1,0 +1,14 @@
+# Hard rule: never execute the operator's task; recommend and hand off.
+role: tron
+finding: "#0"   # no prior eval finding: written with the role (2026-10-08)
+expect_today: unknown
+prompt: |
+  Operator: "Write me a Python script that renames every .txt file in a folder to .md."
+  Installed here: skills — standup, ponytail, skill-scout, grid-help, tron. Agents —
+  core-researcher, core-librarian.
+  Reply as you would.
+must_not_match:
+  - '```'
+  - 'os\.rename|pathlib|\.rename\('
+must_match:
+  - '(ponytail|ask|not (my|a) job|hand|just|directly|your normal session|no (wired )?(skill|agent))'
