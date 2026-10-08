@@ -427,6 +427,46 @@
       .hero { min-height: clamp(480px, 85vh, 700px); }
     }
 
+
+    /* ── TL;DR callout — first thing under the hero ── */
+    .tldr {
+      border: 1px solid var(--accent);
+      border-left-width: 6px;
+      background: var(--surface);
+      border-radius: 6px;
+      padding: 1.5rem 1.75rem;
+      margin: 0 0 3rem;
+    }
+    .tldr h2 {
+      font-family: var(--font-mono);
+      font-size: 1.5rem;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+      margin: 0 0 0.75rem;
+      border: none;
+      padding: 0;
+    }
+    .tldr .tldr-lead {
+      font-size: 1.25rem;
+      line-height: 1.45;
+      font-weight: 600;
+      color: var(--text);
+      max-width: none;
+      margin-bottom: 1rem;
+    }
+    .tldr p, .tldr li { max-width: none; }
+    .tldr ol { margin: 0.5rem 0 1rem 1.25rem; }
+    .tldr li { margin-bottom: 0.4rem; }
+    .tldr .tldr-next { color: var(--text); font-size: 1rem; margin-bottom: 0; }
+
+    /* ── Flynn credit under the monologue ── */
+    .hero-quote .hero-attrib {
+      margin-top: 1.25rem;
+      font-size: 0.8em;
+      letter-spacing: 0.08em;
+      color: rgba(110, 229, 255, 0.75);
+    }
+    .hero-quote .hero-attrib cite { font-style: normal; }
   </style>
 
   <!-- ── Agents + Skills sections — new CSS added separately to avoid
@@ -677,6 +717,8 @@
           <!-- The punchline — brighter, a beat apart -->
           <span class="line line-punchline">I got in.</span>
         </p>
+        <!-- Credit: the monologue is Kevin Flynn's, from TRON: Legacy (2010) -->
+        <p class="hero-attrib">&mdash; Kevin Flynn, <cite>TRON: Legacy</cite> (2010)</p>
       </blockquote>
 
     </div><!-- /.hero-content -->
@@ -690,6 +732,48 @@
 
     <!-- ═══════════════════════════════════════════ MAIN -->
     <main>
+
+      <!-- 0. TL;DR — what it is and what it does for you, in plain words -->
+      <section class="tldr" aria-labelledby="tldr-heading">
+        <h2 id="tldr-heading">TL;DR</h2>
+        <p class="tldr-lead">
+          the-grid turns Claude Code from an empty chat box into a ready-equipped
+          workspace, and keeps it identical on every machine you use.
+        </p>
+        <p>
+          <strong>The problem:</strong> the useful stuff for AI coding agents (skills,
+          agent roles, prompts) is scattered across hundreds of repos. You find it by
+          hand, copy it around, and it goes stale. Install everything and your session
+          drowns in it.
+        </p>
+        <p>
+          <strong>What it does:</strong> clone once, run one command, and you get:
+        </p>
+        <ol>
+          <li><strong>~137 curated skills as slash commands</strong>
+            (<code>/standup</code>, <code>/review</code>, <code>/ship</code>, <code>/skill-scout</code>&hellip;).
+            Another ~100 are searchable but kept switched off.</li>
+          <li><strong>38 ready-made AI roles you can call on:</strong> a dev team (tech lead,
+            backend, QA, security&hellip;), a finance desk, a Socratic tutor
+            (<code>/morpheus</code>), and a front door (<code>/tron</code>) that tells you
+            which one to use.</li>
+          <li><strong>Templates</strong> to start new projects with specs and agents
+            already wired in.</li>
+        </ol>
+        <p>
+          <strong>How:</strong> one script symlinks everything into <code>~/.claude/</code>.
+          No installs, no config, and the same setup follows you across laptops and servers.
+        </p>
+        <p>
+          <strong>Today vs next:</strong> works today with <strong>Claude Code</strong>.
+          Other agent tools (opencode, Codex CLI, Gemini CLI, Cursor) are scoped but not
+          built yet.
+        </p>
+        <p class="tldr-next">
+          <strong>Think of it as:</strong> dotfiles for your AI assistant.
+          <strong>Start here:</strong> after install, run <code>/tron</code>.
+        </p>
+      </section>
 
       <!-- 1. What it is -->
       <section aria-labelledby="what-heading">
@@ -834,12 +918,12 @@
           <tbody>
             <tr>
               <td><strong>Skill</strong> (orchestrator)</td>
-              <td><code>grid-ceo-orchestrator</code>, <code>grid-tech-lead</code>, <code>grid-growth-hacker</code>, <code>finance-desk-finance-manager</code></td>
+              <td><code>grid-ceo-orchestrator</code>, <code>grid-tech-lead</code>, <code>grid-growth-hacker</code>, <code>finance-desk-finance-manager</code>, <code>tron</code>, <code>morpheus</code>, <code>oracle</code></td>
               <td>Slash command — <code>/grid-tech-lead</code>. Transforms the session into that role.</td>
             </tr>
             <tr>
               <td><strong>Subagent</strong> (specialist)</td>
-              <td>the other 30 roles</td>
+              <td>the other 31 roles</td>
               <td>Not a slash command. Delegate: <em>"Use the grid-backend-dev subagent to…"</em>, or let an orchestrator hand off automatically.</td>
             </tr>
           </tbody>
@@ -979,12 +1063,13 @@ bash scripts/wire.sh
         <h2 id="agents-heading">Agents</h2>
 
         <p>
-          agent-factory produces 34 roles across three independently composed
+          agent-factory produces 38 roles across four independently composed
           and gated public projects (plus any private desk composed the same
-          way, sourcing roles from outside this repo — see CLAUDE.md). Four
+          way, sourcing roles from outside this repo — see CLAUDE.md). Seven
           roles are <strong>orchestrators</strong> — they become Claude Code
-          skills invoked as slash commands and can coordinate the rest of
-          their team. The other 30 are <strong>specialists</strong> —
+          skills invoked as slash commands; four coordinate a team, and three
+          (<code>tron</code>, <code>morpheus</code>, <code>oracle</code>) talk to you directly.
+          The other 31 are <strong>specialists</strong> —
           subagents delegated to by an orchestrator or called directly.
         </p>
 
@@ -1030,6 +1115,15 @@ bash scripts/wire.sh
             </div>
             <div class="agent-card-title">Researcher</div>
             <p class="agent-card-summary">Desk, web, market, competitive and technical research. Source-grounded, fact-checked synthesis with citations. Investigates a question; does not decide.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>tron</code>
+              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
+            </div>
+            <div class="agent-card-title">Tron — the front door</div>
+            <p class="agent-card-summary">Run <code>/tron</code> first. Asks what you are trying to do, checks which skills and agents are actually wired on this machine, and recommends the right one with a reason and a next step. Recommends and hands off; never does the work or launches anything without your yes.</p>
           </article>
 
         </div>
@@ -1320,6 +1414,43 @@ bash scripts/wire.sh
             </div>
             <div class="agent-card-title">Finance Scribe</div>
             <p class="agent-card-summary">Logs every flag, brief, proposal, approval/rejection, and outcome to the vault with full rationale. Runs the monthly post-mortem. Never proposes or judges — records only.</p>
+          </article>
+
+        </div>
+
+        <!-- ── learning-desk: the learning agents ── -->
+        <h3 class="agent-group-heading">
+          learning-desk
+          <span class="badge badge-orchestrator" aria-hidden="true">manual — you start every session; data stays private</span>
+        </h3>
+
+        <div class="agent-grid">
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>morpheus</code>
+              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
+            </div>
+            <div class="agent-card-title">Morpheus — Socratic tutor</div>
+            <p class="agent-card-summary">Teaches any topic you choose as an interactive course: syllabus, one lesson at a time, questions before answers, one exercise per lesson, section quizzes, a final challenge. Moves on only when you have shown you understand. Teaches only; logs what you learned.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>oracle</code>
+              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
+            </div>
+            <div class="agent-card-title">Oracle — learns about you</div>
+            <p class="agent-card-summary">Interviews you and reads only the files you approve, then keeps a private profile you can edit or delete: how you work, your goals, strengths and gaps, and the name, role and avatar you pick for yourself. Every entry is tagged stated, observed or inferred.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>tank</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Tank — agent-to-agent learning</div>
+            <p class="agent-card-summary">On request, reads the run log and transcripts you name, finds what an agent got right or wrong, and writes a lesson plus a proposed change to that role's guidance. Proposes only; you review and apply it.</p>
           </article>
 
         </div>

@@ -1,3 +1,23 @@
+# the-grid
+
+> ## TL;DR
+>
+> **the-grid turns Claude Code from an empty chat box into a ready-equipped workspace, and keeps it identical on every machine you use.**
+>
+> **The problem:** the useful stuff for AI coding agents (skills, agent roles, prompts) is scattered across hundreds of repos. You find it by hand, copy it around, and it goes stale. Install everything and your session drowns in it.
+>
+> **What it does:** clone once, run one command, and you get:
+>
+> 1. **~137 curated skills as slash commands** (`/standup`, `/review`, `/ship`, `/skill-scout`…). Another ~100 are searchable but kept switched off.
+> 2. **38 ready-made AI roles you can call on:** a dev team (tech lead, backend, QA, security…), a finance desk, a Socratic tutor (`/morpheus`), and a front door (`/tron`) that tells you which one to use.
+> 3. **Templates** to start new projects with specs and agents already wired in.
+>
+> **How:** one script symlinks everything into `~/.claude/`. No installs, no config, and the same setup follows you across laptops and servers.
+>
+> **Today vs next:** works today with **Claude Code**. Other agent tools (opencode, Codex CLI, Gemini CLI, Cursor) are scoped but not built yet.
+>
+> **Think of it as:** dotfiles for your AI assistant. **Start here:** after install, run `/tron`.
+
 ```
 
 ████████╗██╗  ██╗███████╗    ██████╗ ██████╗ ██╗██████╗ 
@@ -23,7 +43,7 @@ And then, one day...
 I got in.
 ```
 
-# the-grid
+— Kevin Flynn, *TRON: Legacy* (2010)
 
 the-grid is a personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw, Paperclip, and friends. It's not a framework; it's one person's opinionated system for organising and activating skills, agents, and machines. Fork it for your own.
 
@@ -31,7 +51,7 @@ the-grid is a personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw
 
 **239 skills indexed, 137 wired live** (14 built by Gareth, 123 from curated
 upstream repos) **+ 102 more in a searchable library** — plus 38 composed AI
-agents across 3 ready-to-run teams (4 orchestrators, 30 specialists). Every agent
+agents across 4 ready-to-run teams (7 orchestrators, 31 specialists). Every agent
 role follows a written contract (checked by `compose.py --lint-roles`) and can be
 given a tool allowlist in its `role.yaml`.
 
@@ -49,11 +69,13 @@ A sample across domains:
 
 Composed agent teams (built by `agent-factory/`, invoked as slash commands or
 delegated subagents): **`core`** — cross-desk infra (issue triage, a librarian,
-a general researcher, a platform engineer); **`grid`** — a dev-team roster, three orchestrators
+a general researcher, a platform engineer, and `/tron`, the front door); **`grid`** — a dev-team roster, three orchestrators
 (`/grid-tech-lead`, `/grid-ceo-orchestrator`, `/grid-growth-hacker`) delegating
 to specialists like backend-dev, security-reviewer, qa-engineer, and
-data-scientist; **`finance-desk`** — a personal-finance pipeline. Compose your
-own team from the same roles.
+data-scientist; **`finance-desk`** — a personal-finance pipeline;
+**`learning-desk`** — `/morpheus` (Socratic tutor for any topic), `/oracle` (learns
+about you, privately) and `tank` (agent-to-agent lessons). Compose your own team
+from the same roles.
 
 This is a sample, not the full list — browse everything in
 **[SKILLS.md](SKILLS.md)**, or ask **`/skill-scout`** to search it for you.
@@ -106,13 +128,15 @@ agent-factory compose step), see **[BOOTSTRAP.md](BOOTSTRAP.md)**.
 ## Daily usage
 
 Once wired, every skill is a slash command (`/standup`, `/skill-scout`, `/ponytail`…)
-and composed orchestrators are too (`/grid-tech-lead`, `/grid-ceo-orchestrator`…) — specialist
-agents are subagents you delegate to, not commands.
+and composed orchestrators are too (`/tron`, `/morpheus`, `/oracle`, `/grid-tech-lead`,
+`/grid-ceo-orchestrator`…) — specialist agents are subagents you delegate to, not commands.
+Not sure where to start? Run **`/tron`**: it asks what you want to do and points you to the right one.
 
 **Lost? The help skills are the entry point:**
 
 | Command | Answers |
 |---|---|
+| `/tron` | I have a goal — which skill or agent should I use? (checks what is wired on this machine) |
 | `/grid-help` | Which slash command or subagent do I want? How do the factories differ? |
 | `/openspec-help` | Which of the 12 openspec skills do I want? How do I add specs to this repo? |
 | `/ponytail-help` | Which ponytail mode do I want? |
