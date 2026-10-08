@@ -21,3 +21,5 @@ paperclip: false
 
 agents:
   - role: morpheus
+  - role: oracle
+  - role: tank
