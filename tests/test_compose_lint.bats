@@ -240,3 +240,14 @@ EOT
   [ -f "$out/mix/_claude-code/agents/mix-tank.md" ]
   rm -rf "$cfg" "$out"
 }
+
+# Skill description only mentions dev-team coordination for orchestrators that have reports.
+@test "orchestrator skill description omits the dev-team line when it delegates to no one" {
+  cfg=$(mktemp -d)
+  out=$(mktemp -d)
+  printf 'project: dd\nslug: dd\nagents:\n  - role: morpheus\n' > "$cfg/dd.yaml"
+  run "$PY" "$COMPOSE" "$cfg/dd.yaml" --target claude-code --out "$out"
+  [ "$status" -eq 0 ]
+  ! grep -q 'dev-team feature' "$out/dd/_claude-code/skills/dd-morpheus/SKILL.md"
+  rm -rf "$cfg" "$out"
+}
