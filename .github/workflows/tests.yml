@@ -2,16 +2,40 @@ name: tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
   pull_request:
 
+# Least privilege: the gate only reads the repo.
+permissions:
+  contents: read
+
+# A newer push to the same ref supersedes a running gate.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  bats:
-    runs-on: ubuntu-latest
+  gate:
+    # Pinned image: ubuntu-latest moves to a new LTS without notice and the
+    # loop treats this job as its truth signal.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      - name: Run bats suite
-        run: tests/lib/bats-core/bin/bats tests/
+      # The venv-gated tests (compose, lint-roles, deploy, evals) need PyYAML.
+      # This is the only venv step in this file; other changes add nothing here.
+      - name: Build agent-factory venv
+        run: |
+          python3 -m venv agent-factory/.venv
+          agent-factory/.venv/bin/pip install -r agent-factory/requirements.txt
+
+      # gate.sh skips shellcheck silently-ish when it is missing; on CI that
+      # must be a hard failure, so assert the tool first.
+      - name: Require shellcheck
+        run: shellcheck --version
+
+      - name: Gate
+        run: bash scripts/gate.sh

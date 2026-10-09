@@ -1,0 +1,11 @@
+# skill-excludes.txt — listed-prefix exclusions for scripts/lib/find-skill-mds.sh.
+#
+# Framework data (tracked), not personal curation. One row per exclusion:
+#   repo | path-prefix
+# `repo` is the directory name under repos/; `path-prefix` is relative to that
+# repo's root, with a trailing slash. Any SKILL.md whose repo-relative path
+# starts with the prefix is never wired or catalogued.
+#
+# Use this only for duplicates the generic rules (locale dirs, root-level
+# dot-dirs) cannot express.
+ecc | pi/

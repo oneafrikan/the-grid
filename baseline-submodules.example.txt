@@ -48,7 +48,7 @@ anthropic/skill-creator
 anthropic/template
 anthropic/xlsx
 
-# --- gstack — workflow, orchestration, and quality tools (29 skills) ---
+# --- gstack — workflow, orchestration, and quality tools (42 skills) ---
 # OpenClaw-specific tools (gstack-openclaw-*, setup-gbrain, sync-gbrain, open-gstack-browser)
 # and benchmark-models live in machine overlays (wilderness + scout).
 gstack/autoplan
@@ -121,8 +121,9 @@ jeffallan/the-fool
 # Whole-repo entry (not a per-skill list) because the openspec-* skills are one
 # coherent workflow — explore -> propose -> apply -> archive — and a new upstream
 # workflow skill SHOULD wire automatically rather than silently going missing.
-# The one subtraction is openspec's OWN release skill, which lives outside
-# skills/ (.agents/skills/) and is for maintainers of the openspec repo, not us.
+# openspec's own maintainer skills (including release-openspec) live under
+# .agents/skills/ and are excluded by discovery (the root-level dot-dir rule in
+# scripts/lib/find-skill-mds.sh), so no subtraction is needed here.
 #
 # HARD DEPENDENCY: every one of these skills declares
 # `allowed-tools: Bash(openspec:*)` and `compatibility: Requires openspec CLI`.
@@ -130,12 +131,10 @@ jeffallan/the-fool
 #   npm install -g @fission-ai/openspec@latest     (needs Node >= 20.19.0)
 # See docs/SOURCES.md and project-factory/templates/_common/SPECS.md.
 openspec
--openspec/release-openspec
 
-# --- mattpocock — universal dev process (21 skills) ---
+# --- mattpocock — universal dev process (17 skills) ---
 # Design/personal tools (design-an-interface, obsidian-vault, prototype) live in overlays.
-mattpocock/diagnose
-mattpocock/edit-article
+mattpocock/diagnosing-bugs
 mattpocock/git-guardrails-claude-code
 mattpocock/grill-me
 mattpocock/grill-with-docs
@@ -143,20 +142,17 @@ mattpocock/grill-with-docs
 # tool with "grilling"` — required for grill-me to do anything (issue #41).
 mattpocock/grilling
 mattpocock/improve-codebase-architecture
-mattpocock/request-refactor-plan
 mattpocock/scaffold-exercises
 mattpocock/setup-pre-commit
 mattpocock/tdd
 mattpocock/teach
-mattpocock/to-issues
-mattpocock/to-prd
+mattpocock/to-spec
+mattpocock/to-tickets
 mattpocock/triage
-mattpocock/ubiquitous-language
-mattpocock/write-a-skill
 mattpocock/writing-beats
+mattpocock/writing-for-agents
 mattpocock/writing-fragments
 mattpocock/writing-shape
-mattpocock/zoom-out
 
 # --- ponytail — lazy senior dev mode, wanted live everywhere (6 skills) ---
 ponytail

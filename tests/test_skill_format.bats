@@ -1,45 +1,11 @@
 #!/usr/bin/env bats
 # Tests for skill directory structure and SKILL.md frontmatter validity.
-# all_wired_skill_dirs mirrors wire.sh's discovery logic exactly.
+# The "wired" set comes from the real wire.sh (tests/helpers/wired.bash), so it
+# cannot drift from wire.sh's own discovery and works on a CI runner that has
+# no personal baseline (it falls back to baseline-submodules.example.txt).
 
-GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
-
-# Wiring allowlist (mirror wire.sh): only these submodules are wired; the rest
-# are library-only (upstream community content we neither wire nor validate).
-WIRED_REPOS=(); wire_all_repos=1
-if [ -f "$GRID_ROOT/baseline-submodules.txt" ]; then
-  wire_all_repos=0
-  while IFS= read -r line; do
-    line="${line%%#*}"; line="$(echo "$line" | tr -d '[:space:]')"
-    [ -n "$line" ] && WIRED_REPOS+=("$line")
-  done < "$GRID_ROOT/baseline-submodules.txt"
-fi
-repo_is_wired() {
-  [ "$wire_all_repos" -eq 1 ] && return 0
-  local n="$1" r
-  for r in "${WIRED_REPOS[@]:-}"; do [ "$r" = "$n" ] && return 0; done
-  return 1
-}
-
-# Returns every skill dir that wire.sh would actually wire.
-all_wired_skill_dirs() {
-  # skills/ dir (wire.sh step 3)
-  for d in "$GRID_ROOT/skills"/*/; do
-    [ -f "${d}SKILL.md" ] || continue
-    echo "${d%/}"
-  done
-  # Repo skills (wire.sh step 3) — only wired (allowlisted) submodules.
-  for repo_dir in "$GRID_ROOT/repos"/*/; do
-    [ -d "$repo_dir" ] || continue
-    local rd="${repo_dir%/}"
-    repo_is_wired "$(basename "$rd")" || continue
-    while IFS= read -r skill_md; do
-      local skill_dir; skill_dir=$(dirname "$skill_md")
-      [ "$skill_dir" = "$rd" ] && continue
-      echo "$skill_dir"
-    done < <(find "$rd" -name "SKILL.md" -not -path "*/.git/*")
-  done
-}
+load helpers/setup
+load helpers/wired
 
 @test "every wired skill dir contains a SKILL.md" {
   local failed=0
@@ -48,7 +14,7 @@ all_wired_skill_dirs() {
       echo "Missing SKILL.md: $skill_dir" >&3
       failed=1
     fi
-  done < <(all_wired_skill_dirs)
+  done < <(wired_skill_dirs)
   [ "$failed" -eq 0 ]
 }
 
@@ -61,7 +27,7 @@ all_wired_skill_dirs() {
       echo "Missing 'name:' in $skill_dir/SKILL.md" >&3
       failed=1
     fi
-  done < <(all_wired_skill_dirs)
+  done < <(wired_skill_dirs)
   [ "$failed" -eq 0 ]
 }
 
@@ -72,14 +38,14 @@ all_wired_skill_dirs() {
       echo "Missing 'description:' in $skill_dir/SKILL.md" >&3
       failed=1
     fi
-  done < <(all_wired_skill_dirs)
+  done < <(wired_skill_dirs)
   [ "$failed" -eq 0 ]
 }
 
 @test "no duplicate skill names in root-level skills (skills we own)" {
   # Only check skills in skills/ — external repos may overlap intentionally.
   local all unique
-  all=$(for d in "$GRID_ROOT/skills"/*/; do
+  all=$(for d in "$REPO_ROOT/skills"/*/; do
     [ -f "${d}SKILL.md" ] && grep "^name:" "${d}SKILL.md" | awk '{print $2}'
   done | sort)
   unique=$(echo "$all" | uniq)
