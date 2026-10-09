@@ -182,8 +182,9 @@ SessionEnd stdin {session_id, transcript_path, cwd, reason}
                                                                      no commit, every changed path logged, nothing under
                                                                      .git/ moved or deleted, handoff files left in place)
        The worker NEVER moves or deletes anything under .git/.
-       collect: NEW = `find -L "$cwd" "$fallback" -name .git -prune -o -type f -newer stamp -print` (no -maxdepth;
-       .git/ is excluded entirely)
+       collect: NEW = `find -L "$cwd" "$fallback" [<target-dir>] -name .git -prune -o -type f -newer stamp -print`
+       (no -maxdepth; .git/ is excluded entirely; the resolved <target-dir> is a third search root only when its
+       realpath is not under realpath "$cwd")
        (the stamp's mtime is set 2 s in the past with perl utime, so a coarse-granularity filesystem cannot make a
        file written in the same second look old)
          EXPECTED = {one <p>-handoff.md, at most one <p>-context.md} with the same <p>, in one directory that is
@@ -197,7 +198,8 @@ SessionEnd stdin {session_id, transcript_path, cwd, reason}
     8. secret-scan both files with hooks/lib/secret-patterns.sh (always, whatever the project profile or
        GRID_DISABLED_HOOKS say): a hit -> move both files to ${GRID_STATE_DIR:-$HOME/.grid}/handoff-quarantine/<session_id>/, no commit,
        action=error reason=secret (names and line numbers logged, never the value)
-    9. commit: R = realpath of the files' directory; T = `git -C R rev-parse --show-toplevel` (none -> leave files,
+    9. commit (in the repo that contains the resolved <target-dir> when the pair is there, which may be outside cwd):
+       R = realpath of the files' directory; T = `git -C R rev-parse --show-toplevel` (none -> leave files,
        action=done reason=ok commit=none); else `git -C T add -- <a> [<b>]` then
        `git -C T commit -m "docs: auto-handoff <p>" -- <a> [<b>]` (explicit paths only; nothing else the operator
        staged is swept in); a failed commit -> action=error reason=commit-failed, files left in place
@@ -322,7 +324,7 @@ The prefix set is a superset of the vetting `secret-shape` rule's prefixes in `p
 - `tests/helpers/setup.bash` (edited once, in group 1) exports in `common_setup`: `REAL_HOME` first (before any test overrides `HOME`), then `CLAUDE_CONFIG_DIR`, `GRID_HOOK_LOG_DIR`, `GRID_HOOK_STATE_DIR`, `GRID_HANDOFF_FALLBACK_DIR`, `GRID_PRIVATE_DIR` (all temp dirs), `GRID_RUN_LOG` (a temp file path), and the tripwire `GRID_CLAUDE=/nonexistent/grid-claude-tripwire` (G5: the existing variable `agent-factory/run_evals.py` reads, and the same `/nonexistent` convention `tests/test_eval_cases.bats` already uses; no tripwire script file). Executing it fails, so the worker's `exec @ARGV or exit 127` logs `reason=claude-exit-127` instead of reaching a model. `assert_sandboxed` refuses to run if any of those dirs resolves under the real `~/.claude`, `~/.grid` or `~/.the-grid-private`, or if `GRID_CLAUDE` is unset or empty. Tests that need a stub set `GRID_CLAUDE` themselves.
 - Stub `claude` (G5): tests call `make_stubs` from `tests/helpers/stubs.bash` (created by `loops#1`), which creates the stub dir (`STUB_DIR` below), prepends it to PATH and exports `GRID_CLAUDE` as the path of its `claude` stub. Group 3 EXTENDS that helper's `claude` stub, keeping every existing behaviour (argv to `$STUB_LOG`, `STUB_CLAUDE_EXIT`, `--help`/`auth status` handling) unchanged when the new variable is unset:
   - on every run it also writes `pwd` to `$STUB_DIR/claude.cwd`, the value of `GRID_AUTOHANDOFF_CHILD` to `$STUB_DIR/claude.child-env`, `ps -o pgid= -p $$` to `$STUB_DIR/claude.pgid`, `$$` to `$STUB_DIR/claude.pid` and `umask` to `$STUB_DIR/claude.umask`;
-  - new `STUB_CLAUDE_MODE` (unset = old behaviour): `handoff-logs` writes `$PWD/LOGS/2026-01-01-testhost-stub-handoff.md` and `-context.md` with body `${STUB_HANDOFF_BODY:-stub}`; `handoff-fallback` writes the same two names under `$GRID_HANDOFF_FALLBACK_DIR/<basename of PWD>/`; `handoff-extra` does `handoff-logs` and also writes `$PWD/.git/hooks/x` and appends a line to `$PWD/.git/config`; `handoff-stray` does `handoff-logs` and also writes `$PWD/a/b/c/d/e/stray.md` (deeper than the old depth-4 scan); a silent success is `STUB_CLAUDE_EXIT=0` with no mode, a failure is `STUB_CLAUDE_EXIT=3`;
+  - new `STUB_CLAUDE_MODE` (unset = old behaviour): `handoff-logs` writes `$PWD/LOGS/2026-01-01-testhost-stub-handoff.md` and `-context.md` with body `${STUB_HANDOFF_BODY:-stub}`; `handoff-fallback` writes the same two names under `$GRID_HANDOFF_FALLBACK_DIR/<basename of PWD>/`; `handoff-extra` does `handoff-logs` and also writes `$PWD/.git/hooks/x` and appends a line to `$PWD/.git/config`; `handoff-target` writes the same two names under `$STUB_HANDOFF_DIR`; `handoff-stray` does `handoff-logs` and also writes `$PWD/a/b/c/d/e/stray.md` (deeper than the old depth-4 scan); a silent success is `STUB_CLAUDE_EXIT=0` with no mode, a failure is `STUB_CLAUDE_EXIT=3`;
   - new `STUB_CLAUDE_SLEEP=<seconds>`: sleep that long before acting (the same knob `instincts` group 3 adds "only if absent"; this change adds it first in D9 order). The worker's alarm kills the stub process, whose pid the timeout test checks;
   - `STUB_*` variables reach the stub through the environment inherited by the detached worker.
 - Each hook test file's `teardown` kills the pid in `$STUB_DIR/claude.pid` (if any) and runs `pkill -f "$BATS_TEST_TMPDIR"` (worker command lines carry the test's transcript path under it) before `clean_stubs` and removing temp dirs, so no detached process outlives its test.
