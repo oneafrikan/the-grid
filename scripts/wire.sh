@@ -11,6 +11,13 @@
 #   GRID_HOST   — machine key for the overlay (default: hostname -s)
 #   GRID_BASELINE — baseline manifest file (default: $GRID_DIR/baseline-submodules.txt)
 #   GRID_SKIP_CATALOG=1 — don't regenerate SKILLS.md at the end (used by --check)
+#   GRID_DRY_HOME — dry-run home: when set, HOME is exported to it and SKILLS_DIR,
+#                   AGENTS_DIR, CLAUDE_CONFIG_DIR, RULES_DIR and GRID_HARNESS_HOME
+#                   are FORCED under it (inherited values ignored), and nothing is
+#                   written to the repo (SKILLS.md, .wired.manifest). RULES_DIR and
+#                   GRID_HARNESS_HOME are forced under it; every later home-derived
+#                   target (~/.grid state) MUST be forced under it in this same block.
+#                   Every dry-run caller sets ONLY this (plus GRID_HOST/GRID_BASELINE).
 #
 # Usage:
 #   bash wire.sh           # wire (idempotent)
@@ -19,6 +26,23 @@
 set -euo pipefail
 
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+
+# GRID_DRY_HOME: redirect EVERY home-derived target into a throwaway home.
+# Values are forced, not defaulted, so an inherited SKILLS_DIR or
+# CLAUDE_CONFIG_DIR from the operator's shell cannot leak a dry run into the
+# real home. RULES_DIR (rule-packs) and GRID_HARNESS_HOME (harness paths) are
+# forced here too; any later home target (~/.grid state) MUST be added here.
+if [ -n "${GRID_DRY_HOME:-}" ]; then
+  mkdir -p "$GRID_DRY_HOME"
+  export HOME="$GRID_DRY_HOME"
+  SKILLS_DIR="$GRID_DRY_HOME/.claude/skills"
+  AGENTS_DIR="$GRID_DRY_HOME/.claude/agents"
+  export CLAUDE_CONFIG_DIR="$GRID_DRY_HOME/.claude"
+  export RULES_DIR="$GRID_DRY_HOME/.claude/rules"
+  export GRID_HARNESS_HOME="$GRID_DRY_HOME"
+  export GRID_SKIP_CATALOG=1   # no SKILLS.md / .wired.manifest writes either
+fi
+
 # find_skill_mds: tracked-only SKILL.md discovery, shared with catalog.sh.
 # shellcheck source=lib/find-skill-mds.sh
 . "$(dirname "$0")/lib/find-skill-mds.sh"
@@ -32,15 +56,19 @@ GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || uname -n 2>/dev/null | cut 
 # links and real dirs are ignored, exactly as the real run ignores them.
 if [ "${1:-}" = "--check" ]; then
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-  mkdir -p "$tmp/skills" "$tmp/agents"
-  GRID_SKIP_CATALOG=1 SKILLS_DIR="$tmp/skills" AGENTS_DIR="$tmp/agents" \
-    GRID_DIR="$GRID_DIR" GRID_HOST="$GRID_HOST" bash "$0" >/dev/null
+  # The child wires into a dry home (GRID_DRY_HOME forces every target under
+  # it and skips the catalog/manifest writes), not just two overridden dirs.
+  GRID_DRY_HOME="$tmp/home" GRID_DIR="$GRID_DIR" GRID_HOST="$GRID_HOST" \
+    bash "$0" >/dev/null
+  chk_skills="$tmp/home/.claude/skills"; chk_agents="$tmp/home/.claude/agents"
   # "name -> target" lines for grid-owned links only, sorted (C locale: stable).
   # $2 (optional) = live dir: names shadowed there by a REAL dir/file are skipped,
   # because a real wire skips them too ("not managed") — they can never be drift.
   links() { # $1 = dir to list, $2 = live dir for the shadow filter
     [ -d "$1" ] || return 0
-    find "$1" -maxdepth 1 -type l | while IFS= read -r l; do
+    # -H: follow the command-line dir if it is itself a symlink (a symlinked
+    # skills dir), otherwise find lists nothing and drift is never reported.
+    find -H "$1" -maxdepth 1 -type l | while IFS= read -r l; do
       t="$(readlink "$l")"; n="$(basename "$l")"
       if [ -n "${2:-}" ] && [ -e "$2/$n" ] && [ ! -L "$2/$n" ]; then continue; fi
       case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
@@ -48,8 +76,9 @@ if [ "${1:-}" = "--check" ]; then
   }
   rc=0
   for kind in skills agents; do
-    live="$SKILLS_DIR"; [ "$kind" = agents ] && live="$AGENTS_DIR"
-    if ! diff <(links "$tmp/$kind" "$live") <(links "$live") >"$tmp/$kind.diff"; then
+    live="$SKILLS_DIR"; fresh="$chk_skills"
+    if [ "$kind" = agents ]; then live="$AGENTS_DIR"; fresh="$chk_agents"; fi
+    if ! diff <(links "$fresh" "$live") <(links "$live") >"$tmp/$kind.diff"; then
       echo "wire --check: $kind drift in $live ('<' = should exist, '>' = stale):" >&2
       cat "$tmp/$kind.diff" >&2
       rc=1
@@ -171,9 +200,14 @@ teardown_grid_links() {
   [ -d "$dir" ] || return 0
   while IFS= read -r link; do
     target=$(readlink "$link")
-    [[ "$target" == "$GRID_DIR"* ]] || continue   # not ours, leave it alone
+    # "$GRID_DIR"/* (with the slash), not "$GRID_DIR"*: the bare prefix also
+    # matches a sibling dir such as ${GRID_DIR}-private and would delete a
+    # foreign link into it.
+    [[ "$target" == "$GRID_DIR"/* ]] || continue   # not ours, leave it alone
     rm "$link"
-  done < <(find "$dir" -maxdepth 1 -type l 2>/dev/null)
+  # find -H: follow $dir itself when it is a symlink to the real skills dir
+  # (without it find lists nothing and stale grid links silently survive).
+  done < <(find -H "$dir" -maxdepth 1 -type l 2>/dev/null)
 }
 teardown_grid_links "$SKILLS_DIR"
 teardown_grid_links "$AGENTS_DIR"

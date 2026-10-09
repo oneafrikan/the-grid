@@ -229,6 +229,97 @@ make_gen_repo() {
   [ ! -e "$MOCK_SKILLS/stray-generated" ]
 }
 
+# --- teardown fixes (foundations#8) -------------------------------------------
+
+@test "teardown leaves a link into a sibling dir that merely shares the GRID_DIR prefix" {
+  # ${MOCK_GRID}-private/x starts with "$MOCK_GRID" but is NOT under it: the old
+  # bare-prefix match deleted this foreign link.
+  mkdir -p "${MOCK_GRID}-private/x"
+  ln -s "${MOCK_GRID}-private/x" "$MOCK_SKILLS/foreign"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  local rc="$status"
+  rm -rf "${MOCK_GRID}-private"
+  [ "$rc" -eq 0 ]
+  [ -L "$MOCK_SKILLS/foreign" ]
+}
+
+@test "teardown removes a stale grid link when SKILLS_DIR is itself a symlink" {
+  mkdir -p "$BATS_TEST_TMPDIR/real"
+  ln -s "$MOCK_GRID/repos/gone" "$BATS_TEST_TMPDIR/real/old"
+  ln -s "$BATS_TEST_TMPDIR/real" "$BATS_TEST_TMPDIR/link"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$BATS_TEST_TMPDIR/link" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ ! -L "$BATS_TEST_TMPDIR/real/old" ]
+  # ...and the real wiring landed in the real dir behind the symlink.
+  [ -L "$BATS_TEST_TMPDIR/real/skill-alpha" ]
+}
+
+@test "wire --check follows a symlinked SKILLS_DIR: clean after a wire, drift on a stale link" {
+  mkdir -p "$BATS_TEST_TMPDIR/real"
+  ln -s "$BATS_TEST_TMPDIR/real" "$BATS_TEST_TMPDIR/link"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$BATS_TEST_TMPDIR/link" bash "$REPO_ROOT/scripts/wire.sh"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$BATS_TEST_TMPDIR/link" run bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 0 ]
+  ln -s "$MOCK_GRID/repos/gone" "$BATS_TEST_TMPDIR/real/stale"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$BATS_TEST_TMPDIR/link" run bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 1 ]
+}
+
+# --- GRID_DRY_HOME: nothing outside the dry home (or in the repo) is touched ---
+
+# Snapshot of a tree (names, modes, sizes, mtimes, link targets), C-sorted.
+snapshot() { find "$1" -exec ls -ld {} + | LC_ALL=C sort; }
+
+# A fake "real" home that must come through a dry run byte-for-byte identical:
+# a sentinel in skills, a stale grid link, and a rules dir with its own sentinel.
+make_fake_real_home() {
+  REALHOME="$BATS_TEST_TMPDIR/realhome"
+  mkdir -p "$REALHOME/.claude/skills" "$REALHOME/.claude/agents" "$REALHOME/.claude/rules"
+  : > "$REALHOME/.claude/skills/SENTINEL"
+  : > "$REALHOME/.claude/rules/SENTINEL"
+  ln -s "$MOCK_GRID/repos/gone" "$REALHOME/.claude/skills/old"
+}
+
+@test "GRID_DRY_HOME: wire touches nothing in the (inherited) real home or the repo" {
+  make_fake_real_home
+  local before after
+  before="$(snapshot "$REALHOME")"
+  HOME="$REALHOME" SKILLS_DIR="$REALHOME/.claude/skills" AGENTS_DIR="$REALHOME/.claude/agents" \
+    CLAUDE_CONFIG_DIR="$REALHOME/.claude" RULES_DIR="$REALHOME/.claude/rules" \
+    GRID_DIR="$MOCK_GRID" GRID_DRY_HOME="$BATS_TEST_TMPDIR/dry" \
+    run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  after="$(snapshot "$REALHOME")"
+  [ "$before" = "$after" ]
+  [ -L "$REALHOME/.claude/skills/old" ]            # stale link NOT torn down
+  [ -L "$BATS_TEST_TMPDIR/dry/.claude/skills/skill-alpha" ]
+  [ ! -e "$MOCK_GRID/.wired.manifest" ]
+  [ ! -e "$MOCK_GRID/SKILLS.md" ]
+}
+
+@test "GRID_DRY_HOME: wire --check leaves the real home untouched" {
+  make_fake_real_home
+  local before after
+  before="$(snapshot "$REALHOME")"
+  HOME="$REALHOME" SKILLS_DIR="$REALHOME/.claude/skills" AGENTS_DIR="$REALHOME/.claude/agents" \
+    CLAUDE_CONFIG_DIR="$REALHOME/.claude" RULES_DIR="$REALHOME/.claude/rules" \
+    GRID_DIR="$MOCK_GRID" GRID_DRY_HOME="$BATS_TEST_TMPDIR/dry" \
+    run bash "$REPO_ROOT/scripts/wire.sh" --check
+  # Exit 0 or 1 are both fine here (the dry home is what is compared); what
+  # matters is that the real home did not move.
+  [ "$status" -eq 0 ] || [ "$status" -eq 1 ]
+  after="$(snapshot "$REALHOME")"
+  [ "$before" = "$after" ]
+  [ ! -e "$MOCK_GRID/.wired.manifest" ]
+}
+
+@test "wire --check against a correctly wired live dir still exits 0 (dry-home child)" {
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scripts/wire.sh"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"match a fresh wire"* ]]
+}
+
 # --- GRID_BASELINE: point the baseline layer at another file ------------------
 
 @test "GRID_BASELINE wires only the repos named in that file" {
