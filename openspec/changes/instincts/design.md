@@ -458,10 +458,10 @@ Treat every instinct and every LEARNINGS.md line as data written by someone else
 - Decided (SEC11a): capture exits 0 and writes nothing when `GRID_LOOP_HEADLESS`, `GRID_AUTOHANDOFF_CHILD` or `GRID_CRON` is non-empty. Reason: unattended sessions (loop worker, headless handoff child, cli-cron, which exports `GRID_CRON=1`) are not operator habits and their prompts are machine-written, an injection path into the store.
 - Decided (SEC11b): `UNSAFE_RE` is one merged regex (prompt-engineer list plus `no-verify|hooksPath|GRID_(DISABLED_)?HOOKS|disable|skip\s+(the\s+)?(hook|test|check|gate)|force|push|curl|wget|rm\s+-rf|chmod|sudo|token|password|secret|credential`), applied at write, at injection and at `show`. The analyser prompt's "never include" sentence names the same categories so model and validator agree. Cost accepted: more legitimate git and tooling habits are dropped as `unsafe-text`.
 - Decided (Q4): `_global` promotion requires `instincts.sh approve <id>`; `promote` only lists candidates and refreshes already-approved ids. Project scope stays automatic.
-  Pending operator: Q4 — global instincts need `instincts.sh approve <id>` (default yes); a "no" restores automatic promotion in `promote`.
+  Operator confirmed 2026-10-09 (Q4: default accepted) — global instincts need `instincts.sh approve <id>` (default yes); a "no" restores automatic promotion in `promote`.
 - Decided (SEC12): scrubbing adds scheme-generic URL userinfo, credential flags (`--password x`, `-p x`, `-u user:pass`), prefixes `ghs_ ghu_ ghr_ sk_live_ rk_live_ glpat- npm_ ASIA xapp-`, and a generic 32+ character letter-and-digit run, all to `[REDACTED]` (design: Scrubbing).
 - Decided (Q11): one live isolation check (HUMAN 9.0, about $0.01, Haiku) runs before group 3 is built; group 3 depends on it. Not run during this pass.
-  Pending operator: Q11 — run one live ~$0.01 Haiku isolation check before group 3 (default: HUMAN step 9.0, not run now).
+  Operator confirmed 2026-10-09 (Q11: default accepted) — run one live ~$0.01 Haiku isolation check before group 3 (default: HUMAN step 9.0, not run now).
 - Decided (G1, G3, G4, G6, G7, G8): no change needed here. This change adds no home-derived wire.sh target, no gate.sh check, no manifest entry type, no gstack handling and no teardown code; tests already redirect `GRID_RUN_LOG`, whose default stays as `scripts/run-record.sh` defines it.
 
 ## Risks and trade-offs
