@@ -80,7 +80,7 @@ Build steps (write mode; `--check` does the same into a temp dir and diffs):
 5. Replace `plugins/<bundle>/` wholesale (delete stale files), write manifests. Skip `.DS_Store`. Re-running is a no-op.
 
 Gate wiring (in `gate.sh`, same skip-loudly style as the compose check):
-- `check plugins`: `build-plugins.py --check` when `agent-factory/.venv/bin/python` exists, else skipped with a notice.
+- `check plugins`: `build-plugins.py --check` when `python3`, `scripts/build-plugins.py` and `agent-factory/.venv/bin/python` all exist, else skipped with a notice (G3).
 - `check plugins-validate`: `claude plugin validate --strict` on `.`, each `plugins/<bundle>`, and each bundle's `skills/` and `agents/` dir, when `claude` is on PATH and `.claude-plugin/marketplace.json` exists, else skipped with a notice (CI has no `claude`).
 - Vetting: `plugins/` is added to `audit.sh --owned` and `plugins` to `owned_roots` in `policy.yaml`, so the existing `audit` gate check scans the plugin tree at owned-tier severity. No separate audit call.
 
@@ -106,5 +106,8 @@ Two channels, one machine: a machine that wired the-grid already has `grid-qa-en
 - Decided: version lives only in `plugins/bundles.json` and is hand-bumped at release; both bundles and both marketplace entries always share it. Initial value `0.1.0`.
 - Decided: no `description` truncation logic; descriptions come from the manifest and are kept under 200 chars by a test.
 - Decided: tests use a mock grid dir (`GRID_DIR` override, `compose: []`) so they need no venv and never touch `~/.claude`; one extra test exercises real compose and skips when the venv is absent.
-- Decided: nothing in `plugins/` is scanned by `wire.sh` or `catalog.sh` (both read `skills/` and `repos/` only), so plugin copies never inflate skill counts or the listing budget; a test asserts `catalog.sh --check` is unaffected.
+- Decided: nothing in `plugins/` is scanned by `wire.sh` or `catalog.sh` (both read `skills/` and `repos/` only), so plugin copies never inflate skill counts or the listing budget; test 1.5(k) runs `catalog.sh` into a temp output path and asserts it contains no `plugins/` entry (it never reads or rewrites the committed `SKILLS.md`).
 - Decided: publishing (merge to `main`, `marketplace add` from a clean profile) is a HUMAN group gated on tag `v0.1.0` (`front-door#15`). Groups 1-3 land on `next` and are inert until `next` reaches `main`.
+- Decided (QA15): the real-repo agent-count assertion is derived, not literal: files in `plugins/grid-agents/agents/` = `.md` files from a fresh `grid` compose with the neutral identity + `len(bundles["grid-agents"].agents)`. A role added to or removed from `examples/grid.yaml` therefore never breaks the test.
+- Decided (QA15): the catalog-isolation test runs `catalog.sh <tmp>/SKILLS.md` and inspects that temp file; it does not depend on the committed `SKILLS.md` (which is generated from the personal, gitignored baseline).
+- Decided (G3): `plugins` skips loudly (in `SKIPPED`, check exit 0) when `python3`, `scripts/build-plugins.py` or the agent-factory venv is absent; `plugins-validate` skips loudly when `claude` or `.claude-plugin/marketplace.json` is absent. `tests/test_gate.bats` asserts both land in the skipped list, plus a dedicated missing-script case.

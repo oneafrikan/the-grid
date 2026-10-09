@@ -5,12 +5,16 @@ Make a green CI run mean the same thing as a green local gate, so the unattended
 ## ADDED Requirements
 
 ### Requirement: CI runs the commit gate with the agent-factory venv
-The CI workflow SHALL run on pushes to `main` and `next` and on every pull request, build `agent-factory/.venv` from `agent-factory/requirements.txt`, and run `bash scripts/gate.sh`, with machine-only tests skipping on a runner.
+The CI workflow SHALL run on pushes to `main` and `next` and on every pull request, build `agent-factory/.venv` from `agent-factory/requirements.txt`, and run `bash scripts/gate.sh`, on a pinned runner image with read-only repository permissions, with machine-only tests skipping on a runner.
 
 #### Scenario: Venv-dependent tests run on a runner
 - **WHEN** the workflow runs on a pull request
 - **THEN** no bats test is skipped with the reason "agent-factory venv not built"
 - **AND** the gate step exits 0
+
+#### Scenario: Lint tool missing on the runner
+- **WHEN** `shellcheck` is not installed on the runner
+- **THEN** the workflow fails at the shellcheck check step instead of the gate skipping lint
 
 #### Scenario: Push to next is gated
 - **WHEN** a commit is pushed to `next`

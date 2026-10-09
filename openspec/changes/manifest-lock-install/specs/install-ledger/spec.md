@@ -15,6 +15,14 @@ Record exactly what grid placed on a machine so health checks and removal touch 
 - **WHEN** `grid install` is re-run with nothing to do
 - **THEN** the ledger file's modification time is unchanged
 
+#### Scenario: Partial failure still recorded
+- **WHEN** one skill fails verification or vetting and another is placed
+- **THEN** the ledger lists the placed skill and not the failed one
+
+#### Scenario: Unknown kinds survive a rewrite
+- **WHEN** the ledger holds a row of a `kind` this version does not know and `grid install` rewrites the ledger
+- **THEN** that row is still present afterwards
+
 #### Scenario: Ledger is machine-local
 - **WHEN** `git status` is run in the grid dir after an install
 - **THEN** no ledger or staging file appears

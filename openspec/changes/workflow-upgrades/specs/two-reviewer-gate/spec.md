@@ -10,7 +10,7 @@ The `tech-lead` operating procedure SHALL send the same packet to `qa-engineer` 
 #### Scenario: Procedure names both roles and independence
 - **WHEN** `agent-factory/roles/tech-lead/SKILL.md` is read
 - **THEN** its release-gate step names `qa-engineer` and `security-reviewer`
-- **AND** states that neither reviewer sees the other's verdict
+- **AND** its release-gate step contains the exact strings `Both must pass.`, `does not see` and `Maximum 3 rounds`
 
 #### Scenario: Lean deploy carries the procedure
 - **WHEN** `tech-lead` is deployed with `--profile lean`

@@ -11,10 +11,18 @@ Run paid role evals only for the roles whose files changed, so CI or the issue l
 - **WHEN** a commit changes only `agent-factory/roles/qa-engineer/AGENTS.md`
 - **THEN** `--changed HEAD~1 --dry-run` selects only `qa-engineer`
 
-#### Scenario: A narrow rule precedes a broad one
+#### Scenario: A touchfile rule narrows to orchestrators
 - **WHEN** a commit changes only `agent-factory/_core/DECISION_BRIEF.md`
 - **THEN** the orchestrator roles with cases are selected
 - **AND** `qa-engineer` is not
+
+#### Scenario: First matching rule wins
+- **WHEN** a narrow rule for a file precedes a broad rule that also matches it
+- **THEN** only the narrow rule's roles are selected for that file
+
+#### Scenario: A file outside the lean prompt selects nothing
+- **WHEN** a commit changes only `agent-factory/_core/SOUL_base.md`
+- **THEN** the output contains `no eval-relevant changes`
 
 #### Scenario: Unrelated change selects nothing
 - **WHEN** a commit changes only `README.md`
@@ -37,5 +45,5 @@ With `--changed`, real runs MUST still require `GRID_EVALS=1` and `--yes`, the r
 - **THEN** the command exits 2 and writes no results file
 
 #### Scenario: Touchfile names a missing role
-- **WHEN** `evals/touchfiles.yaml` lists a role that has no directory and `--validate` runs
+- **WHEN** `<repo>/evals/touchfiles.yaml` lists a role that has no directory and `--validate` runs
 - **THEN** it exits 1 and reports the role as unknown

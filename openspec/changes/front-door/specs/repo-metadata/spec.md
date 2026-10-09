@@ -5,11 +5,11 @@ Keep the GitHub About text, homepage and topics reproducible and checkable inste
 ## ADDED Requirements
 
 ### Requirement: Declared metadata
-scripts/repo-metadata.sh SHALL declare the About description, the homepage URL and exactly ten topics: claude-code, claude-skills, agent-skills, ai-agents, dotfiles, subagents, skills-manager, openclaw, developer-tools, llm.
+scripts/repo-metadata.sh SHALL declare the About description, the homepage URL and exactly nine topics: claude-code, claude-skills, claude-code-skills, agent-skills, ai-agents, dotfiles, subagents, skills-manager, developer-tools.
 
 #### Scenario: Values
 - **WHEN** the script's declared values are printed
-- **THEN** the description is at most 350 characters, the homepage is the Pages URL, and the topic list equals the ten above
+- **THEN** the description is at most 350 characters, the homepage is the Pages URL, and the topic list equals the nine above
 
 ### Requirement: Read-only check by default
 The script SHALL default to `--check`, SHALL compare declared values with `gh repo view` output, and SHALL exit 1 with a diff on drift without changing anything.

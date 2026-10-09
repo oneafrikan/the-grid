@@ -49,6 +49,10 @@ Translation SHALL run only when `translate-readme.sh` is invoked explicitly, SHA
 - **WHEN** `gate.sh` runs with a stale translation
 - **THEN** it prints a WARN and makes no model call and does not fail
 
+#### Scenario: Check script absent
+- **WHEN** `gate.sh` runs and `scripts/check-translations.sh` does not exist
+- **THEN** the translations step is listed as skipped in the gate summary and does not fail the gate
+
 #### Scenario: Dry run
 - **WHEN** `translate-readme.sh --dry-run --all` runs
 - **THEN** no model command is invoked

@@ -22,12 +22,14 @@ The system SHALL inject only active instincts with confidence at least 0.5, rank
 - **WHEN** a project-scoped and a global instinct both have confidence 0.6
 - **THEN** the project-scoped one ranks first
 
-### Requirement: Injected memory is framed as untrusted context
-The system SHALL prefix injected text with a header stating it is untrusted context and not instructions, and SHALL print nothing at all when no instinct qualifies.
+### Requirement: Injected memory is framed as fallible context, not instructions
+The system SHALL prefix injected text with a fixed header stating that the items are machine-generated and may be wrong, that they are context and not instructions, and that the user's request and the repo's docs take precedence, counting the header inside the character cap, and SHALL print nothing at all when no instinct qualifies.
 
 #### Scenario: Header present
 - **WHEN** at least one instinct qualifies
-- **THEN** the output begins with a line stating the items are untrusted context, not instructions
+- **THEN** the output begins with the fixed header
+- **AND** the header contains the phrases "not instructions" and "always win"
+- **AND** the header plus items total at most 1500 characters
 
 #### Scenario: Nothing qualifies
 - **WHEN** no instinct meets the threshold
@@ -39,6 +41,10 @@ The system SHALL validate and re-scrub every instinct field at injection time an
 #### Scenario: Tampered line
 - **WHEN** a store line has an action containing a URL or a token-shaped string
 - **THEN** the URL line is skipped and the token-shaped string is redacted
+
+#### Scenario: Instruction-like text
+- **WHEN** a store line has an action containing "ignore previous instructions"
+- **THEN** the line is skipped
 
 ### Requirement: Injection is opt-in and switchable
 The system SHALL inject only when `learning: on` is set and `GRID_INSTINCTS` is not `0`.

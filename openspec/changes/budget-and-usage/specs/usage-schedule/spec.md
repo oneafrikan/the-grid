@@ -24,11 +24,15 @@ The weekly job SHALL run the extractor, then commit and push only that host's us
 - **THEN** the file is written locally and git steps are skipped
 
 ### Requirement: Per-OS scheduler installer
-The system SHALL provide an installer that schedules the weekly job with launchd on macOS, a systemd user timer on Linux with systemd, and prints a crontab line otherwise, without hard-coded absolute paths in tracked templates.
+The system SHALL provide an installer that renders the weekly job's launchd job on macOS, systemd user timer on Linux with systemd, or crontab line otherwise through the shared schedule renderer, writes only scheduler files, prints the activation commands without running any scheduler command, and keeps absolute paths out of tracked files.
 
-#### Scenario: Dry run writes only to override directories
-- **WHEN** the installer runs with dry-run and override directories
-- **THEN** scheduler files appear there with the repository path substituted and no scheduler command is invoked
+#### Scenario: Install writes files and prints activation only
+- **WHEN** the installer runs with override directories
+- **THEN** scheduler files appear there with the repository path substituted, the activation commands are printed, and no scheduler command is invoked
+
+#### Scenario: Unsafe install path is refused
+- **WHEN** the repository or state path contains characters the renderer cannot escape safely
+- **THEN** the installer exits with status 2 and writes nothing
 
 #### Scenario: Installer is idempotent
 - **WHEN** the installer runs twice

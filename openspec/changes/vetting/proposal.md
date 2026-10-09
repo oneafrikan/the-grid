@@ -30,7 +30,7 @@ Wired skills, agents and hooks run with the user's full shell and file access, a
 - Edited: `scripts/wire.sh` (pre-link audit step), `scripts/gate.sh` (new check), `CLAUDE.md` (key files, wire.sh contract).
 - Cost: roughly 10 s added to a wire run on a 160-skill machine (measured on an unoptimised prototype); no network, no model calls, no tokens.
 - Use case: protect every machine and harness from malicious or careless upstream content across all stacks (web/app, marketing, data engineering); no new asset type is introduced.
-- Depends on `foundations#2` (`GRID_BASELINE`, CI on `next` with submodules). `manifest-lock-install` and `plugin-marketplace` consume the audit interface. This change does not depend on `grid.lock`.
+- Depends on `foundations#2` (`GRID_BASELINE`, CI on `next` with submodules), `foundations#8` (`GRID_DRY_HOME` for every dry-run wire) and `foundations#5` (runtime-root link, skipped by the audit selector). `manifest-lock-install` and `plugin-marketplace` consume the audit interface. This change does not depend on `grid.lock`.
 
 ## Non-goals
 

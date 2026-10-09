@@ -34,6 +34,10 @@ gate.sh SHALL fail when any stamped file disagrees with the committed SKILLS.md 
 - **WHEN** a marker value in README.md differs from the SKILLS.md headline
 - **THEN** `stamp-counts.py --check` exits 1 and the gate reports FAIL for counts
 
+#### Scenario: Interpreter absent
+- **WHEN** `gate.sh` runs without `python3` on PATH or without `scripts/stamp-counts.py`
+- **THEN** the counts check is listed as skipped in the gate summary and does not fail the gate
+
 ### Requirement: No typed headline counts
 README.md and index.html SHALL NOT contain a bare number of two to four digits directly before the words skills, agents or roles outside a count marker.
 

@@ -18,8 +18,11 @@ Two phases in one change.
 - PR mode: one worktree per issue off `origin/<base>`, branch `issue-<N>`, PR to `<base>`, issue relabelled `ready-for-human` and left open.
 - Headless runner `run-issues.sh`: up to K labelled issues per run, one `claude -p --model sonnet --max-budget-usd <cap>` per issue inside `timeout`, an Opus review step (also model- and budget-capped) posted to the PR, one `run-record.sh` line per issue, stop on first infrastructure failure.
 - Role routing: an issue labelled `role:<agent>` is built by `claude -p --agent <agent>`; unwired or read-only agents are refused (issue `blocked`, run continues); the role lands in the run record; `instantiate.sh --role-labels` creates the labels.
-- Headless environment handled by the runner, not the operator: optional env file sourced by the runner (`GH_TOKEN` for keyring-less `gh`, optional `CLAUDE_CODE_OAUTH_TOKEN`), `~/.local/bin` added to PATH when `claude` is not found, `claude auth status` / `gh auth status` / `git ls-remote` preflight with a fix-naming message, no credential prompts (`GIT_TERMINAL_PROMPT=0`).
+- Isolation and trust (operator decision Q1): the runner runs as a dedicated unprivileged OS user (own HOME, clone, `claude` login; cannot read the operator's HOME). The worker model never holds a GitHub token (`env -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN`, no MCP servers, project/local settings only); it commits and writes one outcome line, and the runner pushes, opens the PR and relabels. Issues pass a trust gate (author association, trusted labeller, trusted editors) before any model call. Preflight refuses to start without a PR-requiring ruleset on the base and a non-admin fine-grained token.
+- Headless environment handled by the runner, not the operator: env file parsed (never sourced) for `GH_TOKEN` and the two isolation keys, PATH append for `~/.local/bin` and Homebrew dirs, `claude auth status` / `gh auth status` / `git ls-remote` preflight with a fix-naming message, no credential prompts (`GIT_TERMINAL_PROMPT=0`).
+- Per-label budget: `LABEL_BUDGETS` raises the worker cap for labelled issues (the-grid: `ws:rule-packs` = $15).
 - Linux profile in `instantiate.sh`: systemd user `.service` + `.timer`, a read-only linger check that warns when linger is off; launchd plist moves to the same runner.
+- `scripts/lib/render-schedule.sh`: the one shared, print-only schedule renderer (daily and weekly; systemd, launchd, cron) used by this change and by `budget-and-usage`, `instincts` and `manifest-lock-install`.
 - Fix the review hook (worktree cwd, `git -C ... commit` matching, comment on the PR, model choice) and `setup.sh` (re-wire the guard, merge instead of overwrite).
 - Fix `git checkout -- .` leaving untracked files; create every escape label.
 - Re-cut the-grid's own `loop/` instance (base `next`, PR mode) and prove the whole chain on a sandbox repo with two trivial issues.
@@ -54,7 +57,8 @@ None. `openspec/specs/` is empty; this change introduces the first specs.
 ## Non-goals
 
 - No auto-merge of agent PRs; nothing reaches `main` without the operator.
-- No Docker or container sandbox; isolation is worktree + guard hook + dedicated token.
+- Isolation: dedicated unprivileged OS user; no container.
+- No headless `direct` mode; direct pushes stay an interactive-`/loop` feature.
 - No Paperclip/OpenClaw heartbeat trigger (issue #4 stays open for that).
 - No scripted idea-to-looping-project chain (issue #21 stays open; runbook only).
 - No agent-factory specialists inside the loop (the roadmap "compose with agent-factory" item).

@@ -19,6 +19,26 @@ Let any machine get the locked skill set with no submodule clones, using only HT
 - **WHEN** the fetched content hash differs from the lock
 - **THEN** nothing for that skill is placed, the error names the skill, and `grid install` exits 1
 
+#### Scenario: Unsafe lock entry rejected
+- **WHEN** a `grid.lock` entry has a `path` or `source` that is absolute, contains `..`, starts with `-` or contains a space, or a `sha` that is not 40 hex characters
+- **THEN** `grid install` exits 2 naming the entry before any network access, and nothing is created outside the grid directory
+
+#### Scenario: Existing directory not overwritten
+- **WHEN** `repos/<source>/<path>` already exists, is not in the ledger and its content differs from the lock, or a placed directory has been edited
+- **THEN** it is left untouched, named in an error and `grid install` exits 1; with `--force` it is replaced
+
+#### Scenario: Matching directory adopted
+- **WHEN** `repos/<source>/<path>` exists, is not in the ledger and its content hash equals the lock
+- **THEN** it is recorded in the ledger with no fetch
+
+#### Scenario: Dry run
+- **WHEN** `grid install --dry-run` runs
+- **THEN** it prints what would be fetched, placed and removed, makes no network access and writes no file
+
+#### Scenario: Symlinked grid directory
+- **WHEN** the grid directory is reached through a symlinked path
+- **THEN** the install, its links and the ledger behave exactly as through the real path
+
 #### Scenario: Machine overlay subtraction honoured
 - **WHEN** the machine overlay contains `-<source>/<skill>`
 - **THEN** that skill is not fetched and not wired
@@ -45,6 +65,18 @@ Let any machine get the locked skill set with no submodule clones, using only HT
 #### Scenario: Allowlisted finding passes
 - **WHEN** the finding is allowlisted in `CURATION.md` for its `repos/<source>/...` path
 - **THEN** the skill is placed
+
+#### Scenario: Scanner missing
+- **WHEN** `scripts/audit.py` or `policy.yaml` is absent from the grid directory and `GRID_AUDIT` is not `warn`
+- **THEN** `grid install` exits 2 with `refusing to place unvetted content` before any network access and places nothing; with `GRID_AUDIT=warn` it places the entries and prints an audit SKIPPED notice
+
+#### Scenario: Source not allowed by policy
+- **WHEN** a selected source's `https://` URL fails `audit.py --check-url`
+- **THEN** `grid install` exits 2 naming the source before any network access
+
+#### Scenario: Symlink escape caught at placement
+- **WHEN** a staged skill directory contains a symlink whose target resolves outside the skill directory, or its content hash recomputed on the copy about to be placed differs from the lock
+- **THEN** that entry is not placed, the error names it, and `grid install` exits 1
 
 #### Scenario: Audit passthrough
 - **WHEN** `grid audit --wired` runs

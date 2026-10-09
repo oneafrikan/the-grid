@@ -15,6 +15,14 @@ The aggregator SHALL sum usage across all host files in the usage directory over
 - **WHEN** a file declares a schema version the aggregator does not know
 - **THEN** it is skipped without failing the run
 
+#### Scenario: Unparseable file ignored
+- **WHEN** a file in the usage directory is not valid JSON
+- **THEN** it is skipped, named as ignored, and the run does not fail
+
+#### Scenario: Token totals summed by month
+- **WHEN** two host files record token totals for the same model and month
+- **THEN** the aggregate holds their sum for that month and model
+
 ### Requirement: Read-only prune proposals
 The prune report MUST write nothing except its own output and SHALL list proposals to move low-use baseline skills to library or set them to name-only, ordered by characters saved and numbered for reply.
 
@@ -29,6 +37,10 @@ The prune report MUST write nothing except its own output and SHALL list proposa
 #### Scenario: Skill used on one host is not proposed
 - **WHEN** a skill has uses on one host and none on another
 - **THEN** it is not proposed for demotion
+
+#### Scenario: Token and hook data do not affect proposals
+- **WHEN** token totals and hook counts are removed from every host file
+- **THEN** the report text and proposals are unchanged
 
 #### Scenario: No file is modified
 - **WHEN** the report runs against a mock grid, settings file and usage directory

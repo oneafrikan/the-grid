@@ -47,8 +47,12 @@ The emitter SHALL resolve the project hook set from the `hooks:` key of `<projec
 Every hook command emitted into a project settings file SHALL invoke the-grid's `hooks/run.sh` through `${GRID_DIR:-$HOME/.the-grid}` with no absolute user-home path, and the launcher MUST exit 0 without running a hook when `GRID_HOOKS=off` or the hook id is in `GRID_DISABLED_HOOKS`, and reject any id that is not a catalogue entry.
 
 #### Scenario: No absolute paths
-- **WHEN** project hooks are emitted for any profile on a machine whose home is `/home/someone` or `/Users/someone`
-- **THEN** the written settings file contains neither that home path nor any `/Users/` or `/home/` string
+- **WHEN** project hooks are emitted for any profile with `HOME` set to a temp directory
+- **THEN** the written settings file contains neither `$HOME` nor the string `/Users/` nor `/home/`
+
+#### Scenario: Emitted command runs end to end
+- **WHEN** the command string is read back from the emitted `settings.local.json`, run with `bash -c` and `GRID_DIR` set to the repo, and fed a `git commit --no-verify -m x` payload
+- **THEN** it exits 2
 
 #### Scenario: Missing grid is a visible error
 - **WHEN** a generated command runs on a machine where `${GRID_DIR:-$HOME/.the-grid}/hooks/run.sh` does not exist
@@ -65,6 +69,10 @@ Every hook command emitted into a project settings file SHALL invoke the-grid's 
 #### Scenario: Path traversal id
 - **WHEN** the launcher is called with the id `../../etc/passwd`
 - **THEN** it exits non-zero without executing anything
+
+#### Scenario: Launcher works without jq
+- **WHEN** `jq` is not on PATH and the launcher is called with `auto-handoff` and a SessionEnd payload
+- **THEN** it exits 0 (fail open) and with `pre-bash-no-bypass` it exits 2 (fail closed)
 
 ### Requirement: Non-clobbering merge
 The emitter MUST add, update and remove only entries it generated, recognised by the generated-command pattern, and leave every other key and hook in the settings files unchanged.
@@ -107,3 +115,11 @@ The emitter SHALL produce byte-identical settings on a second run with unchanged
 #### Scenario: Catalogue and scripts agree
 - **WHEN** the test suite runs
 - **THEN** it fails if a catalogue id has no `hooks/scripts/<id>.sh`, a script has no catalogue entry, or an entry has an empty `cost`
+
+#### Scenario: The agreement check can fail
+- **WHEN** the same check runs against a copy of the catalogue with one `cost` emptied and one script renamed
+- **THEN** it reports both problems, so the check is not vacuously green
+
+#### Scenario: Hooks pass the vetting audit
+- **WHEN** `python3 scripts/audit.py --root . hooks` runs (once `vetting` has merged)
+- **THEN** it exits 0

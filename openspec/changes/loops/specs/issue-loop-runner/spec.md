@@ -1,155 +1,142 @@
 ## Purpose
 
 A headless, capped, auditable way to run the issue-loop unattended: one fresh
-model session per issue, a stronger-model review on each PR, and a run record per
-issue. Use case: nightly backlog grinding on a server with no interactive session.
+model session per issue, run by a dedicated unprivileged OS user that holds no
+GitHub token while the model runs, a stronger-model review on each PR, and a run
+record per issue. Use case: nightly backlog grinding on a server with no
+interactive session.
 
 ## ADDED Requirements
 
-### Requirement: One capped worker session per issue
-The runner SHALL process at most `MAX_ISSUES` issues per run, lowest number first, serially, and SHALL invoke one `claude -p --model "$WORKER_MODEL"` per issue inside the `timeout` binary with `ISSUE_TIMEOUT` seconds.
+### Requirement: One capped, tokenless worker session per issue
+The runner SHALL support `MODE=pr` only, SHALL process at most `MAX_ISSUES` issues per run, lowest number first, serially, each in its own worktree on branch `issue-<N>` cut from `origin/<BASE_BRANCH>`, and SHALL invoke one `claude -p` per issue inside the timeout binary with `ISSUE_TIMEOUT`, launched under `env -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN`, with `--model "$WORKER_MODEL"`, `--max-budget-usd` (`MAX_BUDGET_USD`, raised to the largest `LABEL_BUDGETS` value whose label the issue carries), `--strict-mcp-config --mcp-config '{"mcpServers":{}}' --setting-sources project,local`, `--max-turns "$MAX_TURNS"` only when `claude --help` lists that flag, and `--agent <name>` only when the issue carries exactly one `role:<name>` label naming a wired agent whose `tools:` frontmatter, if present, includes `Edit` or `Write`; any other `role:` situation SHALL label the issue `blocked`, comment the reason and continue without a model call.
 
 #### Scenario: Cap on issues per run
 - **WHEN** three issues carry the opt-in label and `MAX_ISSUES=2`
 - **THEN** the worker command runs exactly twice, for the two lowest-numbered issues
 
-#### Scenario: Worker is a bounded Sonnet call
-- **WHEN** the runner invokes the worker for an issue
-- **THEN** the recorded command line contains `--model sonnet` and is wrapped by the timeout binary with the configured seconds
-
 #### Scenario: Nothing to do
 - **WHEN** no open issue carries the opt-in label
-- **THEN** the runner exits 0 without invoking `claude`
+- **THEN** the runner exits 0 without invoking `claude -p`
 
-### Requirement: Every model call is capped
-The runner SHALL pass an explicit `--model` and `--max-budget-usd` to every `claude` call (worker: `WORKER_MODEL`, `MAX_BUDGET_USD`; review: `REVIEW_MODEL`, `REVIEW_BUDGET_USD`) and run each inside the timeout binary, and SHALL add `--max-turns "$MAX_TURNS"` only when `claude --help` lists that flag.
+#### Scenario: Worker command line and environment
+- **WHEN** the runner invokes the worker with default configuration and `GH_TOKEN` set in the env file
+- **THEN** the recorded command line contains `--model sonnet`, `--max-budget-usd 5`, `--strict-mcp-config`, `--mcp-config {"mcpServers":{}}` and `--setting-sources project,local`, wrapped by the timeout binary
+- **AND** the worker process environment contains none of `GH_TOKEN`, `GITHUB_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`
 
-#### Scenario: Budget always passed
-- **WHEN** the runner invokes the worker with default configuration
-- **THEN** the worker command line contains `--max-budget-usd 5`
-- **AND** the review command line contains `--max-budget-usd 2`
+#### Scenario: Label-specific budget
+- **WHEN** `LABEL_BUDGETS="ws:rule-packs=15"` and the issue carries `ws:rule-packs`
+- **THEN** the worker command line contains `--max-budget-usd 15`
 
-#### Scenario: Turn flag supported
+#### Scenario: Turn flag probed
 - **WHEN** the `claude` help output contains `--max-turns`
 - **THEN** the worker command line contains `--max-turns 40`
-
-#### Scenario: Turn flag unsupported
-- **WHEN** the `claude` help output lacks `--max-turns`
-- **THEN** the worker command line contains no `--max-turns` and the run still proceeds
-
-### Requirement: Role routing by label
-The runner SHALL run the worker with `--agent <name>` when the issue carries exactly one `role:<name>` label naming an agent file in the user or repo agents directory whose `tools:` frontmatter, if present, includes `Edit` or `Write`, SHALL run it without `--agent` when no such label exists, and SHALL otherwise label the issue `blocked`, comment the reason and continue without a model call.
+- **AND** when the help output lacks it, the command line has no `--max-turns` and the run proceeds
 
 #### Scenario: Role label routes to the agent
 - **WHEN** issue 7 carries `role:grid-backend-dev` and that agent file exists
-- **THEN** the worker command line contains `--agent grid-backend-dev` and `--model sonnet`
+- **THEN** the worker command line contains `--agent grid-backend-dev`
 - **AND** the run record line for issue 7 has role `grid-backend-dev`
 
 #### Scenario: No role label
 - **WHEN** issue 7 carries no `role:` label
-- **THEN** the worker command line contains no `--agent`
-- **AND** the run record role is `issue-loop`
+- **THEN** the worker command line contains no `--agent` and the run record role is `issue-loop`
 
-#### Scenario: Unwired agent
-- **WHEN** issue 7 carries `role:no-such-agent` and issue 8 is also eligible
-- **THEN** no `claude -p` call is made for issue 7, it gains `blocked` and a comment saying the agent is not wired
+#### Scenario: Unwired, read-only or ambiguous role
+- **WHEN** issue 7 carries `role:no-such-agent`, or `role:grid-qa-engineer` whose frontmatter is `tools: Read, Grep, Glob, Bash`, or two `role:` labels, and issue 8 is also eligible
+- **THEN** no `claude -p` call is made for issue 7, it gains `blocked` and a comment naming the reason
 - **AND** the worker runs for issue 8
 
-#### Scenario: Read-only agent refused as builder
-- **WHEN** issue 7 carries `role:grid-qa-engineer` whose frontmatter is `tools: Read, Grep, Glob, Bash`
-- **THEN** no `claude -p` call is made for issue 7 and it gains `blocked` with a comment that the role is read-only
+#### Scenario: Worker cwd is the worktree, removed afterwards
+- **WHEN** the worker runs for issue 7
+- **THEN** its working directory is the issue-7 worktree and the main checkout's `git status --porcelain` is unchanged
+- **AND** after the issue finishes the worktree directory no longer exists while branch `issue-7` still exists locally
 
-### Requirement: Isolated worktree per issue
-In `pr` mode the runner SHALL create a worktree for each issue on branch `issue-<N>` from `origin/<BASE_BRANCH>` and run the worker inside it, never in the main checkout.
+#### Scenario: Direct mode refused headless
+- **WHEN** the runner starts with `MODE=direct`
+- **THEN** it exits 2 naming interactive `/loop` and invokes no `claude -p`
 
-#### Scenario: Worker cwd is the worktree
-- **WHEN** the worker runs for issue 7 in `pr` mode
-- **THEN** its working directory is the issue-7 worktree
-- **AND** the main checkout's `git status --porcelain` is unchanged
+### Requirement: Unsafe setups and untrusted issues are refused before any model call
+The runner SHALL exit 2, before changing anything and with one stderr line naming the fix, when any of these fails: required tools present; git `user.name`/`user.email` set; `LOOP_TRUSTED_ACTORS` non-empty; `LOOP_OPERATOR_HOME` exists and cannot be listed by the running user; the PreToolUse guard entry exists in `.claude/settings.json`; `claude auth status` reports logged in; a `GH_TOKEN` was read from the env file and `gh auth status` passes with it, while `gh auth status` without it fails; `origin` is an `https://` URL; `git ls-remote` of the base branch succeeds; a repository rule requiring a pull request applies to the base branch; reading the base branch's classic protection with the token fails with HTTP 403 (the token has no Administration access); the env file is not group/world accessible; the main checkout is clean. Before any worktree or model call for an issue, the runner SHALL require that the issue's `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`, that the actor of the last `labeled` event for the opt-in label is in `LOOP_TRUSTED_ACTORS`, and that every body editor and every `renamed` actor is in `LOOP_TRUSTED_ACTORS`; otherwise it SHALL label the issue `needs-human`, remove the opt-in label, comment which check failed, and continue.
 
-#### Scenario: Worktree removed after the issue
-- **WHEN** an issue finishes in any outcome
-- **THEN** its worktree directory no longer exists
-- **AND** the branch `issue-<N>` still exists locally
+#### Scenario: Not isolated from the operator
+- **WHEN** `LOOP_OPERATOR_HOME` names a directory the running user can list
+- **THEN** the runner exits 2 naming the dedicated loop user and invokes no `claude -p`
 
-### Requirement: Opus review posted to the PR
-After a worker run that leaves an open PR, the runner SHALL run `claude -p --model "$REVIEW_MODEL" --tools ""` on the PR diff (truncated to `REVIEW_DIFF_LINES` with an explicit marker) under `REVIEW_TIMEOUT`, and SHALL post the result with `gh pr comment`.
+#### Scenario: Worker could reach a stored GitHub login
+- **WHEN** `gh auth status` succeeds with `GH_TOKEN` and `GITHUB_TOKEN` unset
+- **THEN** the runner exits 2 naming `gh auth logout`
 
-#### Scenario: Review comment posted
-- **WHEN** the worker leaves an open PR for issue 7
-- **THEN** one `claude` call with `--model opus` and `--tools ""` and no `--agent` is made
-- **AND** one `gh pr comment` call is made on that PR
+#### Scenario: Base branch not protected by a pull-request rule
+- **WHEN** the rules endpoint for the base branch lists no `pull_request` rule
+- **THEN** the runner exits 2 naming a ruleset that requires a pull request on the base branch
 
-#### Scenario: No PR, no review
-- **WHEN** the worker leaves no PR
-- **THEN** no review call and no `gh pr comment` call is made
+#### Scenario: Admin token refused
+- **WHEN** reading the base branch's protection with the token succeeds or fails with anything other than HTTP 403
+- **THEN** the runner exits 2 naming the fine-grained token from the README
+
+#### Scenario: Other preflight failures
+- **WHEN** any one of: `user.email` unset; the guard entry missing; `claude auth status --json` reports `"loggedIn": false`; `origin` is an SSH URL; the env file has mode 644; the main checkout has uncommitted changes
+- **THEN** the runner exits 2, creates no worktree and invokes no `claude -p`
+
+#### Scenario: Issue written by an outsider
+- **WHEN** issue 7's `author_association` is `NONE` and issue 8 passes every check
+- **THEN** issue 7 gains `needs-human`, loses the opt-in label and gets a comment naming the author check, with no worktree and no `claude -p`
+- **AND** the worker runs for issue 8
+
+#### Scenario: Labelled or edited by an untrusted actor
+- **WHEN** the last `labeled` event for the opt-in label was made by an actor not in `LOOP_TRUSTED_ACTORS`, or the body was edited by such an actor
+- **THEN** the issue gains `needs-human` and no `claude -p` call is made for it
+
+### Requirement: The runner integrates, reviews and records; the agent never pushes
+After a worker run, the runner SHALL read the first line of the worker's outcome file and SHALL push `HEAD:refs/heads/issue-<N>` with the token passed per call, open a PR to `<BASE_BRANCH>` whose body contains `Closes #<N>`, and swap the opt-in label for `ready-for-human` (leaving the issue open) only when the line is `done`, the worktree is on `issue-<N>`, clean, and at least one commit ahead of `origin/<BASE_BRANCH>`; a `needs-human` line SHALL label the issue `needs-human`; every other case (including timeout, max-turns, a missing file or no commits) SHALL label it `blocked`, remove the opt-in label and comment the reason. For each opened PR the runner SHALL run `claude -p --model "$REVIEW_MODEL" --max-budget-usd "$REVIEW_BUDGET_USD" --tools ""` under `REVIEW_TIMEOUT` on the issue body and the PR diff (truncated with a `TRUNCATED` marker and capped at 100000 bytes on stdin) and post the result with `gh pr comment`. It SHALL write one `run-record.sh` line per processed issue (role = routed agent else `RUN_ROLE`, action `work-issue`, target `<repo>#<N>`, outcome, summed cost when known) and SHALL NOT fail when `run-record.sh` is missing.
+
+#### Scenario: Happy path
+- **WHEN** the worker for issue 7 commits once on `issue-7` and writes `done`
+- **THEN** the runner pushes with a refspec ending `refs/heads/issue-7`, calls `gh pr create` with `--base` the base branch, and labels the issue `ready-for-human` without closing it
+- **AND** one review `claude` call with `--model opus`, `--max-budget-usd 2` and `--tools ""` and no `--agent` is made, followed by one `gh pr comment`
+
+#### Scenario: Done without commits
+- **WHEN** the worker writes `done` but `issue-7` has no commit ahead of the base
+- **THEN** no push, no PR and no review happen, and the issue gains `blocked` with a comment that the loop ended without a commit
+
+#### Scenario: Worker asks for a human
+- **WHEN** the worker writes `needs-human ambiguous acceptance criteria`
+- **THEN** the issue gains `needs-human`, loses the opt-in label, and the comment contains the reason
 
 #### Scenario: Large diff is flagged
 - **WHEN** the PR diff exceeds `REVIEW_DIFF_LINES`
-- **THEN** the review input contains the word `TRUNCATED`
+- **THEN** the review input contains the word `TRUNCATED` and the review argv stays under 4096 bytes
 
-### Requirement: Outcome comes from GitHub state
-The runner SHALL derive each issue's outcome from observable state: an open PR is `ok`, a `needs-human` label is `skipped`, a `blocked` label or no change is `error`, and in the last case SHALL add `blocked`, remove the opt-in label and comment the reason.
-
-#### Scenario: Worker silently did nothing
-- **WHEN** the worker exits 0 but no PR exists and no label changed
-- **THEN** the issue gains `blocked` and loses the opt-in label
-- **AND** a comment states the loop ended without a PR
-
-### Requirement: Issue-level failures continue, infrastructure failures stop
-The runner SHALL continue to the next issue after a timeout, a max-turns exhaustion, a verify failure or an ambiguous issue, and SHALL stop the whole run with exit code 1 on the first infrastructure failure, defined as a non-zero `claude` exit other than 124 or an error result that is not max-turns.
-
-#### Scenario: Timeout moves on
-- **WHEN** the worker for issue 5 exits 124 and issue 6 is also eligible
-- **THEN** issue 5 is labelled `blocked` and the worker runs for issue 6
-
-#### Scenario: Auth failure stops the run
-- **WHEN** the worker for the first issue exits 1
-- **THEN** no worker runs for later issues
-- **AND** the runner exits 1
-- **AND** the first issue keeps its opt-in label
-
-### Requirement: Run record per issue
-The runner SHALL call `run-record.sh` once per processed issue with the routed agent name as role (else `RUN_ROLE`, default `issue-loop`), action `work-issue`, target `<repo>#<N>`, the outcome and, when known, the summed cost, and SHALL NOT fail the run when `run-record.sh` is missing.
-
-#### Scenario: Two issues, two lines
+#### Scenario: Two issues, two records
 - **WHEN** two issues are processed with `GRID_RUN_LOG` set to a temp file
 - **THEN** the file contains two JSON lines whose `target` values are `<repo>#<N>` for each issue
+- **AND** with no locatable `run-record.sh` the run completes with a warning and the same exit code
 
-#### Scenario: Missing recorder is tolerated
-- **WHEN** no `run-record.sh` can be located
-- **THEN** the run completes with a warning and the same exit code as it otherwise would
+### Requirement: Failure policy, single instance and clean exit
+The runner SHALL continue to the next issue after a timeout (worker exit 124 or 137), a max-turns result or a failed push, SHALL stop the run with exit 1 on the first infrastructure failure (any other non-zero `claude` exit, or an error result that is not max-turns), SHALL read the env file by parsing only the keys `GH_TOKEN`, `LOOP_TRUSTED_ACTORS` and `LOOP_OPERATOR_HOME` without executing it, SHALL append `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin` to PATH when absent, SHALL run worker stdin from `/dev/null`, SHALL hold an absolute-path lock so a concurrent run exits 0, and SHALL remove its current worktree and the lock on SIGTERM, SIGINT or SIGHUP.
 
-### Requirement: Safe preconditions and single instance
-The runner SHALL load the optional env file `GRID_LOOP_ENV` (default `~/.config/the-grid/issue-loop.env`) and add `~/.local/bin` to PATH when `claude` is not found, and SHALL exit 2 before changing anything when a required tool, `claude auth status`, `gh auth status`, `git ls-remote` of the base branch or the timeout binary fails or the main checkout is dirty, and SHALL hold a lock so a second concurrent run exits 0 immediately.
+#### Scenario: Timeout moves on
+- **WHEN** the worker for issue 5 exits 124 or 137 and issue 6 is also eligible
+- **THEN** issue 5 is labelled `blocked` and the worker runs for issue 6
 
-#### Scenario: Claude found in the user bin dir
-- **WHEN** `claude` exists only in `$HOME/.local/bin` and PATH lacks that dir
-- **THEN** the preflight passes and the worker runs that binary
+#### Scenario: Infrastructure failure stops the run
+- **WHEN** the worker for the first issue exits 1
+- **THEN** no worker runs for later issues, the runner exits 1, and the first issue keeps its opt-in label
 
-#### Scenario: Not logged in
-- **WHEN** `claude auth status --json` reports `"loggedIn": false`
-- **THEN** the runner exits 2 with a message naming `CLAUDE_CODE_OAUTH_TOKEN` and the env file path, and invokes no `claude -p`
+#### Scenario: Env file is parsed, not executed
+- **WHEN** the env file contains `GH_TOKEN=abc` and a line `$(touch pwned)`
+- **THEN** every runner `gh` call sees `GH_TOKEN=abc` and no file `pwned` is created
 
-#### Scenario: Env file supplies the GitHub token
-- **WHEN** `GRID_LOOP_ENV` points at a file containing `GH_TOKEN=abc`
-- **THEN** every `gh` call the runner makes sees `GH_TOKEN=abc` in its environment
+#### Scenario: Minimal launchd or cron PATH
+- **WHEN** the runner starts with `PATH=/usr/bin:/bin` and `gh`, `jq` and `claude` exist only in `$HOME/.local/bin`
+- **THEN** the preflight passes
 
-#### Scenario: Dirty tree
-- **WHEN** the main checkout has uncommitted changes
-- **THEN** the runner exits 2 and creates no worktree
-
-#### Scenario: Concurrent run
-- **WHEN** a run is already active and a second run starts
+#### Scenario: Concurrent and stale locks
+- **WHEN** a run is active and a second run starts
 - **THEN** the second exits 0 and logs that another run holds the lock
+- **AND** a lock whose recorded pid is not alive is reclaimed and the run proceeds
 
-#### Scenario: Stale lock is reclaimed
-- **WHEN** the lock directory exists but its recorded pid is not alive
-- **THEN** the runner reclaims the lock and proceeds
-
-### Requirement: Direct mode is supported without worktrees
-In `direct` mode the runner SHALL run the worker in the main checkout, SHALL skip the Opus review step, and SHALL judge success by the issue being closed.
-
-#### Scenario: Direct mode
-- **WHEN** `MODE=direct` and one issue is processed
-- **THEN** no worktree is created and no `gh pr` call is made
+#### Scenario: Terminated mid-issue
+- **WHEN** the runner receives SIGTERM while the worker is running
+- **THEN** the issue worktree and the lock directory no longer exist afterwards

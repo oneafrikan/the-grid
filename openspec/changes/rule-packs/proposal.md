@@ -26,12 +26,13 @@ None. `openspec/specs/` is empty; wiring behaviour of `wire.sh` is specified her
 
 ## Impact
 
-- Code: new `scripts/rules.py`; edits to `scripts/wire.sh`, `scripts/catalog.sh`, `scripts/sources.sh` (both skip `rules:` lines), `scripts/gate.sh` (one lint check), `tests/helpers/setup.bash` (sandbox `RULES_DIR`), `baseline-submodules.example.txt`, `machines/example.txt`.
+- Code: new `scripts/rules.py`; edits to `scripts/wire.sh`, `scripts/catalog.sh`, `scripts/sources.sh` (both gain the generic typed-entry skip `*:*|-*:*`, owned here as the first change in merge order to touch them), `scripts/gate.sh` (one lint check, skipped loudly without `python3`), `tests/test_gate.bats` (skip cases), `tests/helpers/setup.bash` (sandbox `RULES_DIR`), `baseline-submodules.example.txt`, `machines/example.txt`.
 - New dirs: `rules/` (packs, `denylist.txt`, `THIRD_PARTY_NOTICES.txt`), `docs/rules.md`.
 - Use cases named: data engineering (sql, dbt, bash, python), web/app full-stack (typescript, web, react, vue, django, flask, laravel, php, ruby, golang, rust), WordPress/LAMP (php, wordpress, sql), infrastructure (terraform, bash).
 - Token cost: nothing is wired by default. A wired pack costs tokens only when a matching file is read or edited; per-file cap 4 KB, per-pack cap 9 KB.
 - `multi-harness` calls `rules.py emit` (interface in `design.md`) instead of building its own rule emitters or a `dist/rules/` tree.
-- Builds on `foundations` (`GRID_BASELINE`), `vetting` (hidden-Unicode scan of `rules/`) and `manifest-lock-install` (earlier `wire.sh` edits); merges after `hook-profiles` per the shared merge order.
+- Builds on `foundations` (`GRID_BASELINE`, `GRID_DRY_HOME`), `vetting` (hidden-Unicode scan of `rules/`), `manifest-lock-install` and `hook-profiles` (earlier `wire.sh` and test-helper edits); merges after `hook-profiles` per the shared merge order.
+- Content PRs (groups 6-12) run in the overnight loop and need its isolated worker (WebFetch allowed) and a raised per-issue budget for issues labelled `ws:rule-packs`.
 - Issue #5 is closed as superseded when this lands.
 
 ## Non-goals

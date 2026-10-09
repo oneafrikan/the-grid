@@ -16,8 +16,8 @@ Pin every default-wired skill to a reviewed commit and content hash, generated f
 - **THEN** `grid.lock` is byte-identical after both runs
 
 #### Scenario: Lock run writes only to temp dirs
-- **WHEN** `grid lock` runs `wire.sh` to resolve the wired set
-- **THEN** no file outside a temporary directory and `grid.lock` is created or changed
+- **WHEN** `grid lock` runs `wire.sh` to resolve the wired set, with `HOME` pointing at an empty directory
+- **THEN** that directory is still empty afterwards and no file outside a temporary directory and `grid.lock` is created or changed
 
 #### Scenario: Submodule not at its recorded commit
 - **WHEN** a baseline submodule's checkout differs from the commit recorded in the parent repo, or its skill directory has uncommitted changes
@@ -26,6 +26,18 @@ Pin every default-wired skill to a reviewed commit and content hash, generated f
 #### Scenario: Stale lock fails the check
 - **WHEN** a submodule moves to a commit that changes a wired skill and `grid.lock` is not regenerated
 - **THEN** `grid lock --check` exits 1 and names the skill
+
+#### Scenario: Editor and interpreter litter ignored
+- **WHEN** a `.DS_Store` file, a `__pycache__` directory or a `.pyc` file exists inside a skill directory on disk or in git
+- **THEN** the skill's content hash is the same as without them
+
+#### Scenario: Unsafe skill path
+- **WHEN** a wired skill directory path contains a space, a leading `-` or a character outside `[A-Za-z0-9._@+-]`, or the skill contains a nested submodule
+- **THEN** `grid lock` exits 2 naming it
+
+#### Scenario: Check not possible here
+- **WHEN** `grid lock --check` runs and a source named in `grid.lock` has no `repos/<source>/.git`
+- **THEN** it exits 3 with a message and `gate.sh` reports the check as skipped, not failed
 
 #### Scenario: Symlink escaping the skill directory
 - **WHEN** a wired skill contains a symlink whose target resolves outside the skill directory

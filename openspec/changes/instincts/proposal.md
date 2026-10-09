@@ -7,7 +7,7 @@ Agents repeat the same corrections every session because nothing carries habits 
 - Per-project opt-in flag `learning: on` in `.grid/project.yaml`. It is independent of the hook profile and off by default.
 - A zero-token capture hook (PostToolUse, PostToolUseFailure, UserPromptSubmit) appends scrubbed, truncated observations to a machine-local file under `~/.grid/instincts/`. Raw observations never leave the machine.
 - A weekly batched analyser (`scripts/instincts.sh analyse`): a local digest step, then one call per project per week with an explicit `--model haiku`, no tools, a dollar cap, a wall-clock cap and an input cap. It writes confidence-scored instincts to the private repo.
-- Instincts are scoped by a hash of the git remote, stored one file per host so several machines never conflict in git, and promoted to global when the same id is active in 2+ projects.
+- Instincts are scoped by a hash of the git remote, stored one file per host so several machines never conflict in git, and offered for global scope when the same id is active in 2+ projects; a global instinct is written only after `instincts.sh approve <id>`.
 - A SessionStart injector adds at most 6 instincts and 1500 characters, framed as untrusted context and never as instructions.
 - `tank` is extended (no new subsystem): instincts become a named source, and a new `evolve` mode drafts candidate skills into the private store (never wired). `oracle` may offer preference-type instincts for per-entry approval.
 - Each analysis run writes a `run-record.sh` line, and `instincts.sh status` shows the funnel (observations, candidates, instincts) so a silent 0-instinct failure is visible.
@@ -17,7 +17,7 @@ Agents repeat the same corrections every session because nothing carries habits 
 ### New
 - `instinct-capture`: opt-in, zero-token, scrubbed, local-only observation capture.
 - `instinct-store`: private-repo layout, remote-hash scoping, per-host files, promotion, sync, lifecycle.
-- `instinct-analysis`: weekly batched, budget-capped distillation with deterministic confidence.
+- `instinct-analysis`: weekly batched, budget-capped distillation with deterministic confidence, a versioned analysis prompt, grounded and validated output, and labelled prompt cases.
 - `instinct-injection`: capped, ranked, untrusted-framed session-start injection.
 - `learning-desk-instincts`: how tank and oracle consume instincts (evolve mode, propose-only).
 
@@ -26,10 +26,10 @@ Agents repeat the same corrections every session because nothing carries habits 
 
 ## Impact
 
-- New: `scripts/instincts.sh`, `scripts/instincts/{lib,capture,analyse,inject}.py`, `tests/test_instincts_*.bats`, `docs/instincts.md`.
+- New: `scripts/instincts.sh`, `scripts/instincts/{lib,capture,analyse,inject,evalcases}.py`, `scripts/instincts/prompts/analyse-v1.md`, `evals/instincts/*.json`, `evals/cases/tank/evolve-*.yaml`, `tests/test_instincts_*.bats`, `docs/instincts.md`.
 - New (hook runtime from `hook-profiles#1`): four catalogue entries in `hooks/catalogue.json` and four one-line wrappers `hooks/scripts/instincts-*.sh`.
 - Edited: `agent-factory/deploy_hooks.py` (one `opt_in: learning` rule, from `hook-profiles#2`), `agent-factory/deploy.py` (`learning` allowed in `project.yaml`), `hooks/README.md`, `agent-factory/roles/tank/{AGENTS,SKILL}.md`, `agent-factory/roles/oracle/SKILL.md`, `skills/mine-learnings/SKILL.md` (one pointer), `docs/agent-retro.md`, `project-factory/templates/_common/.grid/project.yaml`, `CLAUDE.md` (key-files entry).
-- Private repo gains `learning/instincts/`. Machines gain one weekly schedule entry, installed by the operator.
+- Private repo gains `learning/instincts/`. Machines gain one weekly schedule entry, rendered by the shared `scripts/lib/render-schedule.sh` (`loops#3`) and installed by the operator from printed commands.
 - Cost: capture 0 tokens; analysis at most one haiku call per opted-in project per week ($0.05 and 120 s cap each, at most 5 per machine); injection at most 1500 characters per session in opted-in projects only.
 - Issues: closes #16 and #19; closes #20 as superseded (its intent is met by CLAUDE.md folding, Tank role diffs and runtime instincts).
 

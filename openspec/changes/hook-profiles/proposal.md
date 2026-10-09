@@ -9,8 +9,8 @@ Claude Code hooks are the only way to make a safety rule or a habit unconditiona
   - project mode: reads `hooks:` from `<project>/.grid/project.yaml` and merges the chosen profile's guard hooks into `<project>/.claude/settings.local.json` (or `settings.json` with `target: shared`);
   - `--user` mode (stdlib only): maintains the machine-level hooks in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`.
   - Generated entries carry a marker; hand-written hooks are never touched; re-runs are no-ops.
-- Two project guard hooks: `pre-bash-no-bypass` (blocks `--no-verify` and force-push) and `pre-bash-secret-scan` (blocks a commit that adds a secret).
-- One machine-level hook, `auto-handoff`: on SessionEnd, if no handoff ran in the session, a detached worker runs `claude -p "/handoff"` (Sonnet, turn, budget and time caps) over a transcript digest and commits only the two handoff files.
+- Two project guard hooks (a mistake-catcher, not a security boundary): `pre-bash-no-bypass` (blocks `--no-verify`, hook-disabling config and force-push, including one level of shell wrapping) and `pre-bash-secret-scan` (blocks a commit or `git add` that adds a secret or a sensitive file). The secret pattern table lives once in `hooks/lib/secret-patterns.sh`.
+- One machine-level hook, `auto-handoff`: on SessionEnd, if no handoff ran in the session, a detached worker runs `claude -p "/handoff"` (Sonnet, budget and time caps, plus a turn cap if the CLI accepts one) over a transcript digest. The child may only write the two handoff files; the worker checks them, secret-scans them, commits them by explicit path, and pushes only the private repo when that commit is the sole unpushed one.
 - `wire.sh` turns `auto-handoff` on by default on every run; a manifest line `-hook:auto-handoff` (baseline or machine overlay) turns it off for that machine. `GRID_DISABLED_HOOKS=auto-handoff` turns it off for one session.
 - `deploy.py` accepts the new `hooks` key; the project-factory `.grid/project.yaml` skeleton gains a commented `hooks:` block; `scripts/gate.sh` shellchecks `hooks/`.
 
@@ -29,16 +29,17 @@ None. `openspec/specs/` is empty; the `deploy.py` allowed-keys change and the `w
 ## Impact
 
 - New: `hooks/` (run.sh, catalogue.json, lib/, scripts/, README.md), `agent-factory/deploy_hooks.py`, `tests/test_hooks.bats`, `tests/test_deploy_hooks.bats`, `tests/test_auto_handoff_wiring.bats`.
-- Edited: `scripts/wire.sh` (`hook:` manifest entries, user-hook sync, `--check`, manifest row), `tests/helpers/setup.bash` (sandbox `CLAUDE_CONFIG_DIR`), `agent-factory/deploy.py` (one allowed key), `scripts/gate.sh` (shellcheck globs), `machines/example.txt` and `baseline-submodules.example.txt` (comments), `project-factory/templates/_common/.grid/project.yaml` (comments only), `CLAUDE.md` and `agent-factory/README.md` (pointers).
+- New test assets: `tests/helpers/hooks.bash`, `tests/fixtures/hooks/` (real hook payloads and transcript line shapes captured once by the operator, a hand-written-settings fixture).
+- Edited: `scripts/wire.sh` (`hook:` manifest entries, user-hook sync, `--check`, manifest row), `tests/helpers/setup.bash` (sandbox `CLAUDE_CONFIG_DIR`, hook log/state dirs, `GRID_PRIVATE_DIR`, a tripwire value for the existing `GRID_CLAUDE`), `tests/helpers/stubs.bash` from `loops` (the `claude` stub gains handoff modes), `tests/test_gate.bats` (one case), `agent-factory/deploy.py` (one allowed key), `scripts/gate.sh` (shellcheck globs), `machines/example.txt` and `baseline-submodules.example.txt` (comments), `project-factory/templates/_common/.grid/project.yaml` (comments only), `CLAUDE.md` and `agent-factory/README.md` (pointers).
 - Machines need `jq`, `perl` and `python3` (default or one package away on macOS, Ubuntu, Arch). Project mode needs the agent-factory venv, like `deploy.py`; `--user` mode does not.
 - Token cost:
   - project profiles cost zero tokens unless a guard blocks (about 60 tokens of explanation);
-  - `auto-handoff` is on by default and costs one Sonnet run per qualifying session (5+ human turns, no manual handoff), capped by turns, a USD budget and a wall-clock timeout. Sessions where the operator ran `/handoff` cost nothing extra.
+  - `auto-handoff` is on by default and costs one Sonnet run per qualifying session (5+ human turns, no manual handoff), capped by a USD budget, a wall-clock timeout and (if the CLI accepts it) a turn limit. Sessions where the operator ran `/handoff` cost nothing extra.
 - Use case: guard hooks for web/app, data-engineering and infra repos where a committed secret, a skipped pre-commit hook or a force-push is costly; the auto-handoff for every working session on every machine.
 
 ## Non-goals
 
-- Pushing the auto-handoff commit. The child commits only; the next manual push carries it (see design.md).
+- Pushing anything but a handoff-only commit in the private repo. Handoff commits in any other repo are left for the operator's next manual push (see design.md).
 - Machine-level guard hooks. Guards are per project; only `auto-handoff` is machine-level.
 - Emitters for Codex, Gemini CLI, OpenCode, Pi or OpenClaw. The catalogue is harness-neutral and the settings merge is one function; `multi-harness` owns verifying and building other harnesses.
 - Session-start or per-response hooks that inject context (instincts, memory); that is `instincts`.
