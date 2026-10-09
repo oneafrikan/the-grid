@@ -103,7 +103,8 @@ When you pull the-grid on a machine that's already set up:
 ```bash
 cd ~/.the-grid
 git pull                                    # 1. latest the-grid (source of truth)
-git submodule update --init --recursive     # 2. sync submodule pointers
+git submodule sync --recursive              # 2. only if the pull changed .gitmodules (URLs)
+git submodule update --init --recursive     #    sync submodule pointers
 
 # 3. If ANYTHING under agent-factory/ changed (roles, compose.py, or a compose
 #    config), recompose — projects/ is git-ignored, so a pull alone does NOT
