@@ -6,16 +6,18 @@
   - `index.html` is 2000 lines, `<h1 class="hero-wordmark">` is visually hidden, the hero is `the-grid.png` (5.6 MB, 2816x1536), there are no links to the repo, only `<title>`, and counts are hand-typed (`137`, `~1,275`) and already disagree with `SKILLS.md` (library = 102).
   - `/tron` is an agent-factory orchestrator, so it is only wired by `bootstrap.sh --with-agents` (needs `python3`). The review's quickstart (plain bootstrap, then `/tron`) would fail. The quickstart below uses `--with-agents`.
   - `bootstrap.sh` ends with "Bootstrap complete. Open a fresh Claude session to pick up new skills/agents."
-  - `catalog.sh` already computes total / wired / root-owned / upstream-wired / library for `SKILLS.md`. Roles = 38 = `- role:` lines across `agent-factory/examples/*.yaml` (5+6+3+24).
+  - `catalog.sh` already prints total / wired / root-owned / upstream-wired / library in the committed `SKILLS.md` headline (`**239 skills indexed** — 137 wired live (14 root-owned + 123 from allowlisted repos), 102 in library ...`). Roles = 38 = `- role:` lines across `agent-factory/examples/*.yaml` (5+6+3+24).
+  - `the-grid.png` stays in the repo after `depersonalise` (allowlisted in `scripts/personal-allow-paths.txt` until this change replaces it). `depersonalise` removes `prompts/2026-06-13-openclaw-lamp-team-prompt.md` to the private archive, which retires #7.
+  - `depersonalise`'s size scan blocks tracked files over 1 MB unless allowlisted. Pages is served from `main` `/` with `.nojekyll` (`foundations`). `manifest-lock-install` adds `grid install` and documents it in BOOTSTRAP.md.
   - `gate.sh` runs shellcheck, catalog, compose, bats. CI runs only bats.
-- Gareth's decisions (taken as fixed): the hero sentence, keep Tron reference + Flynn quote + ASCII art, "Who it's for" high, mermaid diagram, first-person author voice, README-only translations into 9 locales, no "why not ECC/gstack" section.
-- Voice: first person ("I"), one byline "Gareth Knight" in the README footer and the site footer. Workstream 2 says "voice = Gareth throughout"; this change reads that as the same thing: author speaks as "I", not "Gareth's brainchild".
+- Operator decisions (taken as fixed): the hero sentence, keep Tron reference + Flynn quote + ASCII art, "Who it's for" high, mermaid diagram, first-person author voice, README-only translations into 9 locales, no "why not ECC/gstack" section.
+- Voice: first person ("I"), one byline "Gareth Knight" in the README footer and the site footer. `depersonalise` allows the name in prose docs; the author speaks as "I", never third person.
 
 ## Approach
 
 Seven slices, in dependency order:
 
-1. **Counts** become data: `catalog.sh` writes `docs/stats.json`; `scripts/stamp-counts.py` rewrites marker comments in README*, index.html; gate fails on drift. Everything after this uses markers instead of typed numbers.
+1. **Counts** become data: `scripts/stamp-counts.py` reads the committed `SKILLS.md` headline and rewrites marker comments in README*, index.html; `catalog.sh` restamps after regenerating; gate fails on drift. Everything after this uses markers instead of typed numbers.
 2. **Doc split** lands before the README shrinks, so no content is lost: INSTALL, CONTRIBUTING, docs/architecture, docs/roadmap, docs/private-projects.
 3. **README** rewritten against a fixed skeleton (below).
 4. **Site assets** script + HUMAN render, then **index.html** rebuilt on those assets.
@@ -44,7 +46,7 @@ Draft copy (implementer uses as written; HUMAN edits at sign-off):
 
 - Hero (exact, verbatim, one paragraph, bold):
   `Inspired by Tron. Dotfiles for your AI assistant: curated skills and agent teams, wired identically onto every machine and every AI tool you use.`
-- Status one-liner under badges: `Works today with Claude Code. Other AI tools are scoped, not built: see [docs/roadmap.md](docs/roadmap.md).`
+- Status one-liner under badges: `Works today with Claude Code. Other AI tools: see [docs/roadmap.md](docs/roadmap.md).` (true whether or not `multi-harness` has shipped).
 - Who it's for:
   - `You use more than one machine (laptop, server, work, home) and your Claude Code setup keeps drifting between them.`
   - `You collect skills from many repos and installing everything buries your session. You want a short live list and a searchable shelf.`
@@ -109,23 +111,14 @@ The four bullets under it: wired vs library; per-machine overlay; symlinks not c
 
 ### Generated counts
 
-`docs/stats.json` (flat, sorted keys, trailing newline, no timestamp):
+No new data file. The source of truth is the committed `SKILLS.md` headline, which `catalog.sh` already writes and `catalog.sh --check` already guards.
 
-```json
-{
-  "indexed": 239,
-  "library": 102,
-  "roles": 38,
-  "root_owned": 14,
-  "upstream_wired": 123,
-  "wired": 137
-}
-```
-
-- `catalog.sh` writes it from the variables it already computes (`total`, `library_skill_count`, `root_owned`, `wired_skill_count`, `wired_live`); `roles` = count of `^\s*- role:` lines in `agent-factory/examples/*.yaml`. `catalog.sh --check` also diffs it. Honours `GRID_DIR`.
-- Marker: `<!--count:NAME-->VALUE<!--/count-->`, valid inline in Markdown and HTML. `NAME` must be a key of stats.json.
-- `scripts/stamp-counts.py` (python3 stdlib): rewrites VALUE in `README.md`, `README.*.md`, `index.html`; `--check` exits 1 and names the file on drift; exits 2 on an unknown NAME or missing stats.json. Idempotent.
-- `gate.sh` gains a `counts` check (`python3 scripts/stamp-counts.py --check`), machine-independent because it compares two committed files. The catalog check keeps its existing skip rule.
+- Keys (six): `indexed`, `wired`, `root_owned`, `upstream_wired`, `library` from the headline; `roles` = count of `^[[:space:]]*- role:` lines in `agent-factory/examples/*.yaml`.
+- Headline regex (Python): `^\*\*(\d+) skills indexed\*\* — (\d+) wired live \((\d+) root-owned \+ (\d+) from allowlisted repos\), (\d+) in library` → indexed, wired, root_owned, upstream_wired, library.
+- Marker: `<!--count:NAME-->VALUE<!--/count-->`, valid inline in Markdown and HTML. `NAME` must be one of the six keys.
+- `scripts/stamp-counts.py` (python3 stdlib, honours `GRID_DIR`): rewrites VALUE in `README.md`, `README.*.md`, `index.html`; `--check` exits 1 and names the file on drift; exits 2 on an unknown NAME, or on a missing/unparsable headline when any marker exists; exits 0 when no file has markers. Idempotent.
+- `catalog.sh` runs `stamp-counts.py` after writing the default `SKILLS.md` (not in `--check`, not with an output-path argument), so `wire.sh` keeps the counts current with no extra step.
+- `gate.sh` gains a `counts` check (`python3 scripts/stamp-counts.py --check`), machine-independent because it compares committed files.
 
 ### index.html contract
 
@@ -231,17 +224,18 @@ Sleep 8s
 - Decided: author voice is first person ("I") in README and site; one byline naming Gareth Knight in README footer and site footer; the name is already public in LICENSE.
 - Decided: README is the copy source of truth; index.html mirrors it; a test enforces byte-identical hero sentence and install command.
 - Decided: the quickstart command uses `--with-agents`, because `/tron` is an agent-factory orchestrator that plain bootstrap does not wire; this also fixes the review's broken step 1.
-- Decided: the README makes no "60 seconds" or timing claim until a HUMAN times it on a clean machine; the first run fetches ~36 submodules and is probably slower. Revisit after workstream 3 (locked fetch) lands.
+- Decided: the README makes no "60 seconds" or timing claim until a HUMAN times it on a clean machine; the first run fetches ~36 submodules and is probably slower.
 - Decided: keep Tron elements as follows: ASCII banner directly under the hero block (it is the wordmark), Flynn monologue in its own `## Why "the grid"` section after How it works, not collapsed. On the site, the monologue becomes a pull-quote band after Quickstart. Reason: prominent, but after the message.
 - Decided: no named-competitor section, no "vs" table, no ECC/gstack in hero or in any heading; the Credits line points at `docs/SOURCES.md` and names no project.
 - Decided: add INSTALL.md as a short outsider guide and keep BOOTSTRAP.md as the full reference; reason: BOOTSTRAP already holds update/precedence/troubleshooting, so duplicating it into INSTALL would drift.
 - Decided: nothing is deleted in the doc split; text moves verbatim and only paths/URLs are corrected, so reviewers can diff by section.
-- Decided: `docs/stats.json` is committed and generated by `catalog.sh`; `stamp-counts.py` is Python stdlib (JSON + regex), not bash, because it edits HTML/Markdown in place across several files.
+- Decided: counts come from the committed `SKILLS.md` headline, not a new `docs/stats.json`; reason: SKILLS.md is already generated, committed and drift-checked, so a second data file would only duplicate it. `stamp-counts.py` is Python stdlib (regex), not bash, because it edits HTML/Markdown in place across several files.
+- Decided: if the SKILLS.md headline format changes, `stamp-counts.py` exits 2 and a test against the real SKILLS.md fails; the headline format is the contract.
 - Decided: marker form `<!--count:NAME-->VALUE<!--/count-->`; reason: invisible in both Markdown and HTML renderers, greppable, safe to repeat.
 - Decided: the hero image is a WebP under 300 KB; the OG image is a JPEG, because several social crawlers still reject WebP.
 - Decided: one 1200x630 `assets/og.jpg` serves both og:image and the GitHub social preview upload; reason: GitHub accepts it and a second 1280x640 file is another asset to keep in sync.
 - Decided: ImageMagick is the single image dependency for `build-site-assets.sh`; the real render is HUMAN on macOS, and the script's bats test skips when ImageMagick is absent.
-- Decided: the source PNG is not in the repo after workstream 2; the script takes its path as an argument and nothing hard-codes where it lives.
+- Decided: the HUMAN render reads `the-grid.png` from the repo, copies it to the private repo, and group 7 then `git rm`s it and drops its `personal-allow-paths.txt` line; the script takes the source path as an argument so later re-renders use the private copy.
 - Decided: no GitHub star-button widget or third-party script; "Star on GitHub" is a plain link to the repo. Reason: no network requests, no tracking.
 - Decided: the architecture diagram on the site is a hand-authored inline SVG with the same nodes as the mermaid source; reason: Pages cannot render mermaid without a CDN script. Both are listed in `docs/architecture.md` as needing joint edits.
 - Decided: remove "Key files", "Common commands" and the per-repo Skills listing from index.html; reason: reference material belongs in README docs/CONTRIBUTING and SKILLS.md is the generated catalogue.
@@ -255,20 +249,22 @@ Sleep 8s
 - Decided: SECURITY.md promises "best-effort acknowledgement within 7 days", no bounty, supported = latest tag and `main`.
 - Decided: CONTRIBUTING.md says to branch from and open PRs against `next` (the integration branch) and that nothing reaches `main` unreviewed. Reason: matches the current workflow; revisit if `next` is retired.
 - Decided: CHANGELOG.md is Keep-a-Changelog style with `## [Unreleased]` and a `## [0.1.0]` entry added in the tag task.
-- Decided: topics applied now are the 10 listed; `codex`, `gemini-cli` and `opencode` are added only after workstream 11 ships a real emitter for each. Reason: topics are a claim about what the repo does; today only Claude Code works.
+- Decided: topics applied now are the 10 listed; `codex`, `gemini-cli` and `opencode` are added by a later edit only after `multi-harness#10` (HUMAN smoke test) passes for that harness. Reason: topics are a claim about what the repo does; today only Claude Code works.
 - Decided: the GitHub About text is the hero sentence minus "Inspired by Tron" plus an honest suffix ("Claude Code today, more AI tools next"); reason: About is shown standalone and must not overclaim.
 - Decided: `scripts/repo-metadata.sh` is the only way metadata is applied, so the HUMAN task is one reviewed command and reproducible later.
 - Decided: tag `v0.1.0` is annotated, created by HUMAN on `main` after `next` is merged, with `gh release create v0.1.0 --notes-from-tag`; README Status wording changes from "No versioning" to "Versioned from v0.1.0; v0.x may still break between tags".
-- Decided: the LAMP build prompt (#7) is retired: `git mv` to `prompts/_retired/` with a one-paragraph header recording that it was superseded and listing its four known gaps; reason: role content was ported role-by-role, the file is dead weight in the repo layout, and git history plus the header keep the record.
+- Decided: the LAMP build prompt (#7) is retired by `depersonalise` (moved to the private archive); this change only closes #7 with a comment in the HUMAN sign-off. Reason: the file is already gone when this change lands.
 - Decided: demo recording is HUMAN (needs a real terminal and Claude auth); the tape lives in the repo so it is re-renderable; the GIF is referenced from README and index.html only after it exists, and must be <= 3 MB.
 - Decided: demo tape hides the initial clone and shows the idempotent bootstrap re-run, with a README caption saying so; reason: the real clone takes minutes and would blow the 20 s budget.
-- Decided: Pages file allowlist: if workstream 1 ended with an Actions deploy that copies named files, this change adds `assets/` to that list; if it used `.nojekyll` on the repo root, nothing to do.
+- Decided: Pages serves the repo root with `.nojekyll` (`foundations`), so `assets/` is published with no config change.
+- Decided: the demo GIF is added to `scripts/personal-allow-paths.txt` with a reason, because `depersonalise`'s size scan blocks files over 1 MB; its own 3 MB cap is enforced by `tests/test_demo_tape.bats`.
+- Decided: the quickstart stays `bootstrap.sh --with-agents` even though `grid install` exists, because bootstrap is the path that composes the agent teams `/tron` needs; INSTALL.md links BOOTSTRAP.md's "Install without submodules" section for `grid install`.
 - Decided: `index.html` total size stays under 100 KB and its page weight (HTML + hero.webp + favicon) under 450 KB; a bats test asserts the two file limits.
 - Decided: stale "29 skills" style typed numbers anywhere in README*/index.html are bugs: the stamping test fails if a bare number sits next to the words skills/agents/roles outside a marker (regex `\b[0-9]{2,4}\s+(skills|agents|roles)\b` in README.md and index.html).
 - Decided: nothing in this change edits USAGE.md or BOOTSTRAP.md other than fixing links that point to README sections that moved.
 
 ## Risks / open items
 
-- The hero says "every AI tool you use" while only Claude Code ships; mitigated by the status one-liner directly under it and the conservative About line. Gareth to confirm.
+- The hero says "every AI tool you use"; the operator kept it verbatim with the "Works today with Claude Code" line directly under it.
 - Group 7 (index.html) is blocked on a HUMAN asset render (group 6); the unattended loop skips it until the assets are committed.
-- Workstream 3 will replace `bootstrap.sh` with `grid install`; the quickstart, the tape and the install string on the site must then be updated together (the byte-identical test makes that one change).
+- If the quickstart ever moves to `grid install`, the README, the tape and the install string on the site change together (the byte-identical test makes that one change).

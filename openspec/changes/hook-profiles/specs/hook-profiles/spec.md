@@ -1,11 +1,11 @@
 ## Purpose
 
-Let a project declare how many of the-grid's Claude Code hooks it wants (off, minimal, standard, strict), and emit exactly those into the project's settings portably, without touching hand-written hooks, with the token cost of every hook stated.
+Let a project declare how many of the-grid's Claude Code guard hooks it wants (off, minimal, standard, strict), and emit exactly those into the project's settings portably, without touching hand-written hooks, with the token cost of every hook stated.
 
 ## ADDED Requirements
 
 ### Requirement: Profile resolution
-The emitter SHALL resolve the hook set from the `hooks:` key of `<project>/.grid/project.yaml` (`profile` of `off`, `minimal`, `standard` or `strict`, absent meaning `off`, plus optional `enable` and `disable` id lists), where each catalogue entry has one `min_profile` and a profile includes every hook at or below it.
+The emitter SHALL resolve the project hook set from the `hooks:` key of `<project>/.grid/project.yaml` (`profile` of `off`, `minimal`, `standard` or `strict`, absent meaning `off`; `target` of `local` or `shared`; no other keys), where each project-scope catalogue entry has one `min_profile` and a profile includes every hook at or below it, and user-scope hooks are never emitted into project files.
 
 #### Scenario: Absent key means off
 - **WHEN** `deploy_hooks.py` runs on a project whose `.grid/project.yaml` has no `hooks:` key and no `--profile` flag is given
@@ -21,19 +21,19 @@ The emitter SHALL resolve the hook set from the `hooks:` key of `<project>/.grid
 
 #### Scenario: Standard includes minimal
 - **WHEN** the profile is `standard`
-- **THEN** the emitted set contains the `minimal` hooks and the `standard` hooks and no `strict` hook
+- **THEN** the emitted set contains the `minimal` hook and the `standard` hook
 
-#### Scenario: Enable adds a higher hook
-- **WHEN** the profile is `minimal` and `enable` lists `session-end-auto-handoff`
-- **THEN** that hook is emitted in addition to the minimal set
+#### Scenario: Strict equals standard for now
+- **WHEN** the profile is `strict`
+- **THEN** the emitted set is the same as for `standard`
 
-#### Scenario: Disable removes a hook
-- **WHEN** the profile is `standard` and `disable` lists `pre-bash-secret-scan`
-- **THEN** that hook is not emitted
+#### Scenario: Unknown key is rejected
+- **WHEN** the `hooks:` mapping contains `enable: [pre-bash-secret-scan]`
+- **THEN** the emitter exits non-zero naming the allowed keys and writes nothing
 
-#### Scenario: Off with enable is an error
-- **WHEN** the profile is `off` and `enable` is non-empty
-- **THEN** the emitter exits non-zero and writes nothing
+#### Scenario: User-scope hooks never reach a project
+- **WHEN** the profile is `strict`
+- **THEN** no `SessionEnd` entry and no `auto-handoff` command appears in either project settings file
 
 #### Scenario: Agent deploy tolerates the hooks key
 - **WHEN** `deploy.py` runs on a project whose `project.yaml` contains a `hooks:` mapping
@@ -44,10 +44,10 @@ The emitter SHALL resolve the hook set from the `hooks:` key of `<project>/.grid
 - **THEN** the profile resolves to `off`
 
 ### Requirement: Portable launcher and runtime kill switches
-Every emitted hook command SHALL invoke the-grid's `hooks/run.sh` through `${GRID_DIR:-$HOME/.the-grid}` with no absolute user-home path, and the launcher MUST exit 0 without running a hook when `GRID_HOOKS=off` or the hook id is in `GRID_DISABLED_HOOKS`, and reject any id that is not a catalogue entry.
+Every hook command emitted into a project settings file SHALL invoke the-grid's `hooks/run.sh` through `${GRID_DIR:-$HOME/.the-grid}` with no absolute user-home path, and the launcher MUST exit 0 without running a hook when `GRID_HOOKS=off` or the hook id is in `GRID_DISABLED_HOOKS`, and reject any id that is not a catalogue entry.
 
 #### Scenario: No absolute paths
-- **WHEN** hooks are emitted for any profile on a machine whose home is `/home/someone` or `/Users/someone`
+- **WHEN** project hooks are emitted for any profile on a machine whose home is `/home/someone` or `/Users/someone`
 - **THEN** the written settings file contains neither that home path nor any `/Users/` or `/home/` string
 
 #### Scenario: Missing grid is a visible error
@@ -74,8 +74,8 @@ The emitter MUST add, update and remove only entries it generated, recognised by
 - **THEN** those entries and keys are still present and unmodified after the run
 
 #### Scenario: Lowering the profile removes only generated entries
-- **WHEN** the profile is lowered from `strict` to `minimal` and the emitter re-runs
-- **THEN** the standard and strict generated entries are removed, the minimal entry and all hand-written entries remain
+- **WHEN** the profile is lowered from `standard` to `minimal` and the emitter re-runs
+- **THEN** the `pre-bash-secret-scan` generated entry is removed, the minimal entry and all hand-written entries remain
 
 #### Scenario: Off removes all generated entries
 - **WHEN** the profile is changed to `off` and the emitter re-runs
@@ -90,7 +90,7 @@ The emitter MUST add, update and remove only entries it generated, recognised by
 - **THEN** the generated entries appear in `settings.json` and are gone from `settings.local.json`
 
 ### Requirement: Idempotent, checkable and cost-disclosed emission
-The emitter SHALL produce byte-identical settings on a second run with unchanged inputs, report drift with a non-zero `--check` that writes nothing, and print every hook's minimum profile, token-cost note and model-call flag under `--list`.
+The emitter SHALL produce byte-identical settings on a second run with unchanged inputs, report drift with a non-zero `--check` that writes nothing, and print every hook's scope, minimum profile, token-cost note and model-call flag under `--list`.
 
 #### Scenario: Second run is a no-op
 - **WHEN** the emitter runs twice in a row with the same inputs
@@ -102,7 +102,7 @@ The emitter SHALL produce byte-identical settings on a second run with unchanged
 
 #### Scenario: List shows cost
 - **WHEN** `deploy_hooks.py --list` runs
-- **THEN** each hook is printed with its minimum profile, its cost note and whether it calls a model
+- **THEN** each hook is printed with its scope, its minimum profile (project hooks only), its cost note and whether it calls a model
 
 #### Scenario: Catalogue and scripts agree
 - **WHEN** the test suite runs

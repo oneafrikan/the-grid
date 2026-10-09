@@ -30,7 +30,7 @@ Run the audit where it matters: before skills are linked onto a machine and befo
 
 ### Requirement: The commit gate runs the audit
 
-`scripts/gate.sh` SHALL run an `audit` check that scans owned assets always and the wired set when the machine has a baseline and initialised submodules, fails the gate on a high finding, and reports the check as skipped (not passed silently) when `scripts/audit.sh` or `python3` is unavailable.
+`scripts/gate.sh` SHALL run an `audit` check that scans owned assets and the baseline's wired set (the personal baseline, else the tracked example baseline) whenever submodules are initialised, fails the gate on a high finding, and reports the check as skipped (not passed silently) when `scripts/audit.sh` or `python3` is unavailable.
 
 #### Scenario: High finding fails the gate
 - **WHEN** an owned skill contains a banned high-severity pattern
@@ -40,6 +40,10 @@ Run the audit where it matters: before skills are linked onto a machine and befo
 - **WHEN** the gate runs where `python3` is not on PATH
 - **THEN** the output lists `audit` under skipped and the gate can still PASS
 
-#### Scenario: CI checks owned assets
-- **WHEN** the gate runs on a machine with no `baseline-submodules.txt`
+#### Scenario: CI audits the example baseline
+- **WHEN** the gate runs with initialised submodules and no `baseline-submodules.txt`
+- **THEN** owned assets and the skills wired by `baseline-submodules.example.txt` are scanned
+
+#### Scenario: Uninitialised submodules skip the wired part loudly
+- **WHEN** the gate runs and `git submodule status` shows an uninitialised submodule
 - **THEN** owned assets are scanned and a notice says the wired set was not

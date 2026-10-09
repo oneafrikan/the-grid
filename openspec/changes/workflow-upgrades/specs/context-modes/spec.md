@@ -13,7 +13,7 @@ The repository SHALL ship `contexts/dev.md`, `contexts/research.md` and `context
 - **AND** none exceeds 1200 bytes
 
 ### Requirement: Aliases append rather than replace the system prompt
-The snippet `contexts/aliases.sh` SHALL define `claude-dev`, `claude-research` and `claude-review` as `claude --append-system-prompt-file <file>` and MUST NOT use `--system-prompt-file`.
+The sourced snippet `contexts/aliases.sh` SHALL define `claude-dev`, `claude-research` and `claude-review` as `claude --append-system-prompt-file <file>`, MUST NOT use `--system-prompt-file`, and MUST NOT write any file.
 
 #### Scenario: Alias invokes claude with the append flag
 - **WHEN** `contexts/aliases.sh` is sourced in bash with alias expansion on and `claude-dev foo` runs against a stub `claude`
@@ -26,11 +26,3 @@ The snippet `contexts/aliases.sh` SHALL define `claude-dev`, `claude-research` a
 #### Scenario: Directory override
 - **WHEN** `GRID_DIR` is set before sourcing
 - **THEN** the aliases point at `$GRID_DIR/contexts/`
-
-### Requirement: Installation is printed, never performed
-The `scripts/contexts-hint.sh` script SHALL print the line to add to a shell rc file and MUST NOT modify any file.
-
-#### Scenario: Hint leaves the home directory untouched
-- **WHEN** `scripts/contexts-hint.sh` runs with a temporary `HOME`
-- **THEN** its output names `contexts/aliases.sh`
-- **AND** no file is created or changed under that `HOME`

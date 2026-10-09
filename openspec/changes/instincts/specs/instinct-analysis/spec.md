@@ -16,11 +16,15 @@ The system SHALL analyse each eligible project at most once per ISO week, with a
 - **THEN** it is skipped, no model call is made and its observations are kept
 
 ### Requirement: Analysis cost is capped
-The system SHALL call the model with no tools, a single turn, a dollar cap (default 0.05), and an input digest of at most 16000 characters, and SHALL analyse at most 5 projects per run.
+The system SHALL call the model with an explicit `--model`, no tools, a dollar cap (default 0.05), a wall-clock cap (default 120 seconds) and an input digest of at most 16000 characters, and SHALL analyse at most 5 projects per run.
 
 #### Scenario: Invocation flags
 - **WHEN** the analyser calls the model
-- **THEN** the command line includes `--model haiku`, `--tools ""`, `--max-turns 1` and `--max-budget-usd 0.05`
+- **THEN** the command line includes `--model haiku`, `--tools ""` and `--max-budget-usd 0.05`
+
+#### Scenario: Call hangs
+- **WHEN** the model call runs longer than the wall-clock cap
+- **THEN** it is killed, the store is unchanged and the run log gets an `error` line
 
 #### Scenario: Many projects
 - **WHEN** eight projects are eligible

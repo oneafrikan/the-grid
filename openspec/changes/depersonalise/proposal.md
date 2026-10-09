@@ -1,6 +1,6 @@
 ## Why
 
-The public repo still carries personal residue: machine names, account and org handles, a real email in `user.yaml.example`, deployment plans for private hosts, a personal investing blueprint, 1.1 MB of third-party PDFs/zips of unclear licence under `__assets/`, and a skill whose document-locations table encodes one person's folders. A stranger cloning it sees someone else's infrastructure, and nothing stops the residue returning. The earlier `LOGS/` audit removed the dev journal only; this change finishes the job and adds a gate so it stays done.
+The public repo still carries personal residue: machine names, account and org handles, a real email in `user.yaml.example`, deployment plans for private hosts, a personal desk blueprint, 1.1 MB of third-party PDFs/zips of unclear licence under `__assets/`, and a skill whose document-locations table encodes one person's folders. A stranger cloning it sees someone else's infrastructure, and nothing stops the residue returning. The earlier `LOGS/` audit removed the dev journal only; this change finishes the job and adds a gate so it stays done.
 
 ## What Changes
 
@@ -26,9 +26,10 @@ None. No specs exist yet in `openspec/specs/`.
 
 - New: `scripts/check-personal.sh`, `scripts/personal-patterns.txt`, `scripts/personal-allow-paths.txt`, `scripts/personal-denylist.example.txt`, `tests/test_check_personal.bats`, `tests/test_depersonalise.bats`.
 - Removed from public: `__assets/` (22 files), `docs/playbook-ai-dev-team.md`, `agent-factory/docs/openclaw-paperclip-targets-plan.md`, `docs/openclaw-portfolio-desk-blueprint.md`, `automation-factory/docs/gh-triage-to-issue-loop.md`, `prompts/2026-06-13-openclaw-lamp-team-prompt.md`; `TODO.md` shrinks to focus plus issue map.
-- Edited: about 25 files (list in `design.md`), `scripts/gate.sh`, `CLAUDE.md`, `README.md`, `index.html` (one sentence), `skills/handoff/*`.
+- Edited: about 25 files (list in `design.md`), `scripts/gate.sh`, `CLAUDE.md`, `README.md`, `index.html` (one sentence; README's equivalent bullet is already accurate), `skills/handoff/*`.
 - Private repo gains `archive/` and `denylist.txt`; the move is a HUMAN step because it commits to a second repo.
-- Cross-change: land before `front-door` (README/`index.html` rewrite). `hook-profiles` also edits the handoff skill; this change makes the smaller edit and should merge first.
+- Cross-change (D9 order): merges after `foundations`, before `vetting` and everything else. `front-door` rewrites README/`index.html` later; `hook-profiles` also edits the handoff skill and builds on this smaller edit. Later changes whose tests need secret- or path-shaped fixtures must use the placeholders the generic patterns allow (`/Users/you|alice|bob/`, `...EXAMPLE` keys, URL userinfo) or build the string at runtime.
+- Composed-agent nameplates: `compose.py` writes `user.yaml` values (operator, channels, machine) only into gitignored `agent-factory/projects/`; no tracked file in this repo receives them (verified). `deploy.py --profile full` does copy the nameplate into another project's `.claude/agents/`; that is owned by D1 (`workflow-upgrades`, `GRID_USER_CONFIG` + `user.public.yaml`), not this change.
 - GitHub issue #42 (default OpenClaw personas) and #54 (operator persona fields, voice layer) stay open: only their "no personal data ships" constraint is applied here.
 
 ## Non-goals
@@ -40,3 +41,4 @@ None. No specs exist yet in `openspec/specs/`.
 - Removing the `oneafrikan/the-grid` owner handle from clone URLs and issue links, or `LICENSE` copyright.
 - Scanning submodule contents (`repos/*`) or vendored `tests/lib/*`.
 - Changing any composed-agent behaviour: edits to roles and templates are wording only.
+- Neutral nameplates for `deploy.py --profile full` output in other repos (D1, `workflow-upgrades`).

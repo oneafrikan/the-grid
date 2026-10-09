@@ -1,6 +1,7 @@
 ## Context
 
 - Claude Code loads `.claude/rules/**/*.md` (project) and `~/.claude/rules/**/*.md` (user), recursively. Frontmatter `paths:` (glob list, brace expansion allowed) makes a rule load only when Claude reads or edits a matching file. No `paths:` means always loaded. ECC ships exactly this shape.
+- Verified: Claude Code follows symlinked rule files, and user-level rules (`~/.claude/rules/`) load without an approval prompt. Wiring by symlink is therefore safe.
 - Every `*.md` under the rules dir is a rule. A `README.md` placed there would load on every session, so pack READMEs must never be wired.
 - Cursor reads `.cursor/rules/*.mdc` with frontmatter `description`, `globs`, `alwaysApply` (shape seen in `repos/ecc/.cursor/rules/*` and the `.md`->`.mdc` rename in `repos/ecc/scripts/lib/install-targets/cursor-project.js`). Codex and OpenCode read `AGENTS.md`. Gemini CLI reads `GEMINI.md` (ECC's gemini target writes `.gemini/GEMINI.md`). None of these has path scoping, so a block in `AGENTS.md`/`GEMINI.md` is always-on and must be capped.
 - Existing wiring: `scripts/wire.sh` reads `baseline-submodules.txt` + `machines/<host>.txt` (+ `.local.txt`) with entry grammar `repo`, `repo/skill`, `project:<name>`, and `-` subtractions; it tears down grid-owned symlinks and rebuilds them each run; `--check` wires into temp dirs and diffs. `catalog.sh` and `sources.sh` re-parse the baseline and skip `project:` lines.
@@ -23,9 +24,9 @@ scripts/rules.py               # lint | list | emit   (Python 3 stdlib only)
 
 - One source, three outputs:
   - Claude Code: wire.sh symlinks each `<topic>.md` as-is into `$RULES_DIR/grid/<pack>/<topic>.md` (no compile; the source file is already a valid Claude rule).
-  - Cursor: `rules.py emit --target cursor` writes `.cursor/rules/grid-<pack>-<topic>.mdc`.
-  - Codex/OpenCode/Gemini: `rules.py emit --target agents-md|gemini-md` writes one managed block.
-- Claude wiring is tiered by the manifest (opt-in); emitters are per project and take an explicit `--packs` list.
+  - Cursor: `rules.py emit --harness cursor` writes `.cursor/rules/grid-<pack>-<topic>.mdc`.
+  - Codex/OpenCode/Gemini: `rules.py emit --harness agents-md|gemini` writes one managed block.
+- Claude wiring is tiered by the manifest (opt-in); emitters take an explicit `--packs` list and `--out` target, so the caller (a person in a project, or `multi-harness` for home-level files) chooses scope.
 - Content is plain imperative bullets sourced from community style guides. The lint is what keeps ECC's opinions out and keeps files small.
 
 ### Rule file format
@@ -90,7 +91,6 @@ Stable codes, one line per finding `E_CODE path: message`, exit 1 if any:
 | `E_FILE_SIZE` | rule file over 4096 bytes |
 | `E_PACK_SIZE` | sum of a pack's rule files over 9216 bytes |
 | `E_OPINION` | any regex in `rules/denylist.txt` matches (case-insensitive) |
-| `E_UNICODE` | zero-width, bidi-control or BOM characters in any pack file |
 | `E_PACK_META` | missing `pack.yaml`, missing `summary`, bad `tier`, tier/`adapted_from` mismatch |
 | `E_SOURCES` | README missing, or a rule file with no https URL row |
 | `E_ATTRIBUTION` | tier 2 pack lacks the attribution line, or its pack name is absent from `THIRD_PARTY_NOTICES.txt` |
@@ -120,7 +120,7 @@ READMEs are not scanned (so the attribution line may say ECC); only `<topic>.md`
 ### Wiring (`wire.sh`)
 
 - New env var `RULES_DIR` (default `$HOME/.claude/rules`). Only `$RULES_DIR/grid/` is grid-owned.
-- Manifest grammar additions, identical in baseline, `machines/<host>.txt`, `.local.txt`:
+- Manifest grammar additions, identical in the baseline (path from `GRID_BASELINE`, introduced by `foundations`), `machines/<host>.txt`, `.local.txt`. The `rules:*` and `-rules:*` cases go in `load_manifest` directly after the `project:*`/`-project:*` cases, before the generic `-*/*`, `-*`, `*/*`, `*` cases:
   - `rules:<pack>`: wire that pack.
   - `-rules:<pack>`: subtract it (overlay escape hatch).
 - Default is opt-in: with no `rules:` entry anywhere, no rules are wired (unlike skills/projects there is no legacy wire-all, because rules cost tokens).
@@ -130,16 +130,26 @@ READMEs are not scanned (so the attribution line may say ECC); only `<topic>.md`
 - `--check` gains a third kind, `rules`: wire into a temp `RULES_DIR`, diff `relpath -> target` lines (recursive) against the live one, same rules as skills/agents (real files shadowing are not drift).
 - `catalog.sh` and `sources.sh` add `rules:*|-rules:*) continue ;;` next to their `project:` skips so `SKILLS.md`/`SOURCES.md` stay unchanged.
 
-### Emitters (`rules.py emit`)
+### Emitters (`rules.py emit`) — the interface other changes call
+
+This command is the only rule emitter in the-grid. `multi-harness` calls it; it does not build its own rule output or a `dist/rules/` tree.
 
 ```
-python3 scripts/rules.py emit --target cursor|agents-md|gemini-md \
-    --project DIR --packs sql,bash [--check] [--max-bytes N]
+python3 scripts/rules.py emit --harness cursor|agents-md|gemini --packs sql,bash [--out PATH] [--check] [--root DIR]
 ```
 
-- `--packs` is required (comma list); unknown pack is exit 2. Output is deterministic: packs and files sorted in C locale, no timestamps.
-- `--check`: write nothing; exit 1 if `emit` would change anything.
-- Cursor: `DIR/.cursor/rules/grid-<pack>-<topic>.mdc`:
+| Flag | Meaning |
+|---|---|
+| `--harness` | required. `cursor` (Cursor `.mdc` files), `agents-md` (Codex, OpenCode), `gemini` (Gemini CLI) |
+| `--packs` | required comma list; `""` = empty selection (removes previous output). Unknown pack = exit 2 |
+| `--out` | where to write. Default, relative to the current directory: `cursor` -> `.cursor/rules` (a directory); `agents-md` -> `AGENTS.md`; `gemini` -> `GEMINI.md` (files). Any path is accepted, including home-level files such as a user-level `AGENTS.md`; missing parent dirs are created. `rules.py` knows no harness home locations; the caller chooses them |
+| `--check` | write nothing; exit 1 if a run would change anything |
+| `--root` | the-grid checkout whose `rules/` is read (default: `GRID_DIR`, else the repo containing the script); same flag as `lint` |
+
+- Exit codes: 0 done / no drift; 1 drift under `--check`; 2 usage or refusal (unknown harness or pack, unbalanced markers, block over cap, `--out` of the wrong type such as an existing file for `cursor`). On exit 2 nothing is written.
+- Stdout: one line per change, `wrote <path>` or `removed <path>`; nothing when already up to date. Errors go to stderr.
+- Output is deterministic: packs and files sorted in C locale, no timestamps.
+- `cursor`: one file per rule, `<out>/grid-<pack>-<topic>.mdc`:
 
 ```
 ---
@@ -154,7 +164,7 @@ alwaysApply: false
 
   - `description` = the rule's `# Title`; `globs` = the `paths` list, braces expanded, rendered as a JSON-style list (the shape ECC's Cursor rules use).
   - A `grid-*.mdc` file carrying the marker line that is not in the current set is deleted. Files without the marker are never touched.
-- agents-md / gemini-md: one block in `DIR/AGENTS.md` (Codex and OpenCode both read it) or `DIR/GEMINI.md` (project root), created if missing:
+- `agents-md` / `gemini`: one block in the `--out` file (`AGENTS.md` is read by Codex and OpenCode; `GEMINI.md` by Gemini CLI), created if missing:
 
 ```
 <!-- BEGIN the-grid rules (generated by scripts/rules.py; edits inside are overwritten) -->
@@ -168,12 +178,12 @@ Apply each rule only when working on files matching its globs.
 ```
 
   - The block is replaced between the markers; everything outside is preserved byte-for-byte. Exactly one BEGIN and one END or the command exits 2 without writing.
-  - Block size over `--max-bytes` (default 12288) exits 2 with a message to choose fewer packs. These files are always loaded, so the cap is the budget.
+  - Block size over 12288 bytes (constant `BLOCK_CAP` in `rules.py`, not a flag) exits 2 with a message to choose fewer packs. These files are always loaded, so the cap is the budget.
   - Emitting with an empty selection removes the block; if the file then contains nothing else it is deleted.
 
 ## Token budget
 
-- Idle cost (nothing touched): 0 for all targets except agents-md/gemini-md, where the block is always loaded (cap 12 KB, about 3k tokens, opt-in per project).
+- Idle cost (nothing touched): 0 for all targets except `agents-md`/`gemini`, where the block is always loaded (cap 12 KB, about 3k tokens, opt-in per output file).
 - Claude/Cursor cost is paid per matching file touched: at most 9 KB (about 2.3k tokens) per pack. Editing a `.tsx` file with `typescript`, `web` and `react` wired can load three packs, worst case 27 KB (about 7k tokens); packs are written to keep real totals near 15 KB. `rules.py list` prints per-pack bytes so this is visible.
 
 ## Relation to issue #5 (stack overlays)
@@ -192,11 +202,11 @@ Apply each rule only when working on files matching its globs.
 
 ## Review process for pack content (applies to every content task group)
 
-Gareth has no opinions on unfamiliar languages, so content rests on community consensus, with two independent checks per PR:
+The operator has no opinions on unfamiliar languages, so content rests on community consensus, with two independent checks per PR:
 
 - Reviewer A, source fidelity: for each rule file, every bullet traces to the cited source in the pack README or is a direct tool-config consequence of it. Output: list of untraceable bullets (must-fix) and URLs that failed to load.
 - Reviewer B, opinion and overbuild: flags any bullet that is personal taste, a single-vendor preference presented as universal, a workflow mandate (tests/coverage/review/agents), or duplicated across files or other packs; flags files over 60% of the cap with low bullet density. Output: must-fix and nice-to-fix lists.
-- Each reviewer is a separate fresh subagent (Opus) given only the pack files, README and the check above, not the author's reasoning. Both outputs are pasted into the PR body; all must-fix items are resolved before the PR is marked ready.
+- Each reviewer is a separate fresh subagent spawned with the Agent tool and an explicit `model: opus`, inside the implementing session (so the loop's per-session `--max-turns`/timeout/cost caps bound it; no extra `claude -p` process), given only the pack files, README and the check above, not the author's reasoning. Both outputs are pasted into the PR body; all must-fix items are resolved before the PR is marked ready.
 
 ## Starting sources per pack (authors must fetch and confirm each URL before citing)
 
@@ -267,18 +277,20 @@ Stripped from ECC when adapting (these are the house opinions the lint guards):
 - Decided: per-file cap 4096 bytes, per-pack cap 9216 bytes, because a file read pulls in every matching file and multi-pack stacks (ts + web + react) stack up.
 - Decided: lint is a gate check (`scripts/gate.sh`) running on every commit; URL liveness is opt-in (`--check-urls`), never in the gate, because the gate must work offline.
 - Decided: the opinion denylist is a data file `rules/denylist.txt`, scanned only in rule files (not READMEs), because reviewers should read and extend it without touching Python.
-- Decided: reject zero-width and bidi-control characters in all pack files, because rule text is injected into the model's context and hidden text is an injection vector.
+- Decided: no hidden-Unicode check in `rules.py lint`; `vetting`'s `scripts/audit.sh --owned` already scans `rules/` for hidden Unicode in the gate, so a second scanner would duplicate it.
 - Decided: tier 2 attribution = `adapted_from` in `pack.yaml`, the literal line `Adapted from affaan-m/ECC (MIT)` in the pack README, and the MIT notice plus per-pack list in `rules/THIRD_PARTY_NOTICES.txt` (a `.txt` so Claude never loads it).
-- Decided: drop every ECC `hooks.md` and `web/design-quality.md`; hook advice belongs to workstream 6 and design taste is not consensus content.
+- Decided: drop every ECC `hooks.md` and `web/design-quality.md`; hook advice belongs to `hook-profiles` and design taste is not consensus content.
 - Decided: keep ECC's `python/fastapi.md` as `fastapi.md` in the python pack, narrowly path-scoped, because FastAPI is a mainstream Python web stack with community-documented conventions and ECC already has the content.
 - Decided: Cursor `globs` is emitted as a JSON-style list with braces expanded, copying the shape ECC's shipped Cursor rules use (the only verified source in the repo); the HUMAN smoke-test task confirms Cursor loads them.
-- Decided: Codex and OpenCode share one target, `agents-md`; Gemini is `gemini-md` writing root `GEMINI.md` (Gemini CLI's default context file); the HUMAN task confirms against the installed CLI. ECC's `.gemini/GEMINI.md` is not copied.
-- Decided: emitters take an explicit `--packs` list rather than reading the manifest, because they run per project and the manifest is per machine.
+- Decided: Codex and OpenCode share one harness value, `agents-md`; Gemini is `gemini`, default `--out GEMINI.md` (Gemini CLI's default context file name); the HUMAN task confirms against the installed CLI. ECC's `.gemini/GEMINI.md` is not copied.
+- Decided: emitters take an explicit `--packs` list rather than reading the manifest, because the caller decides scope (per project by hand, or per machine via `multi-harness`).
 - Decided: the AGENTS.md/GEMINI.md block is capped at 12288 bytes and fails rather than truncating, because silent truncation would drop rules without notice.
 - Decided: `rules.py` is one Python stdlib file with three subcommands, no package, no classes beyond a small dataclass; Python 3.8-compatible syntax (macOS system Python).
 - Decided: tests use temp dirs and `RULES_DIR`/`GRID_DIR` overrides; `tests/helpers/setup.bash` gets a sandboxed `RULES_DIR` and the tripwire checks it against the real `~/.claude`.
 - Decided: issue #5 is closed as superseded; stack stubs get a comment only. No `compose.py` change, because mapping stacks to packs in code would be speculative until agents need it.
-- Decided: workstream 11 consumes `rules.py emit`; this change does not touch `~/.codex`, `~/.gemini` or `~/.config/opencode`.
+- Decided: `emit --harness … --packs … [--out PATH] [--check]` is the stable interface `multi-harness` calls; this change never chooses or writes home-level harness locations itself (`~/.codex`, `~/.gemini`, `~/.config/opencode`), and its tests use temp `--out` paths only.
+- Decided: `--out` replaces a `--project DIR` flag, so one flag serves project files and home-level files; defaults are relative to the current directory.
+- Decided: the block cap is a constant, not a `--max-bytes` flag; no caller needs a different budget (YAGNI).
 - Decided: `rules.py list` is the single source for pack inventory and sizes; docs link to it instead of embedding a table, so parallel content PRs do not collide on a shared doc.
 - Decided: each content task group is one PR covering 2-3 related packs with both reviews pasted into the PR body; the packs in a group are independent of other groups, so groups can run in parallel after group 1.
 - Decided: no pack is added to the maintainers' baseline by the loop; choosing wired packs is personal curation (untracked file), done in the HUMAN task. The tracked example files only carry commented examples.

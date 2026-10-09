@@ -26,13 +26,17 @@ The gstack submodule SHALL be pinned to a commit whose `VERSION` file is at leas
 - **WHEN** `repos/gstack` is empty
 - **THEN** the version test is skipped
 
-### Requirement: Example baseline gstack section is accurate
-The gstack header count in `baseline-submodules.example.txt` MUST equal the number of `gstack/` entries, and each entry SHALL resolve to a discovered skill.
+### Requirement: Every example baseline entry resolves
+Every positive entry in `baseline-submodules.example.txt` MUST resolve (a `<repo>/<skill>` line to a skill dir discovered in `repos/<repo>`, a whole-repo line to an existing `repos/<repo>`), and every section header with per-skill entries MUST state their true count.
+
+#### Scenario: Renamed upstream skill
+- **WHEN** a `<repo>/<skill>` entry in any repo has no matching skill dir
+- **THEN** the test fails and names the entry
 
 #### Scenario: Count matches
-- **WHEN** the header says `(N skills)`
-- **THEN** exactly N lines start with `gstack/`
+- **WHEN** a section header says `(N skills)` and its repo has per-skill lines
+- **THEN** exactly N lines start with `<repo>/`
 
-#### Scenario: Entry does not resolve
-- **WHEN** a `gstack/<skill>` entry has no matching skill dir in `repos/gstack`
-- **THEN** the test fails and names the entry
+#### Scenario: Subtraction and project lines
+- **WHEN** a line starts with `-` or `project:`
+- **THEN** it is not checked

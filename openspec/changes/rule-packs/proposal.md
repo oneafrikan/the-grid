@@ -5,9 +5,9 @@ Claude Code loads `.claude/rules/**/*.md` natively, and `paths:` frontmatter mak
 ## What Changes
 
 - New source format: `rules/<pack>/<topic>.md` (frontmatter = `paths:` only) plus `rules/<pack>/pack.yaml` and `README.md` (sources table).
-- New `scripts/rules.py` (Python stdlib): `lint`, `list`, `emit`. Lint enforces path scoping, size caps, a denylist of ECC house opinions, hidden-Unicode rejection, and source attribution.
+- New `scripts/rules.py` (Python stdlib): `lint`, `list`, `emit`. Lint enforces path scoping, size caps, a denylist of ECC house opinions, and source attribution (hidden-Unicode scanning is `vetting`'s `audit.sh --owned`, which already covers `rules/`).
 - `wire.sh` gains a `rules:<pack>` manifest entry (same baseline/overlay grammar, opt-in) that symlinks each rule file into `~/.claude/rules/grid/<pack>/`, with `--check` drift detection and teardown.
-- Emitters from the same source: Cursor `.mdc` files, and a managed block in `AGENTS.md` (Codex, OpenCode) or `GEMINI.md` (Gemini CLI), per project.
+- Emitters from the same source: `rules.py emit --harness cursor|agents-md|gemini --packs … [--out PATH] [--check]` writes Cursor `.mdc` files, or a managed block in `AGENTS.md` (Codex, OpenCode) or `GEMINI.md` (Gemini CLI). This is the single rule-emitter interface; `multi-harness` calls it with its own `--out` paths.
 - 17 packs. Tier 1 written fresh from community style guides: sql (BigQuery-first), dbt, bash, terraform, django, flask, laravel, wordpress. Tier 2 adapted from `repos/ecc/rules/` (MIT, attributed, house opinions stripped): python, typescript (incl. JS), web, react, vue, php, ruby, golang, rust.
 - Issue #5 (stack overlays) is superseded for conventions: stacks stay as agent-composition stubs and point at the rule packs that carry the actual conventions.
 
@@ -30,7 +30,8 @@ None. `openspec/specs/` is empty; wiring behaviour of `wire.sh` is specified her
 - New dirs: `rules/` (packs, `denylist.txt`, `THIRD_PARTY_NOTICES.txt`), `docs/rules.md`.
 - Use cases named: data engineering (sql, dbt, bash, python), web/app full-stack (typescript, web, react, vue, django, flask, laravel, php, ruby, golang, rust), WordPress/LAMP (php, wordpress, sql), infrastructure (terraform, bash).
 - Token cost: nothing is wired by default. A wired pack costs tokens only when a matching file is read or edited; per-file cap 4 KB, per-pack cap 9 KB.
-- Workstream 11 (`multi-harness`) reuses `rules.py emit` instead of building its own rule emitters. Workstream 3 (`manifest-lock-install`) must carry `rules:` entries into `grid.yaml`.
+- `multi-harness` calls `rules.py emit` (interface in `design.md`) instead of building its own rule emitters or a `dist/rules/` tree.
+- Builds on `foundations` (`GRID_BASELINE`), `vetting` (hidden-Unicode scan of `rules/`) and `manifest-lock-install` (earlier `wire.sh` edits); merges after `hook-profiles` per the shared merge order.
 - Issue #5 is closed as superseded when this lands.
 
 ## Non-goals
@@ -41,8 +42,9 @@ None. `openspec/specs/` is empty; wiring behaviour of `wire.sh` is specified her
 - No MySQL/Postgres-specific packs; `sql` is warehouse-first with portable safety rules only.
 - No editing of `compose.py` or fragments in `agent-factory/stacks/`; no rule injection into composed agents.
 - No project-level Claude emitter (copying rules into a repo's `.claude/rules/` for teammates).
-- No home-directory targets for Codex/Gemini/OpenCode (`~/.codex/AGENTS.md` etc.); workstream 11 owns those locations.
-- No Claude Code hook advice in packs (ECC's `hooks.md` files); workstream 6 owns hooks.
+- No knowledge of home-directory harness locations (`~/.codex/AGENTS.md` etc.); `emit` writes wherever `--out` says and `multi-harness` chooses those paths.
+- No `rules:` support in `grid.yaml`/`grid install`; rules are wired from the manifest files only.
+- No Claude Code hook advice in packs (ECC's `hooks.md` files); `hook-profiles` owns hooks.
 - No design-taste rules (ECC `web/design-quality.md` anti-template policy).
 - No rules copied verbatim from ECC's `common/` or any mandatory-workflow content.
 - No network calls in the gate; URL liveness check is an opt-in flag.

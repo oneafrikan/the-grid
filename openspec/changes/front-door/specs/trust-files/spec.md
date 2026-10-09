@@ -25,10 +25,3 @@ The repository SHALL include CHANGELOG.md in Keep a Changelog form with an Unrel
 #### Scenario: Unreleased heading
 - **WHEN** CHANGELOG.md is read
 - **THEN** it contains `## [Unreleased]`
-
-### Requirement: Stale prompt retired
-The LAMP build prompt SHALL live under `prompts/_retired/` with a header recording that it is superseded and listing its known gaps, and nothing SHALL link to its old path.
-
-#### Scenario: Moved
-- **WHEN** the repo is scanned
-- **THEN** `prompts/2026-06-13-openclaw-lamp-team-prompt.md` does not exist and the retired copy begins with a superseded notice

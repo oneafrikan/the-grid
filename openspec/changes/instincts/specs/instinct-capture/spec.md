@@ -20,6 +20,14 @@ The system SHALL capture observations only for a project whose `.grid/project.ya
 - **WHEN** the hook profile is `strict` and the flag is absent
 - **THEN** the emitted settings contain no instincts hooks
 
+#### Scenario: Learning works with profile off
+- **WHEN** the hook profile is `off` and the flag is `learning: on`
+- **THEN** the emitted settings contain exactly the four instincts hook entries and no guard hooks
+
+#### Scenario: Flag turned off removes the hooks
+- **WHEN** the emitter is re-run after the flag is removed
+- **THEN** the four instincts entries are removed and every other hook entry is unchanged
+
 ### Requirement: Capture costs zero tokens and never blocks
 The system SHALL implement capture as a single local process that makes no model call and exits 0 for every input, including malformed input.
 
@@ -51,7 +59,7 @@ The system SHALL write raw observations only under the machine-local state direc
 
 #### Scenario: Location
 - **WHEN** an observation is captured
-- **THEN** it is appended to a file under `GRID_STATE_DIR` (default `~/.local/state/the-grid`), mode 0600
+- **THEN** it is appended to a file under `GRID_STATE_DIR` (default `~/.grid`), mode 0600
 - **AND** nothing is written under the private learning directory
 
 ### Requirement: Projects without a git remote are not captured

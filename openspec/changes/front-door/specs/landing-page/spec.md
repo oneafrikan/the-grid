@@ -28,7 +28,7 @@ The page SHALL serve its hero as a WebP image under 300 KB with explicit width a
 #### Scenario: Weight limits
 - **WHEN** the file sizes are checked
 - **THEN** `assets/hero.webp` is under 300 KB and `index.html` is under 100 KB
-- **AND** no `the-grid.png` reference remains
+- **AND** no `the-grid.png` reference remains and the file is no longer tracked
 
 ### Requirement: Discoverability metadata
 The page SHALL declare a meta description of at most 160 characters, a canonical URL, a favicon, Open Graph and Twitter card tags with an absolute image URL, and valid JSON-LD of type SoftwareSourceCode.

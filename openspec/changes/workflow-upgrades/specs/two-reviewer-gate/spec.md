@@ -4,8 +4,8 @@ Stop a release being cleared by one reviewer's view alone: correctness and secur
 
 ## ADDED Requirements
 
-### Requirement: Release gate uses two independent reviewers
-The `tech-lead` operating procedure SHALL require `qa-engineer` and `security-reviewer`, each in a fresh context with the same packet, before a change is reported as passing the release gate.
+### Requirement: Both independent reviewers must pass
+The `tech-lead` operating procedure SHALL send the same packet to `qa-engineer` and `security-reviewer`, each in a fresh context without the other's verdict, and MUST report the gate as passed only when `qa-engineer` returns PASS and `security-reviewer` reports no open Critical or High finding.
 
 #### Scenario: Procedure names both roles and independence
 - **WHEN** `agent-factory/roles/tech-lead/SKILL.md` is read
@@ -16,28 +16,17 @@ The `tech-lead` operating procedure SHALL require `qa-engineer` and `security-re
 - **WHEN** `tech-lead` is deployed with `--profile lean`
 - **THEN** the deployed skill contains the release-gate step
 
-### Requirement: Both reviewers must pass
-The procedure MUST report the gate as passed only when `qa-engineer` returns PASS and `security-reviewer` returns no open Critical or High finding.
-
-#### Scenario: One reviewer blocks
-- **WHEN** `qa-engineer` returns PASS and `security-reviewer` reports an open High finding
-- **THEN** the gate is reported as blocked
-- **AND** the finding is forwarded verbatim to the owning specialist
-
-#### Scenario: A reviewer is unavailable
-- **WHEN** either role cannot be spawned
-- **THEN** the procedure states the gate is not passed and tells the user which role is missing
+#### Scenario: Gate cases validate
+- **WHEN** `run_evals.py --validate` runs
+- **THEN** it exits 0 with the two `evals/cases/tech-lead/gate-*` cases among those validated
 
 ### Requirement: Fix loop is capped and re-reviews with fresh agents
-After a blocked gate the procedure SHALL re-run both reviewers with fresh agents after fixes, and MUST escalate to the human after the third blocked round.
+After a blocked gate the procedure SHALL forward findings verbatim to the owning specialist, re-run both reviewers with fresh agents, and MUST escalate to the human after the third blocked round or when either reviewer is unavailable.
 
 #### Scenario: Third block escalates
 - **WHEN** a third consecutive round returns a BLOCK
 - **THEN** the procedure stops fixing and escalates with the verdicts of all rounds
 
-### Requirement: Behaviour is covered by golden eval cases
-The repository SHALL include eval cases for the gate under `evals/cases/tech-lead/` that validate in the gate and are not run by it.
-
-#### Scenario: Cases validate
-- **WHEN** `run_evals.py --validate` runs
-- **THEN** it exits 0 and the two gate cases are among those validated
+#### Scenario: A reviewer is unavailable
+- **WHEN** either role cannot be spawned
+- **THEN** the procedure states the gate is not passed and names the missing role

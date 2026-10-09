@@ -4,15 +4,12 @@ Wire selected rule packs into Claude Code's user rules directory through the exi
 
 ## ADDED Requirements
 
-### Requirement: Rules are opt-in
-`wire.sh` SHALL create no rule links unless at least one `rules:<pack>` entry resolves from the baseline, machine overlay or local overlay.
+### Requirement: Opt-in pack wiring
+`wire.sh` SHALL create rule links only for packs named by `rules:<pack>` entries (minus `-rules:<pack>` subtractions) across the baseline, machine overlay and local overlay, symlinking each `rules/<pack>/*.md` except `README.md` to `$RULES_DIR/grid/<pack>/<file>.md`, where `RULES_DIR` defaults to `~/.claude/rules`.
 
 #### Scenario: No rules entries
 - **WHEN** `wire.sh` runs with a manifest that has no `rules:` entry
 - **THEN** nothing is created under `$RULES_DIR/grid`
-
-### Requirement: Pack wiring layout
-`wire.sh` MUST symlink each `rules/<pack>/*.md` except `README.md` to `$RULES_DIR/grid/<pack>/<file>.md` for every wired pack, where `RULES_DIR` defaults to `~/.claude/rules`.
 
 #### Scenario: Wire a pack
 - **WHEN** the manifest contains `rules:sql` and `wire.sh` runs
@@ -22,8 +19,12 @@ Wire selected rule packs into Claude Code's user rules directory through the exi
 - **WHEN** the baseline has `rules:sql` and the machine overlay has `-rules:sql`
 - **THEN** `wire.sh` creates no links for `sql`
 
-### Requirement: Idempotent teardown
-`wire.sh` SHALL remove grid-owned rule symlinks that are no longer wired, delete the resulting empty directories under `$RULES_DIR/grid`, and never remove or overwrite anything it did not create.
+#### Scenario: Typo in a manifest
+- **WHEN** the manifest contains `rules:slq`
+- **THEN** `wire.sh` prints a warning naming `slq`, records a skipped manifest row, exits 0, and wires the other entries
+
+### Requirement: Idempotent, non-destructive teardown
+`wire.sh` SHALL remove grid-owned rule symlinks that are no longer wired and the resulting empty directories under `$RULES_DIR/grid`, and MUST NOT remove or overwrite anything it did not create.
 
 #### Scenario: Re-run is a no-op
 - **WHEN** `wire.sh` runs twice with the same manifest
@@ -37,22 +38,12 @@ Wire selected rule packs into Claude Code's user rules directory through the exi
 - **WHEN** `$RULES_DIR/grid` contains a symlink pointing outside the repo and a real file at a path a wired pack would use
 - **THEN** both are left untouched and the real-file case is recorded as skipped in `.wired.manifest`
 
-### Requirement: Unknown packs do not fail wiring
-`wire.sh` MUST warn on stderr, record a skipped manifest row, and exit 0 when a `rules:<pack>` entry has no directory under `rules/`.
-
-#### Scenario: Typo in a manifest
-- **WHEN** the manifest contains `rules:slq`
-- **THEN** `wire.sh` prints a warning naming `slq`, exits 0, and wires the other entries
-
-### Requirement: Drift detection
-`wire.sh --check` SHALL compare the rule links under `$RULES_DIR/grid` against a fresh wiring and exit 1 on any difference.
+### Requirement: Drift detection without side effects on other readers
+`wire.sh --check` SHALL exit 1 when the rule links under `$RULES_DIR/grid` differ from a fresh wiring, and `catalog.sh` and `sources.sh` MUST ignore `rules:` and `-rules:` lines.
 
 #### Scenario: Missing link
 - **WHEN** a wired rule link is deleted and `wire.sh --check` runs
 - **THEN** it exits 1 and lists the expected link
-
-### Requirement: Other manifest readers ignore rules entries
-`catalog.sh` and `sources.sh` MUST ignore `rules:` and `-rules:` lines in the baseline.
 
 #### Scenario: Catalog unchanged
 - **WHEN** a `rules:sql` line is added to the baseline

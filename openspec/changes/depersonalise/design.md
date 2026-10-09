@@ -19,8 +19,8 @@
 | move | `__assets/ClawGuides.zip`, `__assets/ClawGuides/**` (22 files) | third-party playbook and skills, licence unclear, 1.1 MB archives | copy to `archive/clawguides/`, `git rm` |
 | delete | `docs/playbook-ai-dev-team.md` | byte-identical copy of `__assets/ClawGuides/ai-dev-team-playbook.md` | `git rm` (archive already holds the original) |
 | move | `agent-factory/docs/openclaw-paperclip-targets-plan.md` | deployment plan for one private host: paths, ports, channel ids, secret handling notes | `archive/design/` |
-| move | `docs/openclaw-portfolio-desk-blueprint.md` | personal retirement-investing desk design naming private hosts and other work | `archive/design/` |
-| move | `automation-factory/docs/gh-triage-to-issue-loop.md` | runbook for one private server and employer repos | `archive/design/` |
+| move | `docs/openclaw-portfolio-desk-blueprint.md` | personal desk design naming private hosts and other work | `archive/design/` |
+| move | `automation-factory/docs/gh-triage-to-issue-loop.md` | runbook for one private server and work repos | `archive/design/` |
 | move | `prompts/2026-06-13-openclaw-lamp-team-prompt.md` | dated one-off session prompt built on the third-party playbook | `archive/prompts/` |
 | move | `TODO.md` sections "Pending rollout" and "Status: Done" | per-machine rollout state and history with host names | `LOGS/todo-done-history.md` in private repo; public file keeps focus + issue map |
 | genericise | `agent-factory/user.yaml.example` | real name/email as example, host name as example | placeholders |
@@ -30,7 +30,7 @@
 | genericise | `automation-factory/patterns/issue-loop/README.md` | names two private downstream repos | "a downstream repo" |
 | genericise | `skills/handoff/SKILL.md`, `handoff-template.md`, `session-template.md` | author SOP wording, host examples, a table of personal folders | see `handoff-locations` |
 | genericise | `baseline-submodules.example.txt`, `scripts/lib/find-skill-mds.sh`, `agent-factory/README.md`, `LEARNINGS.md`, `docs/reference-resources.md` (section 13), `agent-factory/docs/role-skill-map.md` (no change expected) | host names in comments/source lines | neutral wording |
-| genericise | `README.md` tree + status bullet, `index.html` status bullet | tree lists moved files; "still Gareth-shaped" claim becomes false | one-sentence edits |
+| genericise | `README.md` tree lines, `index.html` status bullet | tree lists moved files; the `index.html` "still Gareth-shaped" claim becomes false (README's matching bullet already says forks inherit nothing personal) | one-sentence edits |
 | keep | `LICENSE`, author voice in `CLAUDE.md`, `README.md`, `index.html`, `USAGE.md`, `docs/*` prose, `oneafrikan/the-grid` URLs, `~/.the-grid-private` convention | attribution and mechanism, no personal data | none |
 | keep (exception) | `the-grid.png` | live hero image, not personal | allowlisted for size; `front-door` replaces it |
 
@@ -58,12 +58,13 @@ handoff-locations.md           # optional, see handoff-locations spec
 ```
 # kind<TAB>scope<TAB>label<TAB>regex
 deny	*	email	[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}
-allow	*	email-ok	(git@|@example\.(com|org|net)|noreply)
+allow	*	email-ok	(git@|@example\.(com|org|net)|noreply|https?://[^[:space:]]*@)
 deny	*	home-mac	/Users/[A-Za-z0-9._-]+/
-allow	*	home-placeholder	/Users/(you|name|username|<)
+allow	*	home-placeholder	/Users/(you|name|username|alice|bob|<)
 deny	*	home-linux	/home/[A-Za-z0-9._-]+/
-allow	*	home-placeholder-lx	/home/(you|user|name|username|<)
-deny	*	token	(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[abp]-[0-9A-Za-z-]{10,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY)
+allow	*	home-placeholder-lx	/home/(you|user|name|username|alice|bob|<)
+deny	*	token	(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|\bsk-[A-Za-z0-9_-]{20,}|xox[abp]-[0-9A-Za-z-]{10,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY)
+allow	*	token-example	EXAMPLE
 deny	*	private-ip	\b(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)\b
 deny	agent-factory/openclaw/templates/*	author-name-in-rendered-text	Gareth
 deny	agent-factory/_core/*	author-name-in-rendered-text	Gareth
@@ -78,7 +79,7 @@ deny	skills/*	author-name-in-rendered-text	Gareth
 - Private file absent: print `personal: private denylist not found - generic patterns only`, exit status unaffected, gate records `SKIPPED(personal-denylist)`. This is how CI and a fresh fork run.
 - Extra blocks done in code, not in the pattern file: tracked file types `zip pdf tar tgz gz sqlite db pem key`, a tracked `.env` (not `.env.example`), and any file above `GRID_MAX_BYTES` (default 1048576). All honour the path allowlist.
 - Output: `path:line: [label] <matched line, max 120 chars>` for public rules; `path:line: [private:<n>]` for denylist rules (rule number only, never the text, so CI logs and shared transcripts do not leak the list). Final line `personal: N finding(s)`. Exit 0 clean, 1 findings, 2 usage.
-- Optional positional args restrict the scan to those tracked paths (used by edit groups and by a future pre-commit staged-only mode).
+- Optional positional args restrict the scan to those tracked paths (used by edit groups before the gate wiring lands).
 - Allowlist file `scripts/personal-allow-paths.txt`: one bash glob per line, mandatory trailing `# reason`. Initial content: `tests/lib/*` (vendored bats), `scripts/personal-patterns.txt`, `scripts/personal-denylist.example.txt`, `scripts/personal-allow-paths.txt`, `tests/test_check_personal.bats`, `the-grid.png` (size, remove when `front-door` lands).
 - Bash 3.2-safe (macOS), `LC_ALL=C`, shellcheck-clean, comments throughout.
 
@@ -114,9 +115,15 @@ deny	skills/*	author-name-in-rendered-text	Gareth
 - Decided: group 3 refuses to `git rm` any path unless `~/.the-grid-private/archive/MANIFEST.sha256` lists it and the archived copy hashes equal; re-running after success is a no-op.
 - Decided: `scripts/gate.sh` gains a `personal` check as the last wiring step (group 6); edit groups verify with `bash scripts/check-personal.sh <touched files>` before then.
 
+- Decided: `\bsk-` (word boundary) in the token rule; without it `finance-desk-finance-risk-officer` in `index.html` is a false positive (verified against the current tree).
+- Decided: URL userinfo (`https://user:tok@github.com/...`), `/Users/alice|bob/` and AWS-style `...EXAMPLE` keys are allowed placeholders, because other drafted changes (`instincts`, `vetting`) already use them as test fixtures; with these allows the generic half is clean on the current tree apart from the inventoried files.
+- Decided: the no-dangling-reference test in group 3 excludes `openspec/`, because change and archive docs must name the removed paths.
+- Decided: the `personal` gate check runs after `compose` and before `bats`; `tests/test_gate.bats` stubs `scripts/check-personal.sh` in its fake grid so its existing tests keep their meaning.
+- Decided: overlap with `vetting` is accepted: this scan covers the whole tracked tree for personal data; `vetting`'s `audit.py` covers skill content policy (owned and upstream). Neither calls the other.
+- Decided: composed IDENTITY nameplates are not touched here. `compose.py` `load_user_config()` reads gitignored `agent-factory/user.yaml` and `render_identity()` writes only under gitignored `agent-factory/projects/` (`--out` default); `run_evals.py` uses no nameplate; no tracked file in this repo contains a rendered nameplate (checked: no tracked email or home path outside the inventory). The one leak path, `deploy.py --profile full` writing the flattened identity into another repo's `.claude/agents/`, is D1's (`workflow-upgrades`); the lean default already drops the nameplate.
+
 ## Risks
 
 - Another change rewriting `README.md`/`index.html` first would conflict with the one-sentence edits; mitigated by landing this before `front-door`.
-- `tests/test_gate.bats` may enumerate gate checks; group 6 updates it if so.
 - History still contains everything moved; see Non-goals.
 - Open question for the owner: whether to later rewrite history for the moved paths (a single `git filter-repo` pass, as was done for `LOGS/`) and rotate anything that was ever real.

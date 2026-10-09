@@ -1,14 +1,16 @@
 # Tasks
 
-Order: 1 and 2 are independent. 3 needs 1 and 2. 4 and 5 need 2. 6 needs 3, 4, 5. 7 needs 6.
+Cross-change: lands after `foundations` (D9); every group depends on `foundations` CI being green.
+Order: 1 and 2 are independent. 3 needs 1 and 2. 4 needs 3 (same OpenClaw files). 5 needs 2. 6 needs 3, 4, 5. 7 needs 6.
 Design, file formats and every judgement call are in `design.md`. Until group 6 lands, edit groups verify with `bash scripts/check-personal.sh <touched files>` instead of the whole-tree scan.
 
 ## 1. HUMAN: archive personal material into the private repo
 
-Needs the private repo checkout and Gareth's own strings; commits to a second repo, so not for the unattended loop. No public PR.
+Needs the private repo checkout and the operator's own strings; commits to a second repo, so not for the unattended loop. No public PR.
 Files (all under `~/.the-grid-private/`): `archive/clawguides/`, `archive/design/`, `archive/prompts/`, `archive/MANIFEST.sha256`, `LOGS/todo-done-history.md`, `denylist.txt`.
 Acceptance: `cd ~/.the-grid-private/archive && sha256sum -c MANIFEST.sha256` (macOS: `shasum -a 256 -c`) prints OK for every line; `git -C ~/.the-grid-private status -sb` shows the commit pushed.
 Verify: the two commands above.
+Depends on: none.
 
 - [ ] 1.1 Copy `__assets/ClawGuides.zip` and the `__assets/ClawGuides/` tree to `archive/clawguides/` (preserve structure, byte-exact).
 - [ ] 1.2 Copy `agent-factory/docs/openclaw-paperclip-targets-plan.md`, `docs/openclaw-portfolio-desk-blueprint.md`, `automation-factory/docs/gh-triage-to-issue-loop.md` to `archive/design/`; copy `prompts/2026-06-13-openclaw-lamp-team-prompt.md` to `archive/prompts/`.
@@ -19,7 +21,7 @@ Verify: the two commands above.
 ## 2. Add the scan script and its tests (new files only)
 
 Files: `scripts/check-personal.sh`, `scripts/personal-patterns.txt`, `scripts/personal-allow-paths.txt`, `scripts/personal-denylist.example.txt`, `tests/test_check_personal.bats`.
-Acceptance: new bats tests pass: (a) email, `/Users/<name>/`, token-shaped string, private IP each flagged with exit 1; (b) `you@example.com`, `git@github.com`, `/Users/you/x` not flagged; (c) scoped `Gareth` rule flags `skills/x/SKILL.md` but not `README.md`; (d) denylist hit prints `[private:N]` and not the matched text; (e) absent denylist prints the "generic patterns only" notice and exits 0 on a clean tree; (f) empty `GRID_PRIVATE_DENYLIST=` disables the private half; (g) path in `personal-allow-paths.txt` is skipped; (h) tracked `x.zip` and a file over `GRID_MAX_BYTES` flagged; (i) positional args restrict the scan; (j) untracked files and gitlinks ignored; (k) tests set `GRID_DIR` to a temp repo and never read `$HOME`.
+Acceptance: new bats tests pass: (a) email, `/Users/<name>/`, token-shaped string, private IP each flagged with exit 1; (b) `you@example.com`, `git@github.com`, `https://user:tok@github.com/o/r.git`, `/Users/you/x`, `/Users/alice/x`, `AKIAIOSFODNN7EXAMPLE` and `finance-desk-finance-risk-officer` not flagged; (c) scoped `Gareth` rule flags `skills/x/SKILL.md` but not `README.md`; (d) denylist hit prints `[private:N]` and not the matched text; (e) absent denylist prints the "generic patterns only" notice and exits 0 on a clean tree; (f) empty `GRID_PRIVATE_DENYLIST=` disables the private half; (g) path in `personal-allow-paths.txt` is skipped; (h) tracked `x.zip` and a file over `GRID_MAX_BYTES` flagged; (i) positional args restrict the scan; (j) untracked files and gitlinks ignored; (k) tests set `GRID_DIR` to a temp repo and never read `$HOME`.
 Verify: `bash scripts/gate.sh` (the new script must be shellcheck-clean; it is not yet a gate check).
 
 - [ ] 2.1 Write `scripts/personal-patterns.txt` with the generic rules shown in `design.md` plus a header comment explaining the four columns.
@@ -31,14 +33,14 @@ Depends on: none.
 
 ## 3. Remove archived material from the public tree
 
-Files: delete `__assets/` (22 files), `docs/playbook-ai-dev-team.md`, `agent-factory/docs/openclaw-paperclip-targets-plan.md`, `docs/openclaw-portfolio-desk-blueprint.md`, `automation-factory/docs/gh-triage-to-issue-loop.md`, `prompts/2026-06-13-openclaw-lamp-team-prompt.md`; edit `TODO.md`, `README.md`, `agent-factory/compose.py` (comments only), `agent-factory/README.md`, `agent-factory/openclaw/README.md`, `agent-factory/openclaw/templates/orchestrator/BOOT.md`, `docs/reference-resources.md`; add `tests/test_depersonalise.bats`.
+Files: delete `__assets/` (22 files), `docs/playbook-ai-dev-team.md`, `agent-factory/docs/openclaw-paperclip-targets-plan.md`, `docs/openclaw-portfolio-desk-blueprint.md`, `automation-factory/docs/gh-triage-to-issue-loop.md`, `prompts/2026-06-13-openclaw-lamp-team-prompt.md`; edit `TODO.md`, `README.md`, `agent-factory/compose.py` (comments only), `agent-factory/README.md`, `agent-factory/openclaw/README.md`, `agent-factory/openclaw/templates/orchestrator/BOOT.md`, `agent-factory/openclaw/roster.json` (`description` text only), `agent-factory/scripts/deploy_openclaw.sh` and `agent-factory/scripts/deploy_paperclip.py` (comments only), `docs/reference-resources.md`; add `tests/test_depersonalise.bats`.
 Guard: before any `git rm`, the task checks each path is listed in `~/.the-grid-private/archive/MANIFEST.sha256` (or is the duplicate playbook) and the archived hash equals the working-tree hash; if the manifest is missing, stop and label the issue `blocked`. Re-running when the paths are already gone is a no-op.
-Acceptance: `tests/test_depersonalise.bats` asserts each removed path is absent (`[ ! -e path ]`) and that `git grep -F` of each removed filename returns nothing in tracked files.
+Acceptance: `tests/test_depersonalise.bats` asserts each removed path is absent (`[ ! -e path ]`) and that `git grep -F <basename> -- . ':!openspec' ':!repos'` returns nothing for each removed filename.
 Verify: `bash scripts/gate.sh`.
 
 - [ ] 3.1 Run the guard, then `git rm -r` the paths listed above.
 - [ ] 3.2 In `TODO.md` delete the pending-rollout paragraph and everything from "## Status: Done" to the end; leave one line "Shipped-work history is kept privately; see git log." Reword the issue-map row that names a host to a neutral label.
-- [ ] 3.3 Repoint every remaining mention of a removed doc: `compose.py` comments, `agent-factory/README.md` (the "plan" link), `openclaw/README.md`, `openclaw/templates/orchestrator/BOOT.md` now point at `agent-factory/openclaw/README.md`.
+- [ ] 3.3 Repoint every remaining mention of a removed doc to `agent-factory/openclaw/README.md`: `compose.py` comments (lines ~812, ~943), `agent-factory/README.md` (the "plan" link, ~276), `openclaw/README.md` (~3, ~79), `openclaw/templates/orchestrator/BOOT.md` (~24), `roster.json` `description`, `deploy_openclaw.sh` header (~17), `deploy_paperclip.py` docstring (~5), and the `TODO.md` issue-map line (~64). Find them all with `git grep -n -F openclaw-paperclip-targets-plan -- . ':!openspec' ':!repos'` before and after.
 - [ ] 3.4 In `README.md` drop the `playbook-ai-dev-team.md, openclaw-portfolio-desk-blueprint.md` tree line and the `prompts/` tree line, and update the `docs/` heading text so it no longer says "playbooks".
 - [ ] 3.5 In `docs/reference-resources.md` section 13, replace "uploaded"/"available in outputs" wording with "kept privately"; keep the bibliography entries.
 - [ ] 3.6 Write `tests/test_depersonalise.bats` with the removed-path and no-dangling-reference assertions (path list inline, no personal strings).
@@ -58,9 +60,9 @@ Verify: `bash scripts/gate.sh`.
 - [ ] 4.3 `deploy_openclaw.sh` and `deploy_paperclip.py`: comments only.
 - [ ] 4.4 `gh-triage-spec.md` and `deployment-scope.template.md`: replace deployment tables/"known deployments" with the one-sentence rule; keep the contract text.
 - [ ] 4.5 `issue-loop/README.md`, `baseline-submodules.example.txt`, `find-skill-mds.sh`, `agent-factory/README.md`, `LEARNINGS.md`.
-- [ ] 4.6 `README.md` status bullet and `index.html` status bullet: replace the claim that machine names and account routing are still personal with one true sentence saying personal config is gitignored or private and a gate enforces it. One-sentence edits only (`front-door` rewrites these files later).
+- [ ] 4.6 `index.html` status bullet ("It is opinionated and partly personal", ~line 1978): replace the claim that machine names and account routing are still personal with one true sentence saying personal config is gitignored or private and a gate enforces it. One-sentence edit only (`front-door` rewrites the file later). `README.md`'s matching bullet (~397) is already accurate; leave it.
 
-Depends on: 2.
+Depends on: 2, 3.
 
 ## 5. Handoff skill: neutral defaults, optional private location table
 
@@ -76,11 +78,11 @@ Depends on: 2.
 
 ## 6. Wire the scan into the gate and enforce in CI
 
-Files: `scripts/gate.sh`, `tests/test_depersonalise.bats` (add repo-wide case), `tests/test_gate.bats` (only if it enumerates checks), `CLAUDE.md` (Key files entry + one line in "Drift checks").
+Files: `scripts/gate.sh`, `tests/test_depersonalise.bats` (add repo-wide case), `tests/test_gate.bats` (add a `scripts/check-personal.sh` stub, `exit 0`, to the fake grid in `setup()`, next to the `catalog.sh` stub), `CLAUDE.md` (Key files entry + one line in "Drift checks").
 Acceptance: `tests/test_depersonalise.bats` gains a test running `GRID_PRIVATE_DENYLIST= bash scripts/check-personal.sh` on the real repo and expecting exit 0 (this is what CI runs); `gate.sh` prints `==> personal` with PASS; on a machine without the private denylist the gate prints `gate: PASS (skipped: personal-denylist)` rather than failing; a deliberately added home-directory path line in a scratch copy makes the gate FAIL.
 Verify: `bash scripts/gate.sh`.
 
-- [ ] 6.1 Add `check personal run_personal_check` to `gate.sh`: runs the script; pushes `personal-denylist` onto `SKIPPED` when the script reports the absent-denylist notice.
+- [ ] 6.1 Add `run_personal_check` and `check personal run_personal_check` to `gate.sh` between `check compose` and `check bats`, and list it in the header comment: runs `bash scripts/check-personal.sh`; pushes `personal-denylist` onto `SKIPPED` when the script reports the absent-denylist notice.
 - [ ] 6.2 Add the repo-wide generic test to `tests/test_depersonalise.bats`.
 - [ ] 6.3 Document in `CLAUDE.md`: script, the three rule sources (public patterns, private denylist, allow-paths), the voice rule, and "add a path to `personal-allow-paths.txt` only with a reason".
 - [ ] 6.4 Run the full suite twice; the second run must be identical (idempotent, no tracked file changed: `git status --porcelain` empty).

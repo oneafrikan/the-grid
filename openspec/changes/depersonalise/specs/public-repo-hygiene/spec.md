@@ -18,18 +18,14 @@ The public repo MUST NOT contain machine host names, non-owner account or organi
 - **WHEN** a doc or template needs a table of real deployments (hosts, accounts, channels)
 - **THEN** the public file states that each install keeps that table in its own infra repo and contains no row of real values
 
-### Requirement: Third-party bundles are not redistributed
+### Requirement: Archive before delete
 
-The public repo MUST NOT track third-party archives or documents whose redistribution licence is unclear, and SHALL keep a private copy when the owner wants one.
+The public repo MUST NOT track third-party archives or documents whose redistribution licence is unclear, and the move SHALL copy each removed file to the private repo and verify its hash before removing it, with a re-run being a no-op.
 
 #### Scenario: Third-party playbook archived
 
 - **WHEN** the move completes
 - **THEN** `__assets/` and `docs/playbook-ai-dev-team.md` are absent from the public tree and the private `archive/clawguides/` hashes match the originals listed in `archive/MANIFEST.sha256`
-
-### Requirement: Archive before delete
-
-The move SHALL copy each file to the private repo and verify its hash before removing it from the public tree, and re-running the removal MUST be a no-op.
 
 #### Scenario: Removal blocked without archive
 

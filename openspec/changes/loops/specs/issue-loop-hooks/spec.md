@@ -83,11 +83,15 @@ The review hook SHALL read the repository directory from the payload `cwd` and S
 - **THEN** only one review is queued
 
 ### Requirement: Review is posted where reviewers look
-The review hook SHALL post to the open PR of the current branch when one exists, else to the issue referenced by `#N` in the commit subject, else only to the local log, and SHALL run the reviewer with the model in `GRID_REVIEW_MODEL` (default `sonnet`) and no tools.
+The review hook SHALL post to the open PR of the current branch when one exists, else to the issue referenced by `#N` in the commit subject, else only to the local log, and SHALL run the reviewer with the model in `GRID_REVIEW_MODEL` (default `sonnet`), `--max-budget-usd` from `GRID_REVIEW_BUDGET_USD` (default `1`) and no tools.
 
 #### Scenario: PR preferred
 - **WHEN** the current branch has an open PR and the subject references `#9`
 - **THEN** the comment goes to the PR, not to issue 9
+
+#### Scenario: Reviewer call is capped
+- **WHEN** the hook starts its reviewer
+- **THEN** the `claude` command line contains `--model sonnet`, `--max-budget-usd 1` and `--tools ""`
 
 #### Scenario: Issue fallback
 - **WHEN** the branch has no PR and the subject references `#9`

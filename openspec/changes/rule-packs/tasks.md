@@ -4,57 +4,57 @@ Conventions for every group: work on a branch off `next`, open one PR to `next`,
 
 ## 1. Rule format, lint, and pack scaffold
 
-Depends on: none.
+Depends on: vetting#5 (the gate's `audit` check covers hidden Unicode in `rules/`; this lint does not).
 
 - [ ] 1.1 Create `scripts/rules.py` (Python 3 stdlib only, 3.8-compatible, commented) with subcommands `lint` and `list` per `design.md`: strict frontmatter parser (only `paths:`), flat `pack.yaml` reader, all `E_*` checks in the lint table, `--root DIR` (default: repo root, honour `GRID_DIR`), `--check-urls` (HEAD each Sources URL, never run by tests). `list` prints `pack  tier  files  bytes  summary` sorted in C locale.
 - [ ] 1.2 Create `rules/denylist.txt` (contents from `design.md`), `rules/THIRD_PARTY_NOTICES.txt` (full ECC MIT licence text copied from `repos/ecc/LICENSE`, then a section `Adapted packs` listing pack names, initially empty with a comment), and `rules/README.md` (how to author a pack: file format, pack.yaml, README Sources table, the two-reviewer process, size caps; this file is not wired).
-- [ ] 1.3 Add `check rules python3 scripts/rules.py lint` to `scripts/gate.sh` (one `check` line plus a comment; place before `check bats`). Lint on an empty `rules/` (no packs) must pass.
-- [ ] 1.4 Create `tests/test_rules.bats`. Build fixture packs in a temp dir inside each test (do not commit fixtures). Cases: valid pack passes; each `E_*` code has one failing fixture (missing paths, banned glob `**/*`, extra frontmatter key, no title, 4097-byte file, pack over 9216, denylist hit, zero-width char, bad tier/adapted_from mismatch, README missing a file row, tier 2 missing attribution line, uppercase file name); `list` output sorted and stable across two runs; and one test `real packs lint clean` running `python3 scripts/rules.py lint` on the real `rules/`.
+- [ ] 1.3 Add `check rules python3 scripts/rules.py lint` to `scripts/gate.sh` (one `check` line plus a comment; place directly before `check bats       run_bats`). Lint on an empty `rules/` (no packs) must pass.
+- [ ] 1.4 Create `tests/test_rules.bats`. Build fixture packs in a temp dir inside each test (do not commit fixtures). Cases: valid pack passes; each `E_*` code has one failing fixture (missing paths, banned glob `**/*`, extra frontmatter key, no title, 4097-byte file, pack over 9216, denylist hit, bad tier/adapted_from mismatch, README missing a file row, tier 2 missing attribution line, uppercase file name); `list` output sorted and stable across two runs; and one test `real packs lint clean` running `python3 scripts/rules.py lint` on the real `rules/`.
 - [ ] 1.5 Verify: `tests/lib/bats-core/bin/bats tests/test_rules.bats` then `bash scripts/gate.sh`; `shellcheck` is not needed (no new shell). Second run of lint changes nothing (it writes nothing).
 
 Acceptance: `python3 scripts/rules.py lint` exits 0 on the real tree and non-zero with the expected code for each fixture.
 
 ## 2. Claude Code wiring: `rules:<pack>` manifest tier
 
-Depends on: 1.
+Depends on: 1, foundations#2 (`GRID_BASELINE`), manifest-lock-install#3 (rebase onto its `wire.sh` edits).
 
-- [ ] 2.1 Edit `scripts/wire.sh`: add `RULES_DIR` (default `$HOME/.claude/rules`) to the header docs; parse `rules:<name>` and `-rules:<name>` in `load_manifest` (cases placed before the generic `-*` and `*` cases so they are not mistaken for repos); keep `WIRED_RULES`/`DENY_RULES` arrays; add a recursive teardown of grid-owned symlinks under `$RULES_DIR/grid` followed by deletion of empty dirs there; add a wire step per design (`rules/<pack>/*.md` except `README.md`, `ln -sfn`, skip real files, warn and skip unknown packs); add `rule` rows to `MANIFEST_ROWS`; extend `--check` with a recursive `rules` kind comparing `relpath -> target` lines.
+- [ ] 2.1 Edit `scripts/wire.sh`: add `RULES_DIR` (default `$HOME/.claude/rules`) to the header docs; parse `rules:<name>` and `-rules:<name>` in `load_manifest` (cases placed directly after the `project:*`/`-project:*` cases, before the generic `-*/*`, `-*`, `*/*`, `*` cases, so they are not mistaken for repos); keep `WIRED_RULES`/`DENY_RULES` arrays; add a recursive teardown of grid-owned symlinks under `$RULES_DIR/grid` followed by deletion of empty dirs there; add a wire step per design (`rules/<pack>/*.md` except `README.md`, `ln -sfn`, skip real files, warn and skip unknown packs); add `rule` rows to `MANIFEST_ROWS`; extend `--check` with a `rules` kind: pass `RULES_DIR="$tmp/rules"` to the throwaway run, and add a separate recursive lister (`find "$1/grid" -type l`, printing `relpath -> target` for targets under `GRID_DIR`, same real-file shadow filter) because the existing `links()` is `-maxdepth 1`.
 - [ ] 2.2 Edit `scripts/catalog.sh` and `scripts/sources.sh`: add `rules:*|-rules:*) continue ;;` beside the existing `project:` skips so output is unchanged by `rules:` lines.
-- [ ] 2.3 Edit `tests/helpers/setup.bash`: create `MOCK_RULES`, export `RULES_DIR`, include it in the `assert_sandboxed` loop and in `common_teardown`.
+- [ ] 2.3 Edit `tests/helpers/setup.bash`: in `common_setup` create `MOCK_RULES=$(mktemp -d)` and `export RULES_DIR="$MOCK_RULES"` before `assert_sandboxed`; add `"${RULES_DIR:-}"` to the `assert_sandboxed` loop; add `$MOCK_RULES` to the `rm -rf` and `RULES_DIR` to the `unset` in `common_teardown`.
 - [ ] 2.4 Edit `baseline-submodules.example.txt` and `machines/example.txt`: add a commented `rules:` section documenting the grammar and a few commented example entries (`# rules:sql`, `# -rules:wordpress`); nothing active.
 - [ ] 2.5 Add tests to `tests/test_wiring.bats` (or a new `tests/test_rules_wiring.bats` if cleaner): with no `rules:` entry nothing is created under `RULES_DIR`; `rules:foo` creates `$RULES_DIR/grid/foo/<topic>.md` symlinks resolving to the source and no `README.md`; second run is a no-op (same link set, exit 0); removing the entry then re-running removes the links and the empty dir; `-rules:foo` in an overlay subtracts; unknown pack warns on stderr, exits 0, adds a `skipped` manifest row; a real file at a target path is left untouched; `wire.sh --check` exits 0 after wiring and 1 after a link is deleted; foreign symlinks in `$RULES_DIR/grid` are not removed; `catalog.sh --check` unaffected by a `rules:` line.
 - [ ] 2.6 Verify: `tests/lib/bats-core/bin/bats tests/` then `bash scripts/gate.sh`. Do not run `wire.sh` against the real home.
 
 Acceptance: the new bats cases pass and the whole suite stays green.
 
-## 3. Cursor `.mdc` emitter
+## 3. Emit CLI and Cursor `.mdc` output
 
 Depends on: 1.
 
-- [ ] 3.1 Extend `scripts/rules.py` with `emit --target cursor --project DIR --packs a,b [--check]` per design: output `DIR/.cursor/rules/grid-<pack>-<topic>.mdc`, `description` from the H1, brace-expanded `globs` JSON-style list, `alwaysApply: false`, marker comment line, deterministic output, stale marker-carrying `grid-*.mdc` removed, unmarked files never touched, unknown pack exit 2, `--check` writes nothing and exits 1 on any difference.
-- [ ] 3.2 Add tests to `tests/test_rules.bats`: exact expected `.mdc` text for a fixture rule (frontmatter and body); brace expansion (`**/*.{ts,tsx}` -> two globs); second emit is byte-identical and `--check` exits 0; dropping a pack from `--packs` deletes only its marked files; a hand-written `grid-keep.mdc` without the marker survives; `--check` exits 1 when a file is edited.
+- [ ] 3.1 Extend `scripts/rules.py` with the full `emit` argument surface from `design.md` (`--harness cursor|agents-md|gemini`, `--packs`, `--out`, `--check`, `--root`; exit codes 0/1/2; `wrote`/`removed` stdout lines). `agents-md` and `gemini` may exit 2 with `not implemented` until group 4. Implement `--harness cursor`: output `<out>/grid-<pack>-<topic>.mdc` (default `--out .cursor/rules`, relative to the current directory), `description` from the H1, brace-expanded `globs` JSON-style list, `alwaysApply: false`, marker comment line, deterministic output, stale marker-carrying `grid-*.mdc` removed, unmarked files never touched, unknown pack exit 2, `--check` writes nothing and exits 1 on any difference.
+- [ ] 3.2 Add tests to `tests/test_rules.bats` (always pass a temp `--out` or `cd` into a temp dir): default `--out` lands in `./.cursor/rules`; explicit `--out DIR` lands there; unknown `--harness` and unknown pack exit 2 and write nothing; exact expected `.mdc` text for a fixture rule (frontmatter and body); brace expansion (`**/*.{ts,tsx}` -> two globs); second emit is byte-identical and `--check` exits 0; dropping a pack from `--packs` deletes only its marked files; a hand-written `grid-keep.mdc` without the marker survives; `--check` exits 1 when a file is edited.
 - [ ] 3.3 Verify: `tests/lib/bats-core/bin/bats tests/test_rules.bats` then `bash scripts/gate.sh`.
 
 Acceptance: Cursor emit is idempotent and never modifies files it did not generate.
 
-## 4. AGENTS.md and GEMINI.md block emitter
+## 4. AGENTS.md and GEMINI.md block output
 
-Depends on: 1, 3 (shares the `emit` plumbing).
+Depends on: 3 (shares the `emit` plumbing).
 
-- [ ] 4.1 Extend `scripts/rules.py emit` with `--target agents-md` (writes `DIR/AGENTS.md`) and `--target gemini-md` (writes `DIR/GEMINI.md`) and `--max-bytes N` (default 12288) per design: one managed block between the BEGIN/END markers, H1 removed and the section header `### <pack> / <topic> (applies to: ...)`, file created if missing, content outside the markers preserved byte-for-byte, exit 2 without writing if marker pairs are unbalanced or the block exceeds the cap, empty selection removes the block (and deletes the file only if nothing else remains).
-- [ ] 4.2 Add tests to `tests/test_rules.bats`: creating the block in a new file; replacing the block in a file with surrounding user text (surrounding bytes unchanged); second run byte-identical; `--check` semantics; over-cap exits 2 and leaves the file unchanged; unbalanced markers exit 2; empty `--packs ""` removes the block and, for a block-only file, deletes the file; both targets produce identical blocks except the file name.
+- [ ] 4.1 Implement `emit --harness agents-md` (default `--out AGENTS.md`) and `--harness gemini` (default `--out GEMINI.md`) per design, with the fixed `BLOCK_CAP = 12288`: one managed block between the BEGIN/END markers, H1 removed and the section header `### <pack> / <topic> (applies to: ...)`, file created if missing, content outside the markers preserved byte-for-byte, exit 2 without writing if marker pairs are unbalanced or the block exceeds the cap, empty selection removes the block (and deletes the file only if nothing else remains).
+- [ ] 4.2 Add tests to `tests/test_rules.bats` (temp dirs only): creating the block in a new file; `--out` pointing into a not-yet-existing nested dir creates parents; replacing the block in a file with surrounding user text (surrounding bytes unchanged); second run byte-identical; `--check` semantics; over-cap (two fixture packs totalling more than 12288 bytes of block) exits 2 and leaves the file unchanged; unbalanced markers exit 2; empty `--packs ""` removes the block and, for a block-only file, deletes the file; `agents-md` and `gemini` produce byte-identical blocks.
 - [ ] 4.3 Verify: `tests/lib/bats-core/bin/bats tests/test_rules.bats` then `bash scripts/gate.sh`.
 
 Acceptance: block emit is idempotent, bounded, and never alters text outside its markers.
 
 ## 5. Docs, issue #5 relation, and repo context
 
-Depends on: 1, 2, 3, 4.
+Depends on: 2, 4.
 
-- [ ] 5.1 Create `docs/rules.md`: what rule packs are, the four outputs, the `rules:<pack>` grammar with examples, opt-in/token-cost model with the worst-case co-load note, how to author or adapt a pack (link `rules/README.md`), `python3 scripts/rules.py list` for the pack inventory (no embedded pack table), the stack-stub to pack mapping table from `design.md`, and the Tier 2 attribution policy. No personal data, no absolute home paths.
+- [ ] 5.1 Create `docs/rules.md`: what rule packs are, the four outputs, the `emit` interface table (copied from `design.md`, stated as the contract `multi-harness` calls), the `rules:<pack>` grammar with examples, opt-in/token-cost model with the worst-case co-load note, how to author or adapt a pack (link `rules/README.md`), `python3 scripts/rules.py list` for the pack inventory (no embedded pack table), the stack-stub to pack mapping table from `design.md`, and the Tier 2 attribution policy. No personal data, no absolute home paths.
 - [ ] 5.2 Edit `agent-factory/stacks/{lamp,wordpress,data-engineering,modern-frontend,astro}/stack.yaml`: add one comment line each, `# Conventions for this stack live in rule packs: <list> (see docs/rules.md).` Do not change any key. Verify `agent-factory/.venv/bin/python agent-factory/compose.py agent-factory/examples/core.yaml --target claude-code --check` still passes if the venv exists.
 - [ ] 5.3 Edit `CLAUDE.md`: add `rules/`, `scripts/rules.py`, the `rules:` manifest grammar and `RULES_DIR` to Key files and the wire.sh contract (keep it short). Edit `README.md` only with a one-line pointer to `docs/rules.md` where skills wiring is described.
-- [ ] 5.4 Add a note to `TODO.md` replacing the stack-overlays item (#7 in TODO) with "superseded by rule packs (docs/rules.md)".
+- [ ] 5.4 Edit `TODO.md`: in the `agent-factory — everything else` table, change the `#5` row's Labels cell to `superseded by rule packs (docs/rules.md)`; touch nothing else.
 - [ ] 5.5 Verify: `bash scripts/gate.sh`. Report in the PR body that issue #5 can be closed as superseded (do not close it).
 
 Acceptance: docs match the implemented flags (copy commands from `rules.py --help`), gate green.
@@ -140,8 +140,8 @@ Acceptance: lint clean; rust at most 9216 bytes; reviewer outputs attached.
 
 Depends on: 2, 3, 4, and at least groups 6 and 7 merged.
 
-- [ ] 13.1 HUMAN: on one machine, add `rules:sql` and `rules:bash` to your untracked `baseline-submodules.txt` (or `machines/<host>.txt`), run `bash scripts/wire.sh`, open Claude Code in a repo with a `.sql` file and a `.sh` file, and confirm via `/memory` or a rules listing that `grid/sql/*` loads only after touching the `.sql` file. Confirm symlinked rule files are honoured (design assumption).
-- [ ] 13.2 HUMAN: run `python3 scripts/rules.py emit --target cursor --project <scratch repo> --packs sql,bash` and confirm Cursor lists the `.mdc` rules with the right globs (confirms list-form `globs`). Run `--target gemini-md` and confirm the installed Gemini CLI loads root `GEMINI.md` (if it expects `.gemini/GEMINI.md`, file a one-line fix to the emitter path). Confirm Codex reads the `AGENTS.md` block.
+- [ ] 13.1 HUMAN: on one machine, add `rules:sql` and `rules:bash` to your untracked `baseline-submodules.txt` (or `machines/<host>.txt`), run `bash scripts/wire.sh`, open Claude Code in a repo with a `.sql` file and a `.sh` file, and confirm via `/memory` or a rules listing that `grid/sql/*` loads only after touching the `.sql` file.
+- [ ] 13.2 HUMAN: in a scratch repo run `python3 <grid>/scripts/rules.py emit --harness cursor --packs sql,bash` and confirm Cursor lists the `.mdc` rules with the right globs (confirms list-form `globs`). Run `--harness gemini` and confirm the installed Gemini CLI loads root `GEMINI.md` (if it expects `.gemini/GEMINI.md`, file a one-line fix to the emitter path). Confirm Codex reads the `AGENTS.md` block.
 - [ ] 13.3 HUMAN: choose which packs go in each machine's untracked baseline/overlay (suggested start: the packs for languages actually used on that machine). No tracked file changes are required.
 - [ ] 13.4 HUMAN: close issue #5 as superseded (reference this change).
 

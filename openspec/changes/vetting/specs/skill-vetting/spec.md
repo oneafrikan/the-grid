@@ -22,10 +22,10 @@ The scanner SHALL read its rules from `policy.yaml`, scan every target (director
 
 ### Requirement: Banned-pattern coverage
 
-The policy SHALL define rules for pipe-to-shell installs, unpinned `npx -y`, `@latest` tags, unpinned `uvx`, credential shapes, absolute home paths, writes to `~/.ssh` and shell startup files, prompt-injection phrases, long base64 blobs, network calls inside hooks and reads of credential stores, and the scanner SHALL implement hidden-Unicode, symlink-escape, executable-binary and oversize-file checks.
+The policy SHALL define rules for pipe-to-shell installs, unpinned `npx -y`, `@latest` tags, unpinned `uvx`, credential shapes, absolute home paths, writes to `~/.ssh` and shell startup files, prompt-injection phrases, network calls inside hooks and reads of credential stores, and the scanner SHALL implement hidden-Unicode, symlink-escape, executable-binary and oversize-file checks.
 
 #### Scenario: Each banned pattern is flagged
-- **WHEN** fixture skills each contain one of the banned patterns (pipe-to-shell, `npx -y pkg`, a GitHub-token-shaped string, `echo x >> ~/.zshrc`, `cat >> ~/.ssh/config`, "ignore all previous instructions", a bidi control character, a 300-character base64 line in a script, `curl` in a hook script)
+- **WHEN** fixture skills each contain one of the banned patterns (pipe-to-shell, `npx -y pkg`, a GitHub-token-shaped string, `echo x >> ~/.zshrc`, `cat >> ~/.ssh/config`, "ignore all previous instructions", a bidi control character, `curl` in a hook script)
 - **THEN** each fixture produces at least one `high` finding whose rule id names that pattern
 
 #### Scenario: Pinned and benign forms pass
@@ -98,4 +98,4 @@ The scanner SHALL emit, with `--format json`, a versioned document containing `p
 
 #### Scenario: Report cannot smuggle invisible text
 - **WHEN** a finding's source line contains a zero-width character
-- **THEN** the excerpt shows it as `​` rather than the raw character
+- **THEN** the excerpt shows it as the literal text `\u200b` rather than the raw character

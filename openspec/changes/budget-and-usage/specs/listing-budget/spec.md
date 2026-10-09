@@ -5,18 +5,22 @@ Keep the size of the skill and agent description listing that harnesses load eve
 ## ADDED Requirements
 
 ### Requirement: Description size measurement
-The system SHALL report the total description characters of owned skills, composed role descriptions and, where a baseline exists, the baseline wired set, counting each entry as its name plus its description cut at 1,536 characters plus a fixed overhead.
+The system SHALL report the total listing characters of owned skills, public role descriptions and, where a baseline exists, the baseline wired set, counting each entry as its name plus its description and when-to-use text cut at 1,536 characters plus a fixed overhead, and counting only the name for skills that disable model invocation.
 
 #### Scenario: Long description is cut at the entry limit
 - **WHEN** a skill description of 2,000 characters is measured
 - **THEN** it contributes 1,536 characters plus its name length plus the fixed overhead to the total
 
+#### Scenario: Unlisted skill costs only its name
+- **WHEN** a skill sets disable-model-invocation to true
+- **THEN** its description is not counted
+
 #### Scenario: Machine overlay does not change the baseline figure
 - **WHEN** a machine overlay adds or subtracts wired skills
 - **THEN** the baseline total is identical to the total without the overlay
 
-#### Scenario: Private roles are excluded
-- **WHEN** private roles exist on the machine
+#### Scenario: Private and retired roles are excluded
+- **WHEN** private roles or retired roles exist
 - **THEN** they are not counted in any scope
 
 ### Requirement: Budget ratchet in the commit gate
@@ -35,8 +39,8 @@ The commit gate MUST fail when any measured total exceeds its value in the commi
 - **THEN** it refuses unless explicitly told to allow raising
 
 ### Requirement: Per-entry limit for owned descriptions
-The system MUST fail the budget check when an owned skill or role description exceeds 180 characters or spans more than one line.
+The system MUST fail the budget check when a listed owned skill or role description exceeds 250 characters or spans more than one line.
 
 #### Scenario: Overlong owned description
-- **WHEN** a root skill has a 250-character description
+- **WHEN** a root skill has a 300-character description
 - **THEN** the check fails and names the file

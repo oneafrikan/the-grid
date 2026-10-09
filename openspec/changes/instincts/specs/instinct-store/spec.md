@@ -1,6 +1,6 @@
 ## Purpose
 
-Define where instincts live, how they are scoped to a project across machines, how seven machines write without git conflicts, and when an instinct becomes global. The store is private; the public repo holds none of it.
+Define where instincts live, how they are scoped to a project across machines, how several machines write without git conflicts, and when an instinct becomes global. The store is private; the public repo holds none of it.
 
 ## ADDED Requirements
 
