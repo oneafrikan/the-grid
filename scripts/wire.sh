@@ -9,6 +9,7 @@
 #   SKILLS_DIR  — Claude skills directory (default: ~/.claude/skills)
 #   AGENTS_DIR  — Claude subagents directory (default: ~/.claude/agents)
 #   GRID_HOST   — machine key for the overlay (default: hostname -s)
+#   GRID_BASELINE — baseline manifest file (default: $GRID_DIR/baseline-submodules.txt)
 #   GRID_SKIP_CATALOG=1 — don't regenerate SKILLS.md at the end (used by --check)
 #
 # Usage:
@@ -109,7 +110,10 @@ load_manifest() {
   done < "$file"
 }
 
-load_manifest "$GRID_DIR/baseline-submodules.txt"
+# GRID_BASELINE lets tests (and CI, which has no personal baseline) point the
+# first layer at another file, e.g. baseline-submodules.example.txt. Overlays
+# below still load from $GRID_DIR/machines/.
+load_manifest "${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}"
 load_manifest "$GRID_DIR/machines/$GRID_HOST.txt"
 load_manifest "$GRID_DIR/machines/$GRID_HOST.local.txt"
 

@@ -207,8 +207,9 @@ teardown() {
 # --- tracked-only discovery in git-checkout submodules (gstack host dirs) ----
 
 # Build repos/gen as its own git checkout: one tracked skill, one tracked skill
-# inside a dot-dir (openspec/ponytail style), and one gitignored generated copy
-# (gstack setup writes these per host — they must never be wired or counted).
+# inside a dot-dir (a per-harness copy / maintainer skill: excluded by
+# find-skill-mds.sh's root-level dot-dir rule), and one gitignored generated
+# copy (gstack setup writes these per host — they must never be wired or counted).
 make_gen_repo() {
   local r="$MOCK_GRID/repos/gen"
   make_skill "$r/real-skill" "real-skill"
@@ -219,11 +220,25 @@ make_gen_repo() {
   make_skill "$r/.slate/skills/stray-generated" "stray-generated"
 }
 
-@test "git-checkout repo: wires tracked skills, ignores gitignored generated copies" {
+@test "git-checkout repo: wires tracked skills, ignores dot-dir and gitignored generated copies" {
   make_gen_repo
   GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
   [ "$status" -eq 0 ]
   [ -L "$MOCK_SKILLS/real-skill" ]
-  [ -L "$MOCK_SKILLS/dot-tracked" ]
+  [ ! -e "$MOCK_SKILLS/dot-tracked" ]
   [ ! -e "$MOCK_SKILLS/stray-generated" ]
+}
+
+# --- GRID_BASELINE: point the baseline layer at another file ------------------
+
+@test "GRID_BASELINE wires only the repos named in that file" {
+  make_skill "$MOCK_GRID/repos/repo-one/sk-one" "sk-one"
+  make_skill "$MOCK_GRID/repos/repo-two/sk-two" "sk-two"
+  # No $MOCK_GRID/baseline-submodules.txt exists; the override names one repo.
+  printf 'repo-one\n' > "$BATS_TEST_TMPDIR/alt-baseline.txt"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" GRID_BASELINE="$BATS_TEST_TMPDIR/alt-baseline.txt" \
+    run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/sk-one" ]
+  [ ! -e "$MOCK_SKILLS/sk-two" ]
 }

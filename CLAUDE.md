@@ -243,6 +243,11 @@ All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: 
   in a submodule that is its own git checkout it lists **tracked** files only, so
   gitignored generated copies (gstack writes ~54 per host into `.slate/`, `.kiro/`,
   ...) are never wired or counted; a non-git dir falls back to plain `find`.
+- **Exclusion rule (same helper):** even tracked paths are dropped when they are
+  translations (`docs/`, `i18n/`, `translations/`, `locales/` + a locale dir such as
+  `ja-JP`), live under a root-level dot-dir (`.kiro`, `.agents`, ... — per-harness
+  copies or upstream maintainer skills), or match a `repo | prefix/` row in
+  `scripts/lib/skill-excludes.txt` (currently `ecc | pi/`).
 - Only submodules in the manifest (`baseline-submodules.txt` + `machines/<host>.txt`
   overlay) are wired; the rest are library-only. If no manifest exists, all repos are
   wired (legacy fallback). `catalog.sh` reads the **baseline only** (machine-agnostic,
