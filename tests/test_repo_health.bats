@@ -42,5 +42,18 @@ SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 }
 
 @test "skills dir exists" {
+  # A CI runner has no ~/.claude/skills; on a real machine this stays a hard
+  # health check (an honest skip beats a forced pass).
+  if [ "${CI:-}" = "true" ] && [ ! -d "$SKILLS_DIR" ]; then
+    skip "no skills dir on a CI runner"
+  fi
   [ -d "$SKILLS_DIR" ]
+}
+
+# CI-only guard: tests.yml must build the agent-factory venv, otherwise ~80
+# venv-gated tests silently skip ("agent-factory venv not built") and the gate
+# means less than it claims. Fails loudly if the workflow regresses.
+@test "agent-factory venv exists when CI=true" {
+  [ "${CI:-}" = "true" ] || skip "only meaningful on CI (CI is not 'true')"
+  [ -x "$GRID_ROOT/agent-factory/.venv/bin/python" ]
 }

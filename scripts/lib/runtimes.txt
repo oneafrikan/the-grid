@@ -1,0 +1,28 @@
+# runtimes.txt — submodules that need more than files on disk.
+#
+# Read by scripts/wire.sh (keeps the runtime-root link, warns when the marker is
+# missing) and by scripts/runtime-setup.sh (runs the setup command safely).
+# Framework data (tracked), not personal curation. Pipe-separated, one row per
+# repo, '#' starts a comment:
+#
+#   repo   directory name under repos/
+#   link   name of the symlink wire.sh keeps in the skills dir, pointing at
+#          repos/<repo> (the runtime root skills reference as
+#          ~/.claude/skills/<link>/...). Empty = no link.
+#   marker path relative to repos/<repo> that must exist and be executable (or a
+#          non-empty file) once setup has run
+#   needs  command that must be on PATH to run setup (never installed by the-grid)
+#   setup  command run with `bash -c` inside repos/<repo>
+#
+# gstack setup flags (verified present in setup at the pinned version):
+#   --host claude              Claude only; no Codex/Kiro/Cursor installs
+#   --no-prefix                short names (/review), matches the names wire.sh links
+#   --no-team                  no SessionStart auto-update hook; prunes old gstack hooks
+#   --no-plan-tune-hooks       no AskUserQuestion Pre/PostToolUse hooks
+#   --no-timeline-stop-hook    no Stop hook
+#   -q                         no interactive prompts
+# GSTACK_SKIP_COREUTILS / GSTACK_SKIP_FONTS default to 1 so the-grid never runs
+# brew or sudo implicitly; export 0 in the caller's environment to opt in.
+#
+# repo | link | marker | needs | setup
+gstack | gstack | browse/dist/browse | bun | GSTACK_SKIP_COREUTILS=${GSTACK_SKIP_COREUTILS:-1} GSTACK_SKIP_FONTS=${GSTACK_SKIP_FONTS:-1} ./setup --host claude --no-prefix --no-team --no-plan-tune-hooks --no-timeline-stop-hook -q

@@ -58,6 +58,10 @@ submodules into two tiers:
 - `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
   repos as counts, reference (no-skill) repos in a footer. Deterministic output.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
+- `site-files.txt` + `scripts/stage-site.sh` — define what GitHub Pages publishes:
+  the list names repo-relative paths (index.html, assets), the script copies exactly
+  those into `_site/` for `.github/workflows/pages.yml` (never `repos/`, `.git*`,
+  absolute or `..` paths). A new site asset must be added to `site-files.txt`.
 - `scripts/sources.sh` — regenerates `docs/SOURCES.md` (one upstream URL per
   submodule, tier from the baseline). `--check` HEADs every URL as a rot detector,
   non-zero exit on failure. Deterministic; never edit `SOURCES.md` by hand.
@@ -243,11 +247,37 @@ All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: 
   in a submodule that is its own git checkout it lists **tracked** files only, so
   gitignored generated copies (gstack writes ~54 per host into `.slate/`, `.kiro/`,
   ...) are never wired or counted; a non-git dir falls back to plain `find`.
+- **Exclusion rule (same helper):** even tracked paths are dropped when they are
+  translations (`docs/`, `i18n/`, `translations/`, `locales/` + a locale dir such as
+  `ja-JP`), live under a root-level dot-dir (`.kiro`, `.agents`, ... — per-harness
+  copies or upstream maintainer skills), or match a `repo | prefix/` row in
+  `scripts/lib/skill-excludes.txt` (currently `ecc | pi/`).
 - Only submodules in the manifest (`baseline-submodules.txt` + `machines/<host>.txt`
   overlay) are wired; the rest are library-only. If no manifest exists, all repos are
   wired (legacy fallback). `catalog.sh` reads the **baseline only** (machine-agnostic,
   deterministic `SKILLS.md`).
 - **Machine key:** `GRID_HOST` env var overrides the overlay host (default `hostname -s`).
+- **Runtime map:** `scripts/lib/runtimes.txt` (`repo | link | marker | needs | setup`)
+  lists wired repos whose skills need more than files on disk (gstack: its browse
+  daemon). wire.sh keeps the runtime-root link `$SKILLS_DIR/<link> -> $GRID_DIR/repos/<repo>`
+  (rebuilt each run, since teardown removes every grid link), skips it with
+  `runtime root occupied` if a real dir or foreign link is there, and prints
+  `runtime MISSING: <repo>` (exit status unaffected) when the marker is absent.
+  The setup itself is human-run: `bash scripts/runtime-setup.sh <repo> [--dry-run]`
+  (exit 2 prerequisite/occupied link, 3 if the Claude settings file changed).
+- **Baseline override:** `GRID_BASELINE` env var replaces the path of the first
+  manifest layer (default `$GRID_DIR/baseline-submodules.txt`); machine overlays
+  still load from `$GRID_DIR/machines/`. Tests and CI use it to wire from
+  `baseline-submodules.example.txt` when there is no personal baseline.
+- **Teardown scope:** teardown removes only links whose target is under `$GRID_DIR/`
+  (trailing slash: a sibling dir like `${GRID_DIR}-private` is never matched) and
+  follows a skills/agents dir that is itself a symlink (`find -H`), in both the
+  wire and `--check` paths.
+- **Dry home:** `GRID_DRY_HOME=<dir>` forces every home-derived target under it
+  (`HOME`, `SKILLS_DIR`, `AGENTS_DIR`, `CLAUDE_CONFIG_DIR`, `RULES_DIR`,
+  `GRID_HARNESS_HOME`; inherited values are ignored) and skips the `SKILLS.md` /
+  `.wired.manifest` writes. Every dry-run caller must use it (and nothing else);
+  `--check` and `tests/helpers/wired.bash` do.
 - **Composed agents:** wire.sh also wires `agent-factory/projects/*/_claude-code/`
   output — orchestrator skills into `SKILLS_DIR`, specialist subagents into
   `AGENTS_DIR`. Gated per machine by `project:<name>` manifest entries; with no
