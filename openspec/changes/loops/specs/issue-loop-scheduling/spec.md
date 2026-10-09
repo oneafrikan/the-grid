@@ -14,7 +14,7 @@ other changes.
 #### Scenario: Linux units written, nothing activated
 - **WHEN** `instantiate.sh issue-loop <target> --profile linux --schedule-hour 3` runs with `SYSTEMD_USER_DIR` set to a temp dir and `MAX_ISSUES=3`, `ISSUE_TIMEOUT=1800`, `REVIEW_TIMEOUT=600`
 - **THEN** `issue-loop-<slug>.service` contains `Type=oneshot`, `.local/bin` in `Environment=PATH=`, `TimeoutStartSec=7800` and no `EnvironmentFile=`, and the timer contains `OnCalendar=*-*-* 03:00:00` and `Persistent=true`
-- **AND** no `systemctl`, `launchctl`, `crontab` or `loginctl enable-linger` was executed, the output prints the enable and linger commands, names the env file path and `GH_TOKEN`, and the env file does not exist
+- **AND** no `systemctl`, `launchctl`, `crontab` or `loginctl enable-linger` was executed, the output prints the enable and linger commands, names the env file path and the keys `GH_APP_ID`, `GH_APP_INSTALLATION_ID` and `GH_APP_KEY_FILE`, and the env file does not exist
 
 #### Scenario: Weekly timer with randomized delay
 - **WHEN** `render_systemd_timer "desc" "x.service" "weekly:Sun:04:30" "1h"` is called

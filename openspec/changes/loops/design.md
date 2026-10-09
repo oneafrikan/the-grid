@@ -18,15 +18,15 @@ The target box for the first unattended runs (Ubuntu 24.04) differs from a
 desktop in ways the runner must absorb, not the operator:
 - `claude` (2.1.289, native install) lives in `~/.local/bin`, which is not on the PATH of a non-login shell, a systemd user service or cron.
 - Claude credentials are file-based (`~/.claude/.credentials.json`, subscription login). Headless `claude -p` reads the same file, so no `setup-token` is needed. Under the isolation decision (below) the loop runs as a dedicated OS user with its own login file; `CLAUDE_CODE_OAUTH_TOKEN` is unset for every model call and is not a supported fallback.
-- `gh` stores its token in the desktop keyring, which a headless service cannot unlock. Headless runs read `GH_TOKEN` from an env file; the runner keeps it out of the worker's environment and passes it per `gh`/`git` call.
+- `gh` stores its token in the desktop keyring, which a headless service cannot unlock. Headless runs mint a 1-hour GitHub App installation token per run (`scripts/lib/gh-app-token.sh`, from the App private key named in an env file); the runner keeps it out of the worker's environment and passes it per `gh`/`git` call as `GH_TOKEN`.
 
 Isolation (operator decision Q1, applied here): the unattended loop runs as a
 dedicated unprivileged OS user with its own HOME, its own clone, its own `claude`
 login and no read access to the operator's HOME. The runner, not the agent,
 pushes, opens the PR and relabels. The worker model never has a GitHub token in
 its environment. The guard hook is a mistake-catcher; branch protection (a
-ruleset requiring PRs on the base) and token scope (a fine-grained PAT without
-Administration or Workflows) are the boundary, and the runner refuses to start
+ruleset requiring PRs on the base) and token scope (a GitHub App installation token; the App has no
+Administration or Workflows permission) are the boundary, and the runner refuses to start
 without them.
 - Linger is off, so user timers do not fire while the operator is logged out.
 - Node is v18. Nothing in the runner needs Node (the CLI is the native binary); the OpenSpec CLI (Node >= 20.19) is not used by the runner.
@@ -154,10 +154,24 @@ failure mid-run (stopped early), 2 = preflight failed (nothing touched).
    ENV_FILE=${GRID_LOOP_ENV:-$HOME/.config/the-grid/issue-loop.env} (fixed default, never
    XDG_CONFIG_HOME, which a unit does not set). If it exists and `find "$ENV_FILE" -perm -077`
    prints it -> exit 2 "chmod 600 $ENV_FILE". PARSE it, never source it, never `set -a`:
-   `while IFS= read -r line` loop; accept only `GH_TOKEN=`, `LOOP_TRUSTED_ACTORS=`,
-   `LOOP_OPERATOR_HOME=` lines (one pair of surrounding '…' or "…" stripped), ignore all
-   else. GH_TOKEN goes into the UNEXPORTED shell variable LOOP_GH_TOKEN. Then
+   `while IFS= read -r line` loop; accept only `GH_APP_ID=`, `GH_APP_INSTALLATION_ID=`
+   (optional), `GH_APP_KEY_FILE=` (default `$HOME/.config/the-grid/app.pem`),
+   `LOOP_TRUSTED_ACTORS=` and `LOOP_OPERATOR_HOME=` lines (one pair of surrounding '…' or
+   "…" stripped), ignore all else, except that a `GH_TOKEN=` or `GITHUB_TOKEN=` line is
+   exit 2 "remove GH_TOKEN from $ENV_FILE; the loop mints a GitHub App token" (a leftover
+   long-lived PAT on disk would defeat the App). The key file is refused when
+   `find "$KEY" -perm -077` lists it ("chmod 600 $KEY"). `mint_token` resolves APP_TOKEN_BIN
+   (`GRID_APP_TOKEN_BIN`, else `$REPO_ROOT/loop/gh-app-token.sh` as copied there by
+   instantiate.sh from `scripts/lib/`, else `${GRID_DIR:-$HOME/.the-grid}/scripts/lib/gh-app-token.sh`)
+   and runs it with the three GH_APP_* values in its environment and `--json`; `.token` goes
+   into the UNEXPORTED shell variable LOOP_GH_TOKEN, `.permissions` into LOOP_APP_PERMS,
+   and LOOP_TOKEN_AT=$(date +%s). Then
    `unset GH_TOKEN GITHUB_TOKEN CLAUDE_CODE_OAUTH_TOKEN` in the runner's own environment.
+   `ensure_token` calls `mint_token` again when `now - LOOP_TOKEN_AT >= TOKEN_REMINT_SECS`
+   (2700; env override `GRID_LOOP_TOKEN_REMINT_SECS` is a test hook). Installation tokens
+   last 1 hour but one run can last MAX_ISSUES*(ISSUE_TIMEOUT+REVIEW_TIMEOUT), which is 2 hours
+   with the defaults, so `ensure_token` runs at the start of each issue (before the trust gate),
+   before integrate 5g and before the review comment in 5h; a failed re-mint is INFRA (exit 1).
    Every runner gh call and every runner git network call is prefixed per call:
    `GH_TOKEN="$LOOP_GH_TOKEN" gh ...` / `GH_TOKEN="$LOOP_GH_TOKEN" git ...` (HTTPS
    credentials come from `gh auth setup-git`'s helper, which reads GH_TOKEN);
@@ -171,7 +185,7 @@ failure mid-run (stopped early), 2 = preflight failed (nothing touched).
    message "install GNU coreutils (macOS: brew install coreutils)")
 2  preflight (any failure -> one stderr line naming the fix, exit 2), in this order;
    every network- or keyring-touching probe runs under `"$TIMEOUT_BIN" 60`:
-   a  git gh jq claude present; `git config user.name` and `user.email` non-empty in REPO_ROOT
+   a  git gh jq curl openssl claude present; `git config user.name` and `user.email` non-empty in REPO_ROOT
    b  LOOP_TRUSTED_ACTORS non-empty ("set LOOP_TRUSTED_ACTORS in $ENV_FILE");
       LOOP_OPERATOR_HOME non-empty, `[ -e ]`, and `ls "$LOOP_OPERATOR_HOME" >/dev/null 2>&1`
       FAILS ("run the loop as a dedicated user that cannot read the operator's home; see README")
@@ -180,12 +194,14 @@ failure mid-run (stopped early), 2 = preflight failed (nothing touched).
       "run bash loop/setup.sh"
    d  `env -u CLAUDE_CODE_OAUTH_TOKEN claude auth status --json | jq -e '.loggedIn == true'`
       ("claude not logged in for this user; run `claude` once interactively as the loop user")
-   e  LOOP_GH_TOKEN non-empty ("set GH_TOKEN in $ENV_FILE"); `GH_TOKEN="$LOOP_GH_TOKEN" gh auth
-      status` passes; `env -u GH_TOKEN -u GITHUB_TOKEN gh auth status` FAILS ("this user has a
-      stored gh login the worker could use; run gh auth logout"); token identity:
-      `GH_TOKEN="$LOOP_GH_TOKEN" gh api user --jq .login` must NOT be in LOOP_TRUSTED_ACTORS
-      ("the PAT must belong to a separate machine-account collaborator, not a trusted actor;
-      see README") — otherwise a token-holder could label/edit issues that pass the trust gate
+   e  GH_APP_ID non-empty ("set GH_APP_ID in $ENV_FILE") and the key file exists ("put the App
+      private key at $KEY, mode 600; see README"); `mint_token` succeeds (else exit 2 relaying the
+      script's one stderr line); `env -u GH_TOKEN -u GITHUB_TOKEN gh auth status` FAILS ("this
+      user has a stored gh login the worker could use; run gh auth logout"); token identity:
+      with the minted token `gh api /installation/repositories` succeeds and its
+      `.repositories[].full_name` includes R, and `gh api user` FAILS ("the token is not a GitHub
+      App installation token for R; see README"). An installation token is a bot identity, so it
+      can never be a trusted actor and a token-holder cannot satisfy the trust gate
    f  `git remote get-url origin` starts with https:// ("origin must be https; an SSH key in
       this user's home would give the worker push access")
    g  `git ls-remote --exit-code origin BASE_BRANCH` (with the token)
@@ -193,9 +209,10 @@ failure mid-run (stopped early), 2 = preflight failed (nothing touched).
       `jq '[.[] | select(.type=="pull_request")] | length'` >= 1 ("add a ruleset requiring a pull
       request on BASE_BRANCH, empty bypass list; classic protection cannot be verified with a
       non-admin token")
-   i  non-admin token: `gh api repos/R/branches/BASE_BRANCH/protection` must FAIL with stderr
-      containing `HTTP 403`; success or any other failure -> "token has Administration access or
-      the check is inconclusive; use the fine-grained PAT described in the README"
+   i  App permissions: LOOP_APP_PERMS (the `permissions` object of the token response) is an
+      object with no `administration` key and no `workflows` key; otherwise "the App has
+      Administration or Workflows permission, or the token response lacked permissions; set the
+      App permissions as in the README"
    j  REPO_ROOT tree clean (git status --porcelain empty); acquire the lock:
       LOCK=$(cd "$REPO_ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd -P)/issue-loop.lock
       (absolute: `--git-common-dir` prints a relative `.git` in a main checkout, RAN git 2.39;
@@ -212,7 +229,7 @@ failure mid-run (stopped early), 2 = preflight failed (nothing touched).
 5  for each N (serial):
    a  skip (outcome skipped, note "branch or PR exists") if `gh pr list --head issue-N --state open` is non-empty
       or `git ls-remote --heads origin issue-N` is non-empty
-   a1 trust gate (all reads with the token; logins compared lower-cased via `tr`):
+   a1 trust gate (`ensure_token` first; all reads with the token; logins compared lower-cased via `tr`):
         author  = gh api repos/R/issues/N --jq .author_association  in {OWNER, MEMBER, COLLABORATOR}
         events  = gh api --paginate repos/R/issues/N/events > $TMP/N.events.json, then
                   jq -s --arg l "$ISSUE_LABEL" '[.[][] | select(.event=="labeled" and .label.name==$l)] | last | .actor.login // ""'
@@ -254,7 +271,7 @@ failure mid-run (stopped early), 2 = preflight failed (nothing touched).
         0              -> parse json: is_error true and subtype != error_max_turns -> INFRA;
                           subtype error_max_turns -> issue-level failure "max-turns";
                           cost = .total_cost_usd // empty
-   g  integrate (runner only; the worker never pushes). LINE = first line of $TMP/N.outcome
+   g  integrate (runner only; the worker never pushes; `ensure_token` first). LINE = first line of $TMP/N.outcome
       (missing -> empty):
         LINE == done AND `git -C WT branch --show-current` == issue-N AND `git -C WT status
         --porcelain` empty AND `git -C WT rev-list --count origin/BASE_BRANCH..HEAD` >= 1
@@ -279,7 +296,7 @@ failure mid-run (stopped early), 2 = preflight failed (nothing touched).
         the instruction text is the -p argument; issue body + diff go in on STDIN from a
         temp file (`< $TMP/N.review.in`), capped at 100000 bytes (`head -c` on a file, not a pipe)
         because one argv string is limited to 128 KiB on Linux (E2BIG);
-        result text -> `gh pr comment PR --body-file`
+        `ensure_token`, then result text -> `gh pr comment PR --body-file`
         review exit 124 or 137 -> post nothing, note "review timeout"; other non-zero -> INFRA
    i  cleanup: `git worktree remove --force WT`; branch kept. Runs on every path including
       INFRA stop, via the EXIT trap from step 2
@@ -447,16 +464,49 @@ Credentials: the runner itself parses the env file
 `${GRID_LOOP_ENV:-$HOME/.config/the-grid/issue-loop.env}` of the loop user (mode 600,
 created by the human, never by a script), so systemd, launchd, cron and a manual run
 behave the same and the unit carries no `EnvironmentFile`. Keys (no others are read):
-- `GH_TOKEN=...` required: a fine-grained PAT created from a separate GitHub machine account (not the operator) that is a collaborator with write on the repo, for the one repo (Contents, Pull requests, Issues: read/write; Metadata: read; no Workflows, no Administration). `gh auth setup-git`, run once by the human as the loop user, makes HTTPS pushes use it.
+- `GH_APP_ID=...` required: the App ID of a GitHub App created under the operator's account (no webhook; repository permissions Contents read/write, Pull requests read/write, Issues read/write, Metadata read; no Administration, no Workflows; installed on the one repo only). Commits and PRs the loop opens show as `<app-slug>[bot]`.
+- `GH_APP_INSTALLATION_ID=...` optional: the installation id (the number in the install URL `.../settings/installations/<id>`). When absent `gh-app-token.sh` calls `GET /app/installations` and uses the single installation.
+- `GH_APP_KEY_FILE=...` optional: the App private key, default `$HOME/.config/the-grid/app.pem`, mode 600, owned by the loop user, copied there by the human and never created by a script. `gh auth setup-git`, run once by the human as the loop user with a freshly minted token in `GH_TOKEN` (no stored gh login exists), makes HTTPS pushes use the per-call token.
 - `LOOP_TRUSTED_ACTORS=login1,login2` required: GitHub logins whose labelling and edits the loop trusts. Kept here, not in the tracked `loop.conf`, so no username lands in the repo.
 - `LOOP_OPERATOR_HOME=/home/<operator>` required: a path the loop user must NOT be able to list (isolation check).
 Claude auth is the loop user's own credentials-file login; `CLAUDE_CODE_OAUTH_TOKEN` is unset for every model call.
 
+### GitHub App installation token (`scripts/lib/gh-app-token.sh`)
+
+Bash 3.2 compatible, `set -euo pipefail`, needs only `openssl`, `curl` and `jq` (already a
+runner prerequisite; `gh` is not needed to mint). Input from the environment (the runner
+passes the parsed env-file values): `GH_APP_ID` (required), `GH_APP_KEY_FILE` (default
+`$HOME/.config/the-grid/app.pem`), `GH_APP_INSTALLATION_ID` (optional), `GH_API_URL`
+(default `https://api.github.com`; a test hook). Usage: `gh-app-token.sh [--json]`. Stdout is
+the installation token alone, or with `--json` the whole token response (`token`,
+`expires_at`, `permissions`, `repository_selection`); nothing else reaches stdout. Every
+failure prints one stderr line, nothing on stdout.
+1. Exit 2 for: `GH_APP_ID` unset, key file missing or unreadable, key file listed by
+   `find "$KEY" -perm -077`, `openssl`/`curl`/`jq` missing, or `openssl` unable to sign with the key.
+2. JWT: header `{"alg":"RS256","typ":"JWT"}`, claims `{"iat":<now-60>,"exp":<now+540>,"iss":"<GH_APP_ID>"}`
+   (`exp` is under the 10-minute GitHub limit; `iat` is back-dated 60 s for clock skew); each
+   segment base64url (`openssl base64 -A | tr '+/' '-_' | tr -d '='`); signature
+   `printf %s "$header.$claims" | openssl dgst -sha256 -sign "$KEY"`, base64url. The key and the
+   JWT are never printed or logged, and the script never runs under `set -x`.
+3. Installation id: `GH_APP_INSTALLATION_ID` when set; else `GET $API/app/installations` with
+   `Authorization: Bearer <jwt>`, `Accept: application/vnd.github+json`,
+   `X-GitHub-Api-Version: 2022-11-28` and the id of the single element (none: exit 1 "App is not
+   installed on any account"; several: exit 1 "set GH_APP_INSTALLATION_ID").
+4. `POST $API/app/installations/<id>/access_tokens` with the same headers. Status comes from
+   `curl -sS -o <tmp> -w '%{http_code}'` (not `--fail-with-body`, which older macOS curl lacks);
+   a non-2xx status or a body without `.token` is exit 1 with the HTTP status in the stderr line.
+5. Print the token, or the response with `--json`.
+`instantiate.sh` copies the script to `loop/gh-app-token.sh` beside the runner so a sandbox
+repo without `scripts/lib/` still works.
+
 Residual risk, stated in the README: the worker runs as the same OS user as the runner,
-so a deliberately hostile worker could read the env file and use the token. `env -u`
-stops the token reaching tool output, logs and child processes by accident; what bounds
-a deliberate read is the token's scope (one repo, no Workflows/Administration) and the
-ruleset requiring PRs on the base with an empty bypass list, both checked at preflight.
+so a deliberately hostile worker could read the env file, the App key file and the token.
+`env -u` stops the token reaching tool output, logs and child processes by accident; what
+bounds a deliberate read is the App's permissions (one installed repo, no Workflows or
+Administration), the 1-hour token lifetime, the ability to revoke the key in the App settings,
+and the ruleset requiring PRs on the base with an empty bypass list, both checked at preflight.
+Unlike a PAT, a stolen key mints new tokens until it is deleted, so deleting the key is the
+first response to a suspected leak.
 
 Linger (`sudo loginctl enable-linger <loop-user>`, once, needs the human) lets the user
 manager run timers while logged out. Without it the user manager does not exist at
@@ -622,12 +672,48 @@ logs `GH_TOKEN` per call, serves `api repos/*/issues/N` (`STUB_AUTHOR_ASSOC`, de
 `OWNER`), `api --paginate repos/*/issues/N/events` (`STUB_EVENTS_JSON`, default one
 `labeled` event by `trusted`), `api graphql` (`STUB_EDITORS_JSON`, default none),
 `api repos/*/rules/branches/*` (`STUB_RULES_JSON`, default one `pull_request` rule),
-`api repos/*/branches/*/protection` (exit 1 with `HTTP 403` unless `STUB_PROTECTION=admin`),
-and `auth status` (passes only when `GH_TOKEN` is set, unless `STUB_GH_STORED_LOGIN=1`).
-The test env file sets `LOOP_TRUSTED_ACTORS=trusted` and `LOOP_OPERATOR_HOME` to a temp
+`api /installation/repositories` (`STUB_INSTALL_REPOS_JSON`, default lists the test repo),
+`api user` (exit 1 with `HTTP 403: Resource not accessible by integration` unless
+`STUB_API_USER_OK=1`, which models a PAT) and `auth status` (fails unless
+`STUB_GH_STORED_LOGIN=1`). A mint stub, exported as `GRID_APP_TOKEN_BIN`, prints
+`{"token":"${STUB_APP_TOKEN:-abc}","permissions":${STUB_APP_PERMS:-<contents/pull_requests/issues write, metadata read>}}`,
+appends one line per call to `$STUB_MINT_LOG`, and exits 1 with a stderr line when
+`STUB_APP_MINT_FAIL=1`; `STUB_APP_TOKEN_SEQ=1` makes the token `tok1`, `tok2`, ... per call so a
+re-mint is visible in the per-call `GH_TOKEN` log.
+The test env file sets `GH_APP_ID=1`, `GH_APP_INSTALLATION_ID=2`, `GH_APP_KEY_FILE` (a temp file,
+mode 600), `LOOP_TRUSTED_ACTORS=trusted` and `LOOP_OPERATOR_HOME` to a temp
 dir made `chmod 000` (the runner tests `skip` when `id -u` is 0); `origin` is a temp bare
 repo reached through a `https://` URL rewritten with `git config url.<file-url>.insteadOf`.
 The stub `claude` is also exported as `GRID_CLAUDE` (G5).
+
+`tests/test_gh_app_token.bats` (script level, no network): a throwaway key from
+`openssl genrsa -out $BATS_TEST_TMPDIR/app.pem 2048` (chmod 600) and its public half from
+`openssl rsa -pubout`; a stub `curl` first on PATH logs every argv to `$STUB_LOG`, honours
+`-o <file>` and `-w '%{http_code}'`, and answers by URL: `*/app/installations` returns
+`STUB_INSTALLATIONS_JSON` (default one element, id 4242) with status `STUB_INSTALLATIONS_CODE`
+(default 200); `*/access_tokens` returns `STUB_TOKEN_JSON` (default a `token`, `expires_at` and a
+`permissions` object) with status `STUB_TOKEN_CODE` (default 201). `HOME` is a temp dir and
+`GH_API_URL` is irrelevant to the stub. Cases:
+1. Happy path: stdout is exactly the token; the log shows `GET .../app/installations` then
+   `POST .../app/installations/4242/access_tokens`, both with an `Authorization: Bearer <jwt>` header.
+2. JWT shape: three dot-separated segments with no `+`, `/` or `=`; header decodes to
+   `{"alg":"RS256","typ":"JWT"}`; claims have `iss` equal to `GH_APP_ID`, `iat` <= now, `exp` > now
+   and `exp - now` <= 600; the signature verifies against the public key
+   (`openssl dgst -sha256 -verify pub.pem -signature sig`) and fails against a second key.
+3. `GH_APP_INSTALLATION_ID=7`: no `GET /app/installations` call and the POST goes to `/app/installations/7/`.
+4. `--json`: stdout parses as JSON with `.token` and `.permissions`.
+5. Exit 2 with empty stdout: `GH_APP_ID` unset; key file missing; key file mode 644; file that is not
+   a PEM key; `openssl` not on PATH; `curl` not on PATH.
+6. Exit 1 with empty stdout: installations `[]`; two installations and no `GH_APP_INSTALLATION_ID`;
+   installations status 401; token status 404 and 403; token body `{}`; each stderr line names the
+   cause (HTTP status for the HTTP cases).
+7. No leakage: across every case above neither stdout nor stderr contains `BEGIN`, the JWT or the
+   key file's base64 body.
+The runner suite adds: mint failure at preflight exits 2 with no `claude -p`; `gh api user`
+succeeding (`STUB_API_USER_OK=1`) exits 2; `STUB_APP_PERMS` containing `administration` or
+`workflows` exits 2; a `GH_TOKEN=` line in the env file exits 2; `GRID_LOOP_TOKEN_REMINT_SECS=0`
+with two issues shows `$STUB_MINT_LOG` with more than one line and later `gh` calls logging a
+later `tokN`.
 
 ## Decisions
 
@@ -644,7 +730,7 @@ The stub `claude` is also exported as `GRID_CLAUDE` (G5).
 - Decided: infra failure = preflight failure, `claude` exit non-zero other than 124, `is_error` JSON that is not `error_max_turns`, or a `gh` call failing in the runner itself; the run stops at once, exit 1. Issue-level failure = timeout (124), max-turns, verify failure, ambiguous issue; the runner labels `blocked` or `needs-human`, comments, and continues.
 - Decided: `--max-turns` is passed only when `claude --help` output contains `--max-turns`; `timeout` and `--max-budget-usd` are always passed. The plan assumed `--max-turns` exists; 2.1.295 does not list it. The probe runs once per run.
 - Decided: `--output-format json` is used for both claude calls to read cost and error subtype; the parse is defensive (`jq -r '.total_cost_usd // empty'`) and the exact field names are re-checked during the sandbox proving step.
-- Decided: workers run with `--dangerously-skip-permissions`; reason: unattended; containment is the dedicated loop user, the tokenless worker environment, the worktree, the PreToolUse guard (mistake-catcher), a fine-grained non-admin token and a ruleset requiring PRs on the base branch.
+- Decided: workers run with `--dangerously-skip-permissions`; reason: unattended; containment is the dedicated loop user, the tokenless worker environment, the worktree, the PreToolUse guard (mistake-catcher), a single-repo GitHub App installation token without Administration or Workflows, and a ruleset requiring PRs on the base branch.
 - Decided: the review call uses `--tools ""` (text in, text out, no tools) and the `opus` alias; reason: read-only by construction and cheapest correct form.
 - Decided: reviews are posted as a PR comment, never as an approval or merge; the verdict line is advisory.
 - Decided: `direct` mode is interactive-only (`personal` profile); the post-commit review hook covers it. The runner refuses it (exit 2).
@@ -656,7 +742,7 @@ The stub `claude` is also exported as `GRID_CLAUDE` (G5).
 - Decided: `instantiate.sh --role-labels a,b,c` creates `role:<name>` labels (colour 5319E7, create-if-absent, description "issue-loop: build as agent <name>"); default none. The-grid's re-cut passes `grid-backend-dev,grid-devops,grid-technical-writer,grid-sdet,grid-prompt-engineer,core-platform-engineer` (builders only; no label is created for read-only roles).
 - Decided: the runner suppresses the in-session review hook with `GRID_LOOP_HEADLESS=1`; reason: one Opus review per PR, not a second Sonnet one per commit.
 - Decided: `KillMode` stays at the systemd default (control-group) and the runner waits for every child before exiting; reason: with the hook suppressed no detached children exist, and control-group kills everything on a `systemctl stop` or timeout, which is what we want. `Type=oneshot` makes systemd wait for the runner.
-- Decided: the runner (not the unit) parses the env file `${GRID_LOOP_ENV:-$HOME/.config/the-grid/issue-loop.env}` (keys `GH_TOKEN`, `LOOP_TRUSTED_ACTORS`, `LOOP_OPERATOR_HOME` only; never sourced, never `set -a`); `GH_TOKEN` lives in an unexported variable and is passed per call. Reason: one mechanism for systemd, launchd, cron and manual runs, and no code execution from a config file.
+- Decided: the runner (not the unit) parses the env file `${GRID_LOOP_ENV:-$HOME/.config/the-grid/issue-loop.env}` (keys `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `GH_APP_KEY_FILE`, `LOOP_TRUSTED_ACTORS`, `LOOP_OPERATOR_HOME` only; never sourced, never `set -a`; a `GH_TOKEN`/`GITHUB_TOKEN` line is refused); the minted installation token lives in an unexported variable and is passed per call as `GH_TOKEN`. Reason: one mechanism for systemd, launchd, cron and manual runs, and no code execution from a config file.
 - Decided: Claude auth is checked with `claude auth status --json` (`.loggedIn == true`), no model call; the loop user's own credentials-file login is the only supported auth; `CLAUDE_CODE_OAUTH_TOKEN` is unset for every model call.
 - Decided: the systemd unit sets `Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin` (runner PATH handling: see the append Decided line below).
 - Decided: the runner exports `GIT_TERMINAL_PROMPT=0` and preflights `git ls-remote --exit-code origin BASE_BRANCH`; reason: a credential prompt in a headless run hangs until the timeout instead of failing. HTTPS push auth is `gh auth setup-git` (human, as the loop user) plus the per-call `GH_TOKEN`.
@@ -686,7 +772,7 @@ The stub `claude` is also exported as `GRID_CLAUDE` (G5).
 - Decided: timeout statuses 124 and 137 are both issue-level "timeout" (worker and review); reason: GNU `timeout -k` returns 137 when the child ignored TERM and was KILLed, which would otherwise be misread as an infrastructure failure and stop the whole night.
 - Decided: command arrays start non-empty and no `producer | grep -q` / `| head` runs under `pipefail` (see "Bash 3.2 rules"); reason: both are real failures on macOS bash 3.2 (RAN) and silently pass on Linux bash 5.
 - Decided: the worker runs with `</dev/null`; the review prompt's variable part (issue body + diff) goes in on stdin from a temp file, capped at 100000 bytes as well as `REVIEW_DIFF_LINES`; reason: `claude -p` waits on an open stdin, and a single argv string over 128 KiB fails with E2BIG on Linux.
-- Decided: preflight additionally requires `git config user.name`/`user.email`, a `PreToolUse` guard entry in `.claude/settings.json`, and an env file that is not group/world accessible (`find -perm -077`); network and keyring probes run under `"$TIMEOUT_BIN" 60`; an SSH `origin` is now an exit 2, not a warning (Q1: an SSH key in the loop user's home would give the worker push access).
+- Decided: preflight additionally requires `git config user.name`/`user.email`, a `PreToolUse` guard entry in `.claude/settings.json`, and an env file and App key file that are not group/world accessible (`find -perm -077`); network and keyring probes run under `"$TIMEOUT_BIN" 60`; an SSH `origin` is now an exit 2, not a warning (Q1: an SSH key in the loop user's home would give the worker push access).
 - Decided: the lock path is absolute, a stale lock is reclaimed by atomic `mv` then `rm -rf`, an empty pid file counts as held, and `trap cleanup EXIT` plus `trap 'exit 143' INT TERM HUP` remove the current worktree and the lock on every exit path; `git worktree prune` runs at start and worktrees are added with `--no-track`. Reason: `git rev-parse --git-common-dir` is relative in a main checkout (RAN), and a `systemctl stop` or TimeoutStartSec kill must not strand a worktree whose branch name blocks the next `worktree add -B`.
 - Decided: the env file default is the fixed `$HOME/.config/the-grid/issue-loop.env` in runner, renderers, messages and docs; only the unit directory honours `XDG_CONFIG_HOME`; reason: a unit or cron job does not inherit the interactive `XDG_CONFIG_HOME`, so one path must serve all four launch routes.
 - Decided: `SETUP_CMD` runs under `"$TIMEOUT_BIN" ISSUE_TIMEOUT`; reason: it is the one runner-side step with no model cap, and launchd and cron have no `TimeoutStartSec` backstop.
@@ -696,9 +782,9 @@ The stub `claude` is also exported as `GRID_CLAUDE` (G5).
 - Decided (Q1): the unattended loop runs as a dedicated unprivileged OS user with its own HOME, clone, `claude` login and env file, and no read access to the operator's HOME; preflight enforces it mechanically (`LOOP_OPERATOR_HOME` must exist and not be listable). Operator confirmed 2026-10-09 (Q1: default accepted) — dedicated loop user + runner-does-push + trust gate + PR-ruleset/non-admin-token preflight (default YES).
 - Decided (Q1): the worker, `SETUP_CMD` and the review call run under `env -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN`; the worker argv adds `--strict-mcp-config --mcp-config '{"mcpServers":{}}' --setting-sources project,local`; group 5.6 confirms on the real CLI that `--settings` (guard hook) still applies and `--agent` still resolves user agents under `--setting-sources project,local`; if user agents do not resolve, the fallback is to look up agents only in `$REPO_ROOT/.claude/agents/` (written by `agent-factory/deploy.py`). Operator confirmed 2026-10-09 (Q1: default accepted) — same line.
 - Decided (Q1): input trust gate before any worktree or model call: `author_association` in OWNER/MEMBER/COLLABORATOR; last `labeled` actor for `ISSUE_LABEL` in `LOOP_TRUSTED_ACTORS`; every body editor (GraphQL `userContentEdits`) and `renamed` actor in `LOOP_TRUSTED_ACTORS`; else `needs-human` + comment, continue. Issue comments are never given to the worker (the runner puts only title + body in the prompt and tells it not to fetch the issue). Operator confirmed 2026-10-09 (Q1: default accepted) — same line.
-- Decided (Q1): preflight requires a repository ruleset with a `pull_request` rule on the base branch (`gh api repos/R/rules/branches/<base>`), and a token without Administration access (reading classic protection must fail with HTTP 403); exit 2 otherwise. The README documents the fine-grained PAT (single repo; Contents/Pull requests/Issues read-write, Metadata read; no Workflows, no Administration) and a ruleset with an EMPTY bypass list. Both API behaviours are UNVERIFIED on the drafting machine and are checked in group 5.6. Operator confirmed 2026-10-09 (Q1: default accepted) — same line.
-- Decided (Q13, F6): the runner's PAT belongs to a separate GitHub machine-account collaborator (write access), never the operator; preflight 2e checks `gh api user --jq .login` with the PAT is NOT in `LOOP_TRUSTED_ACTORS` (exit 2); the runner pushes with `git -c core.hooksPath=/dev/null push --no-verify` so worker-planted hooks never run with the token. Reason: PRs opened by the machine account can be reviewed/approved by the operator, and a token-holder must not be able to satisfy the trust gate. Operator confirmed 2026-10-09 (Q13: default accepted).
-- Decided (Q13 fallback): if HUMAN 5.1a shows a fine-grained PAT from the collaborator machine account cannot target a repo owned by another personal account, use a classic PAT with `public_repo` scope from a machine account whose ONLY collaborator access is this repo; preflight checks 2e (incl. token identity), 2h (PR ruleset) and 2i (classic protection read fails with HTTP 403) still apply unchanged. Operator confirmed 2026-10-09 (Q13: default accepted) — same line.
+- Decided (Q1): preflight requires a repository ruleset with a `pull_request` rule on the base branch (`gh api repos/R/rules/branches/<base>`), and an App token without Administration or Workflows permission (the token response's `permissions` has neither key); exit 2 otherwise. The README documents the GitHub App (no webhook; Contents/Pull requests/Issues read-write, Metadata read; no Workflows, no Administration; one installed repo) and a ruleset with an EMPTY bypass list. The rules endpoint behaviour with an installation token is UNVERIFIED on the drafting machine and is checked in group 5.6. Operator confirmed 2026-10-09 (Q1: default accepted) — same line.
+- Decided (Q13 revised): the loop's GitHub identity is a GitHub App owned by the operator, not a machine-user PAT; each run mints a 1-hour installation token with `scripts/lib/gh-app-token.sh` (RS256 JWT signed with the App private key, then `POST /app/installations/<id>/access_tokens`) and the runner exports it as `GH_TOKEN` per call exactly where the PAT was used. App permissions: Contents RW, Pull requests RW, Issues RW, Metadata R; no Administration, no Workflows; installed on the one repo. Preflight 2e requires the minted token to be an installation token (`gh api /installation/repositories` succeeds, `gh api user` fails) and 2i requires the mint response's `permissions` to exclude `administration` and `workflows`; an App identity can never be a trusted actor, so the old login-vs-`LOOP_TRUSTED_ACTORS` comparison is gone. The runner still pushes with `git -c core.hooksPath=/dev/null push --no-verify` so worker-planted hooks never run with the token. Reason: no second GitHub account, no long-lived secret that is valid until revoked (tokens last 1 hour), per-repo install scope, and PRs show as `<app-slug>[bot]` so the operator can approve them. Operator confirmed 2026-10-09 (Q13 revised): GitHub App.
+- Decided (Q13 revised): `gh-app-token.sh` uses `curl` + `openssl` + `jq` (no `gh`, no Node/Python) and `ensure_token` re-mints after 45 minutes because a run can outlast the 1-hour token; a failed re-mint is an infrastructure failure (exit 1). A leftover `GH_TOKEN=`/`GITHUB_TOKEN=` line in the env file is an exit 2. The old classic-PAT fallback is dropped with the PAT.
 - Decided (Q1): proposal Non-goal reads "Isolation: dedicated unprivileged OS user; no container." Residual risk (same-uid worker can read the env file) is stated in the README and bounded by token scope plus the ruleset. Operator confirmed 2026-10-09 (Q1: default accepted) — same line.
 - Decided (Q2): web tools (WebFetch, WebSearch) are NOT disabled in the worker, because the Q1 isolation preflight is mandatory for every headless run; rule-pack content issues may use WebFetch. If Q1 is answered NO, the worker argv gains `--disallowedTools WebFetch WebSearch`. Operator confirmed 2026-10-09 (Q2: default accepted) — WebFetch allowed in the loop worker only with Q1 isolation (default YES).
 - Decided (Q8): `LABEL_BUDGETS` in `loop.conf` (space-separated `label=usd`) raises the worker's `--max-budget-usd` to the largest matching value; the-grid's `loop/loop.conf` sets `LABEL_BUDGETS=${LABEL_BUDGETS:-ws:rule-packs=15}`. Workers may use Opus subagents/reviewers inside that cap (rule-pack content PRs); the cap covers the whole `claude -p` call. Operator confirmed 2026-10-09 (Q8: default accepted) — `ws:rule-packs` issues get MAX_BUDGET_USD=15 and may use Opus reviewers (default YES).

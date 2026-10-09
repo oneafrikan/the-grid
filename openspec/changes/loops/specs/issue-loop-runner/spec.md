@@ -20,7 +20,7 @@ The runner SHALL support `MODE=pr` only, SHALL process at most `MAX_ISSUES` issu
 - **THEN** the runner exits 0 without invoking `claude -p`
 
 #### Scenario: Worker command line and environment
-- **WHEN** the runner invokes the worker with default configuration and `GH_TOKEN` set in the env file
+- **WHEN** the runner invokes the worker with default configuration and the App keys set in the env file
 - **THEN** the recorded command line contains `--model sonnet`, `--max-budget-usd 5`, `--strict-mcp-config`, `--mcp-config {"mcpServers":{}}` and `--setting-sources project,local`, wrapped by the timeout binary
 - **AND** the worker process environment contains none of `GH_TOKEN`, `GITHUB_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`
 
@@ -57,7 +57,7 @@ The runner SHALL support `MODE=pr` only, SHALL process at most `MAX_ISSUES` issu
 - **THEN** it exits 2 naming interactive `/loop` and invokes no `claude -p`
 
 ### Requirement: Unsafe setups and untrusted issues are refused before any model call
-The runner SHALL exit 2, before changing anything and with one stderr line naming the fix, when any of these fails: required tools present; git `user.name`/`user.email` set; `LOOP_TRUSTED_ACTORS` non-empty; `LOOP_OPERATOR_HOME` exists and cannot be listed by the running user; the PreToolUse guard entry exists in `.claude/settings.json`; `claude auth status` reports logged in; a `GH_TOKEN` was read from the env file and `gh auth status` passes with it, while `gh auth status` without it fails; the login returned by `gh api user` with that token is not in `LOOP_TRUSTED_ACTORS` (the token belongs to a separate machine account); `origin` is an `https://` URL; `git ls-remote` of the base branch succeeds; a repository rule requiring a pull request applies to the base branch; reading the base branch's classic protection with the token fails with HTTP 403 (the token has no Administration access); the env file is not group/world accessible; the main checkout is clean. Before any worktree or model call for an issue, the runner SHALL require that the issue's `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`, that the actor of the last `labeled` event for the opt-in label is in `LOOP_TRUSTED_ACTORS`, and that every body editor and every `renamed` actor is in `LOOP_TRUSTED_ACTORS`; otherwise it SHALL label the issue `needs-human`, remove the opt-in label, comment which check failed, and continue.
+The runner SHALL exit 2, before changing anything and with one stderr line naming the fix, when any of these fails: required tools present; git `user.name`/`user.email` set; `LOOP_TRUSTED_ACTORS` non-empty; `LOOP_OPERATOR_HOME` exists and cannot be listed by the running user; the PreToolUse guard entry exists in `.claude/settings.json`; `claude auth status` reports logged in; `GH_APP_ID` is set and the App key file (default `~/.config/the-grid/app.pem`) exists and is not group/world accessible; an installation token can be minted with `scripts/lib/gh-app-token.sh`; `gh auth status` without that token fails; with the minted token `gh api /installation/repositories` succeeds and lists the repository while `gh api user` fails (the token is an installation token, so it can never be a trusted actor); the mint response's `permissions` contains neither `administration` nor `workflows`; the env file has no `GH_TOKEN` or `GITHUB_TOKEN` line; `origin` is an `https://` URL; `git ls-remote` of the base branch succeeds; a repository rule requiring a pull request applies to the base branch; the env file is not group/world accessible; the main checkout is clean. The installation token SHALL be minted by `scripts/lib/gh-app-token.sh` from an RS256 JWT signed with the App key whose `exp` is at most 10 minutes ahead, SHALL expire after one hour, and SHALL be minted again whenever it is older than 45 minutes at the start of an issue, before integrating and before posting a review. Before any worktree or model call for an issue, the runner SHALL require that the issue's `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`, that the actor of the last `labeled` event for the opt-in label is in `LOOP_TRUSTED_ACTORS`, and that every body editor and every `renamed` actor is in `LOOP_TRUSTED_ACTORS`; otherwise it SHALL label the issue `needs-human`, remove the opt-in label, comment which check failed, and continue.
 
 #### Scenario: Not isolated from the operator
 - **WHEN** `LOOP_OPERATOR_HOME` names a directory the running user can list
@@ -67,20 +67,33 @@ The runner SHALL exit 2, before changing anything and with one stderr line namin
 - **WHEN** `gh auth status` succeeds with `GH_TOKEN` and `GITHUB_TOKEN` unset
 - **THEN** the runner exits 2 naming `gh auth logout`
 
-#### Scenario: Token belongs to a trusted actor
-- **WHEN** `gh api user --jq .login` with the env-file token returns a login listed in `LOOP_TRUSTED_ACTORS`
-- **THEN** the runner exits 2 naming the separate machine account and invokes no `claude -p`
+#### Scenario: Token is not an installation token
+- **WHEN** `gh api user` succeeds with the minted token, or `gh api /installation/repositories` fails or does not list the repository
+- **THEN** the runner exits 2 naming the GitHub App from the README and invokes no `claude -p`
+
+#### Scenario: Cannot mint a token
+- **WHEN** `GH_APP_ID` is empty, the key file is missing or mode 644, or `gh-app-token.sh` exits non-zero
+- **THEN** the runner exits 2 with the script's one-line reason and invokes no `claude -p`
+
+#### Scenario: Mint request is short-lived and signed
+- **WHEN** `gh-app-token.sh` runs against a stub `curl` with a throwaway RSA key
+- **THEN** the bearer JWT has header `{"alg":"RS256","typ":"JWT"}`, `iss` equal to `GH_APP_ID`, `exp` at most 600 seconds after the request time, a signature that verifies against the key's public half, and the key and JWT appear in no output
+- **AND** an installations list with zero or several entries and no `GH_APP_INSTALLATION_ID`, or any non-2xx status, exits 1 with empty stdout
+
+#### Scenario: Long run re-mints the token
+- **WHEN** the current token is older than the re-mint age at the start of the second issue
+- **THEN** the mint script runs again and later runner `gh` calls carry the new token
 
 #### Scenario: Base branch not protected by a pull-request rule
 - **WHEN** the rules endpoint for the base branch lists no `pull_request` rule
 - **THEN** the runner exits 2 naming a ruleset that requires a pull request on the base branch
 
-#### Scenario: Admin token refused
-- **WHEN** reading the base branch's protection with the token succeeds or fails with anything other than HTTP 403
-- **THEN** the runner exits 2 naming the fine-grained token from the README
+#### Scenario: Over-privileged App refused
+- **WHEN** the mint response's `permissions` contains `administration` or `workflows`
+- **THEN** the runner exits 2 naming the App permissions in the README
 
 #### Scenario: Other preflight failures
-- **WHEN** any one of: `user.email` unset; the guard entry missing; `claude auth status --json` reports `"loggedIn": false`; `origin` is an SSH URL; the env file has mode 644; the main checkout has uncommitted changes
+- **WHEN** any one of: `user.email` unset; the guard entry missing; `claude auth status --json` reports `"loggedIn": false`; `origin` is an SSH URL; the env file has mode 644; the env file contains a `GH_TOKEN=` line; the main checkout has uncommitted changes
 - **THEN** the runner exits 2, creates no worktree and invokes no `claude -p`
 
 #### Scenario: Issue written by an outsider
@@ -118,7 +131,7 @@ After a worker run, the runner SHALL read the first line of the worker's outcome
 - **AND** with no locatable `run-record.sh` the run completes with a warning and the same exit code
 
 ### Requirement: Failure policy, single instance and clean exit
-The runner SHALL continue to the next issue after a timeout (worker exit 124 or 137), a max-turns result or a failed push, SHALL stop the run with exit 1 on the first infrastructure failure (any other non-zero `claude` exit, or an error result that is not max-turns), SHALL read the env file by parsing only the keys `GH_TOKEN`, `LOOP_TRUSTED_ACTORS` and `LOOP_OPERATOR_HOME` without executing it, SHALL append `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin` to PATH when absent, SHALL run worker stdin from `/dev/null`, SHALL hold an absolute-path lock so a concurrent run exits 0, and SHALL remove its current worktree and the lock on SIGTERM, SIGINT or SIGHUP.
+The runner SHALL continue to the next issue after a timeout (worker exit 124 or 137), a max-turns result or a failed push, SHALL stop the run with exit 1 on the first infrastructure failure (any other non-zero `claude` exit, or an error result that is not max-turns), SHALL read the env file by parsing only the keys `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `GH_APP_KEY_FILE`, `LOOP_TRUSTED_ACTORS` and `LOOP_OPERATOR_HOME` without executing it, SHALL append `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin` to PATH when absent, SHALL run worker stdin from `/dev/null`, SHALL hold an absolute-path lock so a concurrent run exits 0, and SHALL remove its current worktree and the lock on SIGTERM, SIGINT or SIGHUP.
 
 #### Scenario: Timeout moves on
 - **WHEN** the worker for issue 5 exits 124 or 137 and issue 6 is also eligible
@@ -129,8 +142,8 @@ The runner SHALL continue to the next issue after a timeout (worker exit 124 or 
 - **THEN** no worker runs for later issues, the runner exits 1, and the first issue keeps its opt-in label
 
 #### Scenario: Env file is parsed, not executed
-- **WHEN** the env file contains `GH_TOKEN=abc` and a line `$(touch pwned)`
-- **THEN** every runner `gh` call sees `GH_TOKEN=abc` and no file `pwned` is created
+- **WHEN** the env file contains the App keys and a line `$(touch pwned)`
+- **THEN** every runner `gh` call sees the minted token as `GH_TOKEN` and no file `pwned` is created
 
 #### Scenario: Minimal launchd or cron PATH
 - **WHEN** the runner starts with `PATH=/usr/bin:/bin` and `gh`, `jq` and `claude` exist only in `$HOME/.local/bin`
