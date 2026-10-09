@@ -21,11 +21,14 @@ bibliography (not maintained, kept for provenance) see [`reference-resources.md`
 | `repos/anthropic` | partial | <https://github.com/anthropics/skills> |
 | `repos/automattic` | library ᵍ | <https://github.com/Automattic/agent-skills> |
 | `repos/automattic-wordpress` | library ᵍ | <https://github.com/Automattic/wordpress-agent-skills> |
+| `repos/avoid-ai-writing` | library | <https://github.com/conorbronsdon/avoid-ai-writing> |
 | `repos/clawhub` | library ᵍ | <https://github.com/openclaw/clawhub> |
 | `repos/deanpeters` | library ᵍ | <https://github.com/deanpeters/Product-Manager-Skills> |
+| `repos/ecc` | library | <https://github.com/affaan-m/ECC> |
 | `repos/gstack` | partial | <https://github.com/garrytan/gstack> |
 | `repos/hesamsheikh` | library ᵍ | <https://github.com/hesamsheikh/awesome-openclaw-usecases> |
 | `repos/hubspot` | library | <https://github.com/HubSpot/agent-cli-skills> |
+| `repos/humanize-writing` | library | <https://github.com/jpeggdev/humanize-writing> |
 | `repos/jdevalk` | library ᵍ | <https://github.com/jdevalk/skills> |
 | `repos/jeffallan` | partial | <https://github.com/jeffallan/claude-skills> |
 | `repos/mattberman-google-ads` | library ᵍ | <https://github.com/TheMattBerman/google-ads-copilot> |
@@ -38,6 +41,7 @@ bibliography (not maintained, kept for provenance) see [`reference-resources.md`
 | `repos/paperclip` | library ᵍ | <https://github.com/paperclipai/paperclip> |
 | `repos/ponytail` | wired | <https://github.com/DietrichGebert/ponytail> |
 | `repos/quant-zero` | library | <https://github.com/marcohwlam/quant-zero> |
+| `repos/removing-ai-isms` | library | <https://github.com/gvsg-rs/removing-ai-isms> |
 | `repos/robertbstillwell` | library ᵍ | <https://github.com/robertbstillwell/marketing-skills> |
 | `repos/sarai-wp-openclaw` | library ᵍ | <https://github.com/Sarai-Chinwag/wp-openclaw> |
 | `repos/sebclawops` | library ᵍ | <https://github.com/sebclawops/openclaw-google-ads> |

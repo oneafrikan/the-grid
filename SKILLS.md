@@ -179,6 +179,7 @@ Not enumerated per-skill here (too many) — browse the repo or search with skil
 - **repos/avoid-ai-writing** — 8 skills
 - **repos/clawhub** — 12 skills
 - **repos/deanpeters** — 49 skills
+- **repos/ecc** — 1027 skills
 - **repos/hubspot** — 15 skills
 - **repos/jdevalk** — 12 skills
 - **repos/mattberman-google-ads** — 16 skills
