@@ -51,14 +51,18 @@ On verify failure the loop prompt SHALL discard tracked changes and untracked fi
 - **THEN** `git status --porcelain` is empty afterwards
 
 ### Requirement: All escape and state labels exist
-`instantiate.sh` SHALL create the opt-in label, `ready-for-human`, `needs-human` and `blocked` in the target repo when they are absent, listing existing labels with a limit high enough to see all of them, and SHALL NOT modify labels that already exist.
+`instantiate.sh` SHALL create the opt-in label, `ready-for-human`, `needs-human`, `blocked` and one `role:<name>` label per name given in `--role-labels` in the target repo when they are absent, listing existing labels with a limit high enough to see all of them, and SHALL NOT modify labels that already exist.
 
 #### Scenario: Four labels created on a fresh repo
 - **WHEN** `instantiate.sh` runs against a repo whose label list is empty
 - **THEN** exactly four `gh label create` calls are made, for the four names above
 
+#### Scenario: Role labels created on request
+- **WHEN** `instantiate.sh` runs with `--role-labels grid-devops,grid-sdet` against a repo whose label list is empty
+- **THEN** `gh label create` is called for `role:grid-devops` and `role:grid-sdet` in addition to the four state labels
+
 #### Scenario: Re-run is a no-op
-- **WHEN** `instantiate.sh` runs again and all four labels are listed
+- **WHEN** `instantiate.sh` runs again and all requested labels are listed
 - **THEN** no `gh label create` call is made
 
 ### Requirement: Placeholder values are escaped

@@ -7,7 +7,9 @@
   - `--strict` fails on a marketplace with no `metadata.description`.
   - Validate does NOT fail when an entry's `source` path does not exist. The build script must check that itself.
 - ECC's `PLUGIN_SCHEMA_NOTES.md` rules that apply: `version` required in `plugin.json`; no `agents` field (auto-discovered, field is rejected); no `hooks` field for the standard `hooks/hooks.json` (we ship none); agent `tools:` frontmatter is a comma scalar (composed agents already conform and validate); if a plugin root had `.mcp.json` it is auto-loaded (we ship none, so no `mcpServers: {}` opt-out is needed).
-- Composed agents are git-ignored regenerable output and, on a configured machine, carry that machine's operator email, channels and hostname in the IDENTITY nameplate (seen in `agent-factory/projects/grid/_claude-code/agents/grid-devops.md`). Copying that output into a public tree would leak it. Hence the neutral-identity switch.
+- Composed agents are git-ignored regenerable output and, on a configured machine, carry that machine's operator email, channels and hostname in the IDENTITY nameplate (`load_user_config()` in `agent-factory/compose.py` reads `agent-factory/user.yaml` and falls back to `socket.gethostname()` when `machine` is empty). Copying that output into a public tree would leak it.
+- `workflow-upgrades#2` adds `GRID_USER_CONFIG` (path override for `user.yaml`) and the tracked `agent-factory/user.public.yaml` (neutral values, non-empty `machine` so the hostname fallback never fires). This change reuses both and adds nothing to `compose.py`.
+- `vetting` provides `scripts/audit.sh --owned|--wired|--gate` (directory selector) over `scripts/audit.py`, and the gate's `audit` check runs `audit.sh --gate`. Tier is decided by `owned_roots` in `policy.yaml`.
 - Source layout today: owned skills in `skills/` (14 dirs); composed output per project at `agent-factory/projects/<p>/_claude-code/{agents,skills}`; root-owned agent `agents/grid-ponytail.md`.
 
 ## Approach
@@ -72,15 +74,15 @@ Generated `plugin.json`: `name`, `version`, `description`, `author{name}`, `lice
 
 Build steps (write mode; `--check` does the same into a temp dir and diffs):
 1. Read the manifest; fail on unknown keys.
-2. For each `compose` project run `GRID_PRIVATE_ROLES_DIR= GRID_NEUTRAL_IDENTITY=1 agent-factory/.venv/bin/python agent-factory/compose.py agent-factory/examples/<p>.yaml --target claude-code --out <tmp>`; take `<tmp>/<p>/_claude-code/{agents,skills}`.
+2. For each `compose` project run `GRID_PRIVATE_ROLES_DIR= GRID_USER_CONFIG=agent-factory/user.public.yaml agent-factory/.venv/bin/python agent-factory/compose.py agent-factory/examples/<p>.yaml --target claude-code --out <tmp>`; take `<tmp>/<p>/_claude-code/{agents,skills}`.
 3. Copy each listed owned skill dir from `skills/` and each listed root agent from `agents/`.
 4. Guards (hard fail with a message naming the offender): listed skill lacks `SKILL.md`; a bundle ends with zero components; two components share a name inside one plugin; a listed skill name also exists as a skill dir under `repos/*/` (provenance unknown; skipped with a notice when `repos/` is empty).
 5. Replace `plugins/<bundle>/` wholesale (delete stale files), write manifests. Skip `.DS_Store`. Re-running is a no-op.
 
 Gate wiring (in `gate.sh`, same skip-loudly style as the compose check):
-- `build-plugins.py --check` runs when `agent-factory/.venv/bin/python` exists, else skipped with a notice.
-- `claude plugin validate --strict` runs on `.`, each `plugins/<bundle>`, and each bundle's `skills/` and `agents/` dir, when `claude` is on PATH, else skipped with a notice (CI has no `claude`).
-- `grid audit plugins/` (change `vetting`) runs when that command exists.
+- `check plugins`: `build-plugins.py --check` when `agent-factory/.venv/bin/python` exists, else skipped with a notice.
+- `check plugins-validate`: `claude plugin validate --strict` on `.`, each `plugins/<bundle>`, and each bundle's `skills/` and `agents/` dir, when `claude` is on PATH and `.claude-plugin/marketplace.json` exists, else skipped with a notice (CI has no `claude`).
+- Vetting: `plugins/` is added to `audit.sh --owned` and `plugins` to `owned_roots` in `policy.yaml`, so the existing `audit` gate check scans the plugin tree at owned-tier severity. No separate audit call.
 
 Two channels, one machine: a machine that wired the-grid already has `grid-qa-engineer` etc. in `~/.claude/agents/`; installing `grid-agents` as well lists each twice (second under the `grid-agents:` namespace). `docs/PLUGINS.md` says to pick one channel per machine.
 
@@ -89,14 +91,15 @@ Two channels, one machine: a machine that wired the-grid already has `grid-qa-en
 - Decided: two bundles named `grid-core` and `grid-agents`, as in the plan; fewer plugins means fewer listing entries and less to explain.
 - Decided: bundles contain the-grid's OWN content only. Third-party wired skills are not exposed in v0.1. Reasons: each upstream needs a licence/attribution review and a standing vetting duty (change `vetting` would have to pass for every listed entry); a `git-subdir` source makes the plugin root the skill dir, which does not match the `skills/<name>/SKILL.md` layout without an untested `strict:false` workaround; `grid install` (change `manifest-lock-install`) already serves third-party skills with sha-pinned locks. A future `grid-extras` bundle generated from `grid.lock` is a separate change.
 - Decided: because content is owned and shipped by relative path, entries carry no `sha`/`ref`; pinning is the marketplace repo's own git ref (users may add the marketplace at a tag).
-- Decided: initial `grid-core` skill list is the 9 owned skills in the manifest above, plus `tron` and the 4 core agents via `compose`. Excluded for v0.1: `handoff`, `grill-me`, `caveman` (root forks of upstream skills that exist in `repos/`), `skill-scout` (same name exists in `repos/ecc`), `setup-repo-skills` (derived from mattpocock's `setup-matt-pocock-skills`). Reason: a fork redistributed from a plugin needs licence confirmation first; the HUMAN publish group decides.
+- Decided: initial `grid-core` skill list is the 9 owned skills in the manifest above, plus `tron` and the 4 core agents via `compose`. Excluded for v0.1: `handoff`, `grill-me`, `caveman` (root forks of upstream skills that exist in `repos/`), `skill-scout` (same name exists in `repos/ecc`), `setup-repo-skills` (derived from mattpocock's `setup-matt-pocock-skills`). Reason: a fork redistributed from a plugin needs licence confirmation first. Owned-only v0.1 is approved; adding forks later is a separate change.
 - Decided: `grid-ponytail` (hand-authored root agent) goes in `grid-agents`, not `grid-core`, because it is a coder persona alongside the dev team.
 - Decided: only the `core` and `grid` composed projects are bundled. `finance-desk`, `learning-desk` and private desks are personal verticals; sharing them is a separate decision.
 - Decided: generated plugin dirs are committed copies on the default branch. Marketplace add reads the default branch of the git repo, and a relative `source` must exist there. Drift is prevented by `--check` in the gate, as with `SKILLS.md`.
 - Decided: copies, never symlinks, because the plugin cache copy does not follow links out of the plugin dir.
-- Decided: builds always run compose with `GRID_PRIVATE_ROLES_DIR=` (empty) and `GRID_NEUTRAL_IDENTITY=1`. Output then depends only on tracked files, so `--check` gives the same answer on every machine.
-- Decided: `GRID_NEUTRAL_IDENTITY=1` makes `load_user_config()` return the literal `(not set)` for operator, channels and machine, skipping both `user.yaml` and the hostname fallback. Reason: empty values leave blank table cells in `IDENTITY.md`; a visible placeholder reads as intentional.
-- Decided: `compose.py` also gains `GRID_USER_CONFIG` (path override for `user.yaml`, default unchanged) so tests can inject a configured identity without touching the real file.
+- Decided: builds always run compose with `GRID_PRIVATE_ROLES_DIR=` (empty) and `GRID_USER_CONFIG=agent-factory/user.public.yaml`. Output then depends only on tracked files, so `--check` gives the same answer on every machine. Reason: one neutral-identity mechanism across changes (D1), no new `compose.py` switch.
+- Decided: the build exits 2 if `agent-factory/user.public.yaml` is missing rather than falling back to `user.yaml`, so a misordered merge can never leak a personal nameplate.
+- Decided: plugin vetting goes through the existing gate `audit` check by adding `plugins/` to `audit.sh --owned` and `policy.yaml` `owned_roots`; plugin content is owned by definition, so owned-tier severity applies. Owned-path allowlist entries in `CURATION.md` (none today) would need a matching `plugins/...` entry.
+- Decided: `claude plugin validate` is its own gate check (`plugins-validate`) so it can be tested and skipped independently of the venv-dependent `--check`.
 - Decided: `plugin.json` has no `skills`/`agents`/`hooks`/`mcpServers` fields; convention discovery plus ECC's documented validator rules (agents field rejected, hooks auto-loaded) make omission the safe choice, and the local `--strict` prototype passed.
 - Decided: marketplace `name` and `owner.name` are both `the-grid`; no personal name or email appears in any generated file (`repository` is the public repo URL).
 - Decided: manifest is JSON, not YAML, so the build and `--check` need only stdlib `json`; the compose step is the only part that needs the agent-factory venv.
@@ -104,4 +107,4 @@ Two channels, one machine: a machine that wired the-grid already has `grid-qa-en
 - Decided: no `description` truncation logic; descriptions come from the manifest and are kept under 200 chars by a test.
 - Decided: tests use a mock grid dir (`GRID_DIR` override, `compose: []`) so they need no venv and never touch `~/.claude`; one extra test exercises real compose and skips when the venv is absent.
 - Decided: nothing in `plugins/` is scanned by `wire.sh` or `catalog.sh` (both read `skills/` and `repos/` only), so plugin copies never inflate skill counts or the listing budget; a test asserts `catalog.sh --check` is unaffected.
-- Decided: publishing (merge to `main`, `marketplace add` from a clean profile, announcement) is a HUMAN group gated on tag `v0.1.0` from change `front-door`. Groups 1-4 land on `next` and are inert until `next` reaches `main`.
+- Decided: publishing (merge to `main`, `marketplace add` from a clean profile) is a HUMAN group gated on tag `v0.1.0` (`front-door#15`). Groups 1-3 land on `next` and are inert until `next` reaches `main`.

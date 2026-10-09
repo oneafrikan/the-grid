@@ -13,25 +13,27 @@ currently locked inside private or one-off code.
 
 Two phases in one change.
 
-**Phase A (10a), built interactively with Gareth before any overnight run:**
+**Phase A (10a), built interactively by the operator after `foundations` and before any overnight run:**
 - `{{BASE_BRANCH}}` placeholder everywhere `main` was hard-coded.
 - PR mode: one worktree per issue off `origin/<base>`, branch `issue-<N>`, PR to `<base>`, issue relabelled `ready-for-human` and left open.
-- Headless runner `run-issues.sh`: up to K labelled issues per run, one capped `claude -p --model sonnet` per issue inside `timeout`, an Opus review step posted to the PR, one `run-record.sh` line per issue, stop on first infrastructure failure.
-- Linux profile in `instantiate.sh`: systemd user `.service` + `.timer`; launchd plist moves to the same runner.
+- Headless runner `run-issues.sh`: up to K labelled issues per run, one `claude -p --model sonnet --max-budget-usd <cap>` per issue inside `timeout`, an Opus review step (also model- and budget-capped) posted to the PR, one `run-record.sh` line per issue, stop on first infrastructure failure.
+- Role routing: an issue labelled `role:<agent>` is built by `claude -p --agent <agent>`; unwired or read-only agents are refused (issue `blocked`, run continues); the role lands in the run record; `instantiate.sh --role-labels` creates the labels.
+- Headless environment handled by the runner, not the operator: optional env file sourced by the runner (`GH_TOKEN` for keyring-less `gh`, optional `CLAUDE_CODE_OAUTH_TOKEN`), `~/.local/bin` added to PATH when `claude` is not found, `claude auth status` / `gh auth status` / `git ls-remote` preflight with a fix-naming message, no credential prompts (`GIT_TERMINAL_PROMPT=0`).
+- Linux profile in `instantiate.sh`: systemd user `.service` + `.timer`, a read-only linger check that warns when linger is off; launchd plist moves to the same runner.
 - Fix the review hook (worktree cwd, `git -C ... commit` matching, comment on the PR, model choice) and `setup.sh` (re-wire the guard, merge instead of overwrite).
 - Fix `git checkout -- .` leaving untracked files; create every escape label.
 - Re-cut the-grid's own `loop/` instance (base `next`, PR mode) and prove the whole chain on a sandbox repo with two trivial issues.
 
 **Phase B (10b), loop-buildable afterwards:**
-- New `karpathy-loop` pattern: fixed fixtures, one editable artifact, one scalar metric, keep/discard, `results.tsv`, plateau/max-iter stop, promote by hand.
-- New `cli-cron` pattern: a scheduled job template running any CLI agent against a prompt file, with caps and run-record logging.
+- New `karpathy-loop` pattern (one stdlib Python file + a copyable example): fixed fixtures, one editable artifact, one scalar from a `score_cmd`, keep/discard, `results.tsv`, plateau/max-iter stop, promote by hand.
+- New `cli-cron` pattern: a scheduled job template running any CLI agent against a prompt file, with a wall-clock cap, logs and a run record; claude and codex examples only.
 - Docs: patterns table and a factory-chain runbook.
 
 ## Capabilities
 
 ### New Capabilities
 - `issue-loop-pr-mode`: base-branch placeholder, direct vs PR integration, per-issue worktree, relabel flow, cleanup and label creation.
-- `issue-loop-runner`: headless multi-issue runner with caps, Opus review step, run records and failure policy.
+- `issue-loop-runner`: headless multi-issue runner with caps, role routing by label, Opus review step, run records and failure policy.
 - `issue-loop-hooks`: guard hook shipped in the pattern; review hook and `setup.sh` wiring fixes.
 - `issue-loop-scheduling`: Linux systemd user timer profile, launchd on the same runner, shared unit renderers.
 - `karpathy-loop`: generic metric-driven artifact improvement loop.
@@ -46,11 +48,12 @@ None. `openspec/specs/` is empty; this change introduces the first specs.
 - `automation-factory/patterns/issue-loop/` (template, setup.sh, hooks, new runner and conf), `scripts/instantiate.sh`, new `scripts/lib/render-schedule.sh`, `loop/` (the-grid's own instance), `tests/`.
 - New dirs `automation-factory/patterns/karpathy-loop/` and `automation-factory/patterns/cli-cron/`.
 - Folds in issue #4 partially (a scheduled headless Claude Code run with PR/run-record handoff; Paperclip wiring stays open) and issue #21 partially (documented runbook only; no chain script).
-- Needs on the running machine: `bash`, `git`, `gh`, `jq`, `claude`, GNU `timeout` (`gtimeout` on macOS).
+- Needs on the running machine: `bash`, `git`, `gh`, `jq`, `claude`, GNU `timeout` (`gtimeout` on macOS). No Node dependency.
+- Cross-change: Phase A follows `foundations` (CI on `next`); Phase B merges after `instincts`.
 
 ## Non-goals
 
-- No auto-merge of agent PRs; nothing reaches `main` without Gareth.
+- No auto-merge of agent PRs; nothing reaches `main` without the operator.
 - No Docker or container sandbox; isolation is worktree + guard hook + dedicated token.
 - No Paperclip/OpenClaw heartbeat trigger (issue #4 stays open for that).
 - No scripted idea-to-looping-project chain (issue #21 stays open; runbook only).
@@ -58,5 +61,7 @@ None. `openspec/specs/` is empty; this change introduces the first specs.
 - No parallel issue execution; issues run serially.
 - No cloud `/schedule` integration.
 - No Windows scheduler.
-- No generic multi-metric or multi-artifact optimisation in `karpathy-loop`; one artifact, one scalar.
+- No generic multi-metric or multi-artifact optimisation in `karpathy-loop`; one artifact, one scalar. No built-in judge, `init` scaffold or resume.
+- No `cli-cron` presets for CLIs other than claude and codex.
+- No CI wiring for `next` (owned by `foundations#2`).
 - No port of any content from the private prompt-factory; only the loop shape.

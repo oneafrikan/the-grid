@@ -5,9 +5,9 @@ Agents repeat the same corrections every session because nothing carries habits 
 ## What Changes
 
 - Per-project opt-in flag `learning: on` in `.grid/project.yaml`. It is independent of the hook profile and off by default.
-- A zero-token capture hook (PostToolUse, PostToolUseFailure, UserPromptSubmit) appends scrubbed, truncated observations to a machine-local file. Raw observations never leave the machine.
-- A weekly batched analyser (`scripts/instincts.sh analyse`): a local digest step, then one `haiku` call per project per week with no tools, a dollar cap and an input cap. It writes confidence-scored instincts to the private repo.
-- Instincts are scoped by a hash of the git remote, stored one file per host so seven machines never conflict in git, and promoted to global when the same id is active in 2+ projects.
+- A zero-token capture hook (PostToolUse, PostToolUseFailure, UserPromptSubmit) appends scrubbed, truncated observations to a machine-local file under `~/.grid/instincts/`. Raw observations never leave the machine.
+- A weekly batched analyser (`scripts/instincts.sh analyse`): a local digest step, then one call per project per week with an explicit `--model haiku`, no tools, a dollar cap, a wall-clock cap and an input cap. It writes confidence-scored instincts to the private repo.
+- Instincts are scoped by a hash of the git remote, stored one file per host so several machines never conflict in git, and promoted to global when the same id is active in 2+ projects.
 - A SessionStart injector adds at most 6 instincts and 1500 characters, framed as untrusted context and never as instructions.
 - `tank` is extended (no new subsystem): instincts become a named source, and a new `evolve` mode drafts candidate skills into the private store (never wired). `oracle` may offer preference-type instincts for per-entry approval.
 - Each analysis run writes a `run-record.sh` line, and `instincts.sh status` shows the funnel (observations, candidates, instincts) so a silent 0-instinct failure is visible.
@@ -27,17 +27,18 @@ Agents repeat the same corrections every session because nothing carries habits 
 ## Impact
 
 - New: `scripts/instincts.sh`, `scripts/instincts/{lib,capture,analyse,inject}.py`, `tests/test_instincts_*.bats`, `docs/instincts.md`.
-- Edited: `agent-factory/roles/tank/{AGENTS,SKILL}.md`, `agent-factory/roles/oracle/SKILL.md`, `skills/mine-learnings/SKILL.md` (one pointer), `docs/agent-retro.md`, `project-factory/templates/_common/.grid/project.yaml`, `CLAUDE.md` (key-files entry), and the hook-profiles settings emitter (one added block, depends on workstream 6).
+- New (hook runtime from `hook-profiles#1`): four catalogue entries in `hooks/catalogue.json` and four one-line wrappers `hooks/scripts/instincts-*.sh`.
+- Edited: `agent-factory/deploy_hooks.py` (one `opt_in: learning` rule, from `hook-profiles#2`), `agent-factory/deploy.py` (`learning` allowed in `project.yaml`), `hooks/README.md`, `agent-factory/roles/tank/{AGENTS,SKILL}.md`, `agent-factory/roles/oracle/SKILL.md`, `skills/mine-learnings/SKILL.md` (one pointer), `docs/agent-retro.md`, `project-factory/templates/_common/.grid/project.yaml`, `CLAUDE.md` (key-files entry).
 - Private repo gains `learning/instincts/`. Machines gain one weekly schedule entry, installed by the operator.
-- Cost: capture 0 tokens; analysis at most one haiku call per opted-in project per week (about $0.05 cap each); injection at most 1500 characters per session in opted-in projects only.
-- Issues: closes #16 and #19; #20 closed as superseded only if Gareth agrees (see design Open questions).
+- Cost: capture 0 tokens; analysis at most one haiku call per opted-in project per week ($0.05 and 120 s cap each, at most 5 per machine); injection at most 1500 characters per session in opted-in projects only.
+- Issues: closes #16 and #19; closes #20 as superseded (its intent is met by CLAUDE.md folding, Tank role diffs and runtime instincts).
 
 ## Non-goals
 
 - No background observer, daemon or per-tool-call model call.
 - No capture of tool outputs or file contents (only commands, paths and user prompts), and no capture without `learning: on`.
 - No compile-time injection of LEARNINGS.md into composed agents (#20's literal ask).
-- No cross-harness emitters; Claude Code hooks only. Other harnesses are workstream 11.
+- No cross-harness emitters; Claude Code hooks only. Other harnesses belong to `multi-harness`.
 - No import/export of instincts between people, no sharing outside the private repo.
 - No automatic editing of roles, skills or CLAUDE.md; tank proposes, the operator commits.
 - No MCP server, vector search or dashboard.

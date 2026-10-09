@@ -3,7 +3,7 @@
 ## Context
 
 - Wired content (skills, agents, soon rules and hooks) executes with the user's privileges. 160 skills and 26 agents are wired on the reference Mac; most come from submodules the-grid does not control.
-- Evidence the threat is real: Snyk (2026-02, vendor) scanned 3,984 skills: 76 confirmed malicious, 13.4% critical, 36.82% other-severity. An academic scan (arXiv 2605.28588, search snippet only, not read) reports 26.1% of 31,132 skills with at least one vulnerability. Treat numbers as vendor-sourced; the direction is not in doubt. Snyk's advice: popularity is not a safety proxy; updates can mutate a vetted skill (workstream 3's lock pins the reviewed commit; this change only scans).
+- Evidence the threat is real: Snyk (2026-02, vendor) scanned 3,984 skills: 76 confirmed malicious, 13.4% critical, 36.82% other-severity. An academic scan (arXiv 2605.28588, search snippet only, not read) reports 26.1% of 31,132 skills with at least one vulnerability. Treat numbers as vendor-sourced; the direction is not in doubt. Snyk's advice: popularity is not a safety proxy; updates can mutate a vetted skill (`manifest-lock-install`'s lock pins the reviewed commit; this change only scans).
 - Prior art studied: ECC `scripts/build-pi-core.js` safety scan. It fails the build on callable URLs outside a host allowlist, pipe-to-shell, fetch-and-run `npx`, secrets, absolute home paths and symlinks, with a scoped `scanAllowlist` (path + `contains` + reason) and a per-exclusion `CURATION.md`. ECC also has `scripts/ci/check-unicode-safety.js` (emoji and invisible-character scan) and `scan-supply-chain-iocs.js`.
 - Taken from ECC: the secret shapes, pipe-to-shell forms, home-path rule, the `path + contains + reason` allowlist, "every exclusion has a reason". Left out: the documentation-URL host allowlist (noisy, low value), blanket `npx pkg@version` ban (a pinned version is the fix, not the problem), blanket symlink ban (only symlinks that escape the scanned directory are flagged).
 - No scanner exists here today. `scripts/gate.sh` runs shellcheck, catalog, compose and bats. `scripts/wire.sh` links skills with no inspection. `baseline-submodules.txt` and `machines/*.txt` are gitignored (personal), so anything tracked and public (policy, curation) must be machine-agnostic.
@@ -15,18 +15,20 @@ policy.yaml ──┐
 CURATION.md ──┼─> scripts/audit.py DIR... ──> report (text|json) + exit 0/1/2
 (allowlist)   │        ▲
 miniyaml.py ──┘        │ list of dirs/files
-              scripts/audit.sh --wired | --owned | --gate     (selects the list)
+              scripts/audit.sh --wired|--owned|--gate [TARGET...]  (selects the list)
                        ▲                         ▲
               scripts/wire.sh (pre-link)    scripts/gate.sh (check "audit")
                        ▲
-              WS3 `grid install` (staged dirs; calls audit.py directly)
+              manifest-lock-install `grid install` (staged dirs; calls audit.py directly)
 ```
 
 - `audit.py` is pure: reads files, never writes, never touches the network. Same input and policy give byte-identical output.
 - `audit.sh` only decides WHICH directories to scan.
   - `--owned`: whichever of `skills/*/`, `agents/*.md`, `rules/`, `hooks/`, `agent-factory/roles/*/`, `agent-factory/_core/` exist.
   - `--wired`: dry-run `wire.sh` into throwaway `SKILLS_DIR`/`AGENTS_DIR` (the same trick `wire.sh --check` uses, with `GRID_SKIP_CATALOG=1 GRID_SKIP_AUDIT=1`), then `readlink` every symlink there. The result is exactly what a real wire would link, with the same manifest, overlay and precedence logic, and no second implementation of it.
-  - `--gate`: owned always; wired too when `baseline-submodules.txt` exists and no submodule is uninitialised; otherwise print one loud notice naming what was skipped.
+  - `--gate`: owned, plus the wired set of the BASELINE: baseline file = `$GRID_BASELINE` if set, else `$GRID_DIR/baseline-submodules.txt`, else the tracked `baseline-submodules.example.txt` with `GRID_HOST=baseline-only` (no overlay), the same fallback as foundations' `tests/helpers/wired.bash`. So CI (no personal baseline, submodules initialised) audits the example baseline. The wired part is skipped with one loud notice only when `git submodule status` shows an uninitialised (`-`) submodule.
+  - Explicit targets: any non-option arguments after the mode (or with no mode) are appended as extra targets, so `scripts/audit.sh plugins/` scans one tree (used by `plugin-marketplace`). All other options pass through to `audit.py`.
+  - Every mode passes `--baseline <file>` to `audit.py` with the same baseline file the wire uses (`--wired`: `${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}` when it exists; `--gate`: the file chosen above).
 - Severity model: two levels. `high` blocks (exit 1). `low` warns (printed, exit 0). A rule can start high and be downgraded to low by context (test file, negating prose, code comment).
 - Findings the user has reviewed go in the allowlist (CURATION.md). Findings that are false-positive CLASSES get fixed in the rule, not allowlisted line by line.
 
@@ -77,9 +79,8 @@ builtin:
   symlink-escape: high
   binary-exec: low
   oversize-file: low
-  frontmatter-hook: low
-  source-not-allowed: high
-  source-uncurated: high
+  source-not-allowed: low      # raised to high for repos named in the baseline (see --baseline)
+  source-uncurated: low        # raised to high for repos named in the baseline (see --baseline)
   allow-unused: low
 
 rules:
@@ -134,14 +135,6 @@ rules:
     message: text that tries to override the agent's instructions
     regex: '(?i)\b(?:ignore|disregard|forget)\s+(?:all\s+|any\s+|your\s+)?(?:previous|prior|above|earlier|preceding)\s+(?:instructions|prompts|rules|guidelines|context)|\byou\s+are\s+now\s+(?:in\s+)?(?:developer\s+mode|DAN|jailbroken|unrestricted)|\b(?:do\s+not|don.t|never)\s+(?:tell|inform|reveal\s+(?:this\s+)?to|mention\s+(?:this\s+)?to)\s+the\s+user'
     downgrade: [negation, test]
-  - id: base64-blob
-    severity: low
-    severity_by_class: {script: high, hook: high}
-    message: long base64-looking blob
-    regex: '[A-Za-z0-9+/]{256,}={0,2}'
-    ignore_regex: 'data:[\w/+.-]+;base64,'
-    skip_ext: ['.svg', '.json', '.map', '.ipynb', '.xsd', '.lock', '.min.js']
-    downgrade: [test]
   - id: hook-network
     severity: high
     applies: [hook]
@@ -163,7 +156,7 @@ rules:
 ### Rule semantics (how audit.py evaluates a line)
 
 1. Class of the file = first `classes` entry whose any glob matches the path relative to the scanned directory; none matches -> `other`. A line inside a `SKILL.md`/agent `.md` frontmatter `hooks:` block is class `hook` regardless of file class.
-2. A rule runs on a line only if its `applies` list (absent = all classes) contains the line's class, the file extension is not in `skip_ext`, `regex` matches, and `ignore_regex` (if any) does not match the same line.
+2. A rule runs on a line only if its `applies` list (absent = all classes) contains the line's class, `regex` matches, and `ignore_regex` (if any) does not match the same line.
 3. Base severity = `severity_by_class[class]` else `severity`. Tier `owned` raises it to `owned_severity` when present.
 4. Downgrade to `low` if any listed context holds:
    - `test`: file class is `test`.
@@ -176,7 +169,6 @@ rules:
    - `symlink-escape`: a symlink inside the scanned tree whose resolved target is outside that tree. Symlinks are never followed.
    - `binary-exec`: ELF, Mach-O or PE magic at the start of a file. Binary files are otherwise skipped (a NUL in the first 8 KiB means binary).
    - `oversize-file`: file larger than `limits.max_file_bytes`; not scanned, reported.
-   - `frontmatter-hook`: every `command:` line inside a frontmatter `hooks:` block is listed so a skill that registers a hook is visible in the report even when clean.
 8. Excerpts are truncated to 120 chars and every non-printable or invisible code point is rendered as `\uXXXX`, so the report cannot itself carry bidi or zero-width text.
 
 ### Restricted YAML (scripts/lib/miniyaml.py)
@@ -236,6 +228,7 @@ Skills, agents and roles authored in this repo (`skills/`, `agents/`, `agent-fac
 
 - Machine-checked parts: (a) each `### repos/<name>` heading must exist for every wired upstream repo (see source-curation spec); (b) the `audit-allow` fenced block(s), found by a line that is exactly `` ```yaml audit-allow `` up to the next line that is exactly `` ``` ``.
 - Allowlist entry fields: `rule` (required, must be a known rule or builtin id), `path` (required; glob relative to `--root`, e.g. `repos/gstack/browse/src/*.ts`), `contains` (optional; substring that must appear in the excerpt of the line; omit only for file-level builtins like `hidden-unicode`/`symlink-escape`/`binary-exec`), `reason` (required, at least 10 characters). Missing field, unknown rule id or empty reason -> exit 2 with the entry index.
+- Uncurated severity (one mechanism, used by wire and gate alike): a wired upstream repo with no `### repos/<name>` heading gets `source-uncurated` at `high` when `--baseline` names it, else `low`. Effect: a repo wired only by a machine overlay WARNS at wire time; a baseline repo BLOCKS in the gate (and in wire.sh, since the same audit runs there). CI enforces it for the tracked example baseline through `--gate`; `tests/test_curation.bats` enforces it offline (no submodules needed).
 - An allowlist entry that matches nothing in a run is reported as a `low` note `allow-unused` (not an error: on a machine where the repo is not wired it legitimately matches nothing).
 - Allowlist matching is on rule + path + line text, never on a commit SHA, so a submodule bump that moves lines does not invalidate entries, and a bump that introduces NEW offending lines is still caught.
 
@@ -250,9 +243,9 @@ LOW   home-path        repos/gstack/qa/test/x.test.ts:31  absolute per-user home
 audit: 160 targets, 4210 files, 1 high, 22 low, 3 allowed -> BLOCKED
 ```
 
-`--quiet` omits `LOW` lines (summary still counts them). Final line is `-> BLOCKED` when any high, else `-> ok`.
+`--quiet` omits `LOW` lines (summary still counts them), except `source-not-allowed` and `source-uncurated`, which always print: it is one line per repo and is the wire-time warning for overlay-only repos. Final line is `-> BLOCKED` when any high, else `-> ok`.
 
-JSON (`--format json`), the interface for workstream 3:
+JSON (`--format json`), the interface for `manifest-lock-install`:
 
 ```json
 {
@@ -285,11 +278,14 @@ python3 scripts/audit.py [options] TARGET [TARGET...]
   --format text|json
   --quiet           text mode: hide LOW findings
   --show-allowed    include allowlisted findings
+  --baseline FILE   wiring manifest; repos it names (first path segment of each entry that is
+                    not a comment, `-` subtraction or `project:` line) get `source-not-allowed`
+                    and `source-uncurated` at `high` instead of `low`. Absent = both are `low`.
   --check-url URL   no scan; exit 0 if URL's host and owner/repo are allowed by policy `sources`, else 1 (prints why)
 exit: 0 no un-allowed high | 1 at least one high | 2 usage, policy, allowlist or CURATION.md parse error
 ```
 
-- Tier of a target = `owned` if its resolved path is under `<root>/<one of owned_roots>/`, else `upstream`. A directory staged by WS3 outside the repo is therefore `upstream` automatically.
+- Tier of a target = `owned` if its resolved path is under `<root>/<one of owned_roots>/`, else `upstream`. A directory staged by manifest-lock-install outside the repo is therefore `upstream` automatically.
 - Targets that do not exist are an error (exit 2), not a silent skip.
 
 ## Integration
@@ -336,12 +332,14 @@ check audit run_audit
 
 `tests/test_gate.bats` runs a COPY of gate.sh in a stub repo with no python3 and no audit.sh; the new check must therefore skip loudly there (its existing assertions only grep for names in the skipped list, so adding `audit` does not break them). Add one gate test proving the skip.
 
-### Interface for workstream 3 (manifest-lock-install)
+### Interface for manifest-lock-install
 
+- This is the D3 interface, owned by this change: `python3 scripts/audit.py --format json --root <root> DIR...` and `scripts/audit.sh --owned|--wired|--gate [TARGET...]`.
 - Staged content: `python3 scripts/audit.py --format json --root <staging-root> <staged-dir>...` BEFORE any link or cache promotion; abort the install on exit 1 or 2. Stage under a path like `<staging-root>/repos/<name>/...` so allowlist globs in CURATION.md (`repos/<name>/...`) apply unchanged.
 - Source URLs in `grid.yaml`: validate with `python3 scripts/audit.py --check-url <url>`. `policy.yaml` `sources.allowed_repos` is the single allowlist; `grid.yaml` must not carry a second one.
-- Record `policy_sha256` and the result per skill in the ledger if useful (suggestion, not required here). The audit verdict is only meaningful for the exact content scanned; `grid.lock` content hashes (WS3) are what tie a verdict to bytes.
-- `grid audit` (WS3's CLI) = `exec bash scripts/audit.sh "$@"`. This change creates no `grid` binary.
+- Record `policy_sha256` and the result per skill in the ledger if useful (suggestion, not required here). The audit verdict is only meaningful for the exact content scanned; `grid.lock` content hashes (manifest-lock-install) are what tie a verdict to bytes.
+- `grid audit` is added by `manifest-lock-install` as a thin passthrough (`exec bash scripts/audit.sh "$@"`). This change creates no `grid` binary.
+- `plugin-marketplace` runs `bash scripts/audit.sh plugins/` on its plugin tree.
 - This change never reads `grid.yaml` or `grid.lock`.
 
 ## Expected false positives
@@ -363,7 +361,7 @@ Measured on an unoptimised prototype of exactly this policy (indicative, re-meas
   - ECC `hooks/`, `scripts/hooks/`, `.mcp` configs and `plugins/` are outside `skills/`; they were not measured. Group 4 runs the scanner over them once and records the result in CURATION.md (expected: `hook-network`, `credential-read` highs).
 - Known gaps (false NEGATIVES, accepted and documented in CURATION.md):
   - line-based: a pattern split across lines, or JSON `"command": "uvx"` with args on the next line, is missed.
-  - obfuscation (string concatenation, `eval` of decoded strings below the 256-char blob threshold) is missed.
+  - obfuscation (string concatenation, `eval` of base64-decoded strings) is missed; there is no base64-blob rule.
   - the `negation` downgrade can be gamed by an attacker who writes "never" on the line; the finding still prints as `low`, so it is not hidden, just not blocking.
   - code that fetches and runs a payload at skill-run time, from a script that is itself clean, is invisible to static scanning.
   - the scan covers what is on disk at audit time; a later `git pull` in a submodule needs a re-run (wire.sh and gate do that).
@@ -378,13 +376,13 @@ Measured on an unoptimised prototype of exactly this policy (indicative, re-meas
 - Decided: `negation` downgrade applies to prose (`doc`/`other` class) only, never to scripts, hooks or config, because a script cannot "warn" its way out of executing.
 - Decided: `secret-shape` has no downgrades and its placeholder exemption is the `ignore_regex` (`EXAMPLE`, `placeholder`, `your_`, `xxxxxx`, `...`).
 - Decided: upstream tier warns on `home-path`, owned tier blocks (`owned_severity: high`), because the repo rule is no personal data in public files.
-- Decided: tier is decided by `owned_roots` relative to `--root`, not by "is it under repos/", so content staged by WS3 anywhere is `upstream`.
+- Decided: tier is decided by `owned_roots` relative to `--root`, not by "is it under repos/", so content staged by manifest-lock-install anywhere is `upstream`.
 - Decided: `npx -y` is flagged unless a version is pinned on the same line (`pkg@1.2.3`); bare `npx tool` without `-y` is not flagged (npx prompts before installing).
 - Decided: `@latest` is `high` in script, hook and config files and `low` in prose, since prose is an install instruction to a human and files are executed.
 - Decided: `uvx` and `@latest` pins are judged per line; multi-line JSON arg lists are a documented gap, not a feature to build.
 - Decided: `hook-network` applies only to class `hook` (hooks directories, `hooks.json`, `*-hook` files, frontmatter `hooks:` blocks); ordinary skill scripts may call APIs and are not flagged for it. Loopback hosts are ignored.
 - Decided: add `credential-read` (reads of `~/.ssh/id_*`, `~/.aws/credentials`, `~/.netrc`, keychain, etc.) beyond the listed scope because credential theft is the dominant malicious-skill pattern; `low` in prose, `high` in scripts and hooks.
-- Decided: the base64 rule needs 256+ contiguous base64 characters and is `high` only in script and hook files; `data:...;base64,` lines and `.svg/.json/.map/.ipynb/.xsd/.lock/.min.js` files are skipped.
+- Decided: no base64-blob rule and no frontmatter-hook listing (both cut in review): the blob rule needed a per-extension skip list to stay quiet and catches nothing a determined attacker cannot split below the threshold; the hook listing is informational only. Frontmatter `hooks:` lines are still class `hook`, so `hook-network` covers them.
 - Decided: the allowlist lives in CURATION.md inside a fenced `audit-allow` block (one file for humans and the scanner, per the brief), keyed on rule + path glob + `contains`, `reason` mandatory.
 - Decided: a false-positive CLASS hit in 3 or more places is fixed in `policy.yaml` (`ignore_regex`, `downgrade`); fewer than 3 are allowlisted with a reason.
 - Decided: unused allowlist entries are a `low` note (`allow-unused`), never an error, because uninitialised or unwired repos legitimately match nothing.
@@ -394,11 +392,14 @@ Measured on an unoptimised prototype of exactly this policy (indicative, re-meas
 - Decided: report excerpts escape invisible and non-printable code points as `\uXXXX`.
 - Decided: wire.sh audits BEFORE teardown and exits 3 on a block, so a blocked wire changes nothing; `GRID_AUDIT=warn` is the only override and it prints a warning.
 - Decided: wire.sh does NOT block when `policy.yaml` or `python3` is absent (it prints why); a bare machine and every existing mock-grid test must still wire.
-- Decided: `gate.sh` audits owned assets always and the wired set only when a baseline exists and all submodules are initialised; otherwise audit.sh prints a notice and the gate still passes that part. CI therefore checks owned assets only.
+- Decided: `gate.sh` audits owned assets plus the baseline's wired set, falling back to `baseline-submodules.example.txt` (no overlay) when there is no personal baseline, the same fallback foundations uses for its wired-set tests; only uninitialised submodules skip the wired part (loud notice). CI therefore audits the example baseline, which is what makes "baseline repos block in the gate" true on every PR.
 - Decided: fixtures for tests are generated inside the bats test (temp dir, `printf` assembly of tokens and invisible characters), never committed, so no fake credential or injection phrase sits in the repo for push-protection or for the audit's own scan of `tests/` to trip on.
 - Decided: this change adds no network access, no model calls and no new dependency; `audit.sh` and `audit.py` are offline and deterministic.
 - Decided: the source allowlist is `owner/repo` granular (`allowed_repos`), host-restricted to `github.com`, because trusting an owner trusts all their future repos.
-- Decided: the source and curation checks (`source-not-allowed`, `source-uncurated`) are both `high`, and apply only to wired upstream repos, so library-tier submodules need no entry until promoted.
-- Decided: CURATION.md's machine-checked structure is only `### repos/<name>` headings and the `audit-allow` block; exclusions are a human table, not parsed.
-- Decided: `--check-url` exists for workstream 3 and is the only source-policy API; policy.yaml remains the single allowlist.
+- Decided: source and curation checks apply only to wired upstream repos, so library-tier submodules need no entry until promoted. `source-not-allowed` and `source-uncurated` are both `high` for repos named in the baseline and `low` for overlay-only repos (operator decision: warn at wire time for overlay-only, block in the gate and in wire.sh for baseline; the split on `source-not-allowed` means private overlay repo names never have to enter the tracked `policy.yaml`); the split is carried by `audit.py --baseline` rather than by a wire-vs-gate flag, so the same repo gets the same verdict wherever the audit runs.
+- Decided: with no manifest at all (wire.sh's legacy wire-everything mode) no `--baseline` is passed, so both source checks are `low` for every repo.
+- Decided: CURATION.md's machine-checked structure is only `### repos/<name>` headings and the `audit-allow` block; the exclusions table is for humans and is not parsed or tested.
+- Decided: `--check-url` is the only source-policy API (used by `tests/test_curation.bats` and available to `manifest-lock-install`); policy.yaml remains the single allowlist.
+- Decided: `--quiet` never hides `source-not-allowed` or `source-uncurated`, so `wire.sh` (which runs the audit quietly) still shows the overlay-only warning.
+- Decided: `audit.sh` appends any non-option arguments as extra targets, so other changes scan their own trees through one entry point (D3).
 - Decided: ECC's documentation-URL host allowlist and blanket symlink ban are not adopted (noise; a link to a docs host is not an execution risk).

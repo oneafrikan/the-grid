@@ -38,7 +38,11 @@ Generated plugin files SHALL contain no operator name or email, channel, hostnam
 
 #### Scenario: Built on a configured machine
 - **WHEN** the build runs on a machine whose `agent-factory/user.yaml` has an operator email set
-- **THEN** no file under `plugins/` contains that email and the output is identical to a build on a machine with no `user.yaml`
+- **THEN** compose reads `agent-factory/user.public.yaml` via `GRID_USER_CONFIG`, no file under `plugins/` contains that email or the local hostname, and the output is identical to a build on a machine with no `user.yaml`
+
+#### Scenario: Public identity file missing
+- **WHEN** `agent-factory/user.public.yaml` does not exist and a bundle needs compose
+- **THEN** the build exits 2 and writes nothing
 
 #### Scenario: Private roles do not leak
 - **WHEN** `GRID_PRIVATE_ROLES_DIR` points at a roles tree that overrides a public role
@@ -46,7 +50,7 @@ Generated plugin files SHALL contain no operator name or email, channel, hostnam
 
 ### Requirement: Validation in the gate
 
-`scripts/gate.sh` MUST run `build-plugins.py --check` and `claude plugin validate --strict` on the marketplace, each plugin and each plugin's `skills/` and `agents/` directory, and MUST report a skipped check loudly rather than pass silently when `claude` or the agent-factory venv is absent.
+`scripts/gate.sh` MUST run `build-plugins.py --check`, `claude plugin validate --strict` on the marketplace, each plugin and each plugin's `skills/` and `agents/` directory, and the `vetting` audit over `plugins/` at owned tier, and MUST report a skipped check loudly rather than pass silently when `claude` or the agent-factory venv is absent.
 
 #### Scenario: Validator rejects a bad manifest
 - **WHEN** a generated `plugin.json` lacks `version`
@@ -54,7 +58,11 @@ Generated plugin files SHALL contain no operator name or email, channel, hostnam
 
 #### Scenario: Tool absent
 - **WHEN** `claude` is not on PATH
-- **THEN** the gate prints a skip notice for the validate step and lists `plugins` among skipped checks
+- **THEN** the gate prints a skip notice for the validate step and lists `plugins-validate` among skipped checks
+
+#### Scenario: Audit finding in plugin tree
+- **WHEN** a file under `plugins/` contains a high-severity audit finding such as hidden Unicode
+- **THEN** `scripts/audit.sh --owned` exits 1 naming that path, and the gate fails
 
 ### Requirement: Entry source paths exist
 

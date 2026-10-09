@@ -6,17 +6,16 @@ Claude Code users can install a git repo that ships `.claude-plugin/marketplace.
 
 - Add `plugins/bundles.json`: hand-authored membership manifest (version, owned skills per bundle, which composed projects feed it).
 - Add `scripts/build-plugins.py`: generates `plugins/grid-core/`, `plugins/grid-agents/` and `.claude-plugin/marketplace.json` from the manifest; `--check` reports drift and writes nothing. Generated files are committed and never hand-edited.
-- Add `GRID_NEUTRAL_IDENTITY=1` to `agent-factory/compose.py` so plugin builds embed no operator, channel or hostname.
-- Gate: `scripts/gate.sh` runs `build-plugins.py --check` and `claude plugin validate --strict` over the marketplace, both plugins and their `skills/` and `agents/` dirs.
+- Plugin builds compose with `GRID_USER_CONFIG=agent-factory/user.public.yaml` and no private roles (both from `workflow-upgrades`), so they embed no operator, channel or hostname.
+- Gate: `scripts/gate.sh` runs `build-plugins.py --check` and `claude plugin validate --strict` over the marketplace, both plugins and their `skills/` and `agents/` dirs; `scripts/audit.sh --owned` (change `vetting`) covers `plugins/`.
 - Add `docs/PLUGINS.md` (install, namespacing, "one channel per machine") and a `CLAUDE.md` pointer.
-- HUMAN publish step after tag `v0.1.0`: verify install from a clean profile, then announce.
+- HUMAN publish step after tag `v0.1.0`: verify install from a clean profile.
 
 ## Capabilities
 
 ### New
 
 - `plugin-marketplace`: bundle manifest, generated plugins and marketplace file, validation, owned-content-only scope.
-- `neutral-compose-identity`: compose.py mode that omits install-specific identity from composed agents.
 
 ### Modified
 
@@ -25,7 +24,8 @@ None (no specs exist yet under `openspec/specs/`).
 ## Impact
 
 - New: `plugins/` (about 60 small files), `.claude-plugin/marketplace.json`, `scripts/build-plugins.py`, `docs/PLUGINS.md`, `tests/test_plugins.bats`.
-- Edited: `agent-factory/compose.py` (one env switch), `scripts/gate.sh`, `CLAUDE.md`.
+- Edited: `scripts/gate.sh`, `scripts/audit.sh` and `policy.yaml` (add `plugins/` to the owned set), `CLAUDE.md`. No `compose.py` change.
+- Depends on `workflow-upgrades#2` (`GRID_USER_CONFIG`, `user.public.yaml`), `vetting#3`/`#5` (audit), `front-door#15` (tag).
 - Third-party skills are not touched, so no licence or vetting duty is created for upstream content.
 - Use case named: Claude Code users who want the-grid's skills and dev-team agents (web/app full-stack, marketing, data) without cloning.
 

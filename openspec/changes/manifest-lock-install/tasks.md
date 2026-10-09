@@ -1,111 +1,92 @@
 # Tasks
 
-All groups: add the code comments the repo expects, keep shellcheck clean (`shellcheck -S warning`), keep `scripts/grid` runnable on Python 3.8+ with no third-party imports, never touch real `~/.claude` in tests (use `common_setup` from `tests/helpers/setup.bash`). Default verify command: `bash scripts/gate.sh`. Design reference: `design.md` (file formats, algorithms, `Decided:` list).
+All groups: add the code comments the repo expects, keep shellcheck clean (`shellcheck -S warning`), keep `scripts/grid` runnable on Python 3.8+ with no third-party imports, never touch real `~/.claude` or `~/.grid` in tests (use `common_setup` from `tests/helpers/setup.bash` and export `GRID_STATE_DIR` to a temp dir). Default verify command: `bash scripts/gate.sh`. Design reference: `design.md` (file formats, algorithms, `Decided:` list); copy its formats exactly, do not redesign.
 
-## 1. HTTPS submodule URLs (#37)
+## 1. grid CLI skeleton, grid.yaml, typed-entry reader, audit passthrough
 
-PR body: `Closes #37`. Depends on: none.
+Depends on: foundations#3 (HTTPS `.gitmodules`), vetting#1 (`scripts/lib/miniyaml.py`), vetting#3 (`scripts/audit.sh`).
 
-- [ ] 1.1 For each `git@github.com:` URL in `.gitmodules` (22), check `gh repo view <owner>/<repo> --json isPrivate`; rewrite public ones to `https://github.com/<owner>/<repo>.git`. Leave any private repo as SSH and list it in 1.3.
-- [ ] 1.2 Run `git submodule sync`; regenerate `docs/SOURCES.md` with `bash scripts/sources.sh`; confirm `bash scripts/sources.sh --check` exits 0.
-- [ ] 1.3 Add `tests/test_gitmodules_https.bats`: fails if any `.gitmodules` URL starts with `git@`, except names in an allowlist array at the top of the test (empty unless 1.1 found a private repo).
-- Files: `.gitmodules`, `docs/SOURCES.md`, `tests/test_gitmodules_https.bats`.
-- Acceptance: new bats test passes; `docs/SOURCES.md` has no `ᵍ` markers for converted entries; `git -C repos/<sample> fetch --dry-run` works for three converted repos.
-- Verify: `bash scripts/gate.sh`.
-
-## 2. grid CLI skeleton, grid.yaml, path
-
-Depends on: none (can run parallel with 1).
-
-- [ ] 2.1 Create `scripts/grid` (executable, `#!/usr/bin/env python3`, stdlib only). `argparse` subcommands registered now as stubs that exit 2 with "not implemented": `lock`, `install`, `doctor`, `repair`, `uninstall`, `drift`, `schedule`. Implemented now: `path`. Shared helpers: grid-dir resolution (`GRID_DIR` env, `--grid-dir`, else parent of `scripts/`), `LC_ALL=C` sorting, atomic write (temp + `os.replace`), run-git helper that fails loudly, exit codes 0/1/2 per design.
-- [ ] 2.2 Implement the `grid.yaml` subset parser and validator in `scripts/grid` per design (comments, `key: scalar`, 2-space nesting; reject everything else with line number). Expose sources with `url`, `ref` default `HEAD`, `needs-setup` default false; require `version: 1` and `wired.baseline`.
-- [ ] 2.3 Implement `grid path <source>/<skill>`: print the dir (submodule checkout if `repos/<source>/.git` exists, else store); search by directory basename among tracked skill dirs; exit 1 if none.
-- [ ] 2.4 Create `grid.yaml` listing every source referenced by `baseline-submodules.example.txt` (names = `repos/` dir names; URLs identical to `.gitmodules` as of group 1 — if group 1 has not merged, use the HTTPS form and expect the check in 4.x to pass only after it). Mark `gstack` with `needs-setup: true`. `wired.baseline: baseline-submodules.example.txt`.
-- [ ] 2.5 Add `tests/test_grid_manifest.bats`: valid parse; list item rejected with line number; missing source for a baseline repo; `git@` URL refused; `path` finds a skill in a fixture grid dir (fixture `GRID_DIR` under `mktemp`).
+- [ ] 1.1 Create `scripts/grid` (executable, `#!/usr/bin/env python3`, stdlib only, `sys.path` insert of `scripts/lib` from `__file__`). `argparse` subcommands registered as stubs that exit 2 with "not implemented": `lock`, `install`, `doctor`, `repair`, `uninstall`, `drift`, `schedule`. Shared helpers: grid-dir resolution (`--grid-dir`, `GRID_DIR`, else parent of `scripts/`), state dir (`GRID_STATE_DIR`, else `$HOME/.grid`), atomic write (temp + `os.replace`, skip when content unchanged), run-git helper (env `LC_ALL=C`, raises on non-zero with the command in the message), exit codes 0/1/2.
+- [ ] 1.2 Implement `load_grid_yaml(grid_dir)` using `miniyaml.loads` with the key validation in design.md "File formats" (required `version: 1`, `sources.<name>.url`, optional `ref` default `HEAD`, required `wired.baseline`; reserved `rules`/`harnesses` ignored with the exact notice; any other unknown key exit 2 naming it; `miniyaml.ParseError` exit 2 with its line).
+- [ ] 1.3 Implement `read_wired_entries(paths)` per design.md "Typed entries": strips `#` comments and whitespace like `wire.sh`'s `load_manifest`; returns untyped adds and denies; ignores every typed entry (`<kind>:...` and `-<kind>:...`, any kind).
+- [ ] 1.4 Implement `grid audit [args...]`: run `bash <grid>/scripts/audit.sh args...`, return its exit code unchanged.
+- [ ] 1.5 Create `grid.yaml` with the header comment from design.md, one source per repo referenced by an untyped entry in `baseline-submodules.example.txt` (key = `repos/` dir name, `url` copied from `.gitmodules`), and `wired.baseline: baseline-submodules.example.txt`.
+- [ ] 1.6 Add `tests/test_grid_manifest.bats`: real `grid.yaml` loads; a list where a scalar is expected, an unknown key, and `version: 2` each exit 2 naming the line or key; `rules:` and `harnesses:` top-level keys load with the notice; `read_wired_entries` (via a tiny `python3 -c` import of `scripts/grid` as a module using `importlib.machinery.SourceFileLoader`) ignores `project:x`, `-project:x`, `rules:sql`, `-rules:sql`, `harness:codex`, `-harness:codex`, `future:y` and keeps `repo`, `repo/skill`, `-repo`, `-repo/skill`; `grid audit --owned` in a fixture grid with a stub `scripts/audit.sh` that exits 7 returns 7.
 - Files: `scripts/grid`, `grid.yaml`, `tests/test_grid_manifest.bats`.
-- Acceptance: `python3 -I scripts/grid path <source>/<skill>` works on the real repo; new bats pass; `python3 -m py_compile scripts/grid` clean.
+- Acceptance: new bats pass; `python3 -m py_compile scripts/grid` clean; every repo in an untyped line of `baseline-submodules.example.txt` is a key under `sources`.
 - Verify: `bash scripts/gate.sh`.
 
-## 3. wire.sh store fallback and GRID_BASELINE
+## 2. grid lock, grid.lock, gate check
 
-Depends on: none (parallel with 1, 2).
+Depends on: 1, foundations#1 (skill exclusions), foundations#2 (`GRID_BASELINE`), foundations#5 (runtime-root link exists, must be excluded).
 
-- [ ] 3.1 In `scripts/wire.sh`: replace the baseline path with `${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}` (document it in the header comment env list). Do not change `catalog.sh`.
-- [ ] 3.2 In the repo-wiring loop, iterate the `LC_ALL=C` sorted union of directory names in `repos/` and `.grid/store/`; per name set `repo_dir` to `repos/<name>` if `-e repos/<name>/.git`, else `.grid/store/<name>` if it is a directory, else skip. Keep the existing whole-repo and per-skill branches and alphabetical precedence untouched.
-- [ ] 3.3 Add `.grid/` and `.installed.manifest` to `.gitignore` (next to `.wired.manifest`).
-- [ ] 3.4 Add `tests/test_wiring_store.bats`: store used when `repos/<n>` is an empty dir; submodule checkout (a `git init` dir) wins over store; no store gives identical links to before; `GRID_BASELINE` override honoured; `wire.sh --check` stays clean when wired from the store.
-- Files: `scripts/wire.sh`, `.gitignore`, `tests/test_wiring_store.bats`.
-- Acceptance: existing `tests/test_wiring.bats` passes unmodified; new tests pass.
+- [ ] 2.1 Implement the content-hash helpers in `scripts/grid` exactly per design.md: from git (`git ls-tree -r <sha> -- <path>`, mode to class, `git cat-file blob` for content) and from disk (class from `os.path.islink` / execute bits, every file under the dir); symlink-escape check (exit 2 naming the file).
+- [ ] 2.2 Implement `grid lock` per design.md "grid lock" (wire.sh environment exactly as listed, link selection, gitlink sha, dirty/mismatch exit 2, `../` warning, entries with `kind: "skill"`, sort order, atomic write).
+- [ ] 2.3 Implement `grid lock --check` (in-memory regeneration and diff, exit 1 listing added/removed/changed; manifest checks: HTTPS, URL equals `.gitmodules`, every untyped baseline repo has a source). Implement the lock reader with the unknown-`kind` skip and notice.
+- [ ] 2.4 Generate `grid.lock` from the real submodules (`python3 scripts/grid lock`) and commit it.
+- [ ] 2.5 `scripts/gate.sh`: add `run_lock_check` and `check lock run_lock_check` after `catalog`; skip loudly (append `lock` to `SKIPPED`, like `run_catalog_check`) when `python3` or `scripts/grid` is missing, or any `repos/<source>` named in `grid.lock` has no `.git`. Update the header comment list. Add a case to `tests/test_gate.bats` proving the check self-skips in the throwaway repo without `scripts/grid`.
+- [ ] 2.6 Create `tests/helpers/grid_fixture.bash` with `make_upstream <dir>` (git repo, two skills `skills/alpha` and `nested/cat/beta`, one executable file, `uploadpack.allowFilter` and `uploadpack.allowAnySHA1InWant` true) and `make_grid_fixture <grid> <upstream>` (parent git repo; copies `scripts/grid`, `scripts/wire.sh`, `scripts/lib/find-skill-mds.sh`, `scripts/lib/miniyaml.py`; `repos/up` cloned from upstream and registered as a gitlink via `git update-index --add --cacheinfo 160000,<sha>,repos/up`; `grid.yaml` with `url: file://<upstream>`; baseline file `up`).
+- [ ] 2.7 Add `tests/test_grid_lock.bats`: lock content and sorting, every entry has `kind: "skill"`, 40-hex `sha`, `sha256:` hash; second run byte-identical; dirty skill dir exits 2; checkout at another commit exits 2; changed content committed upstream and checked out without relock makes `--check` exit 1 naming the skill; symlink escaping the skill dir exits 2; a baseline containing `rules:sql`, `harness:codex`, `project:core` produces the same lock as without them; a lock containing a `kind: "rule"` entry is read with a notice and exit 0 by `--check`'s reader.
+- Files: `scripts/grid`, `grid.lock`, `scripts/gate.sh`, `tests/test_gate.bats`, `tests/helpers/grid_fixture.bash`, `tests/test_grid_lock.bats`.
+- Acceptance: `python3 scripts/grid lock --check` exits 0 on the real repo after 2.4; the entry count equals the number of repo-sourced skill links `wire.sh` makes for the example baseline (excluding the runtime-root link).
 - Verify: `bash scripts/gate.sh`.
 
-## 4. grid lock and grid.lock
+## 3. grid install, vetting at install, ledger, GRID_NO_CATALOG
 
-Depends on: 2, 3 (and 1 for URL equality).
+Depends on: 2, vetting#1 (`scripts/audit.py`, `policy.yaml`).
 
-- [ ] 4.1 Implement content hash, tree id and sha helpers in `scripts/grid` exactly per design (tracked files via `git ls-tree -r <sha> -- <path>`, mode class `x`/`-`/`l`, symlink escape check).
-- [ ] 4.2 Implement `grid lock`: run `wire.sh` with `GRID_SKIP_CATALOG=1 GRID_BASELINE=<wired.baseline file> GRID_HOST=lock-none SKILLS_DIR=<tmp> AGENTS_DIR=<tmp>`; take symlinks whose target is under `repos/<source>/`; derive `source`, `path`; get `sha` from `git ls-files -s repos/<source>`; fail (exit 2) if the checkout `HEAD` differs or `git status --porcelain -- <path>` is non-empty; write `grid.lock` atomically. Warn (stderr, not failure) when a `SKILL.md` mentions `../`.
-- [ ] 4.3 Implement `grid lock --check`: regenerate in memory, diff against `grid.lock`, exit 1 listing added/removed/changed skills; also run the manifest checks (every baseline repo has a source; source URL equals `.gitmodules`; HTTPS).
-- [ ] 4.4 Generate and commit `grid.lock` from the real submodules (`python3 -I scripts/grid lock`).
-- [ ] 4.5 Add the gate check: in `scripts/gate.sh` add `lock` check running `python3 -I scripts/grid lock --check`; skip loudly (SKIPPED, like the venv case) if `scripts/grid` or `python3` is missing, or any locked submodule is uninitialised. Update the header comment list. Extend `tests/test_gate.bats` so the existing copy-of-gate tests still pass (the check must self-skip when `scripts/grid` is absent in the throwaway repo).
-- [ ] 4.6 Add `tests/test_grid_lock.bats` using a fixture: a temp parent git repo with a temp submodule-like checkout (`git init` under `repos/fix`, committed, gitlink added via `git update-index --add --cacheinfo 160000,<sha>,repos/fix`), a `grid.yaml` and a baseline file. Cases: lock content and sorting; second run byte-identical; dirty skill dir exits 2; changed content then `--check` exits 1; symlink escape exits 2.
-- Files: `scripts/grid`, `grid.lock`, `scripts/gate.sh`, `tests/test_gate.bats`, `tests/test_grid_lock.bats`.
-- Acceptance: `grid lock --check` exits 0 on the real repo after 4.4; entry count equals the number of repo-sourced links `wire.sh` makes for the example baseline.
+- [ ] 3.1 `scripts/wire.sh`: wrap step 4 (`catalog.sh` refresh) so it also requires `-z "${GRID_NO_CATALOG:-}"`; add `GRID_NO_CATALOG=1` to the header env list. Nothing else in `wire.sh` changes.
+- [ ] 3.2 Implement the fetch, verify and place routine per design.md "Fetch mechanism" and "Install algorithm" step 7 (staging `<grid>/.grid-tmp/<pid>/`, removed in `finally`; `-c protocol.file.allow=always` only when `GRID_ALLOW_FILE=1`; `GRID_TRACE_FETCH` append).
+- [ ] 3.3 Implement the audit step per design.md "Vetting the staged copy" (per-source `audit.py` call, per-entry failure from JSON, `GRID_AUDIT=warn`, loud skip when `audit.py` or `policy.yaml` is absent).
+- [ ] 3.4 Implement ledger read/write per design.md (path `${GRID_STATE_DIR:-$HOME/.grid}/installed.manifest`, columns, sort, atomic, unchanged-content skip, unknown-`kind` skip) as functions reused by group 4.
+- [ ] 3.5 Implement `grid install` steps 1-12 exactly as in design.md, including the runtime-source skip (`scripts/lib/runtimes.txt`), the checkout skip, the no-op path and `GRID_NO_CATALOG=1 bash wire.sh`.
+- [ ] 3.6 Add `tests/test_grid_install.bats` using `grid_fixture.bash`, but with `repos/up` left as an EMPTY dir that is still a gitlink in the parent index (no clone) and `grid.lock` written by running `grid lock` in a maintainer copy of the fixture first. Copy the real `policy.yaml` and `scripts/audit.py` into the fixture grid. Cases: fresh install places both skills under `repos/up/...` with no `.git` in `repos/up`, links exist in `SKILLS_DIR`, `git -C <grid> status --porcelain --untracked-files=no` is empty, `SKILLS.md` not created; second run appends nothing to `GRID_TRACE_FETCH` and leaves the ledger mtime unchanged; tampered lock hash exits 1 and places nothing for that skill; non-HTTPS URL without `GRID_ALLOW_FILE` exits 2 and appends nothing to the trace; overlay `-up/beta` skips beta; overlay containing `rules:sql` and `harness:codex` changes nothing; a skill whose file contains a `curl ... | sh` line is not placed and exit is 1, while the other skill is placed; same with `GRID_AUDIT=warn` places both; a source listed in a fixture `scripts/lib/runtimes.txt` is skipped with the notice; a `repos/up/.git` checkout is left untouched with the notice; ledger rows have `dest` starting `repos/` and no absolute path; `wire.sh` with `GRID_NO_CATALOG=1` writes `.wired.manifest` but not `SKILLS.md`.
+- Files: `scripts/grid`, `scripts/wire.sh`, `.gitignore` (add `.grid-tmp/`), `tests/test_grid_install.bats`.
+- Acceptance: new tests pass offline; existing `tests/test_wiring.bats` and `tests/test_catalog.bats` pass unmodified.
 - Verify: `bash scripts/gate.sh`.
 
-## 5. grid install and the ledger
+## 4. grid doctor, repair, uninstall
 
-Depends on: 2, 3, 4.
+Depends on: 3.
 
-- [ ] 5.1 Implement the fetch/verify/place routine in `scripts/grid` per design (init, `sparse-checkout set --cone`, `fetch --depth 1 --filter=blob:none origin <sha>`, checkout FETCH_HEAD, verify sha, tree, hash, copy without `.git`, swap via rename, stage under `.grid/tmp/` removed in a `finally`). URL policy: `https://` only unless `GRID_ALLOW_FILE=1` and `file://`.
-- [ ] 5.2 Implement `grid install [--skills-dir DIR]`: seed `baseline-submodules.txt` and `machines/<host>.txt` from the tracked examples if absent (host via `GRID_HOST` else `hostname -s`); select lock entries minus deny lines; skip entries already matching ledger and lock; group by source; place; remove store dirs dropped from the selection; write the ledger; run `bash scripts/wire.sh`; print `needs-setup` and not-in-lock notices.
-- [ ] 5.3 Implement ledger read/write (`.installed.manifest`, TSV columns per design, sorted `LC_ALL=C`, atomic, rewrite only on change) as functions reused by groups 6 and 7.
-- [ ] 5.4 Add `tests/test_grid_install.bats` with a `file://` fixture upstream (bare-ish repo with `uploadpack.allowFilter=true` and `uploadpack.allowAnySHA1InWant=true`, two skills, one in a nested dir) and a fixture grid dir containing `grid.yaml`, `grid.lock` (generated by the fixture), the `wire.sh` and `find-skill-mds.sh` copied from `$REPO_ROOT/scripts`. Cases: fresh install places skills, no `.git` in store, links exist in `SKILLS_DIR`; second run does no fetch (assert via a `GRID_TRACE_FETCH` log file the code appends to on each fetch, empty on second run); tampered lock hash exits 1 and places nothing; non-HTTPS URL without the flag exits 2; overlay `-source/skill` skips it; `needs-setup` notice; ledger rows have no absolute paths; ledger mtime unchanged on no-op re-run.
-- Files: `scripts/grid`, `tests/test_grid_install.bats`.
-- Acceptance: new tests pass offline; manual (not in CI): in an empty temp dir, `git clone --filter=blob:none <repo> g && GRID_DIR=g SKILLS_DIR=$tmp/skills python3 g/scripts/grid install` installs a handful of real skills.
+- [ ] 4.1 Implement `grid doctor [--json]` per design.md (four checks, finding format, sorting, exit 0/1, maintainer-mode message when no ledger).
+- [ ] 4.2 Implement `grid repair [--prune]` reusing group 3's fetch, verify, audit and place routine, then ledger rewrite and `GRID_NO_CATALOG=1 bash wire.sh`.
+- [ ] 4.3 Implement `grid uninstall [--yes] [--force]` per design.md (plan listing, dry-run default, containment via `realpath` plus `commonpath`, `.git` refusal, `os.lstat` symlink refusal, link removal by exact `readlink` match, empty-parent cleanup stopping at `repos/<source>`, modified-dir protection, ledger removal, `nothing to remove` on a second run).
+- [ ] 4.4 Add `tests/test_grid_health.bats` (fixture from `grid_fixture.bash` plus a completed install): clean doctor exits 0; edited file reports `disk skill <name> modified`; deleted dir, then repair, then doctor exits 0; lock `sha`/`hash` bumped to a second upstream commit reports `stale`, repair fixes it; no ledger prints maintainer mode; `--json` output parses with `python3 -m json.tool`; uninstall without `--yes` changes nothing (compare `find` listings); `--yes` removes only owned dirs and links, leaving a foreign symlink, a real dir in `SKILLS_DIR`, and `repos/up` itself; modified skill skipped then removed with `--force`; second uninstall exits 0 with `nothing to remove`.
+- Files: `scripts/grid`, `tests/test_grid_health.bats`.
+- Acceptance: new tests pass; `py_compile` clean.
 - Verify: `bash scripts/gate.sh`.
 
-## 6. grid doctor, repair, uninstall
+## 5. grid drift and schedule
 
-Depends on: 5.
+Depends on: 2, loops#3 (`scripts/lib/render-schedule.sh`).
 
-- [ ] 6.1 Implement `grid doctor [--json]` per design (four checks, finding line format `<check> <kind> <name> <detail>`, exit 0/1, maintainer-mode message when no ledger; check 4 runs `bash scripts/wire.sh --check`).
-- [ ] 6.2 Implement `grid repair [--prune]` reusing the group 5 fetch routine for missing/stale/absent/modified entries, then ledger rewrite and `wire.sh`.
-- [ ] 6.3 Implement `grid uninstall [--yes] [--force]` per design: plan listing, dry-run default, path containment under `.grid/store/` via `os.path.realpath` plus `os.path.commonpath`, never follow symlinks (`os.lstat`), remove store-pointing links in the skills dir, remove empty parents it created, remove the ledger; skip modified dirs unless `--force`; second run reports nothing to remove.
-- [ ] 6.4 Add `tests/test_grid_health.bats` (reuse the install fixture via `tests/helpers/`): clean doctor exit 0; edited file reports `modified`; deleted dir then repair then doctor 0; lock sha bump reports `stale` then repair; no ledger gives maintainer-mode message; uninstall dry run changes nothing; `--yes` removes only owned items and leaves a foreign symlink and a real dir; modified skill protected, `--force` removes it; second uninstall exits 0.
-- Files: `scripts/grid`, `tests/test_grid_health.bats`, optionally `tests/helpers/grid_fixture.bash` (shared fixture builder extracted from group 5's test).
-- Acceptance: new tests pass; `shellcheck` and `py_compile` clean.
-- Verify: `bash scripts/gate.sh`.
-
-## 7. grid drift and schedule
-
-Depends on: 4 (parallel with 5 and 6).
-
-- [ ] 7.1 Implement `grid drift [--quiet]` per design: `git ls-remote <url> <ref>` per source; for moved sources a trees-only fetch (`--depth 1 --filter=blob:none`) into a temp bare repo, compare `rev-parse FETCH_HEAD:<path>` with lock `tree`; classify unchanged/changed/removed/unreachable; write `drift-YYYY-MM-DD.md` and `drift-latest.md` to `${GRID_REPORT_DIR:-$HOME/.grid/reports}`; exit 0 on success. Report body has no absolute paths and no hostname.
-- [ ] 7.2 Implement `grid schedule install|remove|status [--dry-run]`: detect Darwin, Linux with a working `systemctl --user show-environment`, else cron; generate plist / service+timer / tagged crontab line from in-code templates, command `<abs scripts/grid> drift --quiet`; idempotent; with `GRID_SCHEDULE_DIR` set write there and run no `launchctl`/`systemctl`/`crontab`; print the `loginctl enable-linger` notice on Linux. Add an override `GRID_SCHEDULER=launchd|systemd|cron` used by tests to force a branch.
-- [ ] 7.3 Add `tests/test_grid_drift.bats`: fixture upstream with a second commit changing one of two skills; assert report lists the changed one, counts the other, lists a removed path, no-drift case says all current; `grid.lock`, ledger, store byte-identical before/after (checksum compare); schedule tests for each of the three mechanisms via `GRID_SCHEDULER` and `GRID_SCHEDULE_DIR`; double install yields one job; remove yields none.
+- [ ] 5.1 Implement `grid drift [--quiet]` per design.md "Drift report" (ls-remote, trees-only fetch into `.grid-tmp/<pid>/`, classification, report path under `${GRID_STATE_DIR:-$HOME/.grid}/reports/`, `drift-latest.md` copy, exit codes, no absolute paths or hostname in the body).
+- [ ] 5.2 Implement `grid schedule install|remove` per design.md "Schedule": OS choice (`GRID_OS`, else `uname -s` plus the `systemctl --user show-environment` probe), rendering through `scripts/lib/render-schedule.sh` with the arguments documented in its header, output dirs from `LAUNCH_AGENTS_DIR` / `SYSTEMD_USER_DIR`, printed activation and deactivation commands, cron line printed only. Never run `launchctl`, `systemctl` (other than the read-only probe) or `crontab`.
+- [ ] 5.3 Add `tests/test_grid_drift.bats`: fixture upstream with a second commit changing `alpha` only and a third deleting `beta`; report lists `alpha` changed with both short shas and counts the rest; removed path listed; unchanged upstream says all current and appends nothing to `GRID_TRACE_FETCH`; unreachable `file://` path listed as unreachable with exit 0; `grid.lock`, the ledger and `repos/` are byte-identical before and after (`shasum` of a sorted file listing); schedule with `GRID_OS=Darwin` writes the plist, `GRID_OS=Linux` writes both units, `GRID_OS=Other` writes nothing and prints a line ending `# the-grid drift`; a second `install` leaves files byte-identical; `remove` deletes them; a `PATH` containing stub `launchctl`/`systemctl`/`crontab` that write a marker file proves none was called (except the probe, which the `GRID_OS` override skips).
 - Files: `scripts/grid`, `tests/test_grid_drift.bats`.
-- Acceptance: new tests pass offline; manual: `python3 scripts/grid drift` against the real lock writes a report and exits 0.
+- Acceptance: new tests pass offline; manual (not in CI): `python3 scripts/grid drift` against the real lock writes a report and exits 0.
 - Verify: `bash scripts/gate.sh`.
 
-## 8. Drop the empty skills-factory from docs (#40)
+## 6. Drop the empty skills-factory from docs (#40)
 
 PR body: `Closes #40`. Depends on: none.
 
-- [ ] 8.1 `README.md`: delete the table row at the `skills-factory/` line (about 94) and the layout line (about 221); change nothing else (workstream 12 rewrites the README).
-- [ ] 8.2 `automation-factory/README.md` (line 5) and `project-factory/README.md` (line 4): remove the `skills-factory/` cross-reference, saying skills are authored as `skills/<name>/SKILL.md` or via the wired `skill-creator` skill.
-- [ ] 8.3 `rmdir skills-factory` if it exists (untracked, empty); `index.html` is NOT edited (workstream 12 owns the "four factories" copy).
-- [ ] 8.4 Add `tests/test_docs_factories.bats`: no `skills-factory` match in `README.md`, `CLAUDE.md`, `automation-factory/README.md`, `project-factory/README.md`; `skills-factory/` absent or has tracked files.
+- [ ] 6.1 `README.md`: delete the table row on the `skills-factory/` line (line 94) and the layout line (line 221); change nothing else.
+- [ ] 6.2 `automation-factory/README.md` (lines 3-5) and `project-factory/README.md` (line 4): remove the `skills-factory/` cross-reference; where a sentence needs a replacement, say skills are authored as `skills/<name>/SKILL.md` or with the wired `skill-creator` skill.
+- [ ] 6.3 `rmdir skills-factory` if it exists and is empty (it is untracked); do not edit `index.html`.
+- [ ] 6.4 Add `tests/test_docs_factories.bats`: no `skills-factory` match in `README.md`, `CLAUDE.md`, `automation-factory/README.md`, `project-factory/README.md`; `skills-factory/` absent or has tracked files (`git ls-files skills-factory` non-empty).
 - Files: `README.md`, `automation-factory/README.md`, `project-factory/README.md`, `tests/test_docs_factories.bats`.
 - Acceptance: new test passes.
 - Verify: `bash scripts/gate.sh`.
 
-## 9. Docs for the install path
+## 7. Docs for the install path
 
-Depends on: 5, 6, 7, 8. PR body: `Closes #6` plus the comment text "Folded into manifest-lock-install: not populating agent-factory/skills/; `grid path <source>/<skill>` is the resolve-by-name primitive if option C is ever built."
+Depends on: 3, 4, 5, 6. PR body: `Closes #6` plus the comment "Folded into manifest-lock-install: not populating agent-factory/skills/; installed skills sit at the same repos/<source>/<path> as on the maintainer path, so a future resolve-by-name works on both."
 
-- [ ] 9.1 `BOOTSTRAP.md`: add a "Install without submodules" section: `git clone --filter=blob:none <url> ~/.the-grid && ~/.the-grid/scripts/grid install`, then `grid doctor`, `grid repair`, `grid uninstall`, `grid schedule install`; keep the existing submodule path as "Maintainer path". State prerequisites (`python3` 3.8+, `git` 2.25+).
-- [ ] 9.2 `CLAUDE.md`: add `grid.yaml`, `grid.lock`, `scripts/grid`, `.installed.manifest`, `.grid/store/` to Key files; add the `wire.sh` contract lines for the store fallback and `GRID_BASELINE`; add a Learnings bullet only if a real gotcha surfaced during groups 2-7.
-- [ ] 9.3 `docs/` : do not add new files; no README changes (workstream 12).
-- Files: `BOOTSTRAP.md`, `CLAUDE.md`.
-- Acceptance: every command shown in the new BOOTSTRAP section exists in `python3 scripts/grid --help` output (verified by a one-line bats test added to `tests/test_grid_manifest.bats`).
+- [ ] 7.1 `BOOTSTRAP.md`: add an "Install without submodules" section: `git clone --filter=blob:none https://github.com/<your-username>/the-grid.git ~/.the-grid && python3 ~/.the-grid/scripts/grid install` (same placeholder as the existing clone line), then `grid doctor`, `grid repair`, `grid uninstall`, `grid audit --wired`, `grid schedule install`; note that re-wiring on such a machine is `GRID_NO_CATALOG=1 bash scripts/wire.sh`; note that `git submodule update --init` refuses a source that `grid` populated (run `grid uninstall --yes` first to switch to the maintainer path); keep the existing submodule path as "Maintainer path". State prerequisites (`python3` 3.8+, `git` 2.25+).
+- [ ] 7.2 `CLAUDE.md`: add `grid.yaml`, `grid.lock`, `scripts/grid`, `~/.grid/installed.manifest` to Key files; add `GRID_NO_CATALOG` and "`grid` ignores typed entries (`project:`, `rules:`, `harness:`)" to the `wire.sh` contract; add a Learnings bullet only if a real gotcha surfaced during groups 1-5.
+- [ ] 7.3 Add one bats case to `tests/test_grid_manifest.bats`: every `grid <subcommand>` named in the new `BOOTSTRAP.md` section appears in `python3 scripts/grid --help`.
+- Files: `BOOTSTRAP.md`, `CLAUDE.md`, `tests/test_grid_manifest.bats`.
+- Acceptance: the new case passes.
 - Verify: `bash scripts/gate.sh`.

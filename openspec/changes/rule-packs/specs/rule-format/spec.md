@@ -4,8 +4,8 @@ Define the source format for path-scoped coding rule packs and the lint that kee
 
 ## ADDED Requirements
 
-### Requirement: Path-scoped rule files
-Every rule file under `rules/<pack>/` (any `*.md` other than `README.md`) SHALL have frontmatter containing exactly one key, `paths`, with at least one glob that is not `*`, `**`, `**/*`, absolute, or containing `..`.
+### Requirement: Path-scoped, size-capped rule files
+Every rule file under `rules/<pack>/` (any `*.md` other than `README.md`) SHALL have frontmatter containing exactly one key, `paths`, with at least one glob that is not `*`, `**`, `**/*`, absolute, or containing `..`, and lint MUST fail any rule file over 4096 bytes or any pack whose rule files total over 9216 bytes.
 
 #### Scenario: Rule without paths is rejected
 - **WHEN** `rules.py lint` runs on a pack containing a rule file with no `paths:` frontmatter
@@ -19,9 +19,6 @@ Every rule file under `rules/<pack>/` (any `*.md` other than `README.md`) SHALL 
 - **WHEN** a rule file's frontmatter contains a key other than `paths`
 - **THEN** lint exits non-zero and reports `E_FRONTMATTER`
 
-### Requirement: Size caps
-Lint MUST fail any rule file larger than 4096 bytes and any pack whose rule files total more than 9216 bytes.
-
 #### Scenario: Oversized file
 - **WHEN** a rule file is 4097 bytes
 - **THEN** lint reports `E_FILE_SIZE` and exits non-zero
@@ -30,8 +27,8 @@ Lint MUST fail any rule file larger than 4096 bytes and any pack whose rule file
 - **WHEN** a pack's rule files total 9217 bytes with each file under the per-file cap
 - **THEN** lint reports `E_PACK_SIZE` and exits non-zero
 
-### Requirement: Opinion denylist
-Lint SHALL fail any rule file whose text matches a case-insensitive regex in `rules/denylist.txt`.
+### Requirement: Opinion-free, sourced and attributed packs
+Lint SHALL fail any rule file matching a case-insensitive regex in `rules/denylist.txt`, any pack lacking `pack.yaml` (`summary`, `tier`) or a README Sources row with an https URL per rule file, and any tier 2 pack lacking the README line `Adapted from affaan-m/ECC (MIT)`, an `adapted_from` key, or an entry in `rules/THIRD_PARTY_NOTICES.txt`.
 
 #### Scenario: Imported house opinion
 - **WHEN** a rule file contains the text `ALWAYS create new objects`
@@ -40,16 +37,6 @@ Lint SHALL fail any rule file whose text matches a case-insensitive regex in `ru
 #### Scenario: Legitimate technical wording passes
 - **WHEN** a rule file says "inline critical CSS" and "the query planner"
 - **THEN** lint reports no `E_OPINION` finding for those phrases
-
-### Requirement: Hidden text rejection
-Lint MUST reject zero-width, bidirectional-control and byte-order-mark characters in any file inside a pack directory.
-
-#### Scenario: Zero-width character
-- **WHEN** a rule file contains U+200B
-- **THEN** lint reports `E_UNICODE` and exits non-zero
-
-### Requirement: Sourced and attributed packs
-Every pack SHALL have `pack.yaml` (with `summary` and `tier`) and a `README.md` whose Sources table gives an https URL for each rule file, and each tier 2 pack MUST carry the line `Adapted from affaan-m/ECC (MIT)` in its README, an `adapted_from` key, and an entry in `rules/THIRD_PARTY_NOTICES.txt`.
 
 #### Scenario: Rule file without a source row
 - **WHEN** a pack README's Sources table has no row with an https URL for `style.md`
@@ -63,7 +50,7 @@ Every pack SHALL have `pack.yaml` (with `summary` and `tier`) and a `README.md` 
 - **WHEN** a pack declares `tier: 1` and also has an `adapted_from` key
 - **THEN** lint reports `E_PACK_META`
 
-### Requirement: Lint is part of the commit gate
+### Requirement: Lint is part of the offline commit gate
 `scripts/gate.sh` SHALL run `python3 scripts/rules.py lint` and MUST NOT make network calls for it.
 
 #### Scenario: Gate fails on a bad pack

@@ -15,15 +15,16 @@ runs the backlog nightly and catches up after downtime.
 
 #### Scenario: Nothing activated
 - **WHEN** the profile run finishes
-- **THEN** no `systemctl`, `loginctl` or `launchctl` command was executed
+- **THEN** no `systemctl` or `launchctl` command and no `loginctl enable-linger` was executed
 - **AND** the output prints the enable and linger commands for the human
 
 ### Requirement: Service unit shape
-The rendered service SHALL be `Type=oneshot`, run `/bin/bash <target>/loop/run-issues.sh`, set `WorkingDirectory` to the target, set `Environment=PATH=` including `%h/.local/bin`, load credentials from `EnvironmentFile=%h/.config/the-grid/issue-loop.env`, and set `TimeoutStartSec` to `MAX_ISSUES*(ISSUE_TIMEOUT+REVIEW_TIMEOUT)+600`.
+The rendered service SHALL be `Type=oneshot`, run `/bin/bash <target>/loop/run-issues.sh`, set `WorkingDirectory` to the target, set `Environment=PATH=` including `%h/.local/bin`, carry no `EnvironmentFile` (the runner loads its own optional env file), and set `TimeoutStartSec` to `MAX_ISSUES*(ISSUE_TIMEOUT+REVIEW_TIMEOUT)+600`.
 
 #### Scenario: Required directives present
 - **WHEN** the service is rendered for a target with `MAX_ISSUES=3`, `ISSUE_TIMEOUT=1800`, `REVIEW_TIMEOUT=600`
-- **THEN** it contains `Type=oneshot`, `EnvironmentFile=%h/.config/the-grid/issue-loop.env`, `.local/bin` in `Environment=PATH=` and `TimeoutStartSec=7800`
+- **THEN** it contains `Type=oneshot`, `.local/bin` in `Environment=PATH=` and `TimeoutStartSec=7800`
+- **AND** it contains no `EnvironmentFile=` line
 
 #### Scenario: Unit passes systemd verification
 - **WHEN** `systemd-analyze` is available and `verify` runs on the rendered files
@@ -36,13 +37,18 @@ The rendered timer SHALL use `OnCalendar` with the configured hour, `Persistent=
 - **WHEN** `--schedule-hour 3` is passed
 - **THEN** the timer contains `OnCalendar=*-*-* 03:00:00` and `Persistent=true`
 
-### Requirement: Credentials are never written by scripts
-`instantiate.sh` SHALL NOT create or write the credentials env file, SHALL warn when it is missing, and SHALL document its expected keys and `chmod 600` in the pattern README together with `loginctl enable-linger`.
+### Requirement: Credentials and linger are the human's
+`instantiate.sh` SHALL NOT create or write the credentials env file, SHALL print its path and keys (`GH_TOKEN` required where `gh` uses a keyring, `CLAUDE_CODE_OAUTH_TOKEN` optional), and on the linux profile SHALL warn, without changing anything, when `loginctl show-user` reports linger is not `yes`.
 
-#### Scenario: Missing env file warning
-- **WHEN** the profile run finishes and the env file does not exist
-- **THEN** the output warns that `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN` must be placed there
+#### Scenario: Env file guidance
+- **WHEN** the linux profile run finishes and the env file does not exist
+- **THEN** the output names the env file path and `GH_TOKEN`
 - **AND** the env file was not created
+
+#### Scenario: Linger off
+- **WHEN** a stub `loginctl show-user` prints `no`
+- **THEN** the output warns that timers will not fire while logged out and prints `loginctl enable-linger`
+- **AND** the stub log shows no `enable-linger` call
 
 ### Requirement: launchd uses the same runner and carries no personal name
 The mac-mini profile SHALL write a launchd plist whose command runs `loop/run-issues.sh`, whose label starts with `io.the-grid.issue-loop.`, and which contains no personal name.

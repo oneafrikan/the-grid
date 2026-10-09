@@ -4,18 +4,14 @@ Let the handoff skill ship with a neutral default save location while allowing e
 
 ## ADDED Requirements
 
-### Requirement: Neutral default location
+### Requirement: Save location resolution
 
-The handoff skill SHALL save handoff and context files to `LOGS/` in the current project (asking before creating it) when no private table matches.
+The handoff skill SHALL use the first row of `~/.the-grid-private/handoff-locations.md` whose first column matches the current working directory name or path glob, and SHALL otherwise save to `LOGS/` in the current project, asking before creating it.
 
 #### Scenario: No private table
 
 - **WHEN** `~/.the-grid-private/handoff-locations.md` does not exist
 - **THEN** the skill writes to `LOGS/`, asking before creating the directory if absent
-
-### Requirement: Optional private location table
-
-The handoff skill MUST read `~/.the-grid-private/handoff-locations.md` when it exists and SHALL use the first table row whose first column matches the current working directory name or path glob.
 
 #### Scenario: Private row matches
 
@@ -27,11 +23,7 @@ The handoff skill MUST read `~/.the-grid-private/handoff-locations.md` when it e
 - **WHEN** the private table exists but no row matches
 - **THEN** the skill falls back to `LOGS/`
 
-### Requirement: Skill text carries no personal examples
-
-The handoff skill and its templates MUST use neutral machine and project examples and MUST NOT name the author, real hosts, or private projects.
-
-#### Scenario: Scan passes on skill files
+#### Scenario: Skill text carries no personal examples
 
 - **WHEN** `scripts/check-personal.sh` is run on the `skills/handoff/` files
 - **THEN** it reports no finding

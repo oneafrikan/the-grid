@@ -8,12 +8,8 @@ Collect aggregated, privacy-safe usage counts per machine from agent-harness log
 The system SHALL read usage through adapters that implement availability detection, normalised event emission and a wired-set listing, with the Claude Code adapter shipped and other harnesses addable by one module and one registry entry.
 
 #### Scenario: Claude Code events counted
-- **WHEN** transcripts contain skill tool calls, subagent tool calls, slash commands and assistant token usage across several days
-- **THEN** the output holds per-day counts for skills, agents, slash commands and tokens by model
-
-#### Scenario: Streamed duplicate messages counted once
-- **WHEN** the same assistant message id appears several times in a transcript
-- **THEN** its tokens are counted once
+- **WHEN** transcripts contain skill tool calls, subagent tool calls and slash commands across several days
+- **THEN** the output holds per-day counts for skills, agents and slash commands
 
 #### Scenario: Extra harness needs no extractor change
 - **WHEN** a fake adapter is added to the registry
@@ -24,7 +20,7 @@ The system SHALL read usage through adapters that implement availability detecti
 - **THEN** the extractor exits successfully after printing that no adapters are available
 
 ### Requirement: Aggregated counts only
-The output MUST contain only counts keyed by skill, agent, slash-command or model name, dates and the wired-name lists, and MUST NOT contain prompt text, file paths, project names or session identifiers.
+The output MUST contain only counts keyed by skill, agent or slash-command name, dates, listing sizes and the wired-name lists, and MUST NOT contain prompt text, file paths, project names or session identifiers.
 
 #### Scenario: Prompt text never stored
 - **WHEN** a transcript prompt contains a distinctive marker string

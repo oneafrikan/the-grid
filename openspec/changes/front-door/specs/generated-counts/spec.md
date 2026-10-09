@@ -4,34 +4,34 @@ Make skill and role counts a generated fact so README and the landing page can n
 
 ## ADDED Requirements
 
-### Requirement: Stats file from the catalogue
-catalog.sh SHALL write `docs/stats.json` with the keys indexed, library, roles, root_owned, upstream_wired and wired, deterministically.
-
-#### Scenario: Stats written
-- **WHEN** `catalog.sh` runs against a fixture repo
-- **THEN** `docs/stats.json` holds the same totals printed in the SKILLS.md headline and the roles count equals the `- role:` lines in agent-factory/examples
-- **AND** a second run produces a byte-identical file
-
-#### Scenario: Catalog check covers stats
-- **WHEN** `catalog.sh --check` runs after `docs/stats.json` is edited by hand
-- **THEN** it exits non-zero and names stats.json
-
-### Requirement: Marker stamping
-scripts/stamp-counts.py SHALL replace the value inside every `<!--count:NAME-->...<!--/count-->` marker in README.md, README.*.md and index.html with the matching stats.json value, idempotently.
+### Requirement: Marker stamping from the catalogue
+scripts/stamp-counts.py SHALL replace the value inside every `<!--count:NAME-->...<!--/count-->` marker in README.md, README.*.md and index.html with the value parsed from the committed SKILLS.md headline (indexed, wired, root_owned, upstream_wired, library) or the role count from agent-factory/examples (roles), idempotently.
 
 #### Scenario: Stamp and re-stamp
 - **WHEN** stamp-counts.py runs twice on files with stale values
-- **THEN** the first run updates them and the second changes nothing
+- **THEN** the first run writes the SKILLS.md headline numbers and the `- role:` line count
+- **AND** the second run changes nothing
 
 #### Scenario: Unknown name
-- **WHEN** a marker names a key not in stats.json
+- **WHEN** a marker names a key outside the six known keys
 - **THEN** the script exits 2 and names the marker
 
+#### Scenario: Headline format changed
+- **WHEN** markers exist and the SKILLS.md headline no longer matches the expected pattern
+- **THEN** the script exits 2
+
+### Requirement: Catalogue regeneration restamps
+catalog.sh SHALL run stamp-counts.py after writing the default SKILLS.md, and SHALL NOT run it in `--check` mode or when given an output path.
+
+#### Scenario: Wire keeps counts current
+- **WHEN** `catalog.sh` regenerates SKILLS.md with a new wired count
+- **THEN** the count markers in README.md hold the new number
+
 ### Requirement: Drift fails the gate
-gate.sh SHALL fail when any stamped file disagrees with docs/stats.json.
+gate.sh SHALL fail when any stamped file disagrees with the committed SKILLS.md headline or role count.
 
 #### Scenario: Stale number
-- **WHEN** a marker value in README.md differs from stats.json
+- **WHEN** a marker value in README.md differs from the SKILLS.md headline
 - **THEN** `stamp-counts.py --check` exits 1 and the gate reports FAIL for counts
 
 ### Requirement: No typed headline counts

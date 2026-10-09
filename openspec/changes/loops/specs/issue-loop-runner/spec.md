@@ -21,16 +21,43 @@ The runner SHALL process at most `MAX_ISSUES` issues per run, lowest number firs
 - **WHEN** no open issue carries the opt-in label
 - **THEN** the runner exits 0 without invoking `claude`
 
-### Requirement: Turn cap only where supported
-The runner SHALL pass `--max-turns "$MAX_TURNS"` to `claude` only when `claude --help` lists that flag, and SHALL pass `--max-budget-usd "$MAX_BUDGET_USD"` only when that variable is non-empty.
+### Requirement: Every model call is capped
+The runner SHALL pass an explicit `--model` and `--max-budget-usd` to every `claude` call (worker: `WORKER_MODEL`, `MAX_BUDGET_USD`; review: `REVIEW_MODEL`, `REVIEW_BUDGET_USD`) and run each inside the timeout binary, and SHALL add `--max-turns "$MAX_TURNS"` only when `claude --help` lists that flag.
 
-#### Scenario: Flag supported
+#### Scenario: Budget always passed
+- **WHEN** the runner invokes the worker with default configuration
+- **THEN** the worker command line contains `--max-budget-usd 5`
+- **AND** the review command line contains `--max-budget-usd 2`
+
+#### Scenario: Turn flag supported
 - **WHEN** the `claude` help output contains `--max-turns`
 - **THEN** the worker command line contains `--max-turns 40`
 
-#### Scenario: Flag unsupported
+#### Scenario: Turn flag unsupported
 - **WHEN** the `claude` help output lacks `--max-turns`
 - **THEN** the worker command line contains no `--max-turns` and the run still proceeds
+
+### Requirement: Role routing by label
+The runner SHALL run the worker with `--agent <name>` when the issue carries exactly one `role:<name>` label naming an agent file in the user or repo agents directory whose `tools:` frontmatter, if present, includes `Edit` or `Write`, SHALL run it without `--agent` when no such label exists, and SHALL otherwise label the issue `blocked`, comment the reason and continue without a model call.
+
+#### Scenario: Role label routes to the agent
+- **WHEN** issue 7 carries `role:grid-backend-dev` and that agent file exists
+- **THEN** the worker command line contains `--agent grid-backend-dev` and `--model sonnet`
+- **AND** the run record line for issue 7 has role `grid-backend-dev`
+
+#### Scenario: No role label
+- **WHEN** issue 7 carries no `role:` label
+- **THEN** the worker command line contains no `--agent`
+- **AND** the run record role is `issue-loop`
+
+#### Scenario: Unwired agent
+- **WHEN** issue 7 carries `role:no-such-agent` and issue 8 is also eligible
+- **THEN** no `claude -p` call is made for issue 7, it gains `blocked` and a comment saying the agent is not wired
+- **AND** the worker runs for issue 8
+
+#### Scenario: Read-only agent refused as builder
+- **WHEN** issue 7 carries `role:grid-qa-engineer` whose frontmatter is `tools: Read, Grep, Glob, Bash`
+- **THEN** no `claude -p` call is made for issue 7 and it gains `blocked` with a comment that the role is read-only
 
 ### Requirement: Isolated worktree per issue
 In `pr` mode the runner SHALL create a worktree for each issue on branch `issue-<N>` from `origin/<BASE_BRANCH>` and run the worker inside it, never in the main checkout.
@@ -50,7 +77,7 @@ After a worker run that leaves an open PR, the runner SHALL run `claude -p --mod
 
 #### Scenario: Review comment posted
 - **WHEN** the worker leaves an open PR for issue 7
-- **THEN** one `claude` call with `--model opus` and `--tools ""` is made
+- **THEN** one `claude` call with `--model opus` and `--tools ""` and no `--agent` is made
 - **AND** one `gh pr comment` call is made on that PR
 
 #### Scenario: No PR, no review
@@ -83,7 +110,7 @@ The runner SHALL continue to the next issue after a timeout, a max-turns exhaust
 - **AND** the first issue keeps its opt-in label
 
 ### Requirement: Run record per issue
-The runner SHALL call `run-record.sh` once per processed issue with role `issue-loop`, action `work-issue`, target `<repo>#<N>`, the outcome and, when known, the summed cost, and SHALL NOT fail the run when `run-record.sh` is missing.
+The runner SHALL call `run-record.sh` once per processed issue with the routed agent name as role (else `RUN_ROLE`, default `issue-loop`), action `work-issue`, target `<repo>#<N>`, the outcome and, when known, the summed cost, and SHALL NOT fail the run when `run-record.sh` is missing.
 
 #### Scenario: Two issues, two lines
 - **WHEN** two issues are processed with `GRID_RUN_LOG` set to a temp file
@@ -94,7 +121,19 @@ The runner SHALL call `run-record.sh` once per processed issue with role `issue-
 - **THEN** the run completes with a warning and the same exit code as it otherwise would
 
 ### Requirement: Safe preconditions and single instance
-The runner SHALL exit 2 before changing anything when a required tool, authentication or the timeout binary is missing or the main checkout is dirty, and SHALL hold a lock so a second concurrent run exits 0 immediately.
+The runner SHALL load the optional env file `GRID_LOOP_ENV` (default `~/.config/the-grid/issue-loop.env`) and add `~/.local/bin` to PATH when `claude` is not found, and SHALL exit 2 before changing anything when a required tool, `claude auth status`, `gh auth status`, `git ls-remote` of the base branch or the timeout binary fails or the main checkout is dirty, and SHALL hold a lock so a second concurrent run exits 0 immediately.
+
+#### Scenario: Claude found in the user bin dir
+- **WHEN** `claude` exists only in `$HOME/.local/bin` and PATH lacks that dir
+- **THEN** the preflight passes and the worker runs that binary
+
+#### Scenario: Not logged in
+- **WHEN** `claude auth status --json` reports `"loggedIn": false`
+- **THEN** the runner exits 2 with a message naming `CLAUDE_CODE_OAUTH_TOKEN` and the env file path, and invokes no `claude -p`
+
+#### Scenario: Env file supplies the GitHub token
+- **WHEN** `GRID_LOOP_ENV` points at a file containing `GH_TOKEN=abc`
+- **THEN** every `gh` call the runner makes sees `GH_TOKEN=abc` in its environment
 
 #### Scenario: Dirty tree
 - **WHEN** the main checkout has uncommitted changes

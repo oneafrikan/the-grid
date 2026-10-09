@@ -1,9 +1,9 @@
 ## Purpose
 
-Run any CLI coding agent (claude, codex, gemini, opencode) on a schedule against
-a prompt file, with a hard time cap, per-run logs and a run record. Use cases:
-nightly report generation, periodic repo audits, scheduled research digests.
-Partially serves the "scheduled headless run" half of issue #4.
+Run any CLI coding agent on a schedule against a prompt file, with a hard time
+cap, per-run logs and a run record. Use cases: nightly report generation,
+periodic repo audits, scheduled research digests. Partially serves the
+"scheduled headless run" half of issue #4.
 
 ## ADDED Requirements
 
@@ -39,12 +39,16 @@ The runner SHALL write combined output to `LOG_DIR/<JOB_NAME>-<UTC stamp>.log` a
 - **WHEN** `KEEP_LOGS=2` and four runs have happened
 - **THEN** exactly two log files remain, the newest two
 
-### Requirement: Preflight and single instance
-The runner SHALL exit 2 when the prompt file is unreadable, the agent binary (first word of `AGENT_CMD`) is not on PATH, or no timeout binary exists, and SHALL exit 0 immediately when another run of the same job holds the lock.
+### Requirement: Headless environment and single instance
+The runner SHALL load the optional `GRID_LOOP_ENV` file and add `~/.local/bin` to PATH when the agent binary is not found, SHALL exit 2 when the prompt file is unreadable, the agent binary (first word of `AGENT_CMD`) is still not on PATH, or no timeout binary exists, and SHALL exit 0 immediately when another run of the same job holds the lock.
 
 #### Scenario: Missing agent binary
 - **WHEN** `AGENT_CMD` starts with a command that does not exist
 - **THEN** the runner exits 2 and starts no process
+
+#### Scenario: Agent in the user bin dir
+- **WHEN** the agent binary exists only in `$HOME/.local/bin` and PATH lacks that dir
+- **THEN** the run proceeds
 
 #### Scenario: Overlap
 - **WHEN** a run is active and a second starts
@@ -61,10 +65,10 @@ The runner SHALL exit 2 when the prompt file is unreadable, the agent binary (fi
 - **WHEN** `--scheduler cron` is used
 - **THEN** a crontab line is printed and no crontab was modified
 
-### Requirement: Agent presets state their verification status
-`agents.example.conf` SHALL contain one command line per agent for claude, codex, gemini and opencode, each tagged `verified <date>` only if its flags were checked against that CLI's `--help` on the authoring machine and `UNVERIFIED` otherwise, and none SHALL include a permission-bypass flag.
+### Requirement: Example agent commands are capped
+`job.conf.example` SHALL contain exactly two commented `AGENT_CMD` examples, for `claude` and `codex`, each naming an explicit model, the claude one also `--max-budget-usd`, and neither SHALL contain a permission-bypass flag.
 
-#### Scenario: Tags and flags
+#### Scenario: Examples checked
 - **WHEN** the file is read
-- **THEN** every agent line carries one of the two tags
-- **AND** the text `dangerously-skip-permissions` does not appear in an uncommented command
+- **THEN** the claude line contains `--model` and `--max-budget-usd`, the codex line contains `-m`
+- **AND** the text `dangerously-skip-permissions` does not appear
