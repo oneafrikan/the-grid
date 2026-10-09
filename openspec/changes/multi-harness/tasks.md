@@ -127,7 +127,8 @@ Depends on: 2.
 - [ ] 8.1 Edit `agent-factory/compose.py`: add `--target portable`. It writes `<out>/<name>/_portable/<role>.md` = `# <Title>\n\n` + `render_lean_body(agent, "")` for every role, orchestrators included. Wipe and refuse a symlinked dir, as the other writers do, and register it in `--check` and `--dry-run`.
 - [ ] 8.2 Add `portable` to `scripts/compose-goldens.sh` and run `--update`.
 - [ ] 8.3 Create `scripts/build-personas.sh` (shellcheck-clean, commented) per design.md, with `--check`. If `agent-factory/.venv` is absent, print a skip notice and exit 0.
-- [ ] 8.4 Edit `scripts/gate.sh`: add one `check personas bash scripts/build-personas.sh --check` line with a comment, placed before the bats check.
+- [ ] 8.4 Add a `run_personas_check` function and `check personas   run_personas_check` to `scripts/gate.sh` (place the `check` line directly before `check bats       run_bats`, with a comment, and add `personas` to the header comment list of checks). The function skips loudly, matching `run_compose_check`: if `scripts/build-personas.sh` or `agent-factory/.venv` does not exist, print `    build-personas.sh or agent-factory/.venv absent — skipped`, append `personas` to `SKIPPED`, return 0; otherwise run `bash scripts/build-personas.sh --check`.
+- [ ] 8.4a Add one case to `tests/test_gate.bats` using its existing fake-grid setup: no `scripts/build-personas.sh` in the fake grid -> gate exits 0 and its last line lists `personas` in `skipped:`.
 - [ ] 8.5 Run `bash scripts/build-personas.sh` and commit `dist/personas/*.md`. Before committing, `grep -rnE '/Users/|/home/|@[a-z0-9-]+\.[a-z]' dist/personas` must print nothing. If it prints anything, stop and report it instead of committing.
 - [ ] 8.6 Create `tests/test_personas.bats`. Acceptance:
   - No persona starts with `---`.

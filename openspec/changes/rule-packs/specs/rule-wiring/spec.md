@@ -54,8 +54,8 @@ Wire selected rule packs into Claude Code's user rules directory through the exi
 - **THEN** `catalog.sh` and `sources.sh` output is unchanged
 
 ### Requirement: Dry runs never reach the real rules directory
-When `GRID_DRY_HOME` is set and `RULES_DIR` is not, `wire.sh` SHALL derive `RULES_DIR` as `$GRID_DRY_HOME/.claude/rules` and MUST NOT create, change or remove anything under `$HOME/.claude/rules`.
+When `GRID_DRY_HOME` is set, `wire.sh` SHALL use `$GRID_DRY_HOME/.claude/rules` as `RULES_DIR`, ignoring any inherited `RULES_DIR`, and MUST NOT create, change or remove anything under the caller's real `$HOME/.claude/rules`.
 
 #### Scenario: Sentinel survives a dry run
-- **WHEN** `$HOME/.claude/rules/sentinel.md` exists, `RULES_DIR` is unset, `GRID_DRY_HOME` points at a temp dir, and `wire.sh` runs with `rules:foo`
-- **THEN** the sentinel is byte-identical, nothing new exists under `$HOME/.claude/rules`, and the `foo` links exist under `$GRID_DRY_HOME/.claude/rules/grid/foo`
+- **WHEN** the caller's real `$HOME/.claude/rules/sentinel.md` exists, `RULES_DIR` is exported as that real `$HOME/.claude/rules`, `GRID_DRY_HOME` points at a temp dir, and `wire.sh` runs with `rules:foo`
+- **THEN** the sentinel is byte-identical, nothing new exists under the real `$HOME/.claude/rules`, and the `foo` links exist under `$GRID_DRY_HOME/.claude/rules/grid/foo`

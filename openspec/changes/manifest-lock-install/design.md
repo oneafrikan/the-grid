@@ -188,16 +188,28 @@ git -C <run>/repos/<source> checkout -q FETCH_HEAD
 
 ### Schedule
 
-`grid schedule install|remove`. Opt-in only; `grid install` never schedules anything. The three bodies are rendered by `loops#3`'s `scripts/lib/render-schedule.sh` in its weekly form (weekday 1, hour 9), called as `bash -c 'source <grid>/scripts/lib/render-schedule.sh && render_<kind> "$@"' _ <args>` with that file's documented arguments; `scripts/grid` writes the printed text to the file. Nothing is activated: the activation command is printed, and `launchctl`/`systemctl`/`crontab`/`loginctl` are never run (the read-only `systemctl --user show-environment` probe excepted).
+`grid schedule install|remove`. Opt-in only; `grid install` never schedules anything. Every body is rendered by `loops#3`'s `scripts/lib/render-schedule.sh` (signatures in `loops` design.md "Scheduling"), called in its executed form `bash <grid>/scripts/lib/render-schedule.sh render_<fn> ARGS…`; `scripts/grid` writes the printed text to the file unchanged and builds no schedule text itself. Nothing is activated: the activation command is printed, and `launchctl`/`systemctl`/`crontab`/`loginctl` are never run (the read-only probe below excepted).
 
-| OS (`GRID_OS` override, else `uname -s`; Linux counts as systemd when `systemctl --user show-environment` succeeds or `GRID_OS=Linux`) | Files written | Printed command |
+Inputs, resolved by `scripts/grid` to absolute literal paths before the call (the renderer rejects `$`):
+- `<grid>`: the realpath grid dir; also WORKDIR.
+- SCHEDULE: `weekly:Mon:09:00`.
+- LOG_DIR: `${GRID_STATE_DIR:-$HOME/.grid}/logs`; LOG_FILE: `<LOG_DIR>/grid-drift.log`.
+- CMD `/usr/bin/env`, ARGs `python3 <grid>/scripts/grid drift --quiet`.
+
+OS: `GRID_OS` override, else `uname -s`; Linux is systemd when `systemctl --user show-environment >/dev/null 2>&1` succeeds (or `GRID_OS=Linux`), else falls to the cron row.
+
+| OS | Renderer calls → files written | Printed command |
 |---|---|---|
-| `Darwin` | `${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}/io.the-grid.drift.plist`: `Label`, `ProgramArguments` = `/usr/bin/env python3 <abs scripts/grid> drift --quiet`, `StartCalendarInterval` Weekday 1 Hour 9 Minute 0, `EnvironmentVariables` `PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` | `launchctl bootstrap gui/$(id -u) <plist>` |
-| `Linux` (systemd user) | `${SYSTEMD_USER_DIR:-$HOME/.config/systemd/user}/grid-drift.service` (`Type=oneshot`, `Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin`, `ExecStart=/usr/bin/env python3 <abs scripts/grid> drift --quiet`, `TimeoutStartSec=600`) and `grid-drift.timer` (`OnCalendar=Mon *-*-* 09:00:00`, `Persistent=true`, `Unit=grid-drift.service`, `WantedBy=timers.target`) | `systemctl --user daemon-reload && systemctl --user enable --now grid-drift.timer`, plus the `loginctl enable-linger "$USER"` note (a user timer does not run while logged out without it) |
-| anything else | none | the crontab line `0 9 * * 1 /usr/bin/env python3 <abs scripts/grid> drift --quiet # the-grid drift` |
+| `Darwin` | `render_launchd_plist io.the-grid.drift <HOME> <grid> <LOG_DIR> weekly:Mon:09:00 /usr/bin/env python3 <grid>/scripts/grid drift --quiet` → `${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}/io.the-grid.drift.plist`. `PATH`, `HOME`, `WorkingDirectory` and the log paths are whatever `render_launchd_plist` emits; `scripts/grid` runs `mkdir -p <LOG_DIR>` (launchd does not create it). | `render_activation_commands launchd <plist path>` |
+| `Linux` (systemd user) | `render_systemd_service "grid drift report" <grid> 600 /usr/bin/env python3 <grid>/scripts/grid drift --quiet` → `${SYSTEMD_USER_DIR:-$HOME/.config/systemd/user}/grid-drift.service`; `render_systemd_timer "Weekly grid drift report" grid-drift.service weekly:Mon:09:00` (no RANDOM_DELAY) → `grid-drift.timer` | `render_activation_commands systemd grid-drift.timer`, plus the `loginctl enable-linger "$USER"` note (a user timer does not run while logged out without it) |
+| anything else | `render_crontab_line weekly:Mon:09:00 <LOG_FILE> <grid> /usr/bin/env python3 <grid>/scripts/grid drift --quiet` → no file | `render_activation_commands cron <that line>` |
 
-- `<abs scripts/grid>` is the realpath of the running script, written only into the generated local file. `schedule install` exits 2 with a message, writing nothing, when that path contains any character outside `[A-Za-z0-9_./@+-]` (a space, `%`, `$`, a quote): clone to a plain path to use the schedule (G2: unsafe install paths exit 2, even though the renderer escapes).
-- `install` writes byte-identical files on a second run (no timestamps). `remove` deletes exactly those files (or prints the crontab line to delete) and prints the deactivation command (`launchctl bootout gui/$(id -u)/io.the-grid.drift`; `systemctl --user disable --now grid-drift.timer`).
+- The cron line carries no tag; it is identified by the substring `scripts/grid drift`.
+- `schedule install` exits 2 with a message, writing nothing, when the renderer returns 2 (any PATH-like argument, including `<grid>`, `<HOME>` or `<LOG_DIR>`, contains a character outside `[A-Za-z0-9_./@+-]`): clone to a plain path to use the schedule (G2; the renderer does no escaping).
+- `install` writes byte-identical files on a second run (no timestamps). `remove` deletes exactly those files (or prints: delete the crontab line containing `scripts/grid drift`) and prints the deactivation command (`launchctl bootout gui/$(id -u)/io.the-grid.drift`; `systemctl --user disable --now grid-drift.timer`).
+- Decided: the schedule is exactly the renderer calls above (SCHEDULE `weekly:Mon:09:00`, LOG_DIR `${GRID_STATE_DIR:-$HOME/.grid}/logs`, CMD `/usr/bin/env`, ARGs `python3 <grid>/scripts/grid drift --quiet`), because `loops#3` is the one renderer (G2) and restating its output here would drift from it.
+- Decided: Linux systemd detection is `systemctl --user show-environment >/dev/null 2>&1`, the same probe `budget-and-usage` uses.
+- Decided: no `# the-grid drift` crontab tag, because `render_crontab_line` emits no comment; the substring `scripts/grid drift` identifies the line.
 
 ### CLI shape
 
@@ -205,8 +217,9 @@ git -C <run>/repos/<source> checkout -q FETCH_HEAD
 
 ### grid lock
 
-- Runs `wire.sh` with `GRID_SKIP_CATALOG=1 GRID_SKIP_AUDIT=1 GRID_BASELINE=<grid>/<wired.baseline> GRID_DRY_HOME=<tmp>/home GRID_HOST=__baseline__ GRID_HARNESS=claude SKILLS_DIR=<tmp>/skills AGENTS_DIR=<tmp>/agents RULES_DIR=<tmp>/rules GRID_HARNESS_HOME=<tmp>/home CLAUDE_CONFIG_DIR=<tmp>/claude HOME=<tmp>/home` (variables a later change has not introduced yet are harmless; `GRID_DRY_HOME` (G1, `foundations#8`) is the supported redirect of every home-derived `wire.sh` target, and `HOME` is still overridden for this child only, so any current or future `~`-relative write, such as a user-settings hook entry, lands in the temp dir). Lock and wire can never read the baseline differently and nothing outside the temp dir is written.
-- Takes every symlink in `<tmp>/skills` whose target is `<grid>/repos/<source>/<path>` (string compare is safe: `<grid>` is the realpath `grid` itself passed as `GRID_DIR`) with a non-empty `path` and a `SKILL.md` in the target (this excludes the `foundations` runtime-root link). Each discovered `path` must pass Input validation.
+- Runs `wire.sh` with `GRID_SKIP_CATALOG=1 GRID_SKIP_AUDIT=1 GRID_BASELINE=<grid>/<wired.baseline> GRID_HOST=__baseline__ GRID_HARNESS=claude GRID_DRY_HOME=<tmp>/home HOME=<tmp>/home` and no other target override: per the `foundations#8` contract (G1), `GRID_DRY_HOME` makes `wire.sh` export `HOME=$GRID_DRY_HOME` and FORCE `SKILLS_DIR`, `AGENTS_DIR`, `CLAUDE_CONFIG_DIR`, `RULES_DIR` and the harness paths under it, ignoring inherited values, so `grid lock` passes no `SKILLS_DIR`/`AGENTS_DIR`/`RULES_DIR`/`GRID_HARNESS_HOME`/`CLAUDE_CONFIG_DIR`. `HOME` is also set for this child so any `~`-relative write before `wire.sh` applies the contract lands in the temp dir. Results are read from `<tmp>/home/.claude/skills`. Lock and wire can never read the baseline differently and nothing outside the temp dir is written.
+- Decided: `grid lock` sets only `GRID_DRY_HOME` and `HOME` for the home redirect and reads `<tmp>/home/.claude/skills`, because `foundations#8` forces every home-derived target under `GRID_DRY_HOME`; passing its own `SKILLS_DIR` would be ignored and reading `<tmp>/skills` would yield an empty lock.
+- Takes every symlink in `<tmp>/home/.claude/skills` whose target is `<grid>/repos/<source>/<path>` (string compare is safe: `<grid>` is the realpath `grid` itself passed as `GRID_DIR`) with a non-empty `path` and a `SKILL.md` in the target (this excludes the `foundations` runtime-root link). Each discovered `path` must pass Input validation.
 - `sha` from `git ls-files -s repos/<source>` (the index, so a staged pointer bump is seen before commit); exit 2 naming the source if `git -C repos/<source> rev-parse HEAD` differs or `git -C repos/<source> status --porcelain -- <path>` is non-empty. Writes `grid.lock` atomically.
 - Warns on stderr (never fails) when a `SKILL.md` contains `../`.
 - `grid lock --check` regenerates in memory, exits 1 listing added, removed and changed entries, and also runs doctor check 1 plus "every untyped baseline repo has a `sources` entry". It exits 3 (not 1 or 2) with `grid: lock --check not possible here: repos/<source> is not a checkout` when any source named in `grid.lock` has no `repos/<source>/.git`; `gate.sh` maps exit 3 to a loud skip, so no JSON parsing is needed in bash.
@@ -283,7 +296,7 @@ The directory has no tracked files, so nothing is deleted in git. Public docs ar
 - Decided: `grid` requires git 2.25 and checks it at start, and uses `init --cone` then `set` (not `set --cone`, which needs git 2.35), because Ubuntu 20.04 and 22.04 ship 2.25 and 2.34.
 - Decided: the machine host key is `socket.gethostname().split(".")[0]`, not a call to `hostname -s`, because a minimal Arch or container install may lack the `hostname` binary.
 - Decided: link ownership in `uninstall` and link selection in `lock` compare realpaths, and `GRID_DIR` handed to `wire.sh` is the realpath, because macOS temp and home paths go through symlinks and a string compare would silently match nothing.
-- Decided: the `grid lock` child of `wire.sh` also gets `HOME=<tmp>/home` and `CLAUDE_CONFIG_DIR=<tmp>/claude`, because other changes make `wire.sh` maintain a user-settings hook entry and the lock run must write nothing real.
+- Decided: the `grid lock` child of `wire.sh` also gets `HOME=<tmp>/home` (but no `CLAUDE_CONFIG_DIR`; `GRID_DRY_HOME` forces it to `<tmp>/home/.claude`), because other changes make `wire.sh` maintain a user-settings hook entry and the lock run must write nothing real.
 - Decided: `grid lock --check` exits 3 when a locked source is not checked out, and `gate.sh` treats 3 as a loud skip, because bash should not parse JSON to decide that.
 - Decided: schedule files are rendered through `loops#3`'s `scripts/lib/render-schedule.sh` (weekly form), and only activation commands are printed (G2), because one renderer means one set of escaping rules and tests.
 - Decided: `schedule install` refuses (exit 2) a grid path with characters outside `[A-Za-z0-9_./@+-]` (G2).

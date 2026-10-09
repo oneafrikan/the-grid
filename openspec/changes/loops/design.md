@@ -182,7 +182,10 @@ failure mid-run (stopped early), 2 = preflight failed (nothing touched).
       ("claude not logged in for this user; run `claude` once interactively as the loop user")
    e  LOOP_GH_TOKEN non-empty ("set GH_TOKEN in $ENV_FILE"); `GH_TOKEN="$LOOP_GH_TOKEN" gh auth
       status` passes; `env -u GH_TOKEN -u GITHUB_TOKEN gh auth status` FAILS ("this user has a
-      stored gh login the worker could use; run gh auth logout")
+      stored gh login the worker could use; run gh auth logout"); token identity:
+      `GH_TOKEN="$LOOP_GH_TOKEN" gh api user --jq .login` must NOT be in LOOP_TRUSTED_ACTORS
+      ("the PAT must belong to a separate machine-account collaborator, not a trusted actor;
+      see README") — otherwise a token-holder could label/edit issues that pass the trust gate
    f  `git remote get-url origin` starts with https:// ("origin must be https; an SSH key in
       this user's home would give the worker push access")
    g  `git ls-remote --exit-code origin BASE_BRANCH` (with the token)
@@ -255,7 +258,9 @@ failure mid-run (stopped early), 2 = preflight failed (nothing touched).
       (missing -> empty):
         LINE == done AND `git -C WT branch --show-current` == issue-N AND `git -C WT status
         --porcelain` empty AND `git -C WT rev-list --count origin/BASE_BRANCH..HEAD` >= 1
-          -> `GH_TOKEN=… git -C WT push origin HEAD:refs/heads/issue-N` (explicit refspec; a
+          -> `GH_TOKEN=… git -C WT -c core.hooksPath=/dev/null push --no-verify origin
+             HEAD:refs/heads/issue-N` (hooks off: a hook the worker planted in the worktree
+             must never run while the token is in the environment; explicit refspec; a
              rejected push, e.g. a workflow file the token cannot write, is issue-level
              "push rejected")
           -> `gh pr create --repo R --base BASE_BRANCH --head issue-N --title "<issue title> (#N)"
@@ -442,7 +447,7 @@ Credentials: the runner itself parses the env file
 `${GRID_LOOP_ENV:-$HOME/.config/the-grid/issue-loop.env}` of the loop user (mode 600,
 created by the human, never by a script), so systemd, launchd, cron and a manual run
 behave the same and the unit carries no `EnvironmentFile`. Keys (no others are read):
-- `GH_TOKEN=...` required: a fine-grained PAT for the one repo (Contents, Pull requests, Issues: read/write; Metadata: read; no Workflows, no Administration). `gh auth setup-git`, run once by the human as the loop user, makes HTTPS pushes use it.
+- `GH_TOKEN=...` required: a fine-grained PAT created from a separate GitHub machine account (not the operator) that is a collaborator with write on the repo, for the one repo (Contents, Pull requests, Issues: read/write; Metadata: read; no Workflows, no Administration). `gh auth setup-git`, run once by the human as the loop user, makes HTTPS pushes use it.
 - `LOOP_TRUSTED_ACTORS=login1,login2` required: GitHub logins whose labelling and edits the loop trusts. Kept here, not in the tracked `loop.conf`, so no username lands in the repo.
 - `LOOP_OPERATOR_HOME=/home/<operator>` required: a path the loop user must NOT be able to list (isolation check).
 Claude auth is the loop user's own credentials-file login; `CLAUDE_CODE_OAUTH_TOKEN` is unset for every model call.
@@ -692,6 +697,7 @@ The stub `claude` is also exported as `GRID_CLAUDE` (G5).
 - Decided (Q1): the worker, `SETUP_CMD` and the review call run under `env -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN`; the worker argv adds `--strict-mcp-config --mcp-config '{"mcpServers":{}}' --setting-sources project,local`; group 5.6 confirms on the real CLI that `--settings` (guard hook) still applies and `--agent` still resolves user agents under `--setting-sources project,local`; if user agents do not resolve, the fallback is to look up agents only in `$REPO_ROOT/.claude/agents/` (written by `agent-factory/deploy.py`). Pending operator: Q1 — same line.
 - Decided (Q1): input trust gate before any worktree or model call: `author_association` in OWNER/MEMBER/COLLABORATOR; last `labeled` actor for `ISSUE_LABEL` in `LOOP_TRUSTED_ACTORS`; every body editor (GraphQL `userContentEdits`) and `renamed` actor in `LOOP_TRUSTED_ACTORS`; else `needs-human` + comment, continue. Issue comments are never given to the worker (the runner puts only title + body in the prompt and tells it not to fetch the issue). Pending operator: Q1 — same line.
 - Decided (Q1): preflight requires a repository ruleset with a `pull_request` rule on the base branch (`gh api repos/R/rules/branches/<base>`), and a token without Administration access (reading classic protection must fail with HTTP 403); exit 2 otherwise. The README documents the fine-grained PAT (single repo; Contents/Pull requests/Issues read-write, Metadata read; no Workflows, no Administration) and a ruleset with an EMPTY bypass list. Both API behaviours are UNVERIFIED on the drafting machine and are checked in group 5.6. Pending operator: Q1 — same line.
+- Decided (Q13, F6): the runner's PAT belongs to a separate GitHub machine-account collaborator (write access), never the operator; preflight 2e checks `gh api user --jq .login` with the PAT is NOT in `LOOP_TRUSTED_ACTORS` (exit 2); the runner pushes with `git -c core.hooksPath=/dev/null push --no-verify` so worker-planted hooks never run with the token. Reason: PRs opened by the machine account can be reviewed/approved by the operator, and a token-holder must not be able to satisfy the trust gate. Pending operator: Q13 (default: separate machine account).
 - Decided (Q1): proposal Non-goal reads "Isolation: dedicated unprivileged OS user; no container." Residual risk (same-uid worker can read the env file) is stated in the README and bounded by token scope plus the ruleset. Pending operator: Q1 — same line.
 - Decided (Q2): web tools (WebFetch, WebSearch) are NOT disabled in the worker, because the Q1 isolation preflight is mandatory for every headless run; rule-pack content issues may use WebFetch. If Q1 is answered NO, the worker argv gains `--disallowedTools WebFetch WebSearch`. Pending operator: Q2 — WebFetch allowed in the loop worker only with Q1 isolation (default YES).
 - Decided (Q8): `LABEL_BUDGETS` in `loop.conf` (space-separated `label=usd`) raises the worker's `--max-budget-usd` to the largest matching value; the-grid's `loop/loop.conf` sets `LABEL_BUDGETS=${LABEL_BUDGETS:-ws:rule-packs=15}`. Workers may use Opus subagents/reviewers inside that cap (rule-pack content PRs); the cap covers the whole `claude -p` call. Pending operator: Q8 — `ws:rule-packs` issues get MAX_BUDGET_USD=15 and may use Opus reviewers (default YES).

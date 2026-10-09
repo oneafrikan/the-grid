@@ -171,19 +171,29 @@ SessionEnd stdin {session_id, transcript_path, cwd, reason}
        (GRID_AUTOHANDOFF_FORCE=1 bypasses steps 2 to 4 only; it exists for the group 5 parity run and for tests)
     5. digest dir = `mktemp -d` (0700 under the umask); digest transcript -> file inside it
        (cap GRID_AUTOHANDOFF_MAX_BYTES, default 300000); `mkdir -p` the fallback dir <fallback>/<basename of cwd>
-    6. cd "$cwd"; touch stamp; GRID_AUTOHANDOFF_CHILD=1 perl alarm <timeout> "${GRID_CLAUDE:-claude}" -p "/handoff <source note>" ...
+    6. cd "$cwd"; G = `git -C "$cwd" rev-parse --absolute-git-dir` (none -> no .git snapshot);
+       snapshot into a second `mktemp -d` dir (never passed to the child): a copy of G/config and, for every file
+       under G/hooks/, its relative path and a content copy;
+       touch stamp; GRID_AUTOHANDOFF_CHILD=1 perl alarm <timeout> "${GRID_CLAUDE:-claude}" -p "/handoff <source note>" ...
          exit 142 (SIGALRM) -> log action=error reason=timeout; exit 127 (exec failed) or other non-zero
          -> action=error reason=claude-exit-<n>
-    7. collect: NEW = `find -L "$cwd" "$fallback" -maxdepth 4 -type f -newer stamp`
+    7. .git check first: compare G/config with its copy (cmp) and the G/hooks/ file list and contents with the
+       snapshot; any difference                                   -> action=error reason=unexpected-file (fail closed:
+                                                                     no commit, every changed path logged, nothing under
+                                                                     .git/ moved or deleted, handoff files left in place)
+       The worker NEVER moves or deletes anything under .git/.
+       collect: NEW = `find -L "$cwd" "$fallback" -name .git -prune -o -type f -newer stamp -print` (no -maxdepth;
+       .git/ is excluded entirely)
        (the stamp's mtime is set 2 s in the past with perl utime, so a coarse-granularity filesystem cannot make a
        file written in the same second look old)
+         EXPECTED = {one <p>-handoff.md, at most one <p>-context.md} with the same <p>, in one directory that is
+         <target-dir> or <fallback>/<basename>; every other path in NEW is UNEXPECTED
+         every UNEXPECTED path is moved to ${GRID_STATE_DIR:-$HOME/.grid}/handoff-quarantine/<session_id>/<cwd|fallback>/<relative path>
+           (always, before any decision below; each moved path listed in the log, field quarantined=<n>)
          no *-handoff.md in NEW                                   -> action=error reason=no-handoff-file
-         NEW is not exactly {one <p>-handoff.md, at most one <p>-context.md} with the same <p>, in one directory
-         that is <fallback>/<basename>, the cwd repo root, or a direct child directory of it
-                                                                  -> action=error reason=unexpected-file (no commit;
-                                                                     every NEW path listed in the log, files left in place)
+         otherwise continue to step 8 with EXPECTED only
     8. secret-scan both files with hooks/lib/secret-patterns.sh (always, whatever the project profile or
-       GRID_DISABLED_HOOKS say): a hit -> move both files to <fallback>/<basename>/, no commit,
+       GRID_DISABLED_HOOKS say): a hit -> move both files to ${GRID_STATE_DIR:-$HOME/.grid}/handoff-quarantine/<session_id>/, no commit,
        action=error reason=secret (names and line numbers logged, never the value)
     9. commit: R = realpath of the files' directory; T = `git -C R rev-parse --show-toplevel` (none -> leave files,
        action=done reason=ok commit=none); else `git -C T add -- <a> [<b>]` then
@@ -204,7 +214,7 @@ perl -e 'alarm shift; exec @ARGV or exit 127' "${GRID_AUTOHANDOFF_TIMEOUT:-900}"
   --model sonnet --max-budget-usd "${GRID_AUTOHANDOFF_MAX_USD:-1.00}" \
   --permission-mode acceptEdits \
   --tools "Read,Write,Bash" \
-  --allowedTools "Read" "Write" "Bash(hostname:*)" "Bash(realpath:*)" "Bash(readlink:*)" "Bash(ls:*)" "Bash(date:*)" \
+  --allowedTools "Read" "Write(<target-dir>/**)" "Write(<fallback-dir>/**)" "Bash(hostname:*)" "Bash(realpath:*)" "Bash(readlink:*)" "Bash(ls:*)" "Bash(date:*)" \
   --disallowedTools "Edit" "Bash(git:*)" \
   --add-dir <digest dir> --add-dir <fallback dir> \
   --append-system-prompt-file "$GRID_DIR/hooks/lib/auto-handoff-system.md"
@@ -212,6 +222,7 @@ perl -e 'alarm shift; exec @ARGV or exit 127' "${GRID_AUTOHANDOFF_TIMEOUT:-900}"
 
 - `--max-turns 25` is added after `--model sonnet` ONLY if group 0 recorded it as accepted; otherwise the caps are the budget and the alarm.
 - If group 0 records that `/handoff` needs a tool outside `Read,Write,Bash` to run headless (for example `Skill`), group 3 adds exactly that name to `--tools` and `--allowedTools`; nothing else.
+- There is no bare `Write` rule. `<fallback-dir>` is `<fallback>/<basename of cwd>` (created by step 5). `<target-dir>` is the existing direct child of `cwd` named `logs` in any casing (the handoff skill's default), given both as `<cwd>/<name>` and, when it differs, as its realpath; if none exists the `<target-dir>` rule is omitted and the child can write only to the fallback dir. Absolute paths use whichever rule form group 0 recorded as enforced.
 
 The appended system prompt (`hooks/lib/auto-handoff-system.md`, under 1.5 KB) says:
 
@@ -224,7 +235,7 @@ The appended system prompt (`hooks/lib/auto-handoff-system.md`, under 1.5 KB) sa
 
 ### Files and state
 
-- Log: `${GRID_HOOK_LOG_DIR:-$HOME/.grid/hook-logs}/auto-handoff.log`, one line per decision, exact shape `ts=<UTC ISO-8601> session=<id> action=<skip|spawn|done|error> reason=<token>` plus optional `turns=<n>`, `commit=<none|sha>`, `push=<token>`. Reason tokens (tests assert these strings): `bad-payload`, `no-transcript`, `already-ran`, `short-session`, `no-new-turns`, `timeout`, `no-handoff-file`, `unexpected-file`, `secret`, `commit-failed`, `claude-exit-<n>`; `spawn` and `done` carry `reason=ok`. Child stdout/stderr appended truncated to 4000 bytes. Directory 0700.
+- Log: `${GRID_HOOK_LOG_DIR:-$HOME/.grid/hook-logs}/auto-handoff.log`, one line per decision, exact shape `ts=<UTC ISO-8601> session=<id> action=<skip|spawn|done|error> reason=<token>` plus optional `turns=<n>`, `commit=<none|sha>`, `push=<token>`, `quarantined=<n>`. Reason tokens (tests assert these strings): `bad-payload`, `no-transcript`, `already-ran`, `short-session`, `no-new-turns`, `timeout`, `no-handoff-file`, `unexpected-file`, `secret`, `commit-failed`, `claude-exit-<n>`; `spawn` and `done` carry `reason=ok`. Child stdout/stderr appended truncated to 4000 bytes. Directory 0700.
 - Fallback dir: `${GRID_HANDOFF_FALLBACK_DIR:-${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}/handoffs}`.
 - State: `${GRID_HOOK_STATE_DIR:-$HOME/.grid/hook-state}/handoff/<session_id>` containing the human-turn count at last handoff.
 - Run record: `scripts/run-record.sh --role auto-handoff --action handoff --outcome ok|error|skipped` per worker run.
@@ -308,7 +319,7 @@ The prefix set is a superset of the vetting `secret-shape` rule's prefixes in `p
 - `tests/helpers/setup.bash` (edited once, in group 1) exports in `common_setup`: `REAL_HOME` first (before any test overrides `HOME`), then `CLAUDE_CONFIG_DIR`, `GRID_HOOK_LOG_DIR`, `GRID_HOOK_STATE_DIR`, `GRID_HANDOFF_FALLBACK_DIR`, `GRID_PRIVATE_DIR` (all temp dirs), `GRID_RUN_LOG` (a temp file path), and the tripwire `GRID_CLAUDE=/nonexistent/grid-claude-tripwire` (G5: the existing variable `agent-factory/run_evals.py` reads, and the same `/nonexistent` convention `tests/test_eval_cases.bats` already uses; no tripwire script file). Executing it fails, so the worker's `exec @ARGV or exit 127` logs `reason=claude-exit-127` instead of reaching a model. `assert_sandboxed` refuses to run if any of those dirs resolves under the real `~/.claude`, `~/.grid` or `~/.the-grid-private`, or if `GRID_CLAUDE` is unset or empty. Tests that need a stub set `GRID_CLAUDE` themselves.
 - Stub `claude` (G5): tests call `make_stubs` from `tests/helpers/stubs.bash` (created by `loops#1`), which creates the stub dir (`STUB_DIR` below), prepends it to PATH and exports `GRID_CLAUDE` as the path of its `claude` stub. Group 3 EXTENDS that helper's `claude` stub, keeping every existing behaviour (argv to `$STUB_LOG`, `STUB_CLAUDE_EXIT`, `--help`/`auth status` handling) unchanged when the new variable is unset:
   - on every run it also writes `pwd` to `$STUB_DIR/claude.cwd`, the value of `GRID_AUTOHANDOFF_CHILD` to `$STUB_DIR/claude.child-env`, `ps -o pgid= -p $$` to `$STUB_DIR/claude.pgid`, `$$` to `$STUB_DIR/claude.pid` and `umask` to `$STUB_DIR/claude.umask`;
-  - new `STUB_CLAUDE_MODE` (unset = old behaviour): `handoff-logs` writes `$PWD/LOGS/2026-01-01-testhost-stub-handoff.md` and `-context.md` with body `${STUB_HANDOFF_BODY:-stub}`; `handoff-fallback` writes the same two names under `$GRID_HANDOFF_FALLBACK_DIR/<basename of PWD>/`; `handoff-extra` does `handoff-logs` and also writes `$PWD/.git/hooks/x`; a silent success is `STUB_CLAUDE_EXIT=0` with no mode, a failure is `STUB_CLAUDE_EXIT=3`;
+  - new `STUB_CLAUDE_MODE` (unset = old behaviour): `handoff-logs` writes `$PWD/LOGS/2026-01-01-testhost-stub-handoff.md` and `-context.md` with body `${STUB_HANDOFF_BODY:-stub}`; `handoff-fallback` writes the same two names under `$GRID_HANDOFF_FALLBACK_DIR/<basename of PWD>/`; `handoff-extra` does `handoff-logs` and also writes `$PWD/.git/hooks/x` and appends a line to `$PWD/.git/config`; `handoff-stray` does `handoff-logs` and also writes `$PWD/a/b/c/d/e/stray.md` (deeper than the old depth-4 scan); a silent success is `STUB_CLAUDE_EXIT=0` with no mode, a failure is `STUB_CLAUDE_EXIT=3`;
   - new `STUB_CLAUDE_SLEEP=<seconds>`: sleep that long before acting (the same knob `instincts` group 3 adds "only if absent"; this change adds it first in D9 order). The worker's alarm kills the stub process, whose pid the timeout test checks;
   - `STUB_*` variables reach the stub through the environment inherited by the detached worker.
 - Each hook test file's `teardown` kills the pid in `$STUB_DIR/claude.pid` (if any) and runs `pkill -f "$BATS_TEST_TMPDIR"` (worker command lines carry the test's transcript path under it) before `clean_stubs` and removing temp dirs, so no detached process outlives its test.
@@ -458,8 +469,11 @@ Auto-handoff test matrix lives in `specs/auto-handoff/spec.md`; transcripts for 
 - Decided: the SessionEnd hook only spawns; transcript parsing happens in the detached worker, because scanning a multi-megabyte JSONL inside the 1.5 s budget is not safe.
 - Decided: the hook detaches the worker with `perl -MPOSIX -e 'POSIX::setsid(); alarm shift; exec @ARGV' <timeout+60> worker ...` and redirected stdio, and the worker runs the child as `perl -e 'alarm shift; exec @ARGV' <timeout> claude ...`, because perl ships on macOS, Ubuntu and Arch while `setsid` and `timeout` do not on macOS, `alarm` survives `exec`, and putting the alarm on the child (default 900 s, `GRID_AUTOHANDOFF_TIMEOUT`) lets the worker see exit 142 and log `action=error reason=timeout`; the outer alarm only catches a hung worker.
 - Decided: the child always gets `--model sonnet`, `--max-budget-usd` (default 1.00, `GRID_AUTOHANDOFF_MAX_USD`) and the wall-clock alarm, because it is an unattended model call that now runs by default (D13). `--max-turns 25` is added only when group 0 recorded it as accepted, because it is absent from `claude --help` 2.1.295 and the only way to learn whether it is accepted is one live call, which the HUMAN group makes once instead of every build agent guessing.
-- Decided: the child gets `--tools "Read,Write,Bash"`, `--allowedTools` limited to `Read`, `Write` and the read-only Bash patterns `hostname`, `realpath`, `readlink`, `ls`, `date`, and `--disallowedTools "Edit" "Bash(git:*)"`, under `--permission-mode acceptEdits`, because under Q3 the child only writes two new files; it needs no Edit, no git and no mkdir (the worker creates the fallback dir).
+- Decided: the child gets `--tools "Read,Write,Bash"`, `--allowedTools` limited to `Read`, path-scoped `Write(<target-dir>/**)` and `Write(<fallback-dir>/**)` (never bare `Write`) and the read-only Bash patterns `hostname`, `realpath`, `readlink`, `ls`, `date`, and `--disallowedTools "Edit" "Bash(git:*)"`, under `--permission-mode acceptEdits`, because under Q3 the child only writes two new files; it needs no Edit, no git and no mkdir (the worker creates the fallback dir).
   Pending operator: Q3 — child writes only; worker verifies, secret-scans, commits by path and pushes only the private repo when the handoff commit is the sole unpushed one (default applied).
+- Decided: the worker quarantines EVERY unexpected new path (moves it to `${GRID_STATE_DIR:-$HOME/.grid}/handoff-quarantine/<session_id>/`, path kept relative to its scan root), and scans `cwd` with no `-maxdepth` and with `.git/` pruned, because a stray file left in the tree stays live and a depth cap lets a deep write go unseen (F7).
+- Decided: the worker NEVER moves or deletes anything under `.git/`; instead it snapshots `.git/config` (a copy, compared with `cmp`) and the file list and contents of `.git/hooks/` before spawning the child and compares after; any difference fails closed (no commit, `reason=unexpected-file`, changed paths logged, left in place for the operator), because a changed git config or hook means the write-only boundary failed, while moving files out of `.git/` could corrupt a repo the operator is using concurrently (F7).
+- Decided: group 0 (HUMAN) verifies that path-scoped `Write(<dir>/**)` rules are enforced under `claude -p` (a write outside the allowed dirs is denied) and records the result and the working rule form; if they are not enforceable, group 3 is blocked, because the path scope is the first line of the write-only boundary and the worker's scan is only the second (F7). This check runs even if Q12 drops the rest of group 0.
 - Decided: the slash-command signal counts only lines of `type` `user` or `system` whose text content (never a `tool_result` block) contains `<command-name>/handoff</command-name>` or `<command-name>/<plugin>:handoff</command-name>`, because the same text appears inside tool results whenever a transcript or this design is `cat`-ed, and that must not suppress a real handoff.
 - Decided: "already ran" is any of the three transcript signals anywhere in the session, even if work continued afterwards, because a precise "ran late enough" rule is speculative for v1 and the operator's manual handoff is the normal path.
 - Decided: trivial-session threshold is 5 human turns (`GRID_AUTOHANDOFF_MIN_TURNS`), because shorter sessions rarely have state worth handing off and the hook is on everywhere.
@@ -470,7 +484,7 @@ Auto-handoff test matrix lives in `specs/auto-handoff/spec.md`; transcripts for 
 - Decided: the hook rejects a payload whose `session_id` is not `^[A-Za-z0-9_-]+$` (log `reason=bad-payload`), because the id becomes a file name under the state dir.
 - Decided: no filter on the SessionEnd `reason`; it is logged only, because the set of reasons is not verified and `/clear` and exit both end sessions with work in them.
 - Decided: the child follows the real `handoff` skill and templates (no second prompt that re-implements it), because the requirement is the same quality as a manual run; only operational constraints go in the appended system prompt.
-- Decided: the WORKER, not the child, commits: only after the new-file check (exactly one `<p>-handoff.md` and at most one `<p>-context.md`, same prefix, one allowed directory; anything else is `reason=unexpected-file` with no commit) and an unconditional secret scan of both files with `hooks/lib/secret-patterns.sh`, it runs `git add -- <a> <b>` and `git commit -m "docs: auto-handoff <p>" -- <a> <b>` in the repo holding their real path, because a deterministic script cannot be talked into sweeping the operator's staged work, writing a git hook, or committing a secret.
+- Decided: the WORKER, not the child, commits: only after the new-file check (exactly one `<p>-handoff.md` and at most one `<p>-context.md`, same prefix, one allowed directory; every other new path outside `.git/` quarantined; a changed `.git/config` or `.git/hooks/` is `reason=unexpected-file` with no commit) and an unconditional secret scan of both files with `hooks/lib/secret-patterns.sh`, it runs `git add -- <a> <b>` and `git commit -m "docs: auto-handoff <p>" -- <a> <b>` in the repo holding their real path, because a deterministic script cannot be talked into sweeping the operator's staged work, writing a git hook, or committing a secret.
   Pending operator: Q3 — child writes only; worker verifies, secret-scans, commits by path and pushes only the private repo when the handoff commit is the sole unpushed one (default applied).
 - Decided: the worker pushes ONLY when the commit's repo is the private repo (`realpath ${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}`), the branch has an upstream, and `rev-list --count @{u}..HEAD` is exactly 1, with a plain `git push`; every other case commits without pushing and logs why in `push=`, because a push sends every unpushed commit, and only the private repo's handoff-only commits are safe to send unattended.
   Pending operator: Q3 — child writes only; worker verifies, secret-scans, commits by path and pushes only the private repo when the handoff commit is the sole unpushed one (default applied).
@@ -510,8 +524,8 @@ Auto-handoff test matrix lives in `specs/auto-handoff/spec.md`; transcripts for 
 - The `/handoff` skill may not run under `claude -p` (headless), or the `--allowedTools` patterns may be rejected; group 0 tests both with one real call before any worker code is written.
 - Transcript line shapes change between Claude Code versions; the fixtures record the version they were captured from, and a shape drift shows as the already-ran or turn-count tests failing against re-captured fixtures, not as silent skips (the worker logs every skip with its reason).
 - On by default means a background Sonnet run on every qualifying session on every machine; bounded by the 5-turn threshold, the manual-handoff skip, `--max-budget-usd`, the alarm and (if accepted) `--max-turns`, and visible in the log and run record. `--max-budget-usd` may not bind on a subscription plan; then the alarm (and the turn cap if present) are the only bounds.
-- `--allowedTools` pattern syntax may differ by Claude Code version; group 0 verifies it with a real call and group 5 re-verifies it in a real session.
+- `--allowedTools` pattern syntax, including path-scoped `Write(<dir>/**)`, may differ by Claude Code version; group 0 verifies it with a real call (group 3 is blocked if path scoping is not enforced) and group 5 re-verifies it in a real session.
 - Two sessions ending at once in the same repo can collide on the git index lock; the worker logs `action=error` and the handoff files stay on disk.
-- The new-file check sees any file created under `cwd` (depth 4) during the child run, including the operator's own concurrent work or another session's git activity; that fails safe (`reason=unexpected-file`, no commit, files left on disk) at the cost of an occasional uncommitted handoff.
+- The new-file check sees any file created anywhere under `cwd` outside `.git/` during the child run, including the operator's own concurrent work; such files are moved to the quarantine dir (logged with `quarantined=<n>` and every moved path), so concurrent edits can be pulled out of the tree. An operator changing `.git/config` or `.git/hooks/` during the child run blocks that handoff commit (fails safe). The unbounded scan is slower on a large tree.
 - On a secret hit the files are moved to the machine-local quarantine `${GRID_STATE_DIR:-$HOME/.grid}/handoff-quarantine/`, outside every repo, so no later `git add -A` can sweep them in. The log line tells the operator to review and delete them.
 - `--tools "Read,Write,Bash"` may be too narrow for `/handoff` to run headless (for example if it needs `Skill`); group 0 records this and group 3 adds only the named tool.

@@ -39,7 +39,7 @@ Two scopes, because the baseline is personal and gitignored (#24) while owned co
 
 Role description = `description:` if present, else `"<title>. <summary>"` (whitespace-collapsed). Roles split by `role.yaml orchestrator: true`: orchestrators are skills (skills total), specialists are agents (separate agents total, a different listing). Private roles (`GRID_PRIVATE_ROLES_DIR`, `~/.the-grid-private/roles`) are never read, so the number is deterministic.
 
-`baseline_wired.py` runs `wire.sh` with `GRID_DRY_HOME=<tmp>` (foundations: redirects every home-derived target, so a measurement never touches the real home) plus `SKILLS_DIR=<tmp>/skills`, `AGENTS_DIR=<tmp>/agents`, `GRID_SKIP_CATALOG=1` and `GRID_HOST=__baseline__` (a host with no overlay file), passing `GRID_BASELINE` through when set, and reads the resulting symlinks. This mirrors `foundations`' `tests/helpers/wired.bash`. The gstack runtime-root link (`skills/gstack -> repos/gstack`, foundations#5) is not a skill dir but Claude Code lists it from `repos/gstack/SKILL.md`, so it is counted as one entry named `gstack`.
+`baseline_wired.py` runs `wire.sh` with `GRID_DRY_HOME=<tmp>` (foundations#8: exports `HOME=<tmp>` and forces every home-derived target under it, ignoring inherited `SKILLS_DIR`/`AGENTS_DIR`, so a measurement never touches the real home) plus `GRID_SKIP_CATALOG=1` and `GRID_HOST=__baseline__` (a host with no overlay file), passing `GRID_BASELINE` through when set; it sets no `SKILLS_DIR`/`AGENTS_DIR` of its own and reads the resulting symlinks from `<tmp>/.claude/skills` (and `<tmp>/.claude/agents`). This mirrors `foundations`' `tests/helpers/wired.bash`. The gstack runtime-root link (`skills/gstack -> repos/gstack`, foundations#5) is not a skill dir but Claude Code lists it from `repos/gstack/SKILL.md`, so it is counted as one entry named `gstack`.
 
 `docs/budget-target.json` (committed; numbers filled by the implementer with `--update-target`):
 
@@ -221,7 +221,7 @@ An existing `<host>.json` that does not parse (truncated, conflict markers) is n
 
 `PRIVATE=${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}`; `STATE=${GRID_STATE_DIR:-$HOME/.grid}` (machine-local state per D8; created with `mkdir -p`). A thin client without the private repo still writes the file locally and skips git. Commits carry no AI attribution (automated job).
 
-`install-schedule.sh [--uninstall]` picks a scheduler (`GRID_SCHEDULER=launchd|systemd|cron` overrides; default Darwin -> launchd, Linux with `systemctl` on `PATH` -> systemd, else cron) and renders every file through the shared `scripts/lib/render-schedule.sh` weekly mode (loops#3); there are no templates in this change and no absolute paths in tracked files.
+`install-schedule.sh [--uninstall]` picks a scheduler (`GRID_SCHEDULER=launchd|systemd|cron` overrides; default Darwin -> launchd, Linux where `systemctl --user show-environment >/dev/null 2>&1` succeeds -> systemd, else cron) and renders every file through the shared `scripts/lib/render-schedule.sh` weekly mode (loops#3); there are no templates in this change and no absolute paths in tracked files.
 
 | scheduler | file written | cadence | printed activation (never run) |
 |---|---|---|---|
@@ -229,7 +229,7 @@ An existing `<host>.json` that does not parse (truncated, conflict markers) is n
 | systemd | `$SYSTEMD_USER_DIR/grid-usage.{service,timer}` (default `~/.config/systemd/user`) | `Mon 09:00`, `Persistent=true`, `RandomizedDelaySec=1h` | `systemctl --user daemon-reload && systemctl --user enable --now grid-usage.timer`; `loginctl enable-linger` note when headless |
 | cron | nothing | `0 9 * * 1` | the rendered crontab line |
 
-The installer never runs `launchctl`, `systemctl`, `crontab` or `loginctl`. A `GRID_DIR` or state path the renderer cannot escape safely makes it exit 2 before writing anything. Installing and activating is per machine and is a HUMAN task.
+The installer never runs `launchctl`, `systemctl`, `crontab` or `loginctl`, apart from the read-only `systemctl --user show-environment` detection probe (F9b). A `GRID_DIR` or state path the renderer cannot escape safely makes it exit 2 before writing anything. Installing and activating is per machine and is a HUMAN task.
 
 ### 5. Prune report
 
@@ -297,7 +297,9 @@ Evidence footer: hosts reporting, day coverage, and the standing caveats (only S
 - Decided: `docs/prune-keep.txt` is tracked and starts with `handoff` and `grid-help`; reason: front-door skills must never be proposed even if unused for a month.
 - Decided: the report prints the `skillOverrides` snippet in the documented shape and never writes settings; reason: settings.json is not grid-owned and the override is per machine.
 - Decided: the installer prints but never runs `launchctl`, `systemctl`, `crontab` or `loginctl`; reason: system-level side effects stay with the human (superseded detail: covered by the G2 line above).
-- Decided (G1): `baseline_wired.py` runs `wire.sh` with `GRID_DRY_HOME=<tmp>` as well as temp `SKILLS_DIR`/`AGENTS_DIR`; a bats case proves a sentinel in a fake real home is untouched; Depends on foundations#8 (its `GRID_DRY_HOME` task); reason: a measurement must never write to any home-derived target.
+- Decided (G1, F1): `baseline_wired.py` runs `wire.sh` with only `GRID_DRY_HOME=<tmp>` (+ `GRID_HOST=__baseline__`, `GRID_BASELINE`, `GRID_SKIP_CATALOG=1`), sets no `SKILLS_DIR`/`AGENTS_DIR`, and reads `<tmp>/.claude/skills` and `<tmp>/.claude/agents`; a bats case proves a non-empty baseline yields a non-empty result; a bats case proves a sentinel in a fake real home is untouched; Depends on foundations#8 (its `GRID_DRY_HOME` task); reason: a measurement must never write to any home-derived target.
+- Decided (F9a): `RandomizedDelaySec=1h` is passed as `render_systemd_timer`'s 4th argument (RANDOM_DELAY); reason: the renderer supports it, so no fallback is needed.
+- Decided (F9b): systemd is detected by `systemctl --user show-environment >/dev/null 2>&1` succeeding (same probe as manifest-lock-install); reason: `systemctl` on `PATH` does not prove a user manager is running.
 - Decided (G3): the gate's `budget` check skips loudly (`SKIPPED+=(budget)`, pass) when `python3` or `scripts/budget.py` is absent, with a `tests/test_gate.bats` case; reason: a missing interpreter must be visible, not a silent pass or a hard fail.
 - Decided (G5): the baseline sentinel host is `GRID_HOST=__baseline__`; reason: one shared sentinel across changes.
 - Decided (G6): the gstack runtime-root link (`skills/gstack -> repos/gstack`, foundations#5) counts as one baseline entry named `gstack` with its description from `repos/gstack/SKILL.md`; Depends on foundations#5; reason: Claude Code lists it like any skill dir.

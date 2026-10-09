@@ -145,19 +145,21 @@ This is the final form (task 8.5). Group 2 ships the same function with `GRID_SK
 # GRID_DRY_HOME: redirect EVERY home-derived target into a throwaway home.
 # Values are forced, not defaulted, so an inherited SKILLS_DIR or
 # CLAUDE_CONFIG_DIR from the operator's shell cannot leak a dry run into the
-# real home. Later changes that add a home target (RULES_DIR,
-# GRID_HARNESS_HOME, ~/.grid state) MUST force it under GRID_DRY_HOME here.
+# real home. RULES_DIR (rule-packs) and GRID_HARNESS_HOME (harness paths) are
+# forced here too; any later home target (~/.grid state) MUST be added here.
 if [ -n "${GRID_DRY_HOME:-}" ]; then
   mkdir -p "$GRID_DRY_HOME"
   export HOME="$GRID_DRY_HOME"
   SKILLS_DIR="$GRID_DRY_HOME/.claude/skills"
   AGENTS_DIR="$GRID_DRY_HOME/.claude/agents"
   export CLAUDE_CONFIG_DIR="$GRID_DRY_HOME/.claude"
+  export RULES_DIR="$GRID_DRY_HOME/.claude/rules"
+  export GRID_HARNESS_HOME="$GRID_DRY_HOME"
   export GRID_SKIP_CATALOG=1   # no SKILLS.md / .wired.manifest writes either
 fi
 ```
 
-Every dry-run caller in the uplift (this change's `--check` child and `wired_skill_dirs`; `vetting` `audit.sh --wired|--gate`; `budget-and-usage` `baseline_wired.py`; `manifest-lock-install` `grid lock`) sets `GRID_DRY_HOME` and reads `$GRID_DRY_HOME/.claude/skills` and `.../agents`. Other changes reference this as `foundations#8`.
+Every dry-run caller in the uplift (this change's `--check` child and `wired_skill_dirs`; `vetting` `audit.sh --wired|--gate`; `budget-and-usage` `baseline_wired.py`; `manifest-lock-install` `grid lock`) sets ONLY `GRID_DRY_HOME` (plus `GRID_HOST`/`GRID_BASELINE` as needed, never `SKILLS_DIR`/`AGENTS_DIR`/`RULES_DIR`/`CLAUDE_CONFIG_DIR`/`GRID_HARNESS_HOME`) and reads `$GRID_DRY_HOME/.claude/{skills,agents,rules}`. Other changes reference this as `foundations#8`.
 
 ### Pages deploy (group 9)
 
@@ -310,6 +312,7 @@ Both are in `teardown_grid_links` (`scripts/wire.sh`, currently around line 172)
 - Decided: an existing standalone `~/.claude/skills/gstack` (not a link to `repos/gstack`) is removed by the operator before HUMAN group 6 (task 6.2); the-grid scripts still never delete it.
   Pending operator: Q10 — remove the standalone ~/.claude/skills/gstack before group 6 (default YES).
 - Decided: wire.sh teardown fixes (sibling-prefix match, `find -H` for a symlinked skills dir) live in foundations group 8, because both are live bugs in the file this change already edits and `multi-harness` task 1.5(c) will depend on `foundations#8` instead of fixing them. Tests: a link into `${GRID_DIR}-private/x` survives a wire; with `SKILLS_DIR` a symlink to a real dir holding a stale grid link, the stale link is removed.
+- Decided: `RULES_DIR` (`$GRID_DRY_HOME/.claude/rules`) and `GRID_HARNESS_HOME` (`$GRID_DRY_HOME`) are forced in the dry-home block alongside `SKILLS_DIR`/`AGENTS_DIR`/`CLAUDE_CONFIG_DIR`, ignoring inherited values, because rule-packs and multi-harness write home-derived targets and their dry-run callers rely on foundations#8 to redirect them; the 8.6 sentinel test exports `RULES_DIR` into the fake real home and asserts it untouched.
 
 ## Risks
 
