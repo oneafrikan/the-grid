@@ -8,18 +8,18 @@ Depends on: none.
 
 Files: `scripts/lib/find-skill-mds.sh`, new `scripts/lib/skill-excludes.txt`, new `tests/test_skill_discovery.bats`, `CLAUDE.md` (one bullet in "wire.sh contract").
 
-- [ ] 1.1 Add an `_skill_excluded <repo-name> <relative-path>` helper to `find-skill-mds.sh` implementing the three rules in design.md (translation dirs, root-level dot-dir, listed prefix from `scripts/lib/skill-excludes.txt` located via `BASH_SOURCE`). Apply it to the output of both branches (git `ls-files` and `find` fallback). Keep the output contract (`<repo>/<relative path>`, one per line). The repo name for rule 3 is `basename` of the argument.
-- [ ] 1.2 Create `scripts/lib/skill-excludes.txt` with the header comment and the single row `ecc | pi/`.
-- [ ] 1.3 Rewrite the header comment of `find-skill-mds.sh`: it currently says skills tracked inside dot-dirs are honoured; state the new rule and why.
-- [ ] 1.4 Write `tests/test_skill_discovery.bats` with fixtures under `mktemp -d` (both a plain dir and a `git init` + `git add` + commit fixture, so both branches run):
+- [x] 1.1 Add an `_skill_excluded <repo-name> <relative-path>` helper to `find-skill-mds.sh` implementing the three rules in design.md (translation dirs, root-level dot-dir, listed prefix from `scripts/lib/skill-excludes.txt` located via `BASH_SOURCE`). Apply it to the output of both branches (git `ls-files` and `find` fallback). Keep the output contract (`<repo>/<relative path>`, one per line). The repo name for rule 3 is `basename` of the argument.
+- [x] 1.2 Create `scripts/lib/skill-excludes.txt` with the header comment and the single row `ecc | pi/`.
+- [x] 1.3 Rewrite the header comment of `find-skill-mds.sh`: it currently says skills tracked inside dot-dirs are honoured; state the new rule and why.
+- [x] 1.4 Write `tests/test_skill_discovery.bats` with fixtures under `mktemp -d` (both a plain dir and a `git init` + `git add` + commit fixture, so both branches run):
   - keeps `skills/a/SKILL.md` and a nested `engineering/b/SKILL.md`;
   - drops `docs/ja-JP/skills/a/SKILL.md`, `docs/tr/skills/a/SKILL.md`, `i18n/zh-CN/a/SKILL.md`;
   - keeps `docs/guides/a/SKILL.md` (not a locale);
   - drops `.kiro/skills/a/SKILL.md`, `.agents/skills/a/SKILL.md`;
   - drops `pi/core/a/SKILL.md` only when the fixture dir is named `ecc`;
   - a real-repo test (skipped when `repos/ecc` is uninitialised): no path from `find_skill_mds repos/ecc` contains `/docs/` or `/.`, every path is under `repos/ecc/skills/`, and the line count equals `git -C repos/ecc ls-files -- 'skills/*SKILL.md' | wc -l` (which must be greater than 0). No literal count: it moves with every ECC bump.
-- [ ] 1.5 `wire.sh` and `catalog.sh` need no code change (they source the helper); add one catalog test: a mock repo with a `.kiro` copy and a `skills/` skill reports count 1 in the section header.
-- [ ] 1.6 If `baseline-submodules.txt` exists on this machine, run `bash scripts/catalog.sh` and include the regenerated `SKILLS.md`; otherwise leave `SKILLS.md` untouched and write "SKILLS.md needs regeneration on a baseline machine" in the PR body.
+- [x] 1.5 `wire.sh` and `catalog.sh` need no code change (they source the helper); add one catalog test: a mock repo with a `.kiro` copy and a `skills/` skill reports count 1 in the section header.
+- [x] 1.6 If `baseline-submodules.txt` exists on this machine, run `bash scripts/catalog.sh` and include the regenerated `SKILLS.md`; otherwise leave `SKILLS.md` untouched and write "SKILLS.md needs regeneration on a baseline machine" in the PR body.
 
 Acceptance: `tests/lib/bats-core/bin/bats tests/test_skill_discovery.bats` passes; if `repos/ecc` is initialised, `find_skill_mds repos/ecc | wc -l` equals `git -C repos/ecc ls-files -- 'skills/*SKILL.md' | wc -l` (derived, not a literal; 293 at the 2026-10-09 pin).
 
@@ -29,9 +29,9 @@ Depends on: 1.
 
 Files: `.github/workflows/tests.yml`, `scripts/wire.sh` (add `GRID_BASELINE`), `tests/test_wiring.bats`, new `tests/helpers/wired.bash`, `tests/test_skill_format.bats`, `tests/test_repo_health.bats`.
 
-- [ ] 2.1 `wire.sh`: replace the hard-coded `$GRID_DIR/baseline-submodules.txt` in the first `load_manifest` call (currently line 112) with `${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}`; add `GRID_BASELINE` to the env-var list in the header comment. Add a test to `tests/test_wiring.bats`: a mock grid with two repos, `GRID_BASELINE` pointing at a temp file naming only one of them, wires only that repo's skills.
-- [ ] 2.2 Add `tests/helpers/wired.bash` with `wired_skill_dirs` exactly as sketched in design.md (the group-2 form: `SKILLS_DIR`/`AGENTS_DIR` in a temp dir, `GRID_HOST=__baseline__`). Task 8.5 switches it to `GRID_DRY_HOME`.
-- [ ] 2.3 `tests/test_skill_format.bats`: delete the baseline parsing, `repo_is_wired` and `all_wired_skill_dirs`; add `load helpers/setup` and `load helpers/wired` (setup defines `REPO_ROOT`) and have the three "wired" tests iterate `wired_skill_dirs`. Keep the "no duplicate skill names in root-level skills" test as is.
+- [x] 2.1 `wire.sh`: replace the hard-coded `$GRID_DIR/baseline-submodules.txt` in the first `load_manifest` call (currently line 112) with `${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}`; add `GRID_BASELINE` to the env-var list in the header comment. Add a test to `tests/test_wiring.bats`: a mock grid with two repos, `GRID_BASELINE` pointing at a temp file naming only one of them, wires only that repo's skills.
+- [x] 2.2 Add `tests/helpers/wired.bash` with `wired_skill_dirs` exactly as sketched in design.md (the group-2 form: `SKILLS_DIR`/`AGENTS_DIR` in a temp dir, `GRID_HOST=__baseline__`). Task 8.5 switches it to `GRID_DRY_HOME`.
+- [x] 2.3 `tests/test_skill_format.bats`: delete the baseline parsing, `repo_is_wired` and `all_wired_skill_dirs`; add `load helpers/setup` and `load helpers/wired` (setup defines `REPO_ROOT`) and have the three "wired" tests iterate `wired_skill_dirs`. Keep the "no duplicate skill names in root-level skills" test as is.
 - [ ] 2.4 `tests/test_repo_health.bats`: `skills dir exists` calls `skip "no skills dir on a CI runner"` when `CI=true` and the dir is absent; add `agent-factory venv exists when CI=true` (skips when `CI` is unset, fails when `CI=true` and `agent-factory/.venv/bin/python` is missing).
 - [ ] 2.5 Rewrite `.github/workflows/tests.yml` exactly as in design.md (triggers: pushes to `main` and `next`, every pull request; `permissions`, `concurrency`, `ubuntu-24.04`, `timeout-minutes`, `actions/checkout@v7`; build venv; `shellcheck --version`; run `bash scripts/gate.sh`). This group owns the only venv step in this file; `workflow-upgrades` task 2.7 depends on it and adds nothing.
 - [ ] 2.6 Run the venv-dependent tests locally with the venv built (`python3 -m venv agent-factory/.venv && agent-factory/.venv/bin/pip install -r agent-factory/requirements.txt`; the venv is gitignored). For any test that fails only because of the runner environment, add an explicit `skip "<reason>"`. Never delete a test.
