@@ -1,0 +1,38 @@
+schema: spec-driven
+
+# Project context — shown to every agent that drafts or applies a change here.
+context: |
+  the-grid is a wiring hub for the AI-agent ecosystem: it curates skills (and,
+  increasingly, agents, rules and hooks) from its own root dirs plus upstream
+  repos pinned as git submodules, and wires a chosen subset onto each machine.
+  agent-factory/ composes role-based agents to multiple runtimes from one source.
+
+  Non-negotiables:
+  - Portability across MACHINES (macOS, Ubuntu, Arch; thin and thick clients) is
+    the core value. Git is the sync layer — no external databases or services.
+  - Portability across HARNESSES (Claude Code first; Codex, Gemini CLI, OpenCode,
+    Pi, OpenClaw next). Prefer formats several harnesses read; isolate
+    harness-specific output behind an emitter.
+  - Never a paid product. No sponsored content in any skill. No sprawl: every new
+    asset type or pack names its use case (web/app full-stack, marketing, data
+    engineering — Bash, Python, PHP, SQL/dbt, Terraform, frontend, backend, DBs).
+  - Personal data never lands in this public repo; it lives in the private repo
+    (~/.the-grid-private).
+  - Scripts are bash (shellcheck-clean) or Python 3 stdlib-first; idempotent;
+    safe to re-run; pin LC_ALL=C for any output that is committed.
+  - Tests are bats under tests/ (run: tests/lib/bats-core/bin/bats tests/);
+    commit gate is scripts/gate.sh. Tests never touch the real ~/.claude.
+  - Token cost is a design constraint: anything that injects text into context
+    or calls a model must be opt-in and budgeted.
+  - Comment code generously; keep CLAUDE.md, README and docs true to the code.
+
+rules:
+  proposal:
+    - Include a "Non-goals" section.
+    - Name the use case for any new asset type.
+  tasks:
+    - Each "## N." group must be independently implementable by an unattended
+      agent in one PR: list files to touch, the acceptance test, and the verify
+      command (default: bash scripts/gate.sh).
+    - Record every judgement call as "Decided:" in design.md so the implementer
+      never has to choose. Tasks needing human taste say "HUMAN:" in the title.
