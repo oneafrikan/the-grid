@@ -116,6 +116,10 @@ The worker SHALL run `claude -p` in the session's `cwd` with a prompt beginning 
 - **WHEN** the stub child writes the two handoff files into `LOGS/` and also `a/b/c/d/e/stray.md` under `cwd`
 - **THEN** the worker logs `action=error reason=unexpected-file` naming `a/b/c/d/e/stray.md`, makes no commit, and moves nothing: `stray.md` and both handoff files stay where they were written
 
+#### Scenario: Mapped location outside cwd is committed in its own repo
+- **WHEN** the matching `handoff-locations.md` row maps the cwd to an absolute directory outside `cwd` that is its own git repo, and the stub child writes the two handoff files there
+- **THEN** the worker finds them, commits exactly the two files in that repo, and the cwd repo has no new commit and no change
+
 #### Scenario: Mapped handoff location
 - **WHEN** `~/.the-grid-private/handoff-locations.md` has a row matching the cwd that maps it to an existing `notes/handoffs` directory
 - **THEN** the child's `--allowedTools` holds `Write(<cwd>/notes/handoffs/**)` and no rule for `LOGS`
