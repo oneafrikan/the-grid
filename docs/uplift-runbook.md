@@ -15,7 +15,8 @@ This runbook describes the uplift changes in `openspec/changes/*/` (13 changes).
 |---|---|
 | `<box>` | the Linux machine that runs the loop (Ubuntu 24.04 was used for the design) |
 | `<loop-user>` | a dedicated unprivileged OS user for the loop |
-| `<machine-account>` | a separate GitHub account that only the loop uses |
+| `<app-name>` | the GitHub App the loop signs in as (shows as `<app-name>[bot]`) |
+| App private key | `~<loop-user>/.config/the-grid/app.pem` (mode 600) |
 | `<owner>/the-grid` | the repo the loop works on (base branch `next`) |
 | `<operator-login>` | your own GitHub login (the trusted actor) |
 | `<slug>` | `owner/name` with every character outside `[A-Za-z0-9_.-]` replaced by `-`, e.g. `<owner>-the-grid` |
@@ -38,7 +39,7 @@ export XDG_RUNTIME_DIR=/run/user/$(id -u)
 
 Run on the box over SSH. `[sudo]` marks a step that needs sudo. `[browser]` marks a step done on github.com.
 
-Why so much isolation (loops design, Q1 and Q13): the worker runs with `--dangerously-skip-permissions`. It never holds a GitHub token. The runner pushes, opens PRs and relabels using a token that belongs to a machine account with write access only, behind a ruleset that requires a PR on `next`. The runner refuses to start if any of that is missing.
+Why so much isolation (loops design, Q1 and Q13 revised): the worker runs with `--dangerously-skip-permissions`. It never holds a GitHub token. The runner pushes, opens PRs and relabels using a 1-hour installation token it mints per run for a GitHub App (@APP@) that has write access to the one repo and no Administration or Workflows permission, behind a ruleset that requires a PR on `next`. There is no long-lived token on the box, only the App private key. The runner refuses to start if any of that is missing.
 
 ## Part 1: needs no new code
 
@@ -68,16 +69,14 @@ Why so much isolation (loops design, Q1 and Q13): the worker runs with `--danger
    ```
    Success: `auth status` shows logged in. Its usage counts against the plan of the account you logged in with.
 
-5. `[sudo]` Check the tools and that the loop user has no stored `gh` login. The runner needs `git`, `gh`, `jq` and `claude`, and refuses to run if the loop user has a stored `gh` login the worker could use.
+5. `[sudo]` Check the tools and that the loop user has no stored `gh` login. The runner needs `git`, `gh`, `jq`, `curl`, `openssl` and `claude` (curl and openssl mint the App token), and refuses to run if the loop user has a stored `gh` login the worker could use.
    ```bash
    sudo -iu <loop-user>
-   command -v git gh jq                      # all three must print a path; if one is missing: exit, then sudo apt install git gh jq
+   command -v git gh jq curl openssl         # all five must print a path; if one is missing: exit, then sudo apt install git gh jq curl openssl
    gh auth status                            # must FAIL ("not logged in")
-   git config --global user.name  "<machine-account>"
-   git config --global user.email "<the machine account's noreply or own email>"
    exit
    ```
-   Success: `gh auth status` fails; `git config --global --get user.email` is non-empty.
+   Success: all five print a path; `gh auth status` fails. The git identity is set in step 10, once the App exists.
 
 6. `[sudo]` Enable linger so the user timer fires while nobody is logged in.
    ```bash
@@ -86,65 +85,68 @@ Why so much isolation (loops design, Q1 and Q13): the worker runs with `--danger
    ```
    Success: prints `yes`.
 
-7. `[browser]` Create the GitHub machine account `<machine-account>`. Usernames are global: open `https://github.com/<machine-account>` first; a 404 means it is free, otherwise pick another name. Use a mailbox you control (a plus-alias of your own address works), enable two-factor, and keep the password out of the box. It must be a different account from `<operator-login>`: the runner refuses a token whose login is in `LOOP_TRUSTED_ACTORS`.
+7. `[browser]` Create the GitHub App, signed in as <operator-login> (the repo owner): `https://github.com/settings/apps/new`.
+   - GitHub App name: `<app-name>`. App names are global: if it is taken, pick another. The bot shows up on commits and PRs as `<app-slug>[bot]`.
+   - Homepage URL: `https://github.com/<owner>/the-grid`.
+   - Webhook: untick "Active". No URL and no secret.
+   - Repository permissions: Contents Read and write, Issues Read and write, Pull requests Read and write, Metadata Read-only (set automatically). Nothing else: no Administration, no Workflows, no account or organization permissions, no event subscriptions.
+   - Where can this GitHub App be installed?: Only on this account.
+   - Create GitHub App. On the page it opens, note the App ID (a number near the top; not the Client ID).
 
-8. `[browser]` Add the machine account as a collaborator with Write on the repo, then accept the invite as the machine account.
-   ```bash
-   # as <operator-login> (use <operator-login>'s token, not another account's), or use Settings > Collaborators in the browser
-   gh api -X PUT repos/<owner>/the-grid/collaborators/<machine-account> -f permission=push
-   # then, signed in as <machine-account>: https://github.com/<owner>/the-grid/invitations  -> Accept
-   ```
-   Success (as <operator-login>): `gh api repos/<owner>/the-grid/collaborators/<machine-account>/permission --jq .permission` prints `write`.
+   Success: the App settings page shows the App ID and exactly the four permissions above.
 
-9. `[browser]` Create the token FROM the machine account (signed in as `<machine-account>`). Try fine-grained first.
-   - Settings > Developer settings > Personal access tokens > Fine-grained tokens > Generate.
-   - Resource owner: pick `<owner>` if it is offered, then Repository access: only `<owner>/the-grid`. If only `<machine-account>` itself is offered as resource owner, the fine-grained route is closed: go to the fallback below.
-   - Permissions: Contents read and write, Pull requests read and write, Issues read and write, Metadata read. Nothing else (no Workflows, no Administration).
-   - UNVERIFIED (loops task 5.1a): whether a collaborator's fine-grained token can target a repo owned by another personal account. If `<owner>/the-grid` is not selectable, use the fallback: Tokens (classic) > scope `public_repo` only. The fallback is acceptable only because the machine account's sole access is this repo.
-   - Copy the token once. Do not paste it into chat, a shell history line or a file other than the env file in step 10.
+8. `[browser]` Install the App on the repo only: App settings > Install App > <operator-login> > Install > Only select repositories > `<owner>/the-grid` > Install. Note the installation id: the install page URL is `https://github.com/settings/installations/<number>`.
 
-   Verify (this is the loops 5.1a check; run it before anything else that uses the token):
-   ```bash
-   read -rs -p 'PAT: ' PAT; echo
-   GH_TOKEN="$PAT" gh api repos/<owner>/the-grid --jq .permissions     # push must be true, admin must be false
-   GH_TOKEN="$PAT" gh api user --jq .login                     # must print <machine-account>
-   unset PAT
-   ```
-   Success: `push: true`, `admin: false`, login is `<machine-account>`. If the fine-grained token fails this, redo it as classic and re-run the same check. Record which kind worked in the loops PR.
+   Success: the URL ends in a number, and the page lists exactly one repository (`<owner>/the-grid`) with the permissions from step 7. The ruleset in step 11 keeps an empty bypass list, so the App needs no bypass.
 
-10. `[sudo]` Put the token in the env file. The runner PARSES this file (never sources it) and accepts only these three keys; the file must be mode 600 or the runner refuses to start.
+9. `[browser]` Generate the private key: App settings > Private keys > Generate a private key. The browser downloads `<app-slug>.<date>.private-key.pem`. Do not paste it into chat, a repo or a shell history line, and delete the download after step 10.
+
+   Success: the `.pem` exists and `head -1 <file>` prints `-----BEGIN RSA PRIVATE KEY-----`.
+
+10. `[sudo]` Put the key and the ids on the box. The runner PARSES the env file (never sources it) and reads only `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `GH_APP_KEY_FILE` (optional, defaults to the path below), `LOOP_TRUSTED_ACTORS` and `LOOP_OPERATOR_HOME`. The env file and the key file must both be mode 600 or the runner refuses to start, and a `GH_TOKEN=` line in the env file is refused.
     ```bash
+    # on your own machine
+    scp ~/Downloads/<app-slug>.<date>.private-key.pem <box>:/tmp/app.pem
+    # on the box
+    sudo -u <loop-user> install -d -m 700 ~<loop-user>/.config/the-grid
+    sudo install -o <loop-user> -g <loop-user> -m 600 /tmp/app.pem ~<loop-user>/.config/the-grid/app.pem
+    rm /tmp/app.pem
     sudo -iu <loop-user>
     umask 077
     mkdir -p ~/.config/the-grid
-    read -rs -p 'PAT: ' PAT; echo
-    printf 'GH_TOKEN=%s\nLOOP_TRUSTED_ACTORS=%s\nLOOP_OPERATOR_HOME=%s\n' "$PAT" '<operator-login>' '<the $HOME value noted in step 3>' > ~/.config/the-grid/issue-loop.env
-    unset PAT
-    chmod 600 ~/.config/the-grid/issue-loop.env
-    find ~/.config/the-grid/issue-loop.env -perm -077     # must print nothing
-    sed 's/^GH_TOKEN=.*/GH_TOKEN=<hidden>/' ~/.config/the-grid/issue-loop.env
+    read -r -p 'App ID: ' APP_ID; read -r -p 'Installation ID: ' INST_ID
+    printf 'GH_APP_ID=%s\nGH_APP_INSTALLATION_ID=%s\nLOOP_TRUSTED_ACTORS=%s\nLOOP_OPERATOR_HOME=%s\n' "$APP_ID" "$INST_ID" '<operator-login>' '<the $HOME value noted in step 3>' > ~/.config/the-grid/issue-loop.env
+    git config --global user.name  "<app-name>[bot]"
+    git config --global user.email "${APP_ID}+<app-name>[bot]@users.noreply.github.com"
+    find ~/.config/the-grid/issue-loop.env ~/.config/the-grid/app.pem -perm -077     # must print nothing
+    cat ~/.config/the-grid/issue-loop.env                                             # holds ids and logins, no secret
     exit
     ```
-    Success: `find` prints nothing; the `sed` output shows the three keys with the token hidden. `LOOP_TRUSTED_ACTORS` is comma-separated; it is the list of logins whose labelling and edits the loop trusts. Only <operator-login> is listed. One env file serves one repo at a time: it holds the PAT for whichever repo the installed timer targets (see the callout after step 14).
+    Success: `find` prints nothing; the env file shows the App ID, the installation id, a non-empty `LOOP_OPERATOR_HOME` and no `GH_TOKEN` line. `LOOP_TRUSTED_ACTORS` is comma-separated; only <operator-login> is listed (the App can never be one: it is a bot). One env file serves one repo at a time: the installation decides which repo the token can reach (see the callout after step 14). The token check itself needs the mint script, `scripts/lib/gh-app-token.sh`, which ships with loops group 2: it runs at the start of step 13, not before.
 
 11. `[browser]` Add the ruleset on `next` (repo owner's account). Settings > Rules > Rulesets > New ruleset > New branch ruleset.
     - Name `next-needs-pr`; Enforcement status: Active.
     - Bypass list: EMPTY (add nobody).
     - Target branches: Add target > Include by pattern > `next`.
-    - Rules: tick "Require a pull request before merging". Required approvals can stay 0 (you merge the machine account's PRs yourself).
+    - Rules: tick "Require a pull request before merging". Required approvals can stay 0 (you merge the App's PRs yourself).
     - Create.
 
     Consequence: with an empty bypass list, nobody can push to `next` directly, you included. After this, spec and doc commits reach `next` through PRs. If you need a direct push, set the ruleset to Disabled for that moment and back to Active afterwards, never during the night.
 
-    Verify (these are the loops 5.6 checks; both are UNVERIFIED API behaviours until you run them):
+    Verify (these are the loops 5.6 checks; the rules endpoint with an installation token is UNVERIFIED until you run it). They need the mint script, so run them in step 13 right after the clone, as the loop user:
     ```bash
-    read -rs -p 'PAT: ' PAT; echo
-    GH_TOKEN="$PAT" gh api repos/<owner>/the-grid/rules/branches/next --jq '[.[] | select(.type=="pull_request")] | length'    # must print 1 or more
-    GH_TOKEN="$PAT" gh api repos/<owner>/the-grid/branches/next/protection 2>&1 | head -3      # must fail with HTTP 403
-    unset PAT
-    # admin check, with <operator-login>'s own token: the same protection call must NOT fail with 403
+    cd ~/the-grid
+    ids() { sed -n "s/^$1=//p" ~/.config/the-grid/issue-loop.env; }
+    export GH_APP_ID="$(ids GH_APP_ID)" GH_APP_INSTALLATION_ID="$(ids GH_APP_INSTALLATION_ID)"
+    bash scripts/lib/gh-app-token.sh --json | jq '{permissions, repository_selection}'     # no administration, no workflows; selection "selected"
+    tok="$(bash scripts/lib/gh-app-token.sh)"
+    GH_TOKEN="$tok" gh api /installation/repositories --jq '.repositories[].full_name'     # must print only <owner>/the-grid (plus the sandbox while it is installed)
+    GH_TOKEN="$tok" gh api user 2>&1 | head -3                                             # must FAIL: HTTP 403 "Resource not accessible by integration"
+    GH_TOKEN="$tok" gh api repos/<owner>/the-grid --jq .permissions                        # push true, admin false
+    GH_TOKEN="$tok" gh api repos/<owner>/the-grid/rules/branches/next --jq '[.[] | select(.type=="pull_request")] | length'    # must print 1 or more
+    unset tok
     ```
-    Success: the first prints 1 or more; the second shows `HTTP 403`. If the `protection` call succeeds for the PAT, the token has Administration access: recreate it.
+    Success: the permissions object has neither `administration` nor `workflows`; `gh api user` fails (this is how the runner knows the token is an installation token and not a person); the last call prints 1 or more. If `permissions` lists `administration` or `workflows`, remove it in the App settings (and accept the change on the installation page) before going on.
 
 12. `[sudo]` Copy the private leak-scan denylist for the loop user, if you keep one. Only this one file goes to the loop user, never a private repo.
     ```bash
@@ -157,15 +159,29 @@ Why so much isolation (loops design, Q1 and Q13): the worker runs with `--danger
 
 Gate: loops groups 1 to 4 are merged to `next`. Check from a clone: `git log --oneline next -- scripts/lib/render-schedule.sh automation-factory/patterns/issue-loop/run-issues.sh` lists commits. Until it does, stop after Part 1.
 
-13. `[sudo]` Prove the runner on a sandbox repo first (loops group 5, Section 4 has the full text). The sandbox is a throwaway PUBLIC repo with a `next` branch, a PR-requiring ruleset with an empty bypass list, the machine account as collaborator, and two trivial issues. Do not skip this: loops task 5.8 says the-grid goes live only after 5.1 to 5.7 pass.
+13. `[sudo]` Prove the runner on a sandbox repo first (loops group 5, Section 4 has the full text). The sandbox is a throwaway PUBLIC repo with a `next` branch, a PR-requiring ruleset with an empty bypass list, the App installed on it as well (App settings > Install App > Configure > add the sandbox repository), and two trivial issues. Do not skip this: loops task 5.8 says the-grid goes live only after 5.1 to 5.7 pass.
+
+    First get the repo onto the box and run the step 7 to 11 checks, as the loop user. The mint script lives in the repo, and the repo may be private, so bootstrap with a copy of that one script (it needs nothing around it):
+    ```bash
+    # on your own machine
+    scp <your the-grid checkout>/scripts/lib/gh-app-token.sh <box>:/tmp/gh-app-token.sh
+    # on the box
+    sudo -iu <loop-user>
+    ids() { sed -n "s/^$1=//p" ~/.config/the-grid/issue-loop.env; }
+    export GH_APP_ID="$(ids GH_APP_ID)" GH_APP_INSTALLATION_ID="$(ids GH_APP_INSTALLATION_ID)"
+    tok="$(bash /tmp/gh-app-token.sh)"                     # prints a ghs_ token on success; one stderr line naming the cause otherwise
+    GH_TOKEN="$tok" gh auth setup-git
+    GH_TOKEN="$tok" git clone https://github.com/<owner>/the-grid.git ~/the-grid     # https, not ssh: the runner refuses an ssh origin
+    unset tok
+    ```
+    UNVERIFIED (loops task 5.6): that `gh`'s git credential helper accepts an installation token. If the clone prompts or is rejected, stop and report it: the fix is a runner change, not a workaround on the box. Then run the step 11 verify block.
+
 
 14. `[sudo]` Go live on the-grid (loops task 5.8). As the bot user:
     ```bash
     sudo -iu <loop-user>
-    git clone https://github.com/<owner>/the-grid.git ~/the-grid        # https, not ssh: the runner refuses an ssh origin
-    cd ~/the-grid
+    cd ~/the-grid                                              # cloned in step 13, origin is https
     git checkout next                                          # inferred: the loop code lives on next until release
-    GH_TOKEN="$(sed -n 's/^GH_TOKEN=//p' ~/.config/the-grid/issue-loop.env)" gh auth setup-git
     bash scripts/instantiate.sh issue-loop . --profile linux --base-branch next --verify-cmd "GRID_REQUIRE_DENYLIST=1 bash scripts/gate.sh"
     bash loop/setup.sh
     ```
@@ -181,7 +197,7 @@ Gate: loops groups 1 to 4 are merged to `next`. Check from a clone: `git log --o
     ```
     Success: `list-timers` shows a NEXT time around 02:00 (the default `--schedule-hour` is 2, daily, `Persistent=true`, no random delay). Exit codes of the runner: 0 run finished, 1 infrastructure failure mid-run (stopped early), 2 preflight failed (nothing touched; the journal line names the fix).
 
-    One env file, one repo: if you proved the sandbox with its own token in `issue-loop.env`, replace `GH_TOKEN` with the the-grid token (step 9) before the go-live run, and disable the sandbox timer (`systemctl --user disable --now issue-loop-<sandbox-slug>.timer`).
+    One env file, one repo: the same App ids serve both repos, so nothing in `issue-loop.env` changes. Before the go-live run remove the sandbox from the App installation (Install App > Configure > Repository access) so the App reaches only the-grid, and disable the sandbox timer (`systemctl --user disable --now issue-loop-<sandbox-slug>.timer`).
 
 15. Before the first night, read the throughput and cost limits you are accepting (all from `loop.conf`; an environment variable of the same name overrides the file):
     - `MAX_ISSUES=3`: at most 3 issues per run, lowest issue number first. Raising it needs a systemd drop-in, not an edit of `loop/loop.conf` (editing a tracked file dirties the clone and the runner refuses a dirty tree). The unit's `TimeoutStartSec` is `MAX_ISSUES*(ISSUE_TIMEOUT+REVIEW_TIMEOUT)+600` seconds, so raise it with it:
@@ -305,7 +321,7 @@ Recording is best-effort: a missing line does not mean the issue was not touched
 
 1. Merge in this order (D9 in the specs): foundations, depersonalise, vetting, budget-and-usage, workflow-upgrades, manifest-lock-install, hook-profiles, rule-packs, loops (Phase A before everything; Phase B after instincts), instincts, multi-harness, front-door, plugin-marketplace.
 2. Inside a change, merge in group-number order, respecting each group's "Depends on".
-3. Merge them yourself (the machine account's PRs need your merge; the loop's guard blocks `gh pr merge`). Use one merge style throughout so any PR can be reverted the same way.
+3. Merge them yourself (the App's PRs need your merge; the loop's guard blocks `gh pr merge`). Use one merge style throughout so any PR can be reverted the same way.
 4. After each merge, on a machine you trust: `git pull`, then `bash scripts/gate.sh`. A red gate on `next` stops the next night's promotions.
 5. When a merge makes a HUMAN group due (Section 4 gives the trigger), do that group before promoting anything that depends on it.
 
@@ -347,23 +363,23 @@ Do not promote a HUMAN group to `ready-for-agent`; the loop cannot do them.
 
 Depends on: 4.
 
-HUMAN: needs the operator at the keyboard of the Ubuntu 24.04 box with sudo (creates the dedicated loop user, a GitHub repo, a fine-grained PAT and rulesets, enables linger).
+HUMAN: needs the operator at the keyboard of the Ubuntu 24.04 box with sudo (creates the dedicated loop user, a GitHub repo, the GitHub App and its key, and rulesets, enables linger).
 
 Files: none in the-grid (sandbox repo is throwaway) except fixes to `run-issues.sh` if 5.6 finds a mismatch; append to `design.md` Decisions only if a Decided: item turns out wrong.
 
-Acceptance: all of these observed and pasted into the PR: everything runs as the dedicated loop user, which cannot list the operator's HOME; a sandbox repo with `next` (PR-requiring ruleset) and two trivial issues labelled `ready-for-agent` becomes two PRs to `next` opened by the runner (the worker's environment had no token), each with an Opus review comment, issues relabelled `ready-for-human` and still open, two lines in the run log, no worktrees left; `systemctl --user start issue-loop-<slug>.service` repeats the cycle on a fresh pair of issues while the operator is logged out of desktop sessions; a `role:grid-backend-dev` issue is built with `--agent` (journal shows it) and its run record role is `grid-backend-dev`; a `role:grid-qa-engineer` issue ends `blocked` with no model call; an ambiguous issue ends `needs-human`; an issue authored by a non-collaborator ends `needs-human` with no model call; every 5.6 check recorded; a failing verify command ends `blocked` with a clean tree.
+Acceptance: all of these observed and pasted into the PR: everything runs as the dedicated loop user, which cannot list the operator's HOME; a sandbox repo with `next` (PR-requiring ruleset) and two trivial issues labelled `ready-for-agent` becomes two PRs to `next` opened by the runner (the worker's environment had no token; the PRs are authored by `<app-slug>[bot]`), each with an Opus review comment, issues relabelled `ready-for-human` and still open, two lines in the run log, no worktrees left; `systemctl --user start issue-loop-<slug>.service` repeats the cycle on a fresh pair of issues while the operator is logged out of desktop sessions; a `role:grid-backend-dev` issue is built with `--agent` (journal shows it) and its run record role is `grid-backend-dev`; a `role:grid-qa-engineer` issue ends `blocked` with no model call; an ambiguous issue ends `needs-human`; an issue authored by a non-collaborator ends `needs-human` with no model call; every 5.6 check recorded; a failing verify command ends `blocked` with a clean tree.
 
 Verify: the observations above; then `bash scripts/gate.sh` unchanged.
 
-- [ ] 5.1a FIRST, before any other 5.x step (UNVERIFIED: whether a fine-grained PAT created by a collaborator machine account can target a repo owned by another personal account): create the machine account, add it as a collaborator with write on the target repo, create a fine-grained PAT from it scoped to that repo, and run `GH_TOKEN=<pat> gh api repos/<R> --jq .permissions`; it must show `push: true` and `admin: false`. If the fine-grained PAT cannot select the repo, apply the classic-PAT fallback Decided line (Q13) in design.md and re-run the check with that token. Record the result in the PR.
-- [ ] 5.1 Operator creates the sandbox repo (PUBLIC, so rulesets are free), a `next` branch, a ruleset targeting `next` that requires a pull request with an EMPTY bypass list, a separate GitHub machine account (not the operator; Operator confirmed 2026-10-09 (Q13: default accepted)) added as a collaborator with write on the sandbox, a fine-grained PAT created FROM that machine account for that repo only (Contents, Pull requests, Issues read-write; Metadata read; nothing else), and two issues ("Add a line `hello` to README.md", "Add a file `hello.txt` containing `hi`") labelled by the operator.
-- [ ] 5.2 Operator, once, on the box: `sudo useradd -m -s /bin/bash <loop-user>` (name of their choice); `chmod 700` the operator's own HOME and confirm `sudo -u <loop-user> ls <operator-home>` fails; as the loop user (`sudo -iu <loop-user>`): install the native `claude` and log in once interactively (`~/.local/bin/claude auth status --text` shows logged in); confirm `gh auth status` fails (no stored login); clone the sandbox over https; set `git config --global user.name`/`user.email`; create `~/.config/the-grid/issue-loop.env` (mode 600) with `GH_TOKEN=<PAT>`, `LOOP_TRUSTED_ACTORS=<operator login>`, `LOOP_OPERATOR_HOME=<operator home>`; `GH_TOKEN=<PAT> gh auth setup-git`; run `instantiate.sh issue-loop <clone> --profile linux --base-branch next --verify-cmd "test -f README.md" --role-labels grid-backend-dev` and `bash loop/setup.sh`. Then `sudo loginctl enable-linger <loop-user>`; for `systemctl --user` as that user use `sudo machinectl shell <loop-user>@` (or export `XDG_RUNTIME_DIR=/run/user/$(id -u)` after linger).
-- [ ] 5.3 Dry run as the loop user from a stripped environment that mimics systemd (`env -i HOME="$HOME" PATH=/usr/bin:/bin bash loop/run-issues.sh` inside `sudo -iu <loop-user>`, from the clone) so the PATH append, env-file parse and per-call token are exercised without a login profile; inspect PRs (opened by the runner), comments, labels, run log. Also open one issue from a second, non-collaborator account and label it as the operator: it must end `needs-human` with no model call.
+- [ ] 5.1a FIRST, before any other 5.x step (UNVERIFIED: whether an App owned by one personal account can be installed on and mint tokens for that account's repos with the exact permission set below): create the GitHub App at github.com/settings/apps/new (name e.g. `<operator>-grid-loop`; homepage URL = the repo URL; Webhook: uncheck Active; repository permissions Contents read-write, Pull requests read-write, Issues read-write, Metadata read-only, nothing else; "Where can this GitHub App be installed?": Only on this account), then Install App on the sandbox repo only, Generate a private key (downloads a `.pem`), note the App ID (App settings page) and the installation id (the number in the URL after installing, `.../settings/installations/<id>`). With `scripts/lib/gh-app-token.sh` from group 2 run `GH_APP_ID=<id> GH_APP_KEY_FILE=<pem> bash scripts/lib/gh-app-token.sh --json | jq '.permissions, .repository_selection'`: no `administration` or `workflows` key, selection `selected`; then with that token `gh api /installation/repositories` lists the sandbox, `gh api repos/<R> --jq .permissions` shows `push: true` and `admin: false`, and `gh api user` fails. Record the result in the PR.
+- [ ] 5.1 Operator creates the sandbox repo (PUBLIC, so rulesets are free), a `next` branch, a ruleset targeting `next` that requires a pull request with an EMPTY bypass list, uses the App from 5.1a (installed on the sandbox only; Operator confirmed 2026-10-09 (Q13 revised): GitHub App), and two issues ("Add a line `hello` to README.md", "Add a file `hello.txt` containing `hi`") labelled by the operator.
+- [ ] 5.2 Operator, once, on the box: `sudo useradd -m -s /bin/bash <loop-user>` (name of their choice); `chmod 700` the operator's own HOME and confirm `sudo -u <loop-user> ls <operator-home>` fails; as the loop user (`sudo -iu <loop-user>`): install the native `claude` and log in once interactively (`~/.local/bin/claude auth status --text` shows logged in); confirm `gh auth status` fails (no stored login); clone the sandbox over https; set `git config --global user.name`/`user.email`; copy the App key to `~/.config/the-grid/app.pem` (mode 600, owner the loop user; e.g. `scp` it to the box, then `sudo install -o <loop-user> -g <loop-user> -m 600`); create `~/.config/the-grid/issue-loop.env` (mode 600) with `GH_APP_ID=<id>`, `GH_APP_INSTALLATION_ID=<installation id>`, `LOOP_TRUSTED_ACTORS=<operator login>`, `LOOP_OPERATOR_HOME=<operator home>` (`GH_APP_KEY_FILE` defaults to the path above); `GH_TOKEN="$(GH_APP_ID=<id> GH_APP_INSTALLATION_ID=<installation id> bash <clone>/scripts/lib/gh-app-token.sh)" gh auth setup-git`; run `instantiate.sh issue-loop <clone> --profile linux --base-branch next --verify-cmd "test -f README.md" --role-labels grid-backend-dev` and `bash loop/setup.sh`. Then `sudo loginctl enable-linger <loop-user>`; for `systemctl --user` as that user use `sudo machinectl shell <loop-user>@` (or export `XDG_RUNTIME_DIR=/run/user/$(id -u)` after linger).
+- [ ] 5.3 Dry run as the loop user from a stripped environment that mimics systemd (`env -i HOME="$HOME" PATH=/usr/bin:/bin bash loop/run-issues.sh` inside `sudo -iu <loop-user>`, from the clone) so the PATH append, env-file parse, token mint and per-call token are exercised without a login profile; inspect PRs (opened by the runner), comments, labels, run log. Also open one issue from a second, non-collaborator account and label it as the operator: it must end `needs-human` with no model call.
 - [ ] 5.4 Fire via systemd: enable the timer, `systemctl --user start` the service on two fresh issues plus the role issues; check `journalctl --user -u <service>`. Then prove the timer itself, not just the service: add a drop-in (`systemctl --user edit <timer>` with an empty `OnCalendar=` line followed by `OnCalendar=*-*-* HH:MM:00` two minutes ahead), `systemctl --user list-timers` shows it, log out of every session (linger on), and confirm in `journalctl --user -u <service>` after the time that the run happened; remove the drop-in. Record `loginctl show-user "$USER" --property=Linger --value` (must be `yes`).
 - [ ] 5.5 Check `--agent` with `--model`: run `claude -p --agent grid-backend-dev --model haiku --max-budget-usd 0.1 --output-format json "Reply with the model you are"` and read `.modelUsage` (or equivalent) in the JSON; record which wins (agent `model:` frontmatter or `--model`). If the agent's frontmatter wins, record it as a Decided: item and set `WORKER_MODEL` to match the agents' `model:` so the cap stays explicit.
-- [ ] 5.6 On the box's claude version, verify and record in the PR description (fix `run-issues.sh` or the Decided lines if any differ): `claude auth status --json` has `.loggedIn`; the `-p --output-format json` field names the runner parses (`is_error`, `subtype`, `total_cost_usd`); whether `--max-turns` is listed; that `--max-budget-usd` is honoured under a subscription login (a 0.01 cap ends the call early); that with `--setting-sources project,local --strict-mcp-config --mcp-config '{"mcpServers":{}}'` the `--settings` guard hook still blocks `git push origin next` (journal/hook log) and `--agent grid-backend-dev` still resolves from `~/.claude/agents` (else apply the repo-`.claude/agents` fallback Decided line); that `GH_TOKEN=<PAT> git push` over https works through the `gh auth setup-git` helper; that `gh api repos/R/rules/branches/next` lists the `pull_request` rule with the PAT; that `gh api repos/R/branches/next/protection` fails with `HTTP 403` for the PAT and does not for an admin token (`gh auth token` of the operator).
+- [ ] 5.6 On the box's claude version, verify and record in the PR description (fix `run-issues.sh` or the Decided lines if any differ): `claude auth status --json` has `.loggedIn`; the `-p --output-format json` field names the runner parses (`is_error`, `subtype`, `total_cost_usd`); whether `--max-turns` is listed; that `--max-budget-usd` is honoured under a subscription login (a 0.01 cap ends the call early); that with `--setting-sources project,local --strict-mcp-config --mcp-config '{"mcpServers":{}}'` the `--settings` guard hook still blocks `git push origin next` (journal/hook log) and `--agent grid-backend-dev` still resolves from `~/.claude/agents` (else apply the repo-`.claude/agents` fallback Decided line); that `GH_TOKEN=<minted token> git push` over https works through the `gh auth setup-git` helper with an installation token (UNVERIFIED; if the helper's credentials are rejected, record it and escalate: the fix is a runner change to per-call basic auth `x-access-token:<token>` via `http.extraheader`); that `gh api repos/R/rules/branches/next` lists the `pull_request` rule with the minted token; that the mint response `permissions` has no `administration` or `workflows` key, `gh api /installation/repositories` works and `gh api user` fails with the minted token; that a second `ensure_token` re-mint (`GRID_LOOP_TOKEN_REMINT_SECS=0`) works on the box.
 - [ ] 5.7 Check whether `GRID_REQUIRE_DENYLIST=1 bash scripts/gate.sh` passes inside a bare worktree of the-grid (no submodules, no venv); if not, apply the fallback in design.md Decisions to the-grid's `loop/loop.conf`.
-- [ ] 5.8 the-grid go-live (after 5.1–5.7 pass): on the-grid repo add a ruleset requiring a pull request on `next` with an EMPTY bypass list; add the machine account from 5.1 as a collaborator with write on the-grid and create a fine-grained PAT FROM it scoped to the-grid only (same permissions as 5.1; never the operator's account, preflight refuses a token whose login is in `LOOP_TRUSTED_ACTORS`); as the loop user clone the-grid over https, create its env file (three keys), copy ONLY `denylist.txt` from the private repo to the loop user's `~/.the-grid-private/denylist.txt` (SEC14a: `GRID_REQUIRE_DENYLIST=1` fails the build without it), run `instantiate.sh issue-loop . --profile linux --base-branch next --verify-cmd "GRID_REQUIRE_DENYLIST=1 bash scripts/gate.sh"` (loop.conf already tracked, left alone) and `bash loop/setup.sh`, then one manual `systemctl --user start issue-loop-<slug>.service` on a single trivial labelled issue; record the PR it opens. Enable the timer only after that PR looks right.
+- [ ] 5.8 the-grid go-live (after 5.1–5.7 pass): on the-grid repo add a ruleset requiring a pull request on `next` with an EMPTY bypass list; install the App from 5.1a on the-grid (App settings, Install App: add the-grid's repository, drop the sandbox when done; the App has no Administration or Workflows, preflight refuses it otherwise); as the loop user clone the-grid over https, create its env file (App keys; the key file is already in place from 5.2), copy ONLY `denylist.txt` from the private repo to the loop user's `~/.the-grid-private/denylist.txt` (SEC14a: `GRID_REQUIRE_DENYLIST=1` fails the build without it), run `instantiate.sh issue-loop . --profile linux --base-branch next --verify-cmd "GRID_REQUIRE_DENYLIST=1 bash scripts/gate.sh"` (loop.conf already tracked, left alone) and `bash loop/setup.sh`, then one manual `systemctl --user start issue-loop-<slug>.service` on a single trivial labelled issue; record the PR it opens. Enable the timer only after that PR looks right.
 
 **Success check:** Every observation in the Acceptance block above, pasted into the loops PR; then `bash scripts/gate.sh` unchanged.
 
@@ -747,9 +763,9 @@ Depends on: 2, 3, front-door#15. Needs a clean Claude Code profile and network; 
 systemctl --user disable --now issue-loop-<owner>-the-grid.timer
 systemctl --user stop issue-loop-<owner>-the-grid.service
 
-# 2. cut its access to GitHub: sign in as <machine-account> and delete the token
-#    Settings > Developer settings > Personal access tokens > Delete.   Effective immediately.
-#    Or remove <machine-account> from the repo: Settings > Collaborators.
+# 2. cut its access to GitHub: delete the App's private key (App settings > Private keys > Delete), and suspend or uninstall the App
+#    (Install App > Configure > Suspend, or Uninstall) so tokens already minted stop working. Both are effective immediately;
+#    without the suspend, a token minted in the last hour keeps working until it expires.
 
 # 3. take the queue away
 gh issue list --repo <owner>/the-grid --label ready-for-agent --state open --json number --jq '.[].number' \
@@ -760,7 +776,7 @@ sudo loginctl disable-linger <loop-user>
 sudo usermod -L <loop-user>
 ```
 
-Success: `systemctl --user list-timers` no longer lists the timer; `gh api user` with the old token returns 401.
+Success: `systemctl --user list-timers` no longer lists the timer; `bash scripts/lib/gh-app-token.sh` exits 1 (key deleted or App suspended) and `gh api /installation/repositories` with an old token returns 401 or 403.
 
 ## Revert or discard a PR
 
@@ -789,11 +805,12 @@ Runner exit 2, common causes (each is a preflight check; fix and re-run `systemc
 | `LOOP_TRUSTED_ACTORS` empty, or `LOOP_OPERATOR_HOME` listable | fix the env file; `chmod 700` your home |
 | claude not logged in | `sudo -iu <loop-user>`, run `~/.local/bin/claude`, log in again |
 | stored `gh` login | `sudo -iu <loop-user> gh auth logout` |
-| PAT belongs to a trusted actor | create the token from `<machine-account>`, not from `<operator-login>` |
+| cannot mint a token / token is not an installation token | run `bash scripts/lib/gh-app-token.sh` by hand with `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `GH_APP_KEY_FILE` set (Section 1 step 13) and read its one error line: wrong ids, key missing or not mode 600, App not installed on the repo, App suspended, clock far off |
+| env file has a `GH_TOKEN=` line | delete that line; the loop uses the App, not a PAT |
 | origin must be https | `git -C ~/the-grid remote set-url origin https://github.com/<owner>/the-grid.git` |
-| no `pull_request` ruleset / token has Administration | Section 1 steps 9 and 11 |
+| no `pull_request` ruleset / App has Administration or Workflows | ruleset: Section 1 step 11; App permissions: step 7 (remove them, then accept the change on the installation page) |
 | guard entry missing | `bash loop/setup.sh` in the clone |
 | tree not clean | `git -C ~/the-grid status`; discard stray changes |
 | git identity | `git config --global user.name` / `user.email` as the bot user |
 
-Rotating the token: create a new one from `<machine-account>`, run the Section 1 step 9 check on it, replace the `GH_TOKEN=` line in the env file (keep mode 600), delete the old token on GitHub.
+Rotating the App key: generate a new private key in the App settings, install it over `~/.config/the-grid/app.pem` (`sudo install -o <loop-user> -g <loop-user> -m 600`), run the step 13 mint check, then delete the old key in the App settings. There is no token to rotate: installation tokens last 1 hour.
