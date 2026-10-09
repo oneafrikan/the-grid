@@ -48,7 +48,7 @@ For an **active** repo, list:
 
 - Capabilities: each `openspec/specs/<capability>/spec.md`.
 - In-flight changes: each `openspec/changes/<id>/` (excluding `archive/`).
-- Archived changes: count from `openspec/archive/`.
+- Archived changes: count from `openspec/changes/archive/`.
 
 ### 3. Drift signals
 
