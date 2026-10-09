@@ -253,6 +253,14 @@ All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: 
   wired (legacy fallback). `catalog.sh` reads the **baseline only** (machine-agnostic,
   deterministic `SKILLS.md`).
 - **Machine key:** `GRID_HOST` env var overrides the overlay host (default `hostname -s`).
+- **Runtime map:** `scripts/lib/runtimes.txt` (`repo | link | marker | needs | setup`)
+  lists wired repos whose skills need more than files on disk (gstack: its browse
+  daemon). wire.sh keeps the runtime-root link `$SKILLS_DIR/<link> -> $GRID_DIR/repos/<repo>`
+  (rebuilt each run, since teardown removes every grid link), skips it with
+  `runtime root occupied` if a real dir or foreign link is there, and prints
+  `runtime MISSING: <repo>` (exit status unaffected) when the marker is absent.
+  The setup itself is human-run: `bash scripts/runtime-setup.sh <repo> [--dry-run]`
+  (exit 2 prerequisite/occupied link, 3 if the Claude settings file changed).
 - **Baseline override:** `GRID_BASELINE` env var replaces the path of the first
   manifest layer (default `$GRID_DIR/baseline-submodules.txt`); machine overlays
   still load from `$GRID_DIR/machines/`. Tests and CI use it to wire from

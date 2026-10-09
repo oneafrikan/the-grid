@@ -285,6 +285,63 @@ if [ -d "$GRID_DIR/repos" ]; then
   done
 fi
 
+# --- 2b. Runtime roots (scripts/lib/runtimes.txt) ---
+# Some wired repos need more than files on disk: gstack's skills call
+# ~/.claude/skills/gstack/bin/... and browse/dist/browse, which only exist after
+# its ./setup has run. For each map row whose repo is active this step
+#   (1) keeps the runtime-root link $SKILLS_DIR/<link> -> $GRID_DIR/repos/<repo>
+#       (teardown above deletes every grid-pointing link, so it must be rebuilt
+#       here on every run), and
+#   (2) WARNS (never fails: exit status is unaffected) when the marker file is
+#       missing, pointing at scripts/runtime-setup.sh.
+# Map format (pipe-separated, '#' comments): repo | link | marker | needs | setup
+# No map file (a mock grid in tests) means nothing to do.
+RUNTIMES_FILE="$GRID_DIR/scripts/lib/runtimes.txt"
+rt_trim() { # trim leading/trailing whitespace without forking
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+if [ -f "$RUNTIMES_FILE" ]; then
+  while IFS='|' read -r rt_repo rt_link rt_marker _rt_needs _rt_setup; do
+    rt_repo="$(rt_trim "${rt_repo%%#*}")"
+    [ -n "$rt_repo" ] || continue                      # blank / comment line
+    rt_link="$(rt_trim "$rt_link")"; rt_marker="$(rt_trim "$rt_marker")"
+    # Active = whole-repo entry or any per-skill entry, and not denied.
+    repo_is_denied "$rt_repo" && continue
+    if ! repo_is_wired "$rt_repo" && ! repo_has_skill_entries "$rt_repo"; then continue; fi
+    rt_root="$GRID_DIR/repos/$rt_repo"
+
+    if [ -n "$rt_link" ]; then
+      rt_target="$SKILLS_DIR/$rt_link"
+      # Occupied = a real dir/file, or a symlink to somewhere outside the grid
+      # (e.g. an earlier standalone install). Never touched: gstack's own setup
+      # also refuses to repoint a link at another checkout. A symlink INTO the
+      # grid (a skill that happens to share the name) is ours: the runtime
+      # link wins the clash.
+      if { [ -e "$rt_target" ] || [ -L "$rt_target" ]; } &&
+         { [ ! -L "$rt_target" ] || [[ "$(readlink "$rt_target")" != "$GRID_DIR"/* ]]; }; then
+        echo "  skip (runtime root occupied, not managed): $rt_link"
+        MANIFEST_ROWS+=("runtime-link	$rt_link	$rt_root	skipped	runtime root occupied, not managed")
+      else
+        # Exact shape others rely on: absolute target, no trailing slash.
+        ln -sfn "$rt_root" "$rt_target"
+        MANIFEST_ROWS+=("runtime-link	$rt_link	$rt_root	wired	")
+        echo "  runtime link: $rt_link"
+      fi
+    fi
+
+    # Marker: must exist and be executable, or be a non-empty file.
+    rt_mpath="$rt_root/$rt_marker"
+    if [ -x "$rt_mpath" ] || [ -s "$rt_mpath" ]; then
+      MANIFEST_ROWS+=("runtime	$rt_repo	$rt_mpath	ok	")
+    else
+      echo "  runtime MISSING: $rt_repo ($rt_marker) - run: bash scripts/runtime-setup.sh $rt_repo"
+      MANIFEST_ROWS+=("runtime	$rt_repo	$rt_mpath	missing	")
+    fi
+  done < "$RUNTIMES_FILE"
+fi
+
 # --- 3. Wire skills/ dir last (higher precedence — overrides repos) ---
 if [ -d "$GRID_DIR/skills" ]; then
   for skill_dir in "$GRID_DIR/skills"/*/; do

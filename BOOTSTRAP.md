@@ -49,6 +49,14 @@ cd ~/.the-grid && bash scripts/wire.sh
 
 # 7. External CLI the wired openspec skills depend on
 npm install -g @fission-ai/openspec@latest
+
+# 8. If wire.sh printed "runtime MISSING: <repo>" (a wired repo whose skills
+#    need its own setup, e.g. gstack's browse daemon), run the wrapper. It needs
+#    `bun`, downloads a browser, and aborts (exit 3) if setup changed your
+#    Claude settings file, so read the repo's map first: scripts/lib/runtimes.txt.
+#    Dry run prints the command without running it:
+bash ~/.the-grid/scripts/runtime-setup.sh gstack --dry-run
+bash ~/.the-grid/scripts/runtime-setup.sh gstack
 ```
 
 Skills are live after step 4. Agents (subagents + orchestrator skills) are live after step 6.
