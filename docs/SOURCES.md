@@ -16,47 +16,42 @@ bibliography (not maintained, kept for provenance) see [`reference-resources.md`
 
 | Submodule | Tier | Upstream |
 |---|---|---|
-| `repos/alirezarezvani` | library ᵍ | <https://github.com/alirezarezvani/claude-skills> |
-| `repos/amekala-ads-mcp` | library ᵍ | <https://github.com/amekala/ads-mcp> |
+| `repos/alirezarezvani` | library | <https://github.com/alirezarezvani/claude-skills> |
+| `repos/amekala-ads-mcp` | library | <https://github.com/amekala/ads-mcp> |
 | `repos/anthropic` | partial | <https://github.com/anthropics/skills> |
-| `repos/automattic` | library ᵍ | <https://github.com/Automattic/agent-skills> |
-| `repos/automattic-wordpress` | library ᵍ | <https://github.com/Automattic/wordpress-agent-skills> |
+| `repos/automattic` | library | <https://github.com/Automattic/agent-skills> |
+| `repos/automattic-wordpress` | library | <https://github.com/Automattic/wordpress-agent-skills> |
 | `repos/avoid-ai-writing` | library | <https://github.com/conorbronsdon/avoid-ai-writing> |
-| `repos/clawhub` | library ᵍ | <https://github.com/openclaw/clawhub> |
-| `repos/deanpeters` | library ᵍ | <https://github.com/deanpeters/Product-Manager-Skills> |
+| `repos/clawhub` | library | <https://github.com/openclaw/clawhub> |
+| `repos/deanpeters` | library | <https://github.com/deanpeters/Product-Manager-Skills> |
 | `repos/ecc` | library | <https://github.com/affaan-m/ECC> |
 | `repos/gstack` | partial | <https://github.com/garrytan/gstack> |
-| `repos/hesamsheikh` | library ᵍ | <https://github.com/hesamsheikh/awesome-openclaw-usecases> |
+| `repos/hesamsheikh` | library | <https://github.com/hesamsheikh/awesome-openclaw-usecases> |
 | `repos/hubspot` | library | <https://github.com/HubSpot/agent-cli-skills> |
 | `repos/humanize-writing` | library | <https://github.com/jpeggdev/humanize-writing> |
-| `repos/jdevalk` | library ᵍ | <https://github.com/jdevalk/skills> |
+| `repos/jdevalk` | library | <https://github.com/jdevalk/skills> |
 | `repos/jeffallan` | partial | <https://github.com/jeffallan/claude-skills> |
-| `repos/mattberman-google-ads` | library ᵍ | <https://github.com/TheMattBerman/google-ads-copilot> |
-| `repos/mattberman-meta-ads` | library ᵍ | <https://github.com/TheMattBerman/meta-ads-kit> |
+| `repos/mattberman-google-ads` | library | <https://github.com/TheMattBerman/google-ads-copilot> |
+| `repos/mattberman-meta-ads` | library | <https://github.com/TheMattBerman/meta-ads-kit> |
 | `repos/mattpocock` | partial | <https://github.com/mattpocock/skills> |
-| `repos/mozilla-bq-etl` | library ᵍ | <https://github.com/mozilla/bigquery-etl-skills> |
-| `repos/nowork-toprank` | library ᵍ | <https://github.com/nowork-studio/NotFair> |
-| `repos/openclaw` | library ᵍ | <https://github.com/openclaw/openclaw> |
+| `repos/mozilla-bq-etl` | library | <https://github.com/mozilla/bigquery-etl-skills> |
+| `repos/nowork-toprank` | library | <https://github.com/nowork-studio/NotFair> |
+| `repos/openclaw` | library | <https://github.com/openclaw/openclaw> |
 | `repos/openspec` | wired | <https://github.com/Fission-AI/openspec> |
-| `repos/paperclip` | library ᵍ | <https://github.com/paperclipai/paperclip> |
+| `repos/paperclip` | library | <https://github.com/paperclipai/paperclip> |
 | `repos/ponytail` | wired | <https://github.com/DietrichGebert/ponytail> |
 | `repos/quant-zero` | library | <https://github.com/marcohwlam/quant-zero> |
 | `repos/removing-ai-isms` | library | <https://github.com/gvsg-rs/removing-ai-isms> |
-| `repos/robertbstillwell` | library ᵍ | <https://github.com/robertbstillwell/marketing-skills> |
-| `repos/sarai-wp-openclaw` | library ᵍ | <https://github.com/Sarai-Chinwag/wp-openclaw> |
-| `repos/sebclawops` | library ᵍ | <https://github.com/sebclawops/openclaw-google-ads> |
-| `repos/sjkncs` | library ᵍ | <https://github.com/sjkncs/awesome-openclaw-skills> |
-| `repos/spillwave-astro` | library ᵍ | <https://github.com/spillwavesolutions/publishing-astro-websites-agentic-skill> |
+| `repos/robertbstillwell` | library | <https://github.com/robertbstillwell/marketing-skills> |
+| `repos/sarai-wp-openclaw` | library | <https://github.com/Sarai-Chinwag/wp-openclaw> |
+| `repos/sebclawops` | library | <https://github.com/sebclawops/openclaw-google-ads> |
+| `repos/sjkncs` | library | <https://github.com/sjkncs/awesome-openclaw-skills> |
+| `repos/spillwave-astro` | library | <https://github.com/spillwavesolutions/publishing-astro-websites-agentic-skill> |
 | `repos/superpowers` | partial | <https://github.com/obra/superpowers> |
-| `repos/voltagent` | library ᵍ | <https://github.com/VoltAgent/awesome-openclaw-skills> |
-| `repos/voltagent-agent-skills` | library ᵍ | <https://github.com/VoltAgent/awesome-agent-skills> |
-| `repos/wordpress` | library ᵍ | <https://github.com/WordPress/agent-skills> |
+| `repos/voltagent` | library | <https://github.com/VoltAgent/awesome-openclaw-skills> |
+| `repos/voltagent-agent-skills` | library | <https://github.com/VoltAgent/awesome-agent-skills> |
+| `repos/wordpress` | library | <https://github.com/WordPress/agent-skills> |
 | `tests/lib/bats-core` | tooling | <https://github.com/bats-core/bats-core> |
-
-ᵍ Clone URL in `.gitmodules` is the SSH form (`git@github.com:…`), not HTTPS — 22 of them.
-The link above is the browsable HTTPS equivalent; the clone URL itself is unchanged.
-These only clone on a machine whose **default** `github.com` SSH identity can read the repo,
-so `git submodule update --init` can fail on a new machine even though every repo is public.
 
 ## External dependencies (not submodules)
 
