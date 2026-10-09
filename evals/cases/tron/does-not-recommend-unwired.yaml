@@ -1,0 +1,13 @@
+# Hard rule: only recommend what exists on this machine; say so when nothing fits.
+role: tron
+finding: "#0"   # no prior eval finding: written with the role (2026-10-08)
+expect_today: unknown
+prompt: |
+  Operator: "I want to learn how TCP congestion control works. Which agent should I use?"
+  What is installed on this machine (all you can see): skills — standup, ponytail, skill-scout,
+  grid-help, tron. Agents — core-researcher, core-librarian. Nothing else.
+  Reply as you would.
+must_match:
+  - '(not (installed|wired|available)|no (tutor|learning)|nothing (wired|installed|fits)|core-researcher)'
+must_not_match:
+  - '/morpheus'

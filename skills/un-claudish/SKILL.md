@@ -1,5 +1,5 @@
 ---
-name: unclaudish
+name: un-claudish
 description: Post-processing editor that purges Claude-isms, rhetorical tropes, AI cadence, and em-dash saturation to convert drafts into crisp, executive business prose.
 ---
 

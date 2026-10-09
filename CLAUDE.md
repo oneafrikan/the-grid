@@ -65,7 +65,7 @@ submodules into two tiers:
   benchmarks, worked cost maths, and a dated expiry watchlist. Refreshed on demand
   via the `core-researcher` subagent using the brief at the bottom of the file.
 - `evals/` + `agent-factory/run_evals.py` — golden cases for roles (opt-in, capped, tool-less runs; `--validate` runs in the gate). See `evals/README.md`.
-- `scripts/run-record.sh` — appends one JSON line per agent run to a local private log (`${GRID_RUN_LOG:-~/.grid/runs.jsonl}`); `docs/agent-retro.md` is the review loop that starts from it.
+- `scripts/run-record.sh` — appends one JSON line per agent run to a local private log (`${GRID_RUN_LOG:-~/.the-grid-private/runs.jsonl}`); `docs/agent-retro.md` is the review loop that starts from it.
 - `agent-factory/models.yaml` — the one tier-to-model map for generated Claude Code agents (default: tier maps to itself); `role.yaml` also takes `tools:` (subagent allowlist) and `unattended:`. See `agent-factory/README.md`.
 - `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
@@ -101,7 +101,8 @@ skills, symlinked into `~/.claude/agents/`).
    .venv/bin/pip install -r requirements.txt && .venv/bin/python compose.py
    examples/core.yaml --target claude-code && .venv/bin/python compose.py
    examples/grid.yaml --target claude-code && .venv/bin/python compose.py
-   examples/finance-desk.yaml --target claude-code`. (Three public projects,
+   examples/finance-desk.yaml --target claude-code && .venv/bin/python compose.py
+   examples/learning-desk.yaml --target claude-code`. (Four public projects,
    composed independently — a private desk, if you have one, composes the
    same way with `GRID_PRIVATE_ROLES_DIR` set; see the agent-factory section
    below.)
@@ -123,8 +124,9 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
    If it shows changes: `cd agent-factory && .venv/bin/python compose.py
    examples/core.yaml --target claude-code && .venv/bin/python compose.py
    examples/grid.yaml --target claude-code && .venv/bin/python compose.py
-   examples/finance-desk.yaml --target claude-code && cd ..` (recompose all
-   three public projects — cheap even if only one actually changed).
+   examples/finance-desk.yaml --target claude-code && .venv/bin/python compose.py
+   examples/learning-desk.yaml --target claude-code && cd ..` (recompose all
+   four public projects — cheap even if only one actually changed).
    If it shows nothing: skip this step.
 
    > ⚠ **Recompose every private project too, in the same pass.** A change to
@@ -284,7 +286,7 @@ with the team. grid topology: `ceo → tech-lead, product-manager, growth-hacker
 orchestrator). `examples/grid.yaml` is the **dev-team project** — 24 roles: 3
 orchestrators → CC skills, 21 specialists → CC subagents.
 
-Two sibling public projects, same repo, composed and gated independently:
+Three sibling public projects, same repo, composed and gated independently:
 `examples/finance-desk.yaml` — `finance-manager → the finance desk pipeline`
 (sentinel → analyst → strategist → risk-officer → scribe), a **standalone**
 top-level orchestrator, deliberately never under the CEO's `delegates_to` — a
@@ -301,6 +303,19 @@ task-specific machine can subtract a whole desk via its overlay
 private desk (e.g. a personal research vertical) can be composed the same
 way, sourcing roles from `GRID_PRIVATE_ROLES_DIR` — never committed to this
 repo; see compose.py's `role_dir()`.
+
+`examples/learning-desk.yaml` — the learning agents, all operator-triggered:
+`morpheus` (Socratic tutor for any topic; `/morpheus`), `oracle` (learns about
+the operator, who picks their own name/role/avatar; `/oracle`), `tank`
+(agent-to-agent lessons from the run log; proposes diffs, never edits a role).
+Roles are public; **data is private** and lives in `~/.the-grid-private/learning/`
+(`morpheus/`, `operator/`, `tank/`). `/tron` (in `core`) is the front door: it reads
+what is wired and recommends a route; `/grid-help` stays the static reference.
+Interactive roles (`morpheus`, `oracle`, `tron`) are `orchestrator: true` with no
+`delegates_to` — that is the only way compose emits a **skill** (main session,
+can hold a dialogue); specialists become subagents and cannot. Composed names are
+`<slug>-<role>` by default; `bare_names: true` (project) or `bare: true` (one agent
+entry) gives `/<role>` instead — keep bare role names unique across wired projects.
 
 > **Rollout note:** `agent-factory/projects/*` is git-ignored (regenerable output). A
 > machine picks up roster/topology changes only after `git pull` **then re-running
@@ -324,7 +339,7 @@ factory; what the-grid adds is two thin layers:
   per-project decision someone has to remember. It documents only; the CLI owns
   the `openspec/` tree it creates.
 - `agent-factory/_core/AGENTS_base.md` — a boot-sequence check for `SPECS.md` /
-  `openspec/`. One edit reaches all 34 composed agents across the three projects.
+  `openspec/`. One edit reaches all 38 composed public roles across the four projects.
   Conditional: repos without the markers are untouched.
 
 `skills/spec-scout/` audits adoption and reports spec↔code drift (survey-only,

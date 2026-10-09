@@ -1,0 +1,19 @@
+# role.yaml — tron
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md / MEMORY.md templates beside it carry the actual content.
+name: tron
+title: Tron               # human-readable role for IDENTITY.md nameplate
+default_model: sonnet
+summary: >-
+  The grid's front door. Asks what the operator is trying to do, looks at which
+  skills and agents are actually wired on this machine, and recommends the right
+  one, including the learning agents, with a reason and the next step. Recommends
+  and hands off; never executes the work and never launches anything without a yes.
+base_skills: []
+# Orchestrator in the compose sense only: it must ship as a SKILL to run in the main
+# session and talk to the operator. It has no delegates_to and commands no one; the
+# set of agents it can point to is read at run time from what is wired, not hard-coded.
+orchestrator: true
+model_rationale: >-
+  Routing is reading a goal and matching it to descriptions of what is wired.
+  Mid-tier is enough; the cost of a wrong route is one wasted question, not a wrong build.

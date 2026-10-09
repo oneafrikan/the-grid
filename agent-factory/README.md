@@ -257,7 +257,8 @@ independently and are gated independently:
 |---|---|---|
 | `examples/grid.yaml` | 24 | 3 orchestrators (`ceo-orchestrator`, `tech-lead`, `growth-hacker`) + 21 specialists — the dev team |
 | `examples/finance-desk.yaml` | 6 | `finance-manager` → sentinel/analyst/strategist/risk-officer/scribe. Standalone: deliberately not in anyone's `delegates_to` |
-| `examples/core.yaml` | 4 | `gh-triage`, `librarian`, `researcher`, `platform-engineer` — cross-desk infra, no delegation chain, meant to stay wired everywhere |
+| `examples/core.yaml` | 5 | `gh-triage`, `librarian`, `researcher`, `platform-engineer`, `tron` (the front door, `/tron`) — cross-desk infra, no delegation chain, meant to stay wired everywhere |
+| `examples/learning-desk.yaml` | 3 | `morpheus` (Socratic tutor), `oracle` (learns about the operator), `tank` (agent-to-agent lessons). All manual. `bare_names: true` so they are `/morpheus`, `/oracle`, `tank`. Data is private: `~/.the-grid-private/learning/` |
 
 Orchestrator rosters are generated from each one's `delegates_to` (see **Rosters
 & delegation** above). `compose.py` emits both the OpenClaw 5-file shape and the

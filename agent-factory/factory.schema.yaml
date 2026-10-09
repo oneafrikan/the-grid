@@ -10,12 +10,17 @@
 # project      (str, required)   slug for the output folder: projects/<project>/
 # description  (str, optional)   one-line human description
 # paperclip    (bool, optional)  wire Paperclip heartbeat skills into every agent
+# bare_names   (bool, optional)  Claude Code target only: name agents/skills '<role>' not
+#                               '<slug>-<role>' (so /morpheus, not /learning-desk-morpheus).
+#                               Role names must then be unique across all wired projects.
 # agents       (list, required)  one entry per agent on the team
 #
 # ── per-agent entry ──────────────────────────────────────────────────────────
 # role        (str, required)   must match a folder in roles/<role>/
 # name        (str, optional)   agent's persona name for IDENTITY.md; defaults to
 #                               the role's title (role.yaml `title`) or the slug
+# bare        (bool, optional)  Claude Code target only: name just this agent '<role>' even
+#                               when the project is slugged (e.g. /tron inside `core`)
 # stacks      (list, optional)  overlays from stacks/<stack>/; []=stack-agnostic
 # skills      (list, optional)  bolt-on skills from skills/<skill>/ (the role's own
 #                               operating skill is always included automatically)
