@@ -97,3 +97,15 @@ active_lines() {
 @test "docs/SOURCES.md has no SSH-form marker" {
   ! grep -q ' ᵍ' "$REPO_ROOT/docs/SOURCES.md"
 }
+
+# The gstack pin must not silently regress below the version the runtime map
+# (scripts/lib/runtimes.txt) and its setup flags were verified against.
+@test "gstack pin is at least 1.91" {
+  [ -f "$REPO_ROOT/repos/gstack/VERSION" ] || skip "repos/gstack not initialised"
+  local v major minor
+  v="$(tr -d '[:space:]' < "$REPO_ROOT/repos/gstack/VERSION")"
+  major="${v%%.*}"
+  minor="${v#*.}"; minor="${minor%%.*}"
+  # Numeric compare, not string: 1.100 > 1.91 but "1.100" < "1.91" as text.
+  [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 91 ]; }
+}
