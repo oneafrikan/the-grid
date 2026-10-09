@@ -25,11 +25,11 @@ Tell the maintainer, weekly and cheaply, when upstream has moved on from a locke
 
 #### Scenario: Schedule files per OS
 - **WHEN** `grid schedule install` runs with `GRID_OS` set to `Darwin`, `Linux` and another value
-- **THEN** a plist, a `grid-drift.service` plus `grid-drift.timer` pair, and no file but a printed crontab line tagged `# the-grid drift` are produced respectively, and no `launchctl`, `systemctl` or `crontab` command runs
+- **THEN** a plist, a `grid-drift.service` plus `grid-drift.timer` pair, and no file but a printed crontab line containing `scripts/grid drift` are produced respectively, each rendered by `scripts/lib/render-schedule.sh` with schedule `weekly:Mon:09:00` and command `/usr/bin/env python3 <grid>/scripts/grid drift --quiet`, and no `launchctl`, `systemctl` or `crontab` command runs
 
 #### Scenario: Weekly timing
 - **WHEN** the plist or timer is rendered
-- **THEN** it fires on Monday at 09:00 local time and carries a `PATH` that includes `/usr/bin`
+- **THEN** it fires on Monday at 09:00 local time and its `PATH` and log location are exactly what the renderer emits
 
 #### Scenario: Unquotable install path
 - **WHEN** `grid schedule install` runs from a grid directory whose path contains a space or a character outside `[A-Za-z0-9_./@+-]`

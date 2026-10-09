@@ -27,10 +27,10 @@ Make `wire.sh` teardown remove exactly the links the-grid owns, whatever shape t
 - **THEN** `wire.sh --check` exits 1
 
 ### Requirement: GRID_DRY_HOME redirects every home-derived target
-When `GRID_DRY_HOME` is set, `wire.sh` SHALL write only under that directory: `HOME`, `SKILLS_DIR`, `AGENTS_DIR` and `CLAUDE_CONFIG_DIR` are forced under it regardless of inherited values, and the repo's `SKILLS.md` and `.wired.manifest` are not written. `wire.sh --check` SHALL use it for its throwaway run.
+When `GRID_DRY_HOME` is set, `wire.sh` SHALL write only under that directory: `HOME`, `SKILLS_DIR`, `AGENTS_DIR`, `CLAUDE_CONFIG_DIR`, `RULES_DIR` (`$GRID_DRY_HOME/.claude/rules`) and `GRID_HARNESS_HOME` (`$GRID_DRY_HOME`) are forced under it regardless of inherited values, and the repo's `SKILLS.md` and `.wired.manifest` are not written. `wire.sh --check` SHALL use it for its throwaway run.
 
 #### Scenario: Real home untouched by a dry run
-- **WHEN** `HOME`, `SKILLS_DIR`, `AGENTS_DIR` and `CLAUDE_CONFIG_DIR` point into a fake real home holding a sentinel file and a stale grid-owned link, and `wire.sh` runs with `GRID_DRY_HOME` set
+- **WHEN** `HOME`, `SKILLS_DIR`, `AGENTS_DIR`, `CLAUDE_CONFIG_DIR` and `RULES_DIR` point into a fake real home holding a sentinel file and a stale grid-owned link, and `wire.sh` runs with `GRID_DRY_HOME` set
 - **THEN** the fake real home is byte-identical afterwards
 - **AND** the wired links exist under `$GRID_DRY_HOME/.claude/skills`
 - **AND** the repo's `.wired.manifest` and `SKILLS.md` are unchanged

@@ -162,7 +162,7 @@ Pack README skeleton: as in "Pack README.md" above. `pack.yaml` skeleton: as in 
 
 ### Wiring (`wire.sh`)
 
-- New env var `RULES_DIR` (default `$HOME/.claude/rules`; when `GRID_DRY_HOME` is set and `RULES_DIR` is not, `$GRID_DRY_HOME/.claude/rules`). Only `$RULES_DIR/grid/` is grid-owned.
+- New env var `RULES_DIR` (default `$HOME/.claude/rules`; when `GRID_DRY_HOME` is set, foundations#8 forces it to `$GRID_DRY_HOME/.claude/rules`, ignoring any inherited value). Only `$RULES_DIR/grid/` is grid-owned.
 - Manifest grammar additions, identical in the baseline (path from `GRID_BASELINE`, introduced by `foundations`), `machines/<host>.txt`, `.local.txt`. The `rules:*` and `-rules:*` cases go in `load_manifest` directly after the `project:*`/`-project:*` cases, before the generic `-*/*`, `-*`, `*/*`, `*` cases:
   - `rules:<pack>`: wire that pack.
   - `-rules:<pack>`: subtract it (overlay escape hatch).
@@ -170,7 +170,7 @@ Pack README skeleton: as in "Pack README.md" above. `pack.yaml` skeleton: as in 
 - Teardown: remove every symlink under `$RULES_DIR/grid` whose target is under `GRID_DIR`, then delete now-empty directories under `$RULES_DIR/grid`. Nothing outside `$RULES_DIR/grid` is touched; real files there are never removed or overwritten (skipped + manifest row).
 - Wire: for each wired pack with a dir `rules/<pack>`, `mkdir -p $RULES_DIR/grid/<pack>` and `ln -sfn` each `*.md` except `README.md`. A `rules:<pack>` with no matching dir prints a warning to stderr, adds a `skipped` manifest row, and does not fail.
 - `.wired.manifest` rows: `rule<TAB><pack>/<topic>.md<TAB><source path><TAB>wired|skipped<TAB><reason>`.
-- `--check` gains a third kind, `rules`: wire into a temp `RULES_DIR`, diff `relpath -> target` lines (recursive) against the live one, same rules as skills/agents (real files shadowing are not drift).
+- `--check` gains a third kind, `rules`: the throwaway run sets only `GRID_DRY_HOME=$tmp/home` and reads `$tmp/home/.claude/rules`, diff `relpath -> target` lines (recursive) against the live one, same rules as skills/agents (real files shadowing are not drift).
 - `catalog.sh` and `sources.sh` add the generic typed-entry skip `*:*|-*:*) continue ;;` after their `project:` skips so `SKILLS.md`/`SOURCES.md` stay unchanged by `rules:` and any other typed line.
 
 ### Emitters (`rules.py emit`) — the interface other changes call
@@ -402,7 +402,8 @@ Stripped from ECC when adapting (these are the house opinions the lint guards):
 
 Integration pass (QA, security and cross-change findings):
 
-- Decided: (G1) `RULES_DIR` honours `GRID_DRY_HOME`: when `GRID_DRY_HOME` is set and `RULES_DIR` is unset, `RULES_DIR` defaults to `$GRID_DRY_HOME/.claude/rules`; task 2.5 adds a bats case with a sentinel in a fake real-home that must stay byte-identical. Group 2 depends on the foundations group that introduces `GRID_DRY_HOME`.
+- Decided: (G1, F5) `RULES_DIR` is FORCED to `$GRID_DRY_HOME/.claude/rules` when `GRID_DRY_HOME` is set (foundations#8 contract; an inherited `RULES_DIR` is ignored); rule-packs relies on it and does not re-derive it. `--check` reads `$tmp/home/.claude/rules`. Task 2.5's sentinel test exports `RULES_DIR` into the fake real home and asserts it stays untouched.
+- Decided: (F8) group 2 depends on foundations#8 (the `GRID_DRY_HOME` task), unconditionally.
 - Decided: (G4) rule-packs#2 is the first change in merge order to edit `catalog.sh`/`sources.sh`, so it adds the generic typed-entry skip `*:*|-*:*) continue ;;` after the `project:` case in both, not a `rules:`-specific case; later changes adding `harness:`/`hook:` lines need no edit there. Tested with `rules:`, `-rules:`, `harness:` and `-hook:` lines.
 - Decided: (G3) the gate's `rules` check skips loudly (prints a reason, appends `rules` to `SKIPPED`, returns 0) when `python3` or `scripts/rules.py` is absent, matching `run_compose_check`; task 1.3a adds both cases to `tests/test_gate.bats`.
 - Decided: (QA10) group 1 depends on vetting#1 (`audit.py`, which scans `rules/` for hidden Unicode); vetting#5 (gate wiring) is merge order only.
