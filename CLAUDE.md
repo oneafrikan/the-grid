@@ -253,6 +253,19 @@ All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: 
   wired (legacy fallback). `catalog.sh` reads the **baseline only** (machine-agnostic,
   deterministic `SKILLS.md`).
 - **Machine key:** `GRID_HOST` env var overrides the overlay host (default `hostname -s`).
+- **Baseline override:** `GRID_BASELINE` env var replaces the path of the first
+  manifest layer (default `$GRID_DIR/baseline-submodules.txt`); machine overlays
+  still load from `$GRID_DIR/machines/`. Tests and CI use it to wire from
+  `baseline-submodules.example.txt` when there is no personal baseline.
+- **Teardown scope:** teardown removes only links whose target is under `$GRID_DIR/`
+  (trailing slash: a sibling dir like `${GRID_DIR}-private` is never matched) and
+  follows a skills/agents dir that is itself a symlink (`find -H`), in both the
+  wire and `--check` paths.
+- **Dry home:** `GRID_DRY_HOME=<dir>` forces every home-derived target under it
+  (`HOME`, `SKILLS_DIR`, `AGENTS_DIR`, `CLAUDE_CONFIG_DIR`, `RULES_DIR`,
+  `GRID_HARNESS_HOME`; inherited values are ignored) and skips the `SKILLS.md` /
+  `.wired.manifest` writes. Every dry-run caller must use it (and nothing else);
+  `--check` and `tests/helpers/wired.bash` do.
 - **Composed agents:** wire.sh also wires `agent-factory/projects/*/_claude-code/`
   output — orchestrator skills into `SKILLS_DIR`, specialist subagents into
   `AGENTS_DIR`. Gated per machine by `project:<name>` manifest entries; with no
