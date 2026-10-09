@@ -74,10 +74,10 @@ Depends on: 2, 4, 8 (all edit or rely on `scripts/wire.sh`; the runtime link nee
 
 Files: `scripts/wire.sh`, new `scripts/lib/runtimes.txt`, new `scripts/runtime-setup.sh`, new `tests/test_runtime.bats`, `CLAUDE.md`, `BOOTSTRAP.md`.
 
-- [ ] 5.1 Create `scripts/lib/runtimes.txt` with the header comment and the gstack row from design.md.
-- [ ] 5.2 `wire.sh`: after the repo-skills loop (step 2) and before the root-skills loop (step 3), read `$GRID_DIR/scripts/lib/runtimes.txt` (no file means skip). For each row whose repo passes `repo_is_wired || repo_has_skill_entries` (and not denied), create the runtime-root link (a real dir or a foreign symlink at that path: print `  skip (runtime root occupied, not managed): <link>` and a `skipped` manifest row) and run the marker check as specified. Emit manifest rows `runtime-link` and `runtime` (status `wired`/`skipped`, `ok`/`missing`). Exit status unaffected.
-- [ ] 5.3 `scripts/runtime-setup.sh <repo>` per design.md (steps 1-7, including the occupied-link pre-check in step 1, the `cmp`-based settings check, the snapshot-based removal in step 5 and the submodule-dirt report in step 6; exit codes 2 unknown/missing prerequisite/occupied link, 3 settings changed). Use `cp`, `cmp -s` and `diff`, not `sha256sum` or `shasum`. Env: `GRID_DIR`, `SKILLS_DIR`, `CLAUDE_CONFIG_DIR`, `HOME`. Support `--dry-run` that prints the command it would run and exits 0 without running it.
-- [ ] 5.4 `tests/test_runtime.bats` with a mock grid (`tests/helpers/setup.bash`): a `repos/gstack` with one skill, a copy of the map pointing at a stub `setup` script that logs its argv, creates a flat skill dir in the sandbox skills dir, and optionally edits the sandbox settings file when `STUB_TOUCH_SETTINGS=1`. Cases:
+- [x] 5.1 Create `scripts/lib/runtimes.txt` with the header comment and the gstack row from design.md.
+- [x] 5.2 `wire.sh`: after the repo-skills loop (step 2) and before the root-skills loop (step 3), read `$GRID_DIR/scripts/lib/runtimes.txt` (no file means skip). For each row whose repo passes `repo_is_wired || repo_has_skill_entries` (and not denied), create the runtime-root link (a real dir or a foreign symlink at that path: print `  skip (runtime root occupied, not managed): <link>` and a `skipped` manifest row) and run the marker check as specified. Emit manifest rows `runtime-link` and `runtime` (status `wired`/`skipped`, `ok`/`missing`). Exit status unaffected.
+- [x] 5.3 `scripts/runtime-setup.sh <repo>` per design.md (steps 1-7, including the occupied-link pre-check in step 1, the `cmp`-based settings check, the snapshot-based removal in step 5 and the submodule-dirt report in step 6; exit codes 2 unknown/missing prerequisite/occupied link, 3 settings changed). Use `cp`, `cmp -s` and `diff`, not `sha256sum` or `shasum`. Env: `GRID_DIR`, `SKILLS_DIR`, `CLAUDE_CONFIG_DIR`, `HOME`. Support `--dry-run` that prints the command it would run and exits 0 without running it.
+- [x] 5.4 `tests/test_runtime.bats` with a mock grid (`tests/helpers/setup.bash`): a `repos/gstack` with one skill, a copy of the map pointing at a stub `setup` script that logs its argv, creates a flat skill dir in the sandbox skills dir, and optionally edits the sandbox settings file when `STUB_TOUCH_SETTINGS=1`. Cases:
   - wire.sh with the marker missing: stdout contains `runtime MISSING: gstack`, exit 0, runtime link exists and resolves to `repos/gstack`;
   - marker present: no warning;
   - repo not in the baseline: no link, no warning;
@@ -91,8 +91,8 @@ Files: `scripts/wire.sh`, new `scripts/lib/runtimes.txt`, new `scripts/runtime-s
   - `$SKILLS_DIR/gstack` pre-existing as a symlink to another dir: wire.sh prints `runtime root occupied` and leaves it; runtime-setup exits 2 and the stub never runs;
   - the stub modifies a tracked file in the mock `repos/gstack` (a git-init fixture): the wrapper prints the warning and still exits 0;
   - real-repo flag guard (skipped when `repos/gstack/setup` is absent): every `--flag` or `-q` token in the real `scripts/lib/runtimes.txt` gstack setup field appears in `repos/gstack/setup`.
-- [ ] 5.5 `CLAUDE.md`: add the runtime map, the exclusion rule, and `GRID_BASELINE` to the "wire.sh contract" section (three bullets). `BOOTSTRAP.md`: add a step "if a wired repo reports `runtime MISSING`, run `bash scripts/runtime-setup.sh <repo>`".
-- [ ] 5.6 Shellcheck clean: `shellcheck -S warning scripts/*.sh scripts/lib/*.sh`.
+- [x] 5.5 `CLAUDE.md`: add the runtime map, the exclusion rule, and `GRID_BASELINE` to the "wire.sh contract" section (three bullets). `BOOTSTRAP.md`: add a step "if a wired repo reports `runtime MISSING`, run `bash scripts/runtime-setup.sh <repo>`".
+- [x] 5.6 Shellcheck clean: `shellcheck -S warning scripts/*.sh scripts/lib/*.sh`.
 
 Acceptance: `tests/lib/bats-core/bin/bats tests/test_runtime.bats` passes.
 
