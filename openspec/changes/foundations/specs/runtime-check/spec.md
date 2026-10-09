@@ -21,9 +21,9 @@ For each row in `scripts/lib/runtimes.txt` whose repo is wired, `wire.sh` SHALL 
 - **WHEN** `wire.sh` runs twice
 - **THEN** the link exists after each run and `wire.sh --check` exits 0
 
-#### Scenario: Real dir in the way
-- **WHEN** a real directory exists at `$SKILLS_DIR/gstack`
-- **THEN** wire.sh skips it with a "real dir, not managed" line and leaves it untouched
+#### Scenario: Runtime root occupied
+- **WHEN** a real directory, or a symlink to anywhere other than `$GRID_DIR/repos/gstack`, exists at `$SKILLS_DIR/gstack`
+- **THEN** wire.sh skips it with a "runtime root occupied, not managed" line and leaves it untouched
 
 ### Requirement: Runtime setup is hook-free and safe to re-run
 `scripts/runtime-setup.sh` MUST run the repo's declared setup command, remove only the skill dirs that setup created or converted during that run, re-run `wire.sh`, and exit 3 if the Claude settings file differs afterwards.
@@ -39,6 +39,14 @@ For each row in `scripts/lib/runtimes.txt` whose repo is wired, `wire.sh` SHALL 
 #### Scenario: Missing prerequisite
 - **WHEN** the `needs` command is not on PATH
 - **THEN** the script exits 2 before running setup
+
+#### Scenario: Occupied runtime root blocks setup
+- **WHEN** `$SKILLS_DIR/<link>` exists and is not a symlink to `$GRID_DIR/repos/<repo>`
+- **THEN** the script exits 2 before running setup and removes nothing
+
+#### Scenario: Setup flags exist upstream
+- **WHEN** `repos/gstack/setup` is present
+- **THEN** every flag in the declared setup command appears in that file
 
 #### Scenario: Pre-existing real dir
 - **WHEN** a real directory existed in the skills dir before the run

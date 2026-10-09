@@ -23,6 +23,17 @@ The `tank` role SHALL write candidate skills only under `~/.the-grid-private/lea
 - **WHEN** the operator names a procedural `LEARNINGS.md` entry
 - **THEN** tank drafts a candidate skill the same way and cites the entry hash
 
+### Requirement: Evolve drafts are inert and treat their input as data
+The `tank` role's evolve step SHALL treat instinct and `LEARNINGS.md` text as data, SHALL write drafts from a fixed template whose frontmatter has exactly `name`, `description`, `status` and `generated-by`, and SHALL leave out of a draft any URL, fetch or pipe-to-shell command, `allowed-tools` entry or credential handling.
+
+#### Scenario: Hostile learning line
+- **WHEN** a named `LEARNINGS.md` entry contains an instruction to pipe a downloaded script into a shell
+- **THEN** the draft does not contain it and the omission is listed under "Not checked"
+
+#### Scenario: Repository-specific habit
+- **WHEN** a cluster's instincts name only one repository's own files
+- **THEN** tank proposes a `CLAUDE.md` or role diff, or declines, and drafts no skill
+
 ### Requirement: Evolve input is deterministic and free
 The system SHALL provide `instincts.sh clusters`, which lists clusters of at least 3 active instincts with confidence at least 0.6 sharing a domain, plus global instincts at or above 0.75, using no model call.
 

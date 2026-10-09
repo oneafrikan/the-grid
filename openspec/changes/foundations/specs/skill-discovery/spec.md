@@ -32,7 +32,8 @@ Give `wire.sh`, `catalog.sh` and tests one answer to "which SKILL.md files does 
 
 #### Scenario: ECC count
 - **WHEN** `repos/ecc` is initialised at the current pin
-- **THEN** `find_skill_mds repos/ecc` reports 293 paths, all under `skills/`
+- **THEN** every path `find_skill_mds repos/ecc` reports is under `repos/ecc/skills/`
+- **AND** the number of paths equals the number of tracked `SKILL.md` files under `skills/` (`git -C repos/ecc ls-files -- 'skills/*SKILL.md'`), which is greater than 0
 
 #### Scenario: Catalogue count follows
 - **WHEN** a mock repo has one `skills/` skill and one `.kiro` copy

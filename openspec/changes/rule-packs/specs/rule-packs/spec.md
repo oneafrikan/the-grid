@@ -24,7 +24,11 @@ Each pack PR MUST carry a source-fidelity review and an opinion/overbuild review
 
 #### Scenario: Two reviews attached
 - **WHEN** a content PR is marked ready
-- **THEN** its body contains a Reviewer A (source fidelity) section and a Reviewer B (opinion and overbuild) section with all must-fix items resolved
+- **THEN** its body contains a Reviewer A (source fidelity) section and a Reviewer B (opinion and overbuild) section, each produced from `rules/review-a.prompt.txt` / `rules/review-b.prompt.txt` and each ending `VERDICT: PASS`
+
+#### Scenario: Reviewer cannot pass
+- **WHEN** a reviewer still returns `VERDICT: FAIL` after two re-runs, or cannot fetch source URLs
+- **THEN** the PR stays a draft labelled `needs-human` with the last outputs pasted
 
 #### Scenario: Stub points to packs
 - **WHEN** `agent-factory/stacks/lamp/stack.yaml` is read

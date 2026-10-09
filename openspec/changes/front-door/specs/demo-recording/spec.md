@@ -13,8 +13,9 @@ The repository SHALL include `docs/demo/demo.tape` for charmbracelet vhs that re
 - **AND** the sum of Sleep values is at most 20 seconds
 
 ### Requirement: Rendered artefact is bounded
-A rendered `docs/demo/bootstrap-to-tron.gif` SHALL be at most 3 MB and SHALL be referenced from README.md and index.html only after it exists.
+A rendered `docs/demo/bootstrap-to-tron.gif` SHALL be at most 3 MB and SHALL be embedded in README.md only after it exists; index.html SHALL carry a text link to it and no embedded copy.
 
 #### Scenario: Reference matches file
-- **WHEN** README.md or index.html references the GIF
+- **WHEN** README.md embeds the GIF
 - **THEN** the file exists and is at most 3 MB
+- **AND** index.html contains no `<img>` of the GIF

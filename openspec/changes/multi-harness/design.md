@@ -43,9 +43,9 @@ There are two layers. Both are generated, and nothing is hand-copied.
 1. Skills and rules: `wire.sh` reads a registry and fans out links (skills) or calls `rules.py emit` (rules).
 2. Agents: `compose.py` renders specialists for the harnesses that have a subagent format. Orchestrators ride layer 1 as skills.
 
-### Registry: `scripts/lib/harnesses.tsv`
+### Registry: `scripts/lib/harnesses.txt`
 
-The file is tab-separated with `#` comments. `~` expands to `${GRID_HARNESS_HOME:-$HOME}`, and `-` means the harness has none of that thing. The `claude` row is listed for reference only: wire.sh keeps using `SKILLS_DIR` / `AGENTS_DIR` for Claude exactly as today.
+The file is whitespace-separated (spaces or tabs, no field contains whitespace) with `#` comments, so the block below can be copied verbatim. `-` means the harness has none of that thing. A leading `~/` expands to the harness base: `${GRID_DRY_HOME:-${GRID_HARNESS_HOME:-$HOME}}` (`GRID_DRY_HOME` from foundations, G1, redirects every home-derived target and so wins). The one exception is XDG: a path starting `~/.config/` expands to `${XDG_CONFIG_HOME:-<base>/.config}/…`, and only when both `GRID_DRY_HOME` and `GRID_HARNESS_HOME` are unset. Reason: OpenCode follows `XDG_CONFIG_HOME`, and the override must never let a test escape its sandbox. Other vendor relocation variables (`CODEX_HOME`, `PI_CODING_AGENT_DIR`) are not honoured: edit the registry row instead. Expansion is done with a `case` prefix match, not `${v/#\~/…}`, because bash 3.2 mishandles a tilde in that pattern. Every caller quotes the expanded path, since a home directory may contain a space. The `claude` row is listed for reference only: wire.sh keeps using `SKILLS_DIR` / `AGENTS_DIR` for Claude exactly as today.
 
 ```
 # harness    skills_dir                       agents_dir                  compose_target  rules_file                    rules_harness
@@ -69,12 +69,13 @@ openclaw     ~/.agents/skills                 -                           -     
 
 ### wire.sh flow after this change
 
-1. Tear down grid-owned symlinks (target under `GRID_DIR`) in `SKILLS_DIR`, `AGENTS_DIR`, and every non-claude registry `skills_dir` / `agents_dir`, active or not. Missing dirs are ignored.
+1. Tear down grid-owned symlinks in `SKILLS_DIR`, `AGENTS_DIR`, and every non-claude registry `skills_dir` / `agents_dir`, active or not. Missing dirs are ignored. "Grid-owned" means the target is a path inside `GRID_DIR` (`"$GRID_DIR"/*`). The existing test `[[ $t == "$GRID_DIR"* ]]` has no slash, so it also matches a sibling such as `${GRID_DIR}-private` and would delete a foreign link into it. `foundations#8` tightens it and lists dirs with `find -H` (so a skills dir that is itself a symlink is listed); this change relies on both.
 2. Steps 2 to 3c run unchanged.
-3. New step 3e: for each distinct `skills_dir` of the active non-claude harnesses, take every grid-owned symlink now in `SKILLS_DIR`, in sorted order. Precedence and dedupe are therefore exactly Claude's. Run `skill_portable` on its target and link it under the same name if the check passes. Otherwise record a skip. For each active harness with an `agents_dir` and `compose_target`, link `projects/<p>/_<compose_target>/agents/*` for projects where `project_is_wired`. Both use the existing "real dir/file, not managed" skip.
+3. New step 3e: for each distinct `skills_dir` of the active non-claude harnesses, take every grid-owned symlink now in `SKILLS_DIR`, in sorted order. Precedence and dedupe are therefore exactly Claude's. A link whose target is a submodule root (`"$GRID_DIR"/repos/<r>`, no further component; today only the `gstack` runtime-root link from `foundations#5`) is not a skill and is skipped with manifest reason `runtime-root` before the portability check. Run `skill_portable` on its target and link it under the same name if the check passes. Otherwise record a skip. For each active harness with an `agents_dir` and `compose_target`, link `projects/<p>/_<compose_target>/agents/*` for projects where `project_is_wired`. Both go through one new function `wire_harness_link <src> <dest>`, which creates the parent dir lazily and **never replaces anything**: after step 1 any entry still at `<dest>` (`-e` or `-L`: a real file or dir, a foreign symlink, or a dangling one) belongs to someone else, so it is skipped with the manifest reason `exists, not managed`. This is stricter than `wire_skill`, which `ln -sfn`s over a foreign symlink in the Claude dirs. The shared `~/.agents/skills` is written by other tools, so replacing is not safe there. The stdout line for a skip is `  skip (<~dir>: exists, not managed): <name>`. It must not begin `  skip (real dir, not managed)`, because `scripts/reconcile.sh` parses that exact prefix and would `rm -rf` a same-named dir in the Claude skills dir. Any active non-claude harness requires `python3` on PATH. If it is missing, wire.sh exits 2 before any write.
 4. New step 3f, rules: see Rules delivery below.
 5. `.wired.manifest` rows for non-claude dirs use kind `skill@<dir>` / `agent@<dir>`, where `<dir>` is in `~/` form so the file is home-independent. Skip rows carry the reason. Claude rows are unchanged.
-6. `--check` additionally sets `GRID_HARNESS_HOME=$tmp/home` for the throwaway run. It diffs grid-owned links in every distinct non-claude registry dir, with the live dir under `${GRID_HARNESS_HOME:-$HOME}` and the same shadow filter as today. It also runs the rules `--check` (below).
+6. `--check` runs its throwaway wire with `GRID_DRY_HOME=$tmp/home` (G1), so every harness path of that run lands under `$tmp/home`. It diffs grid-owned links in every distinct non-claude registry dir (active or not, so stale links in a deactivated harness are drift), with the live dir resolved by `harness_path` in the parent run. Harness dirs use a variant lister `hlinks` whose shadow filter skips a name when the live path exists and is not itself a grid-owned link (real entry or foreign symlink). This matches `wire_harness_link`, which never replaces such an entry, so it can never be drift. The Claude dirs keep the existing filter. It also runs the rules `--check` (below).
+7. `catalog.sh` and `sources.sh` re-parse the baseline. This change does not edit them: `rule-packs#2` adds the generic `*:*|-*:*) continue ;;` typed-entry case (G4), which already skips `harness:` lines. A test here proves it.
 
 ### Portability filter
 
@@ -166,8 +167,8 @@ python3 scripts/rules.py emit --harness <rules_harness> --packs <p1,p2,...> --ou
 ```
 
 - `<packs>` is the wired rule set from `rule-packs#2` (`rules:<pack>` minus `-rules:<pack>`), comma-joined in C-locale order.
-- The call is made for each active harness with a `rules_file`, and **only if that file already exists**. The operator opts in per harness by creating the file, even an empty one. wire.sh never creates a global instruction file. A missing file is recorded as a `rules@<file>` manifest row: `skipped`, reason `rules-file-absent`.
-- Inactive harnesses whose existing file contains the `rule-packs` BEGIN marker get the same call with `--packs ''`. This removes the block, using the empty-selection behaviour of `rule-packs#4`.
+- The call is made for each active harness with a `rules_file`, and **only if that file already exists as a regular file and is not a symlink**. A symlinked instruction file (a dotfile manager, or a link to `~/.claude/CLAUDE.md`) is skipped with reason `rules-file-symlink`: editing through it would write into a file the-grid does not own, possibly one that is regenerated elsewhere, and two harness links to one target would add and remove the block on alternate calls. The operator opts in per harness by creating the file, even an empty one. wire.sh never creates a global instruction file. A missing file is recorded as a `rules@<file>` manifest row: `skipped`, reason `rules-file-absent`.
+- Removal: any harness (active with no wired packs, or inactive) whose existing regular file contains the literal `BEGIN the-grid rules` gets the same call with `--packs ''`, using the empty-selection behaviour of `rule-packs#4`. wire.sh greps for that literal first and makes no call when it is absent, because `rules.py` may delete a file left empty by removal, and an operator's empty opt-in file with no block must never be touched. (If a removal leaves the file empty, `rules.py` deletes it and the opt-in is gone. That is `rules.py`'s documented behaviour and is noted in `docs/harnesses.md`.)
 - The marker format, size cap, idempotency and the guarantee that text outside the block stays byte-identical all belong to `rules.py`. A non-zero exit from `rules.py` is reported and makes wire.sh exit non-zero after it has finished every other step.
 - `--check` runs the same calls with `--check` against the live files.
 - No `rules:` entries means `--packs ''`, which means no block. Nothing is injected by default.
@@ -178,7 +179,7 @@ python3 scripts/rules.py emit --harness <rules_harness> --packs <p1,p2,...> --ou
 - This change adds one fixture role `fx-readonly` (`tools: [Read, Grep, Glob, Bash]`) to that fixture config, which also regenerates the `claude-code` golden in the same PR.
 - Each emitter group adds its target name to `compose-goldens.sh`'s target list and commits its golden tree.
 - Format validators live in `tests/lib/validate_harness.py` (stdlib only), with subcommands `codex-agent`, `opencode-agent`, `gemini-agent` and `skill`. They encode the vendor facts above, so a vendor-doc change means editing one file.
-- Wiring tests use temp `GRID_DIR`, `SKILLS_DIR`, `AGENTS_DIR` and `GRID_HARNESS_HOME`. `assert_sandboxed` also refuses a `GRID_HARNESS_HOME` that resolves to the real home.
+- Wiring tests use temp `GRID_DIR`, `SKILLS_DIR`, `AGENTS_DIR` and `GRID_HARNESS_HOME`. `assert_sandboxed` also refuses a `GRID_HARNESS_HOME` that is unset, empty, or resolves to the real home or a path inside it, and `common_setup` unsets `XDG_CONFIG_HOME` and `GRID_DRY_HOME`. Stubbed commands come from `make_stubs` in `tests/helpers/stubs.bash` (`loops#1`); no second stub helper.
 
 ### Portable personas (#36)
 
@@ -197,7 +198,15 @@ python3 scripts/rules.py emit --harness <rules_harness> --packs <p1,p2,...> --ou
 - Decided: harnesses are opt-in per machine, and the default stays `claude` only. Reason: no behaviour change on existing machines, and nothing writes outside `~/.claude` unasked.
 - Decided: `claude` is always active and cannot be subtracted. Reason: the non-Claude skill set is derived from `SKILLS_DIR`, and no use case for a Claude-less grid was named.
 - Decided: `GRID_HARNESS` env var, no `--harness` flag. Reason: wire.sh parses only `--check` today, and an env var avoids an argument-parser rewrite.
-- Decided: the registry is a TSV parsed with `awk`, not YAML. Reason: wire.sh is bash and must not need PyYAML.
+- Decided: the registry is a whitespace-separated file parsed with `awk` (default field split), not YAML or strict TSV. Reason: wire.sh is bash and must not need PyYAML, and a tab-only format breaks silently when the design block is pasted with spaces.
+- Decided: the teardown ownership fix (`"$GRID_DIR"/*`, so `${GRID_DIR}-private` is not grid-owned) and the `find -H` listing of symlinked dirs are live bugs and belong to `foundations#8` (G7). Reason: they affect today's Claude dirs; this change depends on them and only reuses `teardown_grid_links` for the registry dirs.
+- Decided: links in non-claude dirs are never replaced (`exists, not managed`), unlike the Claude dirs. Reason: `~/.agents/skills` is written by other tools (skill installers, the harnesses themselves), so overwriting a same-named foreign symlink is not safe, while `~/.claude/skills` has always been grid-owned.
+- Decided: the skip line for a shared-dir collision uses its own wording, never `skip (real dir, not managed)`. Reason: `reconcile.sh` parses that prefix and deletes the same-named dir in the Claude skills dir.
+- Decided: `~/.config/…` registry paths honour `XDG_CONFIG_HOME` only when `GRID_HARNESS_HOME` is unset. Reason: OpenCode follows XDG, and tests must not inherit the real environment's value. `CODEX_HOME` and `PI_CODING_AGENT_DIR` are not honoured (edit the row).
+- Decided: a symlinked instruction file is never written through (`rules-file-symlink`). Reason: it may point at `~/.claude/CLAUDE.md` or a dotfiles repo, and two links to one file would flap between add and remove.
+- Decided: removal calls to `rules.py` happen only when the file contains `BEGIN the-grid rules`. Reason: empty-selection removal can delete a now-empty file, which would destroy an operator's empty opt-in file.
+- Decided: an active non-claude harness requires `python3` (frontmatter reader), checked up front with exit 2. Reason: wire.sh was pure bash, and a bare macOS may only have the Xcode shim, so fail loudly before any write rather than skip every skill.
+- Decided: `GRID_HARNESS=<list>` replaces the manifest set, so a one-off run for one harness tears down the others' grid links and rules blocks. Reason: scenario above; the consequence is stated in `docs/harnesses.md` so it is not a surprise. Use the overlay for anything lasting.
 - Decided: `compose_target` is set from the start, and wire.sh skips a missing `_<target>/` dir. Reason: emitter groups stay independently mergeable with no registry edits.
 - Decided: Antigravity is skills-only (no agents dir, no rules file). Reason: operator answer. Its subagent location and global AGENTS.md are undocumented.
 - Decided: Gemini CLI is lower priority than Codex and OpenCode. Its emitter group comes last, and its smoke test is optional. Reason: operator answer.
@@ -215,6 +224,10 @@ python3 scripts/rules.py emit --harness <rules_harness> --packs <p1,p2,...> --ou
 - Decided: Pi gets no emitter and no agents dir. Reason: Pi documents no sub-agents.
 - Decided: OpenClaw reuses `openclaw-native` (already goldened by `workflow-upgrades#2`) and gets skills only. Reason: the renderer exists, and live deploy is governed by the throwaway-agent rule.
 - Decided: Cursor is not a registry row. Reason: it is not in the remit list, and it already reads the shared dir.
+- Decided: `GRID_HARNESS_HOME` honours `GRID_DRY_HOME`: the base is `${GRID_DRY_HOME:-${GRID_HARNESS_HOME:-$HOME}}` and XDG is ignored when either is set; `--check` reaches the harness dirs only through `GRID_DRY_HOME`; a sentinel test proves a dry run never writes under the real home. Reason: G1.
+- Decided: no `catalog.sh`/`sources.sh` edit; `harness:` lines are skipped by `rule-packs#2`'s generic typed-entry case, and one test proves it. Reason: G4.
+- Decided: a `SKILLS_DIR` link whose target is a submodule root (the `gstack` runtime-root link, `foundations#5`) is never fanned out to a non-Claude dir; manifest reason `runtime-root`. Reason: G6, it is a runtime root, not a skill.
+- Decided: tests use `make_stubs` from `tests/helpers/stubs.bash` (`loops#1`) for any stubbed command and add no stub helper; fake agent files are inline fixtures. Reason: G5, QA14.
 - Decided: Gemini `tools` is written as a YAML block list. Reason: the docs say "tool names" without showing syntax. A list is the natural YAML form, and the smoke test confirms it.
 
 ## Issue dispositions (D11)

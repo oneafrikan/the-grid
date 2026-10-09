@@ -12,6 +12,10 @@ For every active harness that has an instruction file in the registry, `wire.sh`
 - **WHEN** `harness:codex` is active, a `rules:` pack is wired and `~/.codex/AGENTS.md` does not exist
 - **THEN** no file is created and the wiring manifest records `rules-file-absent`
 
+#### Scenario: Symlinked instruction file is not written through
+- **WHEN** `~/.codex/AGENTS.md` is a symlink (to any file) and a `rules:` pack is wired
+- **THEN** the target file is byte-identical afterwards and the manifest records `rules-file-symlink`
+
 #### Scenario: Existing file receives the block and keeps user text
 - **WHEN** `~/.codex/AGENTS.md` exists with user text and a `rules:` pack is wired
 - **THEN** the rule-packs block is present and the user text is unchanged byte-for-byte
@@ -27,6 +31,10 @@ For every active harness that has an instruction file in the registry, `wire.sh`
 #### Scenario: Deactivation removes the block
 - **WHEN** a harness whose file holds the block is deactivated
 - **THEN** the block is removed from that file
+
+#### Scenario: Empty opt-in file is left alone
+- **WHEN** a harness's instruction file exists and is empty, with no rule-packs block, and the harness is inactive or no pack is wired
+- **THEN** the file still exists afterwards and `rules.py` is not called for it
 
 #### Scenario: Skills-only harness is never touched
 - **WHEN** `GRID_HARNESS=antigravity` is set

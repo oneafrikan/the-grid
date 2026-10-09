@@ -66,19 +66,27 @@ allow	*	home-placeholder-lx	/home/(you|user|name|username|alice|bob|<)
 deny	*	token	(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|\bsk-[A-Za-z0-9_-]{20,}|xox[abp]-[0-9A-Za-z-]{10,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY)
 allow	*	token-example	EXAMPLE
 deny	*	private-ip	\b(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)\b
+deny	*	cgnat-ip	\b100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]+\.[0-9]+\b
+deny	*	tailnet	[A-Za-z0-9-]+\.ts\.net\b
 deny	agent-factory/openclaw/templates/*	author-name-in-rendered-text	Gareth
 deny	agent-factory/_core/*	author-name-in-rendered-text	Gareth
 deny	agent-factory/roles/*	author-name-in-rendered-text	Gareth
 deny	project-factory/templates/*	author-name-in-rendered-text	Gareth
 deny	skills/*	author-name-in-rendered-text	Gareth
+deny	agents/*	author-name-in-rendered-text	Gareth
+deny	hooks/*	author-name-in-rendered-text	Gareth
+deny	rules/*	author-name-in-rendered-text	Gareth
+deny	automation-factory/patterns/*	author-name-in-rendered-text	Gareth
+deny	plugins/*	author-name-in-rendered-text	Gareth
 ```
 
   - `kind`: `deny` (case-sensitive ERE), `deny-i` (case-insensitive ERE), `allow` (ERE; a `deny` hit on a line is suppressed when the same line matches any `allow` whose scope matches the path).
   - `scope`: `*` or a path glob matched with bash `case` against the repo-relative path.
 - Two sources, merged: public `scripts/personal-patterns.txt` (always) and private `${GRID_PRIVATE_DENYLIST-$HOME/.the-grid-private/denylist.txt}` (same format; hostnames, org and account handles, employer names, family names, private project names). Setting `GRID_PRIVATE_DENYLIST=` (empty) disables the private half explicitly.
 - Private file absent: print `personal: private denylist not found - generic patterns only`, exit status unaffected, gate records `SKIPPED(personal-denylist)`. This is how CI and a fresh fork run.
+- `GRID_REQUIRE_DENYLIST=1`: an absent (or explicitly empty) private denylist is an error instead: print `personal: private denylist required but not found`, exit 1. Set by the unattended loop's `VERIFY_CMD` environment on the-grid (see `loops`), so an overnight build can never pass on the generic half alone.
 - Extra blocks done in code, not in the pattern file: tracked file types `zip pdf tar tgz gz sqlite db pem key`, a tracked `.env` (not `.env.example`), and any file above `GRID_MAX_BYTES` (default 1048576). All honour the path allowlist.
-- Output: `path:line: [label] <matched line, max 120 chars>` for public rules; `path:line: [private:<n>]` for denylist rules (rule number only, never the text, so CI logs and shared transcripts do not leak the list). Final line `personal: N finding(s)`. Exit 0 clean, 1 findings, 2 usage.
+- Output: `path:line: [label] <matched line, max 120 chars>` for public rules except `token`; `path:line: [token]` for the `token` rule (never the matched text, so a real secret is not echoed into CI logs); `path:line: [private:<n>]` for denylist rules (rule number only, never the text, so CI logs and shared transcripts do not leak the list). Final line `personal: N finding(s)`. Exit 0 clean, 1 findings, 2 usage.
 - Optional positional args restrict the scan to those tracked paths (used by edit groups before the gate wiring lands).
 - Allowlist file `scripts/personal-allow-paths.txt`: one bash glob per line, mandatory trailing `# reason`. Initial content: `tests/lib/*` (vendored bats), `scripts/personal-patterns.txt`, `scripts/personal-denylist.example.txt`, `scripts/personal-allow-paths.txt`, `tests/test_check_personal.bats`, `the-grid.png` (size, remove when `front-door` lands).
 - Bash 3.2-safe (macOS), `LC_ALL=C`, shellcheck-clean, comments throughout.
@@ -99,7 +107,7 @@ deny	skills/*	author-name-in-rendered-text	Gareth
 - Decided: `deploy_openclaw.sh` and `deploy_paperclip.py` get comment edits only; parameterising them is #42 Session 4.
 - Decided: `TODO.md` keeps "Current focus" and the issue map; the pending-rollout paragraph and the whole "Status: Done" section move verbatim to the private `LOGS/todo-done-history.md`, with a one-line pointer left behind that does not name hosts.
 - Decided: the issue map row for the OpenClaw emitter drops the host name from its title text in `TODO.md` only; the GitHub issue title is untouched (Non-goal).
-- Decided: voice rule is "Gareth" allowed in prose docs (`CLAUDE.md`, `README.md`, `index.html`, `USAGE.md`, `docs/`, `TODO.md`); forbidden in text that is rendered into other people's agents or skills (`agent-factory/_core|roles|openclaw/templates`, `project-factory/templates`, `skills/`). Those say "the operator". Enforced by scoped `deny` rules.
+- Decided: voice rule is "Gareth" allowed in prose docs (`CLAUDE.md`, `README.md`, `index.html`, `USAGE.md`, `docs/`, `TODO.md`); forbidden in text that is rendered into other people's agents, skills, hooks or rules (`agent-factory/_core|roles|openclaw/templates`, `project-factory/templates`, `skills/`, `agents/`, `hooks/`, `rules/`, `automation-factory/patterns/`, `plugins/`). Those say "the operator". Enforced by scoped `deny` rules.
 - Decided: `oneafrikan/the-grid` URLs stay; the handle is the repo owner and is already in every clone URL and badge.
 - Decided: generic patterns live in public, concrete denylist lives only in the private repo; the public file never contains a real hostname, account or employer.
 - Decided: denylist findings print rule number only, never matched text, so CI and pasted logs cannot leak the list.
@@ -119,6 +127,11 @@ deny	skills/*	author-name-in-rendered-text	Gareth
 - Decided: URL userinfo (`https://user:tok@github.com/...`), `/Users/alice|bob/` and AWS-style `...EXAMPLE` keys are allowed placeholders, because other drafted changes (`instincts`, `vetting`) already use them as test fixtures; with these allows the generic half is clean on the current tree apart from the inventoried files.
 - Decided: the no-dangling-reference test in group 3 excludes `openspec/`, because change and archive docs must name the removed paths.
 - Decided: the `personal` gate check runs after `compose` and before `bats`; `tests/test_gate.bats` stubs `scripts/check-personal.sh` in its fake grid so its existing tests keep their meaning.
+- Decided (SEC14a): `GRID_REQUIRE_DENYLIST=1` turns a missing private denylist into exit 1; the-grid's loop `VERIFY_CMD` environment sets it (note for `loops`), and HUMAN step 7.4 confirms the loop box has `~/.the-grid-private/denylist.txt`.
+- Decided (SEC14b): the `token` rule prints `path:line: [token]` only, never the matched text.
+- Decided (SEC14c): the scoped author-name rule also covers `agents/*`, `hooks/*`, `rules/*`, `automation-factory/patterns/*`, `plugins/*` (paths later changes add; a scope with no files is a no-op).
+- Decided (SEC14d): generic rules add `tailnet` (`[A-Za-z0-9-]+\.ts\.net\b`) and `cgnat-ip` (the 100.64/10 shared range); both have zero hits on the current tree outside `openspec/` and `repos/` (checked with `git grep`).
+- Decided (G3): the gate's `personal` check skips loudly when `scripts/check-personal.sh` is absent (prints a skip line, adds `personal` to `SKIPPED`, check passes); `tests/test_gate.bats` asserts it lands in the skipped list. Distinct from the `personal-denylist` skip, which means the script ran but without the private half.
 - Decided: overlap with `vetting` is accepted: this scan covers the whole tracked tree for personal data; `vetting`'s `audit.py` covers skill content policy (owned and upstream). Neither calls the other.
 - Decided: composed IDENTITY nameplates are not touched here. `compose.py` `load_user_config()` reads gitignored `agent-factory/user.yaml` and `render_identity()` writes only under gitignored `agent-factory/projects/` (`--out` default); `run_evals.py` uses no nameplate; no tracked file in this repo contains a rendered nameplate (checked: no tracked email or home path outside the inventory). The one leak path, `deploy.py --profile full` writing the flattened identity into another repo's `.claude/agents/`, is D1's (`workflow-upgrades`); the lean default already drops the nameplate.
 

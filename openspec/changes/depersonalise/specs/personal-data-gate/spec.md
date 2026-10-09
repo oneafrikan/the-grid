@@ -13,6 +13,16 @@ Provide a repeatable scan that fails the commit gate and CI when personal data r
 - **WHEN** a tracked file contains an email address on a non-example domain or a `/Users/<name>/...` path with a real user name
 - **THEN** the script prints `path:line: [label]` for each and exits 1
 
+#### Scenario: Token finding redacted
+
+- **WHEN** a tracked file contains a token-shaped string
+- **THEN** the output line is exactly `path:line: [token]` and the token text is absent from output
+
+#### Scenario: Tailnet host and CGNAT address flagged
+
+- **WHEN** a tracked file contains a `<name>.ts.net` host or an address in the 100.64/10 range
+- **THEN** the script reports it with label `tailnet` or `cgnat-ip` and exits 1
+
 #### Scenario: Placeholders pass
 
 - **WHEN** a tracked file contains `you@example.com`, `git@github.com` and `/Users/you/project`
@@ -42,6 +52,11 @@ The script SHALL merge the rules in `${GRID_PRIVATE_DENYLIST-$HOME/.the-grid-pri
 - **WHEN** `GRID_PRIVATE_DENYLIST` is set to the empty string
 - **THEN** no denylist is read and no absence notice is printed
 
+#### Scenario: Denylist required
+
+- **WHEN** `GRID_REQUIRE_DENYLIST=1` and the private denylist file does not exist
+- **THEN** the script prints `personal: private denylist required but not found` and exits 1
+
 ### Requirement: Scoped and allow rules
 
 Rule files SHALL use four tab-separated columns (kind, scope, label, regex) where `allow` rules suppress `deny` hits on the same line within the same scope.
@@ -50,6 +65,11 @@ Rule files SHALL use four tab-separated columns (kind, scope, label, regex) wher
 
 - **WHEN** the author's first name appears in `skills/x/SKILL.md` and in `README.md`
 - **THEN** only the `skills/` occurrence is reported
+
+#### Scenario: Author name scoped to every rendered tree
+
+- **WHEN** the author's first name appears in a file under `agents/`, `hooks/`, `rules/`, `automation-factory/patterns/` or `plugins/`
+- **THEN** it is reported with label `author-name-in-rendered-text`
 
 ### Requirement: Archives, secrets files and oversize files blocked
 
@@ -78,6 +98,11 @@ The script MUST flag tracked files with extensions `zip`, `pdf`, `tar`, `tgz`, `
 
 - **WHEN** the private denylist is absent and the tree is clean
 - **THEN** the gate passes and its summary lists `personal-denylist` as skipped
+
+#### Scenario: Scan script absent
+
+- **WHEN** `scripts/check-personal.sh` does not exist
+- **THEN** the gate's `personal` check passes, prints a skip line, and the summary lists `personal` as skipped
 
 #### Scenario: Scan is idempotent
 

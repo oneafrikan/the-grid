@@ -30,7 +30,7 @@ None. `openspec/specs/` is empty.
 
 ## Impact
 
-- Files: `README.md`, `index.html`, `INSTALL.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`, `docs/{architecture,roadmap,private-projects}.md`, `assets/*`, `the-grid.png` (deleted), `scripts/personal-allow-paths.txt`, `README.<locale>.md`, `scripts/{catalog.sh,gate.sh,stamp-counts.py,translate-readme.sh,check-translations.sh,build-site-assets.sh,repo-metadata.sh}`, `docs/demo/demo.tape`, new bats tests, `CLAUDE.md` key-files list.
+- Files: `README.md`, `index.html`, `INSTALL.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`, `docs/{architecture,roadmap,private-projects}.md`, `assets/*`, `the-grid.png` (deleted), `scripts/personal-allow-paths.txt`, `site-files.txt` (append site files, Q9), `tests/test_gate.bats`, `README.<locale>.md`, `scripts/{catalog.sh,gate.sh,stamp-counts.py,translate-readme.sh,check-translations.sh,build-site-assets.sh,repo-metadata.sh}`, `docs/demo/demo.tape`, new bats tests, `CLAUDE.md` key-files list.
 - Depends on `foundations` (Pages serves, CI green, catalog counts corrected), `depersonalise` (personal residue and the LAMP prompt leave the repo; `the-grid.png` allowlisted until this change deletes it) and `manifest-lock-install` (BOOTSTRAP.md documents `grid install`).
 - Folds in issue #25 (public README and quickstart) and #7 (LAMP build prompt fate).
 - Use case for new assets: none are new asset types (docs, one site, one script set); all serve one use case, a first-time visitor deciding in 30 seconds whether this repo is for them.

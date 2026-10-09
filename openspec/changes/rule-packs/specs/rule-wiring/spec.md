@@ -39,7 +39,7 @@ Wire selected rule packs into Claude Code's user rules directory through the exi
 - **THEN** both are left untouched and the real-file case is recorded as skipped in `.wired.manifest`
 
 ### Requirement: Drift detection without side effects on other readers
-`wire.sh --check` SHALL exit 1 when the rule links under `$RULES_DIR/grid` differ from a fresh wiring, and `catalog.sh` and `sources.sh` MUST ignore `rules:` and `-rules:` lines.
+`wire.sh --check` SHALL exit 1 when the rule links under `$RULES_DIR/grid` differ from a fresh wiring, and `catalog.sh` and `sources.sh` MUST ignore every typed manifest line (any line matching `*:*` or `-*:*`, including `rules:` and `-rules:`).
 
 #### Scenario: Missing link
 - **WHEN** a wired rule link is deleted and `wire.sh --check` runs
@@ -48,3 +48,14 @@ Wire selected rule packs into Claude Code's user rules directory through the exi
 #### Scenario: Catalog unchanged
 - **WHEN** a `rules:sql` line is added to the baseline
 - **THEN** `catalog.sh --check` output and `SKILLS.md` are unchanged
+
+#### Scenario: Other typed lines ignored
+- **WHEN** `harness:codex` and `-hook:auto-handoff` lines are added to the baseline
+- **THEN** `catalog.sh` and `sources.sh` output is unchanged
+
+### Requirement: Dry runs never reach the real rules directory
+When `GRID_DRY_HOME` is set and `RULES_DIR` is not, `wire.sh` SHALL derive `RULES_DIR` as `$GRID_DRY_HOME/.claude/rules` and MUST NOT create, change or remove anything under `$HOME/.claude/rules`.
+
+#### Scenario: Sentinel survives a dry run
+- **WHEN** `$HOME/.claude/rules/sentinel.md` exists, `RULES_DIR` is unset, `GRID_DRY_HOME` points at a temp dir, and `wire.sh` runs with `rules:foo`
+- **THEN** the sentinel is byte-identical, nothing new exists under `$HOME/.claude/rules`, and the `foo` links exist under `$GRID_DRY_HOME/.claude/rules/grid/foo`

@@ -37,6 +37,6 @@ Every positive entry in `baseline-submodules.example.txt` MUST resolve (a `<repo
 - **WHEN** a section header says `(N skills)` and its repo has per-skill lines
 - **THEN** exactly N lines start with `<repo>/`
 
-#### Scenario: Subtraction and project lines
-- **WHEN** a line starts with `-` or `project:`
+#### Scenario: Subtraction and typed lines
+- **WHEN** a line starts with `-`, or the text before its first `/` contains `:` (for example `project:`, `rules:`, `harness:`, `hook:`)
 - **THEN** it is not checked

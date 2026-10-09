@@ -50,7 +50,7 @@ Generated plugin files SHALL contain no operator name or email, channel, hostnam
 
 ### Requirement: Validation in the gate
 
-`scripts/gate.sh` MUST run `build-plugins.py --check`, `claude plugin validate --strict` on the marketplace, each plugin and each plugin's `skills/` and `agents/` directory, and the `vetting` audit over `plugins/` at owned tier, and MUST report a skipped check loudly rather than pass silently when `claude` or the agent-factory venv is absent.
+`scripts/gate.sh` MUST run `build-plugins.py --check`, `claude plugin validate --strict` on the marketplace, each plugin and each plugin's `skills/` and `agents/` directory, and the `vetting` audit over `plugins/` at owned tier, and MUST report a skipped check loudly rather than pass silently when `claude`, `python3`, `scripts/build-plugins.py` or the agent-factory venv is absent.
 
 #### Scenario: Validator rejects a bad manifest
 - **WHEN** a generated `plugin.json` lacks `version`

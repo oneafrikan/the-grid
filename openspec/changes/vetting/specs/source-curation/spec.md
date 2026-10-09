@@ -20,6 +20,10 @@ The audit SHALL compare the `.gitmodules` URL of every wired upstream repo with 
 - **WHEN** a repo is declared as `git@github.com:Obra/Superpowers.git` and `allowed_repos` lists `obra/superpowers`
 - **THEN** no source finding is reported
 
+#### Scenario: Typed manifest entries are not repos
+- **WHEN** the `--baseline` file contains `project:core`, `rules:python`, `harness:codex`, `hook:auto-handoff`, `-hook:auto-handoff`, an unknown `future-kind:whatever`, and the repo entries `anthropic/pdf`, `anthropic/docx`, `openspec`, `obra`
+- **THEN** the baseline repo set is exactly `anthropic`, `obra`, `openspec`
+
 #### Scenario: Library repos are not checked
 - **WHEN** a submodule is in `.gitmodules` but none of its skills are wired
 - **THEN** no source finding is reported for it

@@ -21,13 +21,13 @@ Depends on: none.
 ## 2. Add the scan script and its tests (new files only)
 
 Files: `scripts/check-personal.sh`, `scripts/personal-patterns.txt`, `scripts/personal-allow-paths.txt`, `scripts/personal-denylist.example.txt`, `tests/test_check_personal.bats`.
-Acceptance: new bats tests pass: (a) email, `/Users/<name>/`, token-shaped string, private IP each flagged with exit 1; (b) `you@example.com`, `git@github.com`, `https://user:tok@github.com/o/r.git`, `/Users/you/x`, `/Users/alice/x`, `AKIAIOSFODNN7EXAMPLE` and `finance-desk-finance-risk-officer` not flagged; (c) scoped `Gareth` rule flags `skills/x/SKILL.md` but not `README.md`; (d) denylist hit prints `[private:N]` and not the matched text; (e) absent denylist prints the "generic patterns only" notice and exits 0 on a clean tree; (f) empty `GRID_PRIVATE_DENYLIST=` disables the private half; (g) path in `personal-allow-paths.txt` is skipped; (h) tracked `x.zip` and a file over `GRID_MAX_BYTES` flagged; (i) positional args restrict the scan; (j) untracked files and gitlinks ignored; (k) tests set `GRID_DIR` to a temp repo and never read `$HOME`.
+Acceptance: new bats tests pass: (a) email, `/Users/<name>/`, token-shaped string, private IP each flagged with exit 1; (b) `you@example.com`, `git@github.com`, `https://user:tok@github.com/o/r.git`, `/Users/you/x`, `/Users/alice/x`, `AKIAIOSFODNN7EXAMPLE` and `finance-desk-finance-risk-officer` not flagged; (c) scoped `Gareth` rule flags `skills/x/SKILL.md` but not `README.md`; (d) denylist hit prints `[private:N]` and not the matched text; (e) absent denylist prints the "generic patterns only" notice and exits 0 on a clean tree; (f) empty `GRID_PRIVATE_DENYLIST=` disables the private half; (g) path in `personal-allow-paths.txt` is skipped; (h) tracked `x.zip` and a file over `GRID_MAX_BYTES` flagged; (i) positional args restrict the scan; (j) untracked files and gitlinks ignored; (k) tests set `GRID_DIR` to a temp repo and never read `$HOME`; (l) `GRID_REQUIRE_DENYLIST=1` with `GRID_PRIVATE_DENYLIST` pointing at a missing file exits 1 with the "required but not found" line; (m) a token-shaped string prints exactly `path:line: [token]` and the token text is absent from output; (n) a `*.ts.net` host and an address at the bottom of the 100.64/10 range are flagged, addresses just below (100.63) and just above (100.128) are not; (o) `Gareth` in `hooks/x.sh` and `automation-factory/patterns/p/README.md` is flagged.
 Verify: `bash scripts/gate.sh` (the new script must be shellcheck-clean; it is not yet a gate check).
 
 - [ ] 2.1 Write `scripts/personal-patterns.txt` with the generic rules shown in `design.md` plus a header comment explaining the four columns.
-- [ ] 2.2 Write `scripts/check-personal.sh` per the "Scan design" section: bash 3.2-safe, `LC_ALL=C`, comments on every block, env `GRID_DIR`, `GRID_PRIVATE_DENYLIST`, `GRID_MAX_BYTES`, exit codes 0/1/2.
+- [ ] 2.2 Write `scripts/check-personal.sh` per the "Scan design" section: bash 3.2-safe, `LC_ALL=C`, comments on every block, env `GRID_DIR`, `GRID_PRIVATE_DENYLIST`, `GRID_MAX_BYTES`, `GRID_REQUIRE_DENYLIST`, exit codes 0/1/2; `token` findings never print the matched text.
 - [ ] 2.3 Write `scripts/personal-allow-paths.txt` with the six initial globs and their reasons; write `scripts/personal-denylist.example.txt` containing only comments and placeholder rows (`deny-i * example-label \bexample-host\b`).
-- [ ] 2.4 Write `tests/test_check_personal.bats` covering (a) to (k) using throwaway repos under `$BATS_TEST_TMPDIR`.
+- [ ] 2.4 Write `tests/test_check_personal.bats` covering (a) to (o) using throwaway repos under `$BATS_TEST_TMPDIR`.
 
 Depends on: none.
 
@@ -79,12 +79,12 @@ Depends on: 2.
 ## 6. Wire the scan into the gate and enforce in CI
 
 Files: `scripts/gate.sh`, `tests/test_depersonalise.bats` (add repo-wide case), `tests/test_gate.bats` (add a `scripts/check-personal.sh` stub, `exit 0`, to the fake grid in `setup()`, next to the `catalog.sh` stub), `CLAUDE.md` (Key files entry + one line in "Drift checks").
-Acceptance: `tests/test_depersonalise.bats` gains a test running `GRID_PRIVATE_DENYLIST= bash scripts/check-personal.sh` on the real repo and expecting exit 0 (this is what CI runs); `gate.sh` prints `==> personal` with PASS; on a machine without the private denylist the gate prints `gate: PASS (skipped: personal-denylist)` rather than failing; a deliberately added home-directory path line in a scratch copy makes the gate FAIL.
+Acceptance: `tests/test_depersonalise.bats` gains a test running `GRID_PRIVATE_DENYLIST= bash scripts/check-personal.sh` on the real repo and expecting exit 0 (this is what CI runs); `gate.sh` prints `==> personal` with PASS; on a machine without the private denylist the gate prints `gate: PASS (skipped: personal-denylist)` rather than failing; with `scripts/check-personal.sh` absent from the fake grid the gate passes and lists `personal` in its skipped summary (new `tests/test_gate.bats` case, G3); a deliberately added home-directory path line in a scratch copy makes the gate FAIL.
 Verify: `bash scripts/gate.sh`.
 
-- [ ] 6.1 Add `run_personal_check` and `check personal run_personal_check` to `gate.sh` between `check compose` and `check bats`, and list it in the header comment: runs `bash scripts/check-personal.sh`; pushes `personal-denylist` onto `SKIPPED` when the script reports the absent-denylist notice.
-- [ ] 6.2 Add the repo-wide generic test to `tests/test_depersonalise.bats`.
-- [ ] 6.3 Document in `CLAUDE.md`: script, the three rule sources (public patterns, private denylist, allow-paths), the voice rule, and "add a path to `personal-allow-paths.txt` only with a reason".
+- [ ] 6.1 Add `run_personal_check` and `check personal run_personal_check` to `gate.sh` between `check compose` and `check bats`, and list it in the header comment: if `scripts/check-personal.sh` is absent, prints `    check-personal.sh absent — skipped`, pushes `personal` onto `SKIPPED` and returns 0 (G3); otherwise runs `bash scripts/check-personal.sh` and pushes `personal-denylist` onto `SKIPPED` when the script reports the absent-denylist notice.
+- [ ] 6.2 Add the repo-wide generic test to `tests/test_depersonalise.bats`; add the G3 case to `tests/test_gate.bats` (delete the stub in the test, run the gate, assert output contains `skipped:` and `personal`).
+- [ ] 6.3 Document in `CLAUDE.md`: script, the three rule sources (public patterns, private denylist, allow-paths), the voice rule, `GRID_REQUIRE_DENYLIST=1` (set in the loop's `VERIFY_CMD` environment), and "add a path to `personal-allow-paths.txt` only with a reason".
 - [ ] 6.4 Run the full suite twice; the second run must be identical (idempotent, no tracked file changed: `git status --porcelain` empty).
 
 Depends on: 3, 4, 5.
@@ -94,6 +94,6 @@ Depends on: 3, 4, 5.
 - [ ] 7.1 Comment on #42: the OpenClaw target is now genericised; personas and a parameterised deploy script remain; issue stays open. Comment on #54: the only constraint applied was "values stay local"; persona fields and voice layer remain; issue stays open.
 - [ ] 7.2 Decide whether to rewrite history for the moved paths (single `git filter-repo` pass) and whether anything in the old files was ever a live credential needing rotation.
 - [ ] 7.3 Decide whether GitHub issue titles that name hosts should be edited.
-- [ ] 7.4 Confirm the overnight build host has the private repo cloned so the denylist half of the gate runs there.
+- [ ] 7.4 Confirm the loop box has `~/.the-grid-private/denylist.txt` (private repo cloned) so the denylist half of the gate runs there; with `GRID_REQUIRE_DENYLIST=1` in the loop's `VERIFY_CMD` environment a missing file fails the build rather than passing on generic patterns only.
 
 Depends on: 6.

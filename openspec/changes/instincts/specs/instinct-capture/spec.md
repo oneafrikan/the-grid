@@ -39,12 +39,20 @@ The system SHALL implement capture as a single local process that makes no model
 - **WHEN** the payload carries an `agent_id`, or `GRID_INSTINCTS_SKIP=1` is set
 - **THEN** nothing is recorded
 
+#### Scenario: Unattended sessions
+- **WHEN** any of `GRID_LOOP_HEADLESS`, `GRID_AUTOHANDOFF_CHILD` or `GRID_CRON` is set to a non-empty value
+- **THEN** nothing is recorded and the process exits 0
+
 ### Requirement: Observations are scrubbed and minimal
 The system SHALL record only the tool name, a scrubbed command or project-relative path, a scrubbed prompt truncated to 240 characters, an error flag and timestamps, and MUST NOT record tool output or file contents.
 
 #### Scenario: Secret in a command
 - **WHEN** a Bash command contains `API_KEY=abcd1234efgh5678`
 - **THEN** the stored line contains `[REDACTED]` in place of the value
+
+#### Scenario: Credentials in other shapes
+- **WHEN** a Bash command contains `postgres://app:pw@db/x`, `mysql -u root --password hunter2`, `curl -u bob:pw1 host` or a `glpat-` token
+- **THEN** each credential value is stored as `[REDACTED]`
 
 #### Scenario: Edit records the path only
 - **WHEN** an Edit tool call completes

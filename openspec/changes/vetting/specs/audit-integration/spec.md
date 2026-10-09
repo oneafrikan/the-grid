@@ -26,7 +26,7 @@ Run the audit where it matters: before skills are linked onto a machine and befo
 
 #### Scenario: Check mode and the audit's own dry run do not recurse
 - **WHEN** `wire.sh --check` runs, or `audit.sh --wired` performs its dry-run wire
-- **THEN** no audit is started from inside them and no link in the real `SKILLS_DIR` changes
+- **THEN** no audit is started from inside them, and nothing under the real home changes, because the dry run uses `GRID_DRY_HOME`
 
 ### Requirement: The commit gate runs the audit
 
@@ -35,6 +35,10 @@ Run the audit where it matters: before skills are linked onto a machine and befo
 #### Scenario: High finding fails the gate
 - **WHEN** an owned skill contains a banned high-severity pattern
 - **THEN** `gate.sh` prints `audit` as FAIL and exits 1
+
+#### Scenario: A failing audit fails the gate
+- **WHEN** the gate runs in a stub repo whose `scripts/audit.sh` exits 1 and `python3` is on PATH
+- **THEN** the output lists `audit` as FAIL and the gate exits 1
 
 #### Scenario: Tooling absent is a loud skip
 - **WHEN** the gate runs where `python3` is not on PATH

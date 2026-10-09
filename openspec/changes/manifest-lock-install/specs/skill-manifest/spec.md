@@ -28,10 +28,10 @@ The repository SHALL contain a tracked `grid.yaml`, read with the restricted-YAM
 - **THEN** `grid lock --check` exits 1 and prints both URLs
 
 ### Requirement: Typed entries are reserved for other asset kinds
-`grid` MUST ignore every typed wired-set entry (`<kind>:<value>` or `-<kind>:<value>`, including `project:`, `rules:<pack>` and `harness:<name>`), MUST write a `kind` on every lock and ledger entry, and MUST skip lock or ledger entries of an unknown `kind` with a notice instead of failing, so rule packs and harness selection can be added without a `grid` change or a format version bump.
+`grid` MUST ignore every typed wired-set entry (`<kind>:<value>` or `-<kind>:<value>`, including `project:`, `rules:<pack>`, `harness:<name>` and `hook:<name>`), MUST write a `kind` on every lock and ledger entry, and MUST skip lock or ledger entries of an unknown `kind` with a notice instead of failing, so rule packs and harness selection can be added without a `grid` change or a format version bump.
 
 #### Scenario: Typed entries pass through
-- **WHEN** the baseline or an overlay contains `rules:sql`, `-rules:sql`, `harness:codex`, `-harness:codex` or `project:core`
+- **WHEN** the baseline or an overlay contains `rules:sql`, `-rules:sql`, `harness:codex`, `-harness:codex`, `-hook:auto-handoff` or `project:core`
 - **THEN** `grid lock` writes the same lock as without those lines and `grid install` selects the same entries
 
 #### Scenario: Unknown lock kind tolerated

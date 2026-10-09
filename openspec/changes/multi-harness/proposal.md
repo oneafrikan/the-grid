@@ -4,7 +4,7 @@ the-grid wires skills, rules and composed agents only into Claude Code. Its stat
 
 ## What Changes
 
-- Add a harness registry (`scripts/lib/harnesses.tsv`) and a `harness:<name>` manifest entry (plus `GRID_HARNESS` env). `wire.sh` links the wired skill set into `~/.agents/skills`, one directory that Codex, Gemini CLI, OpenCode, Pi and OpenClaw (and Cursor) all read.
+- Add a harness registry (`scripts/lib/harnesses.txt`) and a `harness:<name>` manifest entry (plus `GRID_HARNESS` env). `wire.sh` links the wired skill set into `~/.agents/skills`, one directory that Codex, Gemini CLI, OpenCode, Pi and OpenClaw (and Cursor) all read.
 - Filter what reaches non-Claude harnesses: skills that reference Claude-only paths or break Agent Skills name/description limits are skipped, and the reason is recorded.
 - Add `compose.py` targets `codex` (TOML subagents), `opencode` and `gemini-cli` (Markdown subagents). Orchestrator roles reach every harness as skills, which resolves the open design calls in #32 and #33.
 - Pi, OpenClaw and Antigravity get skills only. Pi has no subagents. OpenClaw keeps its existing `openclaw-native` target.
@@ -29,7 +29,7 @@ the-grid wires skills, rules and composed agents only into Claude Code. Its stat
 
 ## Impact
 
-- Code: `scripts/wire.sh`, new `scripts/lib/{harness.sh,harnesses.tsv,skill-portable.sh,skill_frontmatter.py}`, `scripts/build-personas.sh`, `scripts/gate.sh`, `agent-factory/compose.py`, `scripts/compose-goldens.sh` (target list only), `tests/`, `docs/harnesses.md`, `CLAUDE.md`.
+- Code: `scripts/wire.sh`, new `scripts/lib/{harness.sh,harnesses.txt,skill-portable.sh,skill_frontmatter.py}`, `scripts/build-personas.sh`, `scripts/gate.sh`, `agent-factory/compose.py`, `scripts/compose-goldens.sh` (target list only), `tests/`, `docs/harnesses.md`, `CLAUDE.md`.
 - Depends on `workflow-upgrades#2` for the golden harness, `GRID_USER_CONFIG` and `agent-factory/user.public.yaml`. This change does not re-introduce them.
 - Depends on `rule-packs#2` (the `rules:<pack>` manifest tier) and `rule-packs#4` (the `rules.py emit` block emitter) for rules delivery.
 - New committed output: `dist/personas/`.

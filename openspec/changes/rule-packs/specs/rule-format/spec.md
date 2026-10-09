@@ -19,6 +19,14 @@ Every rule file under `rules/<pack>/` (any `*.md` other than `README.md`) SHALL 
 - **WHEN** a rule file's frontmatter contains a key other than `paths`
 - **THEN** lint exits non-zero and reports `E_FRONTMATTER`
 
+#### Scenario: Effectively always-on glob is rejected
+- **WHEN** a rule file declares `paths` of `"**/*.*"`
+- **THEN** lint exits non-zero and reports `E_PATHS`
+
+#### Scenario: Unsupported brace form is rejected
+- **WHEN** a rule file declares `paths` of `"**/*.py{,i}"` or a glob with nested braces
+- **THEN** lint exits non-zero and reports `E_PATHS`
+
 #### Scenario: Oversized file
 - **WHEN** a rule file is 4097 bytes
 - **THEN** lint reports `E_FILE_SIZE` and exits non-zero
@@ -26,6 +34,25 @@ Every rule file under `rules/<pack>/` (any `*.md` other than `README.md`) SHALL 
 #### Scenario: Oversized pack
 - **WHEN** a pack's rule files total 9217 bytes with each file under the per-file cap
 - **THEN** lint reports `E_PACK_SIZE` and exits non-zero
+
+### Requirement: Rule files are short imperative directives
+After its `# Title` line, every non-blank line of a rule file SHALL be a `##`/`###` heading, a `- ` bullet, a two-space-indented bullet continuation, or a line inside a fenced code block of at most 10 lines, and lint MUST fail any bullet (with continuations) over 240 characters, any prose line, any block quote and any second `# ` heading with `E_STYLE`.
+
+#### Scenario: Prose paragraph is rejected
+- **WHEN** a rule file contains a line of plain text that is not a bullet, heading or fenced content
+- **THEN** lint exits non-zero and reports `E_STYLE` for that file
+
+#### Scenario: Long bullet is rejected
+- **WHEN** a bullet is 241 characters
+- **THEN** lint reports `E_STYLE`
+
+#### Scenario: Hedged bullet is rejected
+- **WHEN** a rule file contains the bullet `- You should try to name CTEs well.`
+- **THEN** lint reports `E_OPINION`
+
+#### Scenario: Dangling common pointer is rejected
+- **WHEN** a rule file contains `This file extends [common/testing.md](../common/testing.md)`
+- **THEN** lint reports `E_OPINION` (and `E_STYLE` if it is a block quote)
 
 ### Requirement: Opinion-free, sourced and attributed packs
 Lint SHALL fail any rule file matching a case-insensitive regex in `rules/denylist.txt`, any pack lacking `pack.yaml` (`summary`, `tier`) or a README Sources row with an https URL per rule file, and any tier 2 pack lacking the README line `Adapted from affaan-m/ECC (MIT)`, an `adapted_from` key, or an entry in `rules/THIRD_PARTY_NOTICES.txt`.
@@ -60,3 +87,7 @@ Lint SHALL fail any rule file matching a case-insensitive regex in `rules/denyli
 #### Scenario: URL checking is opt-in
 - **WHEN** the gate runs offline
 - **THEN** no Sources URL is fetched; only `rules.py lint --check-urls` does that
+
+#### Scenario: Gate skips loudly without python3 or the script
+- **WHEN** `python3` is not on PATH, or `scripts/rules.py` does not exist, and `bash scripts/gate.sh` runs
+- **THEN** the `rules` check passes, and the gate's final line lists `rules` among the skipped checks

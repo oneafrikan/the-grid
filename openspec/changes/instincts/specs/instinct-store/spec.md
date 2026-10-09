@@ -40,15 +40,23 @@ The system SHALL accept an instinct only if its id matches `^[a-z0-9][a-z0-9-]{1
 - **WHEN** an instinct line has a 300-character action
 - **THEN** validation rejects it and it is never written or injected
 
-### Requirement: Instincts are promoted to global on evidence from two projects
-The system SHALL promote an instinct to global scope when the same id is active with confidence at least 0.5 in at least two distinct projects, using the lowest contributing confidence.
+### Requirement: Instincts are promoted to global on evidence from two projects and operator approval
+The system SHALL list an instinct as a global candidate when the same id is active with confidence at least 0.5 in at least two distinct projects, and SHALL write it to global scope, at the lowest contributing confidence, only when the operator runs `instincts.sh approve <id>`. Project-scope instincts SHALL NOT need approval.
 
-#### Scenario: Promotion
-- **WHEN** id `bats-for-shell-tests` is active at 0.6 in project A and 0.75 in project B
+#### Scenario: Candidate is not written automatically
+- **WHEN** id `bats-for-shell-tests` is active at 0.6 in project A and 0.75 in project B and `promote` runs
+- **THEN** the id is listed as a pending global candidate and no global line is written
+
+#### Scenario: Approval
+- **WHEN** the operator runs `instincts.sh approve bats-for-shell-tests`
 - **THEN** a global line for that id exists with confidence 0.6
 
+#### Scenario: Approving a non-candidate
+- **WHEN** `approve` names an id that is not a current candidate
+- **THEN** it exits non-zero and writes nothing
+
 #### Scenario: Re-running promotion
-- **WHEN** promotion runs a second time with no changes
+- **WHEN** promotion or approval runs a second time with no changes
 - **THEN** the global file is byte-identical
 
 ### Requirement: The operator can inspect, retire and forget

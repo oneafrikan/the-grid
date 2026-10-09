@@ -5,8 +5,9 @@ Four cheap workflow gaps show up when comparing the-grid with ECC and gstack. Be
 ## What Changes
 
 - Add a `GRID_USER_CONFIG` env override to `compose.py` and a tracked, neutral `agent-factory/user.public.yaml`, so composed output can be made machine-independent. This is the only place the override is introduced; `multi-harness` and `plugin-marketplace` depend on it.
-- Add golden-output conformance tests for `compose.py` (closes #23): fixture roles and config, byte-compared goldens per target, one script to check or update them, run in CI.
+- Add golden-output conformance tests for `compose.py` (closes #23): fixture roles and config, byte-compared goldens per target, one script to check or update them, run in CI once `foundations` has the CI venv in place.
 - Add a numbered decision-brief fragment (`agent-factory/_core/DECISION_BRIEF.md`) that `compose.py` appends to every orchestrator role, full and lean profiles, plus a lint check on it.
+- `deploy.py --profile full` renders the IDENTITY nameplate from `user.public.yaml` by default; `--identity PATH` opts in to another identity file.
 - Add a two-reviewer release gate to the `tech-lead` operating procedure: `qa-engineer` and `security-reviewer` review independently and both must PASS, with a capped fix loop.
 - Add `--changed <git-range>` to `run_evals.py` and an `evals/touchfiles.yaml` map, so paid evals run only for roles whose files changed, still opt-in and capped.
 - Add three opt-in context-mode files (`contexts/dev.md`, `research.md`, `review.md`) and a sourced bash/zsh alias snippet: `claude-dev`, `claude-research`, `claude-review`, each `claude --append-system-prompt-file <file>`. Use case: switching working mode per session.
@@ -15,7 +16,7 @@ Four cheap workflow gaps show up when comparing the-grid with ECC and gstack. Be
 
 ### New Capabilities
 
-- `compose-conformance`: golden-output tests that pin what each compose target emits, and the machine-independent identity config they use.
+- `compose-conformance`: golden-output tests that pin what each compose target emits, and the machine-independent identity config they and full-profile deploys use.
 - `decision-briefs`: one numbered decision-brief format shared by all orchestrator roles.
 - `two-reviewer-gate`: independent qa plus security review, both must pass.
 - `eval-selection`: choose paid eval roles from a git diff.
@@ -28,7 +29,7 @@ None. `openspec/specs/` is empty; these are all new.
 ## Impact
 
 - New: `agent-factory/user.public.yaml`, `scripts/compose-goldens.sh`, `tests/fixtures/compose/`, `agent-factory/_core/DECISION_BRIEF.md`, `evals/touchfiles.yaml`, `contexts/`, five bats files, three eval cases.
-- Edited: `agent-factory/compose.py` (user-config env override, brief append, brief lint), `agent-factory/run_evals.py`, `agent-factory/roles/tech-lead/SKILL.md`, `agent-factory/docs/role-authoring.md`, `agent-factory/README.md`, `evals/README.md`, `.github/workflows/tests.yml` (build the agent-factory venv so venv-gated tests run in CI), `scripts/gate.sh` (shellcheck covers `contexts/*.sh`), `CLAUDE.md`, `USAGE.md`.
+- Edited: `agent-factory/compose.py` (user-config env override, brief append, brief lint), `agent-factory/deploy.py` (`--identity`, neutral default for full profile), `agent-factory/run_evals.py`, `agent-factory/roles/tech-lead/SKILL.md`, `agent-factory/docs/role-authoring.md`, `agent-factory/README.md`, `evals/README.md`, `scripts/gate.sh` (shellcheck covers `contexts/*.sh`), `CLAUDE.md`, `USAGE.md`.
 - Composed output (`agent-factory/projects/`, git-ignored) and per-project deploys (`deploy.py` locks) go stale for orchestrators; machines recompose after pulling.
 - Token cost: contexts are opt-in per session; briefs add about 1.2 KB to each orchestrator prompt. No model calls are added to the gate or CI.
 
