@@ -61,10 +61,10 @@ Depends on: 1, 3. Runs before group 5 so group 5's flag-guard test checks the sh
 
 Files: `repos/gstack` (submodule pointer only), new test in `tests/test_submodule_sources.bats`.
 
-- [ ] 4.1 `git -C repos/gstack fetch origin`; check out the `origin/HEAD` commit (no tags exist; head moves daily). Read `repos/gstack/VERSION`; abort with a note in the PR body if it is below `1.91`. Check that `repos/gstack/setup` still contains each of `--no-team`, `--no-plan-tune-hooks`, `--no-timeline-stop-hook`, `--no-prefix`, `--host` and `-q`; if any is missing, stop and say so in the PR body (group 5 would otherwise ship a setup row that silently re-enables a global hook).
-- [ ] 4.2 Add test `gstack pin is at least 1.91` (reads `repos/gstack/VERSION`, compares major.minor numerically, skipped when uninitialised).
-- [ ] 4.3 Re-run `tests/test_submodule_sources.bats`; if an upstream rename removed a baseline `gstack/<skill>` entry, stop and list the missing entries in the PR body. Do not edit baseline curation.
-- [ ] 4.4 Commit message: `chore: bump gstack to <short sha> (VERSION <x.y.z.w>)`. Run `bash scripts/gate.sh`.
+- [x] 4.1 `git -C repos/gstack fetch origin`; check out the `origin/HEAD` commit (no tags exist; head moves daily). Read `repos/gstack/VERSION`; abort with a note in the PR body if it is below `1.91`. Check that `repos/gstack/setup` still contains each of `--no-team`, `--no-plan-tune-hooks`, `--no-timeline-stop-hook`, `--no-prefix`, `--host` and `-q`; if any is missing, stop and say so in the PR body (group 5 would otherwise ship a setup row that silently re-enables a global hook).
+- [x] 4.2 Add test `gstack pin is at least 1.91` (reads `repos/gstack/VERSION`, compares major.minor numerically, skipped when uninitialised).
+- [x] 4.3 Re-run `tests/test_submodule_sources.bats`; if an upstream rename removed a baseline `gstack/<skill>` entry, stop and list the missing entries in the PR body. Do not edit baseline curation.
+- [x] 4.4 Commit message: `chore: bump gstack to <short sha> (VERSION <x.y.z.w>)`. Run `bash scripts/gate.sh`.
 
 Acceptance: new version-floor test passes; no `gstack/<skill>` entry unresolved.
 
