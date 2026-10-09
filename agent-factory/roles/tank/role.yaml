@@ -1,0 +1,17 @@
+# role.yaml — tank
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md / MEMORY.md templates beside it carry the actual content.
+name: tank
+title: Tank               # human-readable role for IDENTITY.md nameplate
+default_model: sonnet
+summary: >-
+  Agent-to-agent learning, run on request. Reads the run log and the transcripts
+  the operator names, finds what one agent learned or got wrong, and writes it up
+  as a lesson in the private learning store plus a proposed change to the target
+  role's guidance. Proposes only: the operator reviews and applies the change.
+base_skills: []
+orchestrator: false
+tools: [Read, Grep, Glob, Bash, Write]
+model_rationale: >-
+  Reading run records and drafting evidence-cited lessons is mid-tier work. Write
+  is limited to the private learning store by rule, not by tool.

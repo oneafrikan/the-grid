@@ -213,3 +213,41 @@ EOT
   [ "$status" -eq 0 ]
   rm -rf "$fakehome"
 }
+
+# bare_names: true names Claude Code skills/agents '<role>'; default keeps '<slug>-<role>'.
+@test "bare_names drops the slug prefix for claude-code output; default keeps it" {
+  cfg=$(mktemp -d)
+  out=$(mktemp -d)
+  printf 'project: bn\nslug: bn\nbare_names: true\nagents:\n  - role: morpheus\n' > "$cfg/bare.yaml"
+  printf 'project: pfx\nslug: pfx\nagents:\n  - role: morpheus\n' > "$cfg/pfx.yaml"
+  run "$PY" "$COMPOSE" "$cfg/bare.yaml" --target claude-code --out "$out"
+  [ "$status" -eq 0 ]
+  [ -f "$out/bn/_claude-code/skills/morpheus/SKILL.md" ]
+  run "$PY" "$COMPOSE" "$cfg/pfx.yaml" --target claude-code --out "$out"
+  [ "$status" -eq 0 ]
+  [ -f "$out/pfx/_claude-code/skills/pfx-morpheus/SKILL.md" ]
+  rm -rf "$cfg" "$out"
+}
+
+# per-agent bare: true bare-names only that agent; its siblings keep the slug prefix.
+@test "per-agent bare names one agent and leaves siblings prefixed" {
+  cfg=$(mktemp -d)
+  out=$(mktemp -d)
+  printf 'project: mix\nslug: mix\nagents:\n  - role: morpheus\n    bare: true\n  - role: tank\n' > "$cfg/mix.yaml"
+  run "$PY" "$COMPOSE" "$cfg/mix.yaml" --target claude-code --out "$out"
+  [ "$status" -eq 0 ]
+  [ -f "$out/mix/_claude-code/skills/morpheus/SKILL.md" ]
+  [ -f "$out/mix/_claude-code/agents/mix-tank.md" ]
+  rm -rf "$cfg" "$out"
+}
+
+# Skill description only mentions dev-team coordination for orchestrators that have reports.
+@test "orchestrator skill description omits the dev-team line when it delegates to no one" {
+  cfg=$(mktemp -d)
+  out=$(mktemp -d)
+  printf 'project: dd\nslug: dd\nagents:\n  - role: morpheus\n' > "$cfg/dd.yaml"
+  run "$PY" "$COMPOSE" "$cfg/dd.yaml" --target claude-code --out "$out"
+  [ "$status" -eq 0 ]
+  ! grep -q 'dev-team feature' "$out/dd/_claude-code/skills/dd-morpheus/SKILL.md"
+  rm -rf "$cfg" "$out"
+}

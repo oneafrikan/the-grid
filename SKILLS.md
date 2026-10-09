@@ -22,7 +22,7 @@ Library repos are part of the-grid as an index/hub — browse here or search via
 - **spec-scout** — Audit a repo's OpenSpec adoption and report drift between openspec/specs/ and what the code actually does — missing specs, stale in-flight changes, specs that no longer match shipped behaviour.
 - **standup** — Generate a concise standup summary from recent git activity across repos.
 - **tighten** — Condense verbose prose across one or more project files into a tighter, less-wordy form — cutting filler, hedging, and restated ideas without dropping facts or restructuring content.
-- **unclaudish** — Post-processing editor that purges Claude-isms, rhetorical tropes, AI cadence, and em-dash saturation to convert drafts into crisp, executive business prose.
+- **un-claudish** — Post-processing editor that purges Claude-isms, rhetorical tropes, AI cadence, and em-dash saturation to convert drafts into crisp, executive business prose.
 
 ## repos/anthropic (partial) — 9
 

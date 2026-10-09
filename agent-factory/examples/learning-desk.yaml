@@ -1,0 +1,25 @@
+# learning-desk.yaml — the learning agents.
+#
+# Three roles, three kinds of learning, all operator-triggered (no cron):
+#   morpheus — Socratic tutor for any topic the operator sets   (skill, interactive)
+#   oracle   — learns about the operator                        (skill, interactive)
+#   tank     — agent-to-agent learning from run records         (subagent, batch)
+#
+# No orchestrator inside this desk: /tron (project `core`) is the front door and
+# routes here when this desk is wired. Learning data is PRIVATE and lives in
+# ~/.the-grid-private/learning/ — only the roles are public.
+#
+# bare_names: invoked as /morpheus, /oracle, tank — not /learning-desk-<role>.
+# Role names must stay unique across wired projects.
+#
+# Gate with `project:learning-desk` in the baseline or a machine overlay.
+project: learning-desk
+slug: learning-desk
+bare_names: true
+description: Learning agents — Morpheus (topics), Oracle (the operator), Tank (agent-to-agent).
+paperclip: false
+
+agents:
+  - role: morpheus
+  - role: oracle
+  - role: tank
