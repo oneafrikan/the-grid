@@ -103,3 +103,6 @@
 [submodule "repos/removing-ai-isms"]
 	path = repos/removing-ai-isms
 	url = https://github.com/gvsg-rs/removing-ai-isms.git
+[submodule "repos/ecc"]
+	path = repos/ecc
+	url = https://github.com/affaan-m/ECC.git
