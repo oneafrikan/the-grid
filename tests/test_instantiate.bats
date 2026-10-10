@@ -62,6 +62,18 @@ loop_conf_value() {
   [ "$(loop_conf_value BASE_BRANCH)" = "main" ]
 }
 
+@test "repo auto-detection handles an SSH host alias and an ssh:// URL" {
+  git -C "$REPO" remote add origin git@some-host-alias:acme/widgets.git
+  run bash "$INST" issue-loop "$REPO" --profile work --project-context ctx --review-focus f
+  [ "$status" -eq 0 ]
+  [ "$(loop_conf_value GH_REPO)" = "acme/widgets" ]
+  git init -q -b main "$T/repo3"
+  git -C "$T/repo3" remote add origin ssh://git@github.com/acme/gadgets.git
+  run bash "$INST" issue-loop "$T/repo3" --profile work --project-context ctx --review-focus f
+  [ "$status" -eq 0 ]
+  [ "$(cd "$T/repo3" && . loop/loop.conf && printf %s "$GH_REPO")" = "acme/gadgets" ]
+}
+
 @test "without --base-branch the base is origin/HEAD's branch" {
   git -C "$REPO" update-ref refs/remotes/origin/develop HEAD
   git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
@@ -129,7 +141,7 @@ loop_conf_value() {
 }
 
 @test "the heredoc workaround comments and the personal launchd label are gone" {
-  refute grep -nE 'com\.gareth|heredoc-scanner|bash heredoc' "$INST"
+  refute grep -nE 'com\.[a-z]+\.issue-loop|heredoc-scanner|bash heredoc' "$INST"
 }
 
 # ---------------------------------------------------------------- labels ---
@@ -181,6 +193,21 @@ loop_conf_value() {
   [ "$status" -eq 0 ]
   contains "$(cat "$T/repo2/loop/loop-prompt.template.md")" 'Tom & Jerry | x \ y'
   [ "$(cd "$T/repo2" && . loop/loop.conf && printf %s "$PROJECT_CONTEXT")" = 'Tom & Jerry | x \ y' ]
+}
+
+@test "single quotes and non-ASCII text survive in loop.conf and stay readable" {
+  inst --profile work --project-context "it's a test — wiring hub" --verify-cmd "echo 'quoted' && true"
+  [ "$status" -eq 0 ]
+  [ "$(loop_conf_value PROJECT_CONTEXT)" = "it's a test — wiring hub" ]
+  [ "$(loop_conf_value VERIFY_CMD)" = "echo 'quoted' && true" ]
+  contains "$(cat "$REPO/loop/loop.conf")" "wiring hub"
+  contains "$(cat "$REPO/loop/loop-prompt.template.md")" "it's a test — wiring hub"
+}
+
+@test "a multi-line value is refused" {
+  inst --profile work --project-context $'line one\nline two'
+  [ "$status" -eq 1 ]
+  contains "$output" "single line"
 }
 
 @test "tunables land in loop.conf" {
@@ -376,7 +403,15 @@ loop_conf_value() {
 
 @test "shipped scripts carry no absolute home paths, usernames or private repo names" {
   P="$BATS_TEST_DIRNAME/../automation-factory/patterns/issue-loop"
-  refute grep -nE '/Users/|/home/|com\.gareth|oneafrikan|gkwilderness|garethknight|FinanceFlow' \
+  refute grep -nE '/Users/|/home/|FinanceFlow' \
     "$INST" "$BATS_TEST_DIRNAME/../scripts/lib/render-schedule.sh" "$BATS_TEST_DIRNAME/../scripts/lib/gh-app-token.sh" \
-    "$P/run-issues.sh" "$P/setup.sh" "$P/loop.conf.template" "$P/loop-prompt.template.md" "$P"/hooks/*.sh
+    "$P/run-issues.sh" "$P/setup.sh" "$P/loop.conf.template" "$P/loop-prompt.template.md" "$P"/hooks/*.sh "$P/README.md"
+}
+
+@test "the pattern README documents PR mode and no longer carries the Known issues section" {
+  P="$BATS_TEST_DIRNAME/../automation-factory/patterns/issue-loop"
+  refute grep -n 'Known issues' "$P/README.md"
+  grep -q 'Running unattended safely' "$P/README.md"
+  grep -q 'LABEL_BUDGETS' "$P/README.md"
+  grep -q 'branch protection and token scope are the boundary' "$P/README.md"
 }

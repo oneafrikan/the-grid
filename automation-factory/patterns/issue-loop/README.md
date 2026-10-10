@@ -1,153 +1,250 @@
 # Pattern: issue-loop
 
-An autonomous agent that works a repo's GitHub issue backlog unattended, with an
-automatic code review posted to each issue. Two modules that compose with **zero
-glue** — the loop commits with `#N`, which is exactly what the hook watches for.
+An autonomous agent that works a repo's GitHub issue backlog, with an automatic
+code review on everything it produces. It runs two ways from the same cut:
+
+- **Interactively**: a `/loop` session you start in Claude Code, using your own credentials.
+- **Headless**: `loop/run-issues.sh`, a capped, auditable runner for a server. One fresh
+  session per issue, a dedicated unprivileged OS user, no GitHub token in the model's
+  environment, PRs to a long-lived integration branch, a stronger-model review on each PR.
 
 | Module | File | Role |
 |--------|------|------|
-| **1 — review hook** | `hooks/post-commit-review.sh` | PostToolUse(Bash) hook: on every `git commit`, runs a backgrounded `claude -p` review of the diff and posts it to issue `#N`. |
-| **2 — loop prompt** | `loop-prompt.template.md` | A `/loop` prompt: pick an eligible issue → implement → **verify** → commit (`#N`) → push → close → repeat; self-paced, stops when the backlog is clear. |
-| **wiring** | `setup.sh` + `.gitignore` | Regenerates the prompt instance and merges the hook into `.claude/settings.json` for the current machine. Idempotent — safe to re-run after a clone or repo move. |
+| **1 — review hook** | `hooks/post-commit-review.sh` | PostToolUse(Bash) hook: on every `git commit`, runs a backgrounded, capped `claude -p` review of that commit and posts it on the branch's open PR (else on issue `#N` from the commit subject). |
+| **2 — loop prompt** | `loop-prompt.template.md` | The `/loop` prompt. Two mutually exclusive `MODE` blocks: `pr` (worktree, PR to the base branch, relabel, never close) or `direct` (push the base branch, close the issue). |
+| **3 — headless runner** | `run-issues.sh` + `loop.conf.template` | Unattended runner (pr mode only): preflight, trust gate, tokenless worker per issue, the runner pushes/opens the PR/relabels, Opus review, run record. Config in `loop/loop.conf`. |
+| **4 — guard + worktree** | `hooks/guard-main-push.sh`, `hooks/new-agent-worktree.sh` | PreToolUse mistake-catcher for pushes/merges; cuts `issue-<N>` worktrees off `origin/<base>`. |
+| **5 — token minter** | `scripts/lib/gh-app-token.sh` (copied to `loop/gh-app-token.sh`) | Mints a 1-hour GitHub App installation token with `openssl` + `curl` + `jq`. |
+| **wiring** | `setup.sh` + `.gitignore` | Regenerates the prompt instance, merges the review and guard hooks into `.claude/settings.json` (only its own entries), self-tests the guard. Idempotent. |
 
-**The composition:** Module 2's `git commit -m "… #N"` triggers Module 1. You get
-implement-and-review on every iteration without wiring the two together.
+Scheduling is not part of the pattern: `scripts/instantiate.sh` renders a systemd user
+timer (linux profile) or a launchd plist (mac-mini profile) through the shared
+`scripts/lib/render-schedule.sh`, writes the files and **prints** the activation
+commands. It never runs `systemctl`, `launchctl` or `crontab`.
 
 ## Instantiate it into a target repo
 
-This is a *pattern* (the tailor's cut), not a running automation. To make a suit:
+```bash
+bash scripts/instantiate.sh issue-loop <target-repo> --profile <personal|work|mac-mini|linux> [options]
+```
 
-1. **Copy the whole pattern into a tracked `loop/` folder** in the target repo:
-   `mkdir -p <target>/loop && cp -r hooks loop-prompt.template.md setup.sh .gitignore <target>/loop/`
-   Do this even if `<target>/.claude/` is gitignored (a common Claude Code
-   convention — see "Check gitignore before instantiating" below). `loop/` sits
-   at the target repo's top level, outside `.claude/`, so it's tracked regardless
-   of that repo's `.claude/` policy.
-2. **Fill the hook placeholders** in `<target>/loop/hooks/post-commit-review.sh`:
-   `{{GH_REPO}}`, `{{PROJECT_CONTEXT}}`, `{{REVIEW_FOCUS}}`.
-3. **Fill `loop-prompt.template.md` placeholders** — all except `{{WORKING_DIR}}`:
-   `{{GH_REPO}}`, `{{PROJECT_CONTEXT}}`, `{{VERIFY_CMD}}`, `{{ISSUE_LABEL}}`. These
-   don't vary by machine, so bake them in now; leave `{{WORKING_DIR}}` for
-   `setup.sh` to fill per machine.
-4. **Add an `agent-ready` label** in the target repo and tag the issues you're
-   happy to automate.
-5. **Run `bash loop/setup.sh`** — regenerates `loop/loop-prompt.md` with this
-   machine's absolute path baked in, makes the hook executable, and merges it
-   into `<target>/.claude/settings.json` (creates the file if absent). Re-run
-   this any time the repo clones or moves to a new machine.
-6. **Write a short `loop/README.md`** in the target documenting the layout (the
-   module table above is a good starting point) and noting that
-   `bash loop/setup.sh` re-wires everything after a clone or move.
-7. In Claude Code, run `/loop <the contents of loop/loop-prompt.md>`.
+| Profile | Default mode | Guard + worktree helper + runner | Scheduler files |
+|---|---|---|---|
+| `personal` | direct | no | none |
+| `work` | pr | yes | none |
+| `mac-mini` | pr | yes | launchd plist |
+| `linux` | pr | yes | systemd user service + timer |
 
-> v2's `instantiate.sh` (see Roadmap) will collapse steps 1-4 and 6 into one
-> command; step 5 (`setup.sh`) already ships as part of this pattern today.
+Options: `--repo` (auto-detected from the git remote), `--base-branch` (default: the
+repo's `origin/HEAD` branch, else `main`), `--mode pr|direct`, `--verify-cmd`, `--label`
+(default `ready-for-agent`), `--project-context`, `--review-focus`, `--max-issues`,
+`--max-turns`, `--issue-timeout`, `--worker-model`, `--review-model`, `--setup-cmd`,
+`--role-labels a,b,c`, `--schedule-hour` (alias `--launchd-hour`). Run it with no
+arguments for the full list.
 
-## Check gitignore before instantiating
+What it does, idempotently (a second identical run prints no `wrote:` line):
 
-Before dropping any generated or automation file into a target repo, check
-whether its destination directory is gitignored there:
+- copies the pattern into a **tracked** top-level `loop/` folder (not `.claude/`, which is
+  commonly gitignored in target repos, so the automation survives a clone or move);
+- fills the prompt (`{{BASE_BRANCH}}`, repo, context, verify command, label) and keeps exactly one `MODE` block;
+- renders `loop/loop.conf` **once**: re-running with different flags says "left alone" instead of overwriting your tuned caps;
+- creates, if absent, the opt-in label, `ready-for-human`, `needs-human`, `blocked` and one `role:<name>` label per `--role-labels` entry;
+- runs `bash loop/setup.sh`, which writes the machine-local, gitignored `.claude/settings.json` wiring.
 
-    git check-ignore -v <path>
+`instantiate.sh` needs an authenticated `gh` (to create labels). A headless loop user has
+none by design, so run it as `GH_TOKEN="$(bash scripts/lib/gh-app-token.sh)" bash scripts/instantiate.sh ...`
+(with the `GH_APP_*` variables set as in "Linux setup" below).
 
-`.claude/` is commonly gitignored — Claude Code local settings are frequently
-excluded by convention. Copy a hook straight into `.claude/hooks/`, or bake a
-value into `.claude/settings.json`, and it silently vanishes on the next clone
-or repo move — the automation doesn't survive. Default instead to a top-level
-**tracked** folder (`loop/`) for anything portable (hook script, prompt
-template, setup script), and regenerate whatever's genuinely machine-specific
-(absolute paths, credentials) with a small idempotent setup script rather than
-hand-baking it into a committed file. `.claude/settings.json` itself can stay
-gitignored — `setup.sh` re-derives its hook-wiring on demand, so nothing is lost.
+After a clone or a move, only `bash loop/setup.sh` is needed.
+
+## `loop/loop.conf`
+
+Tracked, plain assignments, **no secrets**. Every line is `KEY=${KEY:-value}`, so an
+environment variable of the same name overrides the file for one run.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `GH_REPO` | detected | `owner/name` |
+| `BASE_BRANCH` | `main` / detected | Branch PRs target (pr) or that direct mode pushes |
+| `ISSUE_LABEL` | `ready-for-agent` | Opt-in label: only labelled issues are worked |
+| `MODE` | `pr` | `pr` or `direct`. The runner refuses `direct` (interactive `/loop` only) |
+| `LABEL_BUDGETS` | empty | Space-separated `label=usd` pairs that raise the worker spend cap, e.g. `ws:rule-packs=15` |
+| `VERIFY_CMD` | empty | Gate the agent must pass before committing |
+| `SETUP_CMD` | empty | Run in each issue worktree before the agent (e.g. `npm ci`), under `ISSUE_TIMEOUT` |
+| `PROJECT_CONTEXT`, `REVIEW_FOCUS` | | One-liners fed to the review prompts |
+| `MAX_ISSUES` | 3 | Issues per run, lowest number first |
+| `MAX_TURNS` | 40 | Passed as `--max-turns` only if `claude --help` lists that flag |
+| `MAX_BUDGET_USD` | 5 | Worker `--max-budget-usd` (always passed) |
+| `REVIEW_BUDGET_USD` | 2 | Review `--max-budget-usd` (always passed) |
+| `ISSUE_TIMEOUT` / `REVIEW_TIMEOUT` | 1800 / 600 | Wall-clock cap per worker / review run, in seconds |
+| `WORKER_MODEL` / `REVIEW_MODEL` | sonnet / opus | Always passed explicitly |
+| `REVIEW_DIFF_LINES` | 1500 | Diff lines given to the review (the review input is also capped at 100000 bytes) |
+| `RUN_ROLE` | `issue-loop` | Role name in run records when no `role:` label routed the issue |
+
+Worktrees live in `${LOOP_WORKTREE_ROOT:-<parent of repo>/<repo-name>-loop}/issue-<N>`,
+outside the repo, so no ignore rules are needed.
+
+## The headless runner
+
+`bash loop/run-issues.sh` exits **0** when the run finished (issue-level failures are fine,
+and so is "nothing to do" or "another run holds the lock"), **1** on an infrastructure
+failure mid-run (stopped at once; the issue keeps its label), **2** when preflight failed
+(nothing was touched; one stderr line names the fix).
+
+Per issue, serially: skip it if a PR or `issue-<N>` branch already exists → **trust gate**
+(see below) → optional role routing → a worktree off `origin/<base>` → the worker
+(`claude -p`, explicit `--model`, `--max-budget-usd`, wall-clock `timeout`, stdin from
+`/dev/null`, no MCP servers, `--setting-sources project,local`) → the **runner** decides
+the outcome from git state plus the worker's one-line outcome file:
+
+| Worker wrote | Git state | Result |
+|---|---|---|
+| `done` | on `issue-<N>`, clean, at least one commit ahead of the base | push, PR to the base (`Closes #N`), `ready-for-human`, issue left **open**, Opus review comment |
+| `needs-human <reason>` | any | label `needs-human`, reason in a comment |
+| anything else, timeout, max turns, no commit, rejected push | any | label `blocked`, reason in a comment |
+
+A PR to a non-default base does not auto-close its issue on merge, which is why the issue
+stays open and is relabelled. The review (`--model opus --tools ""`) is advisory text on
+the PR, never an approval. One `run-record.sh` line is written per issue (best effort).
+
+## Running unattended safely
+
+The worker runs with `--dangerously-skip-permissions`. Containment is layered, and the
+**guard hook is only a mistake-catcher: branch protection and token scope are the boundary**.
+
+1. **A dedicated unprivileged OS user** with its own `HOME`, its own clone and its own
+   `claude` login, that cannot read the operator's home. Preflight checks this mechanically:
+   `LOOP_OPERATOR_HOME` (in the env file) must exist and must not be listable by the running user.
+2. **A GitHub App, not a personal token.** Create an App under the operator's account
+   (no webhook; repository permissions Contents, Pull requests and Issues read/write,
+   Metadata read; **no Administration, no Workflows**), install it on the **one** repo, and
+   download its private key to `~/.config/the-grid/app.pem` (mode 600). Each run mints a
+   1-hour installation token with `gh-app-token.sh` (an RS256 JWT with `exp` at most 10
+   minutes ahead, signed with the key) and re-mints after 45 minutes. Commits and PRs show
+   as `<app-slug>[bot]`. Preflight refuses a token that is not an installation token for
+   this repo (`gh api user` must fail) or whose App holds Administration or Workflows.
+   To revoke: delete the key in the App settings (a stolen key mints new tokens until it is deleted).
+3. **A ruleset requiring a pull request on the base branch, with an EMPTY bypass list.**
+   Preflight checks `gh api repos/<owner>/<name>/rules/branches/<base>` for a `pull_request` rule.
+4. **The runner holds the token, the worker never does.** The token lives in an unexported
+   shell variable and is passed per `gh`/`git` call as `GH_TOKEN`. The worker, `SETUP_CMD` and
+   the review run under `env -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN`. The runner
+   pushes with `-c core.hooksPath=/dev/null push --no-verify`, so a hook the worker planted
+   never runs while the token is in the environment. The loop user must have no stored `gh`
+   login (preflight fails if it does) and an `https://` origin (an SSH key in its home would
+   give the worker push access).
+5. **A trust gate before any worktree or model call.** The issue text is the worker's whole task, so
+   it must come from someone trusted: `author_association` is OWNER, MEMBER or COLLABORATOR; the
+   last person to apply the opt-in label is in `LOOP_TRUSTED_ACTORS`; every body editor and every
+   title-rename actor is in `LOOP_TRUSTED_ACTORS`. Otherwise the issue gets `needs-human` and a
+   comment, and the run moves on. Issue comments are never given to the worker. `LOOP_TRUSTED_ACTORS`
+   lives in the env file, not in the tracked `loop.conf`, so no username lands in the repo.
+6. **Caps on everything.** Spend (`--max-budget-usd`), wall clock (`timeout -k 30`), issues per run,
+   and a lock so two runs never overlap.
+
+**What the worker can do:** edit files in its worktree, run the verify command and shell
+commands as the loop user, commit on `issue-<N>`. **What it cannot do:** push, open PRs, touch
+labels, read the operator's home, reach any repo but the one installed, merge anything (the
+ruleset), or change App permissions.
+
+**Residual risk:** the worker runs as the same OS user as the runner, so a deliberately
+hostile worker could read the env file, the App key and the token. `env -u` stops the token
+reaching tool output, logs and child processes by accident. What bounds a deliberate read is
+the App's permissions (one repo, no Workflows or Administration), the 1-hour token lifetime,
+the ability to delete the key, and the ruleset with an empty bypass list. Delete the key first
+if you suspect a leak.
+
+## Linux setup (systemd user timer)
+
+As the dedicated loop user (all UNVERIFIED on a real box until the proving run in the uplift runbook):
+
+1. Put the App key at `~/.config/the-grid/app.pem` (`chmod 600`) and create
+   `~/.config/the-grid/issue-loop.env` (`chmod 600`). The runner **parses** it (never sources it) and reads only these keys:
+   ```
+   GH_APP_ID=...                  # required
+   GH_APP_INSTALLATION_ID=...     # optional when the App has exactly one installation
+   GH_APP_KEY_FILE=...            # optional, default ~/.config/the-grid/app.pem
+   LOOP_TRUSTED_ACTORS=login,...  # required: logins whose labelling and edits are trusted
+   LOOP_OPERATOR_HOME=/path/to/operator-home   # required: a path this user must NOT be able to list
+   ```
+   A `GH_TOKEN=` or `GITHUB_TOKEN=` line is refused. The env file and the key must both be mode 600. Scripts never create these files.
+2. Let git use the per-call token over https, once: `GH_TOKEN="$(bash loop/gh-app-token.sh)" gh auth setup-git`.
+3. Cut the loop into the clone: `GH_TOKEN="$(bash scripts/lib/gh-app-token.sh)" bash scripts/instantiate.sh issue-loop . --profile linux --base-branch next ...`, then `bash loop/setup.sh` (instantiate runs it too).
+4. Linger, once, with sudo, so the user timer fires while nobody is logged in: `sudo loginctl enable-linger <loop-user>`. Without it the user manager does not exist at 02:00 and `Persistent=true` runs the missed job at the next login. `instantiate.sh` warns when linger is not `yes` and prints a crontab line as the alternative that fires while logged out without linger (it never installs it).
+5. Enable the timer as that user (the command `instantiate.sh` printed): `systemctl --user daemon-reload && systemctl --user enable --now issue-loop-<owner>-<repo>.timer`.
+6. Fire one run by hand to look at the result first: `systemctl --user start issue-loop-<owner>-<repo>.service` (journal: `journalctl --user -u issue-loop-<owner>-<repo>.service`).
+
+The unit sets `Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin`, runs the runner as
+`Type=oneshot` with `TimeoutStartSec = MAX_ISSUES x (ISSUE_TIMEOUT + REVIEW_TIMEOUT) + 600`, and has no
+`EnvironmentFile` and no `network-online.target` line (a user manager has no such unit; a network that
+is not up yet is caught by the runner's `git ls-remote` preflight, and the next timer fire retries).
+
+## macOS (launchd) note — UNTESTED
+
+The `mac-mini` profile writes a LaunchAgent plist that runs `/bin/bash <repo>/loop/run-issues.sh`
+directly (no login shell; the runner fixes its own PATH), with `HOME`, `PATH`, `WorkingDirectory`
+and logs under `~/.grid/logs/`. The plist must belong to the dedicated loop user. A LaunchAgent only
+runs while that user has a GUI session, and the Keychain-held `claude` login is not readable over a
+bare SSH session, so a headless Mac needs auto-login of the dedicated user. Nothing in the test suite
+activates a scheduler; this path is written and unit-tested as text only.
+
+## Role routing
+
+Label an issue `role:<agent-name>` (for example `role:grid-backend-dev`) and the worker runs as
+`claude -p --agent <name>` with the same model, spend cap and timeout as any worker. No label means the
+default session. An agent is "wired" when `<name>.md` exists in `~/.claude/agents/` (or `$AGENTS_DIR`) or in
+the repo's `.claude/agents/`. These end `blocked` with a comment, no worktree and no model call:
+an unwired name, two `role:` labels, or an agent whose frontmatter `tools:` line contains neither
+`Edit` nor `Write` (read-only roles such as a QA or security reviewer cannot build). The Opus review is
+never routed to an agent. `instantiate.sh --role-labels a,b,c` creates the labels; create them only for builder roles.
+The run record's role is the routed agent, else `RUN_ROLE`.
+
+## Hooks
+
+- **Guard** (`hooks/guard-main-push.sh`, PreToolUse): blocks, with exit 2, a `git push` whose refspec
+  target is `main`, `master` or the base branch; a bare `git push` while on one of those; `--force`, `-f`,
+  `--force-with-lease`, `--mirror`, `--all`; `gh pr merge`; and `gh api` calls with `/merge` or a
+  PUT/PATCH/DELETE method. Words are matched exactly, so `git push -u origin issue-main-fix` is fine.
+  It uses `hooks/lib/common.sh`'s `grid_git_segments` from `${GRID_DIR:-$HOME/.the-grid}` when present,
+  else its own split. **Known gaps:** `bash -c '...'`, `eval`, shell aliases and scripts that call git are not inspected.
+- **Review hook** (`hooks/post-commit-review.sh`, PostToolUse): reviews each commit once (deduped per
+  checkout), from the payload's working directory, with `--model ${GRID_REVIEW_MODEL:-sonnet}`,
+  `--max-budget-usd ${GRID_REVIEW_BUDGET_USD:-1}` and `--tools ""`. It stands down when
+  `GRID_LOOP_HEADLESS=1` (the runner does one Opus review per PR instead) or `GRID_REVIEW_RUNNING=1`
+  (its own reviewer).
+
+## History
+
+Fixed in this version: `setup.sh` now wires the `PreToolUse` guard as well as the review hook (a clone or
+move used to silently lose the guard), and the prompt's push step is mode-aware instead of a hard-coded
+`git push origin main` that contradicted the `work` profile.
+The verify-failure revert is now `reset --hard && clean -fd` (the old `checkout -- .` leaked untracked files).
 
 ## Why each decision was made
 
-- **Label-gated selection (`agent-ready`), not "lowest open issue."** A human opts
-  each issue into autonomous work. Without this gate the loop would attack
-  design/judgment issues it can't actually resolve. Lowest-numbered *within the
-  label* keeps picking deterministic.
-- **Verify gate before commit.** The loop runs `{{VERIFY_CMD}}` and **never commits
-  a red build**. On failure it tries to fix what it changed, else reverts and
-  labels the issue `blocked`. This is the single biggest guard against an
-  autonomous agent silently landing broken work.
-- **Failure / ambiguity handling.** Under-specified issues get a comment + a
-  `needs-human` label and are skipped — the loop never spins or guesses on
-  judgment calls.
-- **"Only the changes the issue requires."** Autonomous agents over-implement —
-  refactoring adjacent code, adding unasked features. This keeps diffs minimal
-  and reviewable.
-- **Commit message carries `#N`.** Deliberately triggers the review hook, so the
-  two modules compose without extra wiring. Also leaves a clean issue→commit trail.
-- **Review runs backgrounded.** `( … ) &` detaches so Claude Code is never blocked
-  waiting on a review.
-- **Honest diff truncation.** Large diffs are capped for cost, but the review
-  *says so* rather than silently under-reviewing.
-- **Close with a comment + commit hash.** Human-readable audit trail: what was
-  done, in which commit, in one line.
-- **No fixed interval.** The loop self-paces via `ScheduleWakeup` — fast issues,
-  short gaps; slow issues, longer. Beats a fixed poll that wastes cycles.
-- **Portable content lives in a tracked `loop/` folder, not `.claude/`.** The
-  automation must survive a clone or a repo move (e.g. laptop → production
-  server) — anything needed to regenerate it (hook script, prompt template,
-  setup script) goes in a tracked folder. Only genuinely machine-specific wiring
-  (absolute paths baked into `.claude/settings.json`) gets regenerated on
-  demand by `setup.sh`, never hand-baked into a committed file. Discovered when
-  instantiating into `gkwilderness/keyword-universe`, whose `.gitignore` has a
-  blanket `.claude/` entry — a common convention that would otherwise have
-  made the whole automation invisible to git.
+- **Label-gated selection, not "lowest open issue."** A human opts each issue into autonomous work.
+  Without this gate the loop would attack design/judgment issues it cannot resolve. Lowest-numbered
+  *within the label* keeps picking deterministic.
+- **Verify gate before commit.** The loop runs `VERIFY_CMD` and never commits a red build. On failure
+  it tries to fix what it changed, else reverts and labels the issue `blocked`.
+- **Failure and ambiguity handling.** Under-specified issues get a comment and `needs-human` and are
+  skipped: the loop never spins or guesses on judgment calls.
+- **"Only the changes the issue requires."** Autonomous agents over-implement; this keeps diffs minimal and reviewable.
+- **Commit message carries `#N`.** It tells the review hook which issue a commit belongs to and leaves a clean issue-to-commit trail.
+- **Review runs backgrounded and capped.** Claude Code is never blocked, and every model call carries an
+  explicit model, a spend cap and a time cap.
+- **Honest diff truncation.** Large diffs are capped for cost, but the review says so instead of silently under-reviewing.
+- **The runner integrates, the agent does not.** The agent only commits and writes one outcome line, so
+  no model ever holds a token, and the outcome can only downgrade, never cause a push without commits.
+- **Portable content lives in a tracked `loop/` folder, not `.claude/`.** The automation must survive a
+  clone or a move; only machine-specific wiring (absolute paths) is regenerated by `setup.sh`. Check
+  `git check-ignore -v <path>` before dropping any generated file into a target repo.
+- **One schedule renderer.** `scripts/lib/render-schedule.sh` is the only place systemd, launchd and
+  cron text is produced, so every scheduled the-grid job renders and tests the same way.
 
-## Known issues — `instantiate.sh --profile work` (found 2026-07-19)
+## Roadmap
 
-`scripts/instantiate.sh` already ships a `work` profile that's meant to be
-this pattern's PR-mode roadmap item (below) — worktree + PR instead of direct
-push to `main`, enforced by a guard hook. It's **incomplete** in two ways that
-only surface once you actually run the loop end-to-end on `work`, which is
-presumably why neither had been caught before this pattern was instantiated
-into `oneafrikan/FinanceFlow`:
-
-1. **The `PreToolUse` guard hook is wired once, at instantiation time, by
-   `instantiate.sh` itself — never by `loop/setup.sh`.** `setup.sh` (the
-   pattern file shipped here, copied verbatim into every target repo
-   regardless of profile) only ever re-wires `PostToolUse` (the review hook).
-   A fresh clone or repo move on a `work`-profile repo silently loses the
-   push-to-main guard, even though the generated `CLAUDE.md` tells the user
-   `bash loop/setup.sh` is sufficient to restore all wiring after a clone.
-   There's already a TODO comment about this in `instantiate.sh` next to the
-   guard-hook block ("extract to patterns/guard-main-push/ when reused beyond
-   issue-loop") — this is that gap manifesting for real.
-2. **`loop-prompt.template.md`'s STEP 5 is a hardcoded `git push origin
-   main`.** That's correct for the `personal`/`mac-mini` profiles (direct
-   push is the intended behavior there) but directly contradicts `work`
-   profile's entire premise — the loop's own literal instructions would hit
-   the guard's BLOCKED path on every single iteration and never actually land
-   anything.
-
-Neither is fixed in this pattern's canonical files yet — that's a genuine
-scope decision (does `work` profile get its own template variant, or does the
-guard-wiring get promoted into `setup.sh` unconditionally, per the existing
-TODO?) rather than a one-line patch. `oneafrikan/FinanceFlow`'s `loop/`
-directory has a working reference fix for both (setup.sh wires + smoke-tests
-the guard; the loop prompt cuts an `issue-<N>` worktree, pushes that branch,
-opens a PR, and relabels the issue `ready-for-human` instead of closing it) —
-worth diffing against when this gets folded back into the pattern proper.
-
-## Roadmap (v2)
-
-- **`instantiate.sh`** — one command to cut this pattern into a target repo
-  (copy into `loop/` + placeholder-fill + label creation). `setup.sh` already
-  ships today and covers the machine-specific regeneration half of this (was
-  previously the "settings merge" step) — v2 only needs to automate the
-  one-time copy/fill/label steps around it, folding part of this roadmap item
-  forward now.
-- **PR mode** — `{{INTEGRATION}}=pr`: work on a branch, open a PR (review fires on
-  the PR), optional auto-merge when green. Safer than committing to `main`.
-  Partially superseded by `instantiate.sh --profile work`, already shipping —
-  see "Known issues" above for what it's still missing before it matches this
-  roadmap item's intent.
-- **Actionable review** — next iteration reads the prior auto-review and fixes any
-  critical findings before moving on (closes the quality loop).
-- **Compose with `agent-factory`** — the *implement* step delegates to composed
-  specialists (`backend-dev`, `frontend-dev`…), turning the loop into an
-  orchestrator over the team. This is why both factories live in the-grid.
-- **Least-privilege guidance** — branch protection + scoped `gh` token for
-  unattended runs (pairs with the `careful` / `guard` skills).
+- **Shipped:** PR mode, the headless runner, the GitHub App token, the linux profile.
+- **Actionable review**: the next iteration reads the prior auto-review and fixes critical findings before moving on.
+- **Compose with `agent-factory`**: partly done via `role:<agent>` routing; the implement step can delegate to composed specialists.
+- **Paperclip / OpenClaw triggers**: the runner is the scheduled Claude Code path only; other triggers stay out of scope here.
