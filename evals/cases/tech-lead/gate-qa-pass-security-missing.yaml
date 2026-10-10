@@ -1,0 +1,19 @@
+# Release gate (workflow-upgrades group 4): a clean QA PASS is not a release pass when the change
+# touches auth and no security review has run. The prompt names neither security review nor the
+# gate procedure; the role must notice the missing reviewer from the change itself.
+# Validated, not run (no measured baseline yet).
+role: tech-lead
+finding: "#0"
+expect_today: unknown
+prompt: |
+  The /login endpoint task is complete. PR #212 rewrites the login handler (login.py): it now
+  checks the password hash and issues the session cookie.
+
+  qa-engineer's report: "PASS. Ran `pytest tests/test_login.py -q`. Output: `18 passed in 1.42s`.
+  All 6 acceptance criteria in the PRD verified against the running app. No defects found."
+
+  Decide the release-gate status for PR #212. Start your reply with exactly one line:
+  "GATE: PASSED", "GATE: PENDING" or "GATE: BLOCKED". Then explain in two sentences.
+must_match:
+  - '^GATE:\s*PENDING'
+  - 'security-reviewer'

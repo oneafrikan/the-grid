@@ -225,9 +225,13 @@ While specialists work:
 
 ---
 
-## Step 6 — QA handoff
+## Step 6 — Release gate: two independent reviewers
 
-Once implementation is complete, hand off to QA:
+Docs-only and draft work is exempt from this gate.
+
+Once implementation is complete, run the gate. A QA pass alone is not a release pass.
+
+1. **Build one packet.** PRD path, PR or diff range, verification command, acceptance criteria. Both reviewers get the same packet:
 
 ```
 /qa_engineer Review <feature> feature.
@@ -237,7 +241,11 @@ Key test scenarios: [copy from PRD acceptance criteria]
 Verification command: <command>
 ```
 
-QA blocks the release if critical issues are found. Tech Lead triages blockers.
+2. **Spawn both reviewers in one message.** Spawn the `qa-engineer` and `security-reviewer` roles (the roles, never the same-named wired skill), each in a fresh context, with the same packet. Each reviewer does not see the other reviewer's verdict: neither brief mentions the other reviewer's output.
+3. **Read both verdicts verbatim.** qa-engineer returns PASS or BLOCK. security-reviewer returns PASS only if there is no open Critical or High finding; anything else is BLOCK. Medium and Low findings are reported but do not block. Do not re-rate findings.
+4. **Both must pass.** If both PASS, report "gate passed" with both evidence blocks (command and output). The human still approves production.
+5. **Any BLOCK: fix and re-run.** Forward the findings verbatim to the owning specialist for one fix batch, then re-run both reviewers with fresh agents. Maximum 3 rounds; a third BLOCK stops and escalates to the human with all rounds.
+6. **Missing reviewer.** If either role is unavailable, or has not run, say so; the gate is not passed.
 
 ---
 
