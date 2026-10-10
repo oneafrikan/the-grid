@@ -84,6 +84,7 @@ GH_REPO=""
 PROJECT_CONTEXT=""
 VERIFY_CMD=""
 ISSUE_LABEL="ready-for-agent"
+LABEL_EXPLICIT=0
 REVIEW_FOCUS=""
 BASE_BRANCH=""
 MODE=""
@@ -106,7 +107,7 @@ while [[ $# -gt 0 ]]; do
     --repo)             GH_REPO="$2";          shift 2 ;;
     --project-context)  PROJECT_CONTEXT="$2";  shift 2 ;;
     --verify-cmd)       VERIFY_CMD="$2";       shift 2 ;;
-    --label)            ISSUE_LABEL="$2";      shift 2 ;;
+    --label)            ISSUE_LABEL="$2"; LABEL_EXPLICIT=1; shift 2 ;;
     --review-focus)     REVIEW_FOCUS="$2";     shift 2 ;;
     --base-branch)      BASE_BRANCH="$2";      shift 2 ;;
     --mode)             MODE="$2";             shift 2 ;;
@@ -125,6 +126,19 @@ done
 [[ -z "$PROFILE" ]] && { echo "Error: --profile is required (personal | work | mac-mini | linux)"; exit 1; }
 [[ "$PROFILE" =~ ^(personal|work|mac-mini|linux)$ ]] || { echo "Error: profile must be personal, work, mac-mini or linux"; exit 1; }
 [[ "$PATTERN" == "issue-loop" ]] || { echo "Error: unknown pattern '$PATTERN' (available: issue-loop)"; exit 1; }
+
+# An existing (tracked, hand-tuned) loop/loop.conf is the source of truth for the base branch, the
+# opt-in label and the mode: read them BEFORE anything is rendered, so the prompt template can never
+# end up differing from what loop.conf implies (it is never overwritten). Explicit flags still win.
+BASE_FROM_CONF=0
+if [[ -f "$TARGET_DIR/loop/loop.conf" ]]; then
+  conf_vals="$( (unset BASE_BRANCH ISSUE_LABEL MODE; . "$TARGET_DIR/loop/loop.conf" >/dev/null 2>&1; \
+    printf '%s %s %s' "${BASE_BRANCH:--}" "${ISSUE_LABEL:--}" "${MODE:--}") 2>/dev/null || true)"
+  read -r conf_base conf_label conf_mode <<< "$conf_vals"
+  if [[ -z "$BASE_BRANCH" && -n "${conf_base:-}" && "$conf_base" != "-" ]]; then BASE_BRANCH="$conf_base"; BASE_FROM_CONF=1; fi
+  if [[ "$LABEL_EXPLICIT" == 0 && -n "${conf_label:-}" && "$conf_label" != "-" ]]; then ISSUE_LABEL="$conf_label"; fi
+  if [[ -z "$MODE" && -n "${conf_mode:-}" && "$conf_mode" != "-" ]]; then MODE="$conf_mode"; fi
+fi
 
 # profile -> default mode; the scheduled profiles run the headless runner, which is pr-only
 if [[ -z "$MODE" ]]; then
@@ -284,8 +298,13 @@ detect_base_branch() {
     BASE_BRANCH="${ref#origin/}"
     [[ -n "$BASE_BRANCH" ]] || BASE_BRANCH="main"
     echo "  base branch: $BASE_BRANCH (detected)"
+  elif [[ "$BASE_FROM_CONF" == 1 ]]; then
+    echo "  base branch: $BASE_BRANCH (from loop/loop.conf)"
   else
     echo "  base branch: $BASE_BRANCH"
+    if [[ -f "$TARGET_DIR/loop/loop.conf" ]]; then
+      echo "  note: loop/loop.conf stays as it is; if its BASE_BRANCH differs from --base-branch the prompt and loop.conf will disagree"
+    fi
   fi
 }
 
