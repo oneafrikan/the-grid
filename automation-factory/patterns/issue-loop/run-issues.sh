@@ -27,6 +27,12 @@
 
 set -euo pipefail
 
+# The runner never reads its own stdin. A child run from an interactive terminal (under GNU
+# `timeout`, which puts it in a background process group) that reads the TTY is stopped by
+# SIGTTIN: timeout's TERM never lands and Ctrl-C never reaches it. With stdin on /dev/null no
+# child can touch the terminal; signals still reach the runner, which only traps them.
+exec </dev/null
+
 # --------------------------------------------------------------------------
 # small helpers
 # --------------------------------------------------------------------------
