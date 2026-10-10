@@ -196,6 +196,26 @@ expect_preflight_exit2() {
   [ "$(worker_calls)" -eq 1 ]
 }
 
+@test "the runner's own stdin is detached: a preflight child that reads stdin cannot block it (TTY hang)" {
+  mkfifo "$T/fifo2"
+  exec 9<> "$T/fifo2"         # an open, silent stdin, like a terminal nobody types on
+  export STUB_ISSUES="7" STUB_WORKER_COMMIT=1 STUB_CLAUDE_READ_STDIN=1
+  bash "$CLONE/loop/run-issues.sh" < "$T/fifo2" > "$T/out2.txt" 2>&1 3>&- 9>&- &
+  pid=$!
+  for _ in $(seq 1 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 "$pid" 2>/dev/null
+    exec 9>&-
+    echo "the runner hung: a child read the runner's stdin"
+    false
+  fi
+  rc=0
+  wait "$pid" || rc=$?
+  exec 9>&-
+  [ "$rc" -eq 0 ]
+  [ "$(worker_calls)" -eq 1 ]
+}
+
 @test "comment bodies carry the PR url, never the token" {
   export STUB_ISSUES="7" STUB_WORKER_COMMIT=1
   runner

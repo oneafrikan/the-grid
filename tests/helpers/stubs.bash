@@ -27,6 +27,7 @@
 #
 #   claude
 #     `claude --help` and `claude auth status` are NOT logged: they are not model calls.
+#     STUB_CLAUDE_READ_STDIN=1  `--help` and `auth status` first read stdin to EOF (models a child touching the terminal)
 #     STUB_CLAUDE_EXIT[_N]     exit status of a `-p` call (default 0)
 #     STUB_CLAUDE_JSON[_N]     stdout of a worker `-p ... --output-format json` call
 #                              (default a success result with total_cost_usd 0.01)
@@ -134,6 +135,7 @@ EOF
     printf '%s\n' '#!/bin/bash'
     printf '. %s\n' "$lib"
     cat <<'EOF'
+if [ "${STUB_CLAUDE_READ_STDIN:-0}" = 1 ] && { [ "${1:-}" = "--help" ] || [ "${1:-}" = "auth" ]; }; then cat > /dev/null; fi
 case "${1:-}" in
   --help|-h)
     if [ -n "${STUB_CLAUDE_HELP:-}" ]; then printf '%s\n' "$STUB_CLAUDE_HELP"
