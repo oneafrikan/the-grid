@@ -108,11 +108,10 @@ Why so much isolation (loops design, Q1 and Q13 revised): the worker runs with `
 10. `[sudo]` Put the key and the ids on the box. The runner PARSES the env file (never sources it) and reads only `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `GH_APP_KEY_FILE` (optional, defaults to the path below), `LOOP_TRUSTED_ACTORS` and `LOOP_OPERATOR_HOME`. The env file and the key file must both be mode 600 or the runner refuses to start, and a `GH_TOKEN=` line in the env file is refused.
     ```bash
     # on your own machine
-    scp ~/Downloads/<app-slug>.<date>.private-key.pem <box>:/tmp/app.pem
+    scp ~/Downloads/<app-slug>.<date>.private-key.pem <box>:~/app.pem && ssh <box> 'chmod 600 ~/app.pem'   # never /tmp: world-readable dir
     # on the box
     sudo -u <loop-user> install -d -m 700 ~<loop-user>/.config/the-grid
-    sudo install -o <loop-user> -g <loop-user> -m 600 /tmp/app.pem ~<loop-user>/.config/the-grid/app.pem
-    rm /tmp/app.pem
+    sudo bash <setup-script> --key ~/app.pem --app-id <id> --installation-id <id>   # installs mode 600, verifies, shreds your copy
     sudo -iu <loop-user>
     umask 077
     mkdir -p ~/.config/the-grid
