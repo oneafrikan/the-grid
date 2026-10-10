@@ -74,6 +74,36 @@ loop_conf_value() {
   [ "$(cd "$T/repo3" && . loop/loop.conf && printf %s "$GH_REPO")" = "acme/gadgets" ]
 }
 
+@test "an existing loop.conf is the source of truth: base/label/mode come from it, the tracked tree stays clean" {
+  printf '.claude/settings.json\n' > "$REPO/.gitignore"
+  inst --profile work --base-branch next --label agent-ready
+  [ "$status" -eq 0 ]
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -q -m "cut the loop"
+  # origin/HEAD now says main, which must NOT leak in
+  git -C "$REPO" update-ref refs/remotes/origin/main HEAD
+  git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  inst --profile work
+  [ "$status" -eq 0 ]
+  contains "$output" "base branch: next (from loop/loop.conf)"
+  prompt="$(cat "$REPO/loop/loop-prompt.template.md")"
+  contains "$prompt" "--base next"
+  contains "$prompt" "Never push to next"
+  contains "$prompt" "--label agent-ready"
+  lacks "$prompt" "Never push to main"
+  [ -z "$(git -C "$REPO" status --porcelain)" ]
+  [ "$(loop_conf_value BASE_BRANCH)" = "next" ]
+}
+
+@test "an explicit --base-branch still wins over an existing loop.conf, with a note" {
+  inst --profile work --base-branch next
+  inst --profile work --base-branch develop
+  [ "$status" -eq 0 ]
+  contains "$output" "base branch: develop"
+  contains "$output" "loop/loop.conf stays as it is"
+  [ "$(loop_conf_value BASE_BRANCH)" = "next" ]
+}
+
 @test "without --base-branch the base is origin/HEAD's branch" {
   git -C "$REPO" update-ref refs/remotes/origin/develop HEAD
   git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
