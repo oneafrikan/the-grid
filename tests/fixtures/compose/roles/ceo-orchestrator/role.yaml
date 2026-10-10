@@ -1,0 +1,6 @@
+name: ceo-orchestrator
+title: Fixture ceo-orchestrator
+summary: Fixture role ceo-orchestrator.
+default_model: sonnet
+orchestrator: true
+model_rationale: fixture

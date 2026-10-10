@@ -1,0 +1,6 @@
+name: product-manager
+title: Fixture product-manager
+summary: Fixture role product-manager.
+default_model: sonnet
+orchestrator: false
+model_rationale: fixture
