@@ -56,3 +56,5 @@ convention this led to.
   hooks, release automations, and agent-team orchestrations follow.
 
 See each pattern's own `README.md` for instantiation steps and design rationale.
+
+Running a pattern unattended (dedicated OS user, GitHub App, trust gate)? See the [secure agent loop playbook](docs/secure-agent-loop.md).

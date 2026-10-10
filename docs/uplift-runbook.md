@@ -2,6 +2,8 @@
 
 How to run the-grid's unattended issue loop on your own Linux box, and the human steps the uplift changes leave to you. Replace every `<placeholder>` with your own value.
 
+For the generic, repo-agnostic version of the isolation and GitHub App setup (and the team/organisation case), see the [secure agent loop playbook](../automation-factory/docs/secure-agent-loop.md).
+
 This runbook describes the uplift changes in `openspec/changes/*/` (13 changes). Commands marked "needs loops Phase A" only exist once the `loops` change is merged to your working branch. Commands in Section 4 are copied from each change's `tasks.md`; if a `tasks.md` changes later, the `tasks.md` wins.
 
 ## Prerequisites
