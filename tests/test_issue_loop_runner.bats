@@ -648,7 +648,15 @@ expect_preflight_exit2() {
   # the stubs source their library by absolute path, so the copies keep working
   export STUB_ISSUES="7" STUB_WORKER_COMMIT=1
   unset GRID_CLAUDE
-  run env PATH=/usr/bin:/bin bash "$CLONE/loop/run-issues.sh"
+  # a real gh or timeout in /usr/bin (CI runners have both) would shadow the stubs the runner appends
+  # from .local/bin, so the system dirs are mirrored without gh, claude, timeout and gtimeout
+  mkdir -p "$T/sysbin"
+  for f in /usr/bin/* /bin/*; do
+    n="${f##*/}"
+    case "$n" in gh|claude|timeout|gtimeout) continue ;; esac
+    [ -e "$T/sysbin/$n" ] || ln -s "$f" "$T/sysbin/$n"
+  done
+  run env PATH="$T/sysbin" bash "$CLONE/loop/run-issues.sh"
   [ "$status" -eq 0 ]
   [ "$(worker_calls)" -eq 1 ]
 }

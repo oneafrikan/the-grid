@@ -414,7 +414,9 @@ stub_issue() {
   shift 3
   for l in "$@"; do labels="$labels,{\"name\":\"$l\"}"; done
   labels="${labels#,}"
-  jq -n --arg t "$title" --arg b "$body" --argjson l "[${labels}]" '{title:$t,body:$b,labels:$l}' > "$STUB_DIR/issue-$n.json"
+  # body via a file: a single --arg over 128 KiB hits the Linux per-argument limit (E2BIG)
+  printf '%s' "$body" > "$STUB_DIR/issue-$n.body"
+  jq -n --arg t "$title" --rawfile b "$STUB_DIR/issue-$n.body" --argjson l "[${labels}]" '{title:$t,body:$b,labels:$l}' > "$STUB_DIR/issue-$n.json"
 }
 
 clean_stubs() {
