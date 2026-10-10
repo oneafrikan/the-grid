@@ -2,7 +2,7 @@
 # gate.sh — the commit gate: everything that must be true before a commit lands.
 #
 # Checks (each runs even if an earlier one fails; one PASS/FAIL summary at the end):
-#   lint         shellcheck warnings and errors in scripts/ and .githooks/
+#   lint         shellcheck warnings and errors in scripts/, .githooks/ and automation-factory/patterns/
 #   catalog      SKILLS.md is current           (catalog.sh --check)
 #   compose      every role lints clean (compose.py --lint-roles) and composed
 #                output is current for every public project (compose.py --check; skipped with a notice if the venv is absent)
@@ -56,7 +56,8 @@ check() {
 
 run_shellcheck() {
   command -v shellcheck >/dev/null || { echo "    shellcheck not installed — skipped"; SKIPPED+=(shellcheck); return 0; }
-  shellcheck -S warning scripts/*.sh scripts/lib/*.sh .githooks/pre-commit
+  shellcheck -S warning scripts/*.sh scripts/lib/*.sh .githooks/pre-commit \
+    automation-factory/patterns/*/*.sh automation-factory/patterns/*/hooks/*.sh
 }
 
 run_compose_check() {
