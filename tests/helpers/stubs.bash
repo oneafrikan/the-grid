@@ -8,7 +8,7 @@
 #   stub_issue <N> <title> <body> [label...]   # fixture for `gh issue view N`
 #
 # make_stubs creates a temp stub dir, PREPENDS it to PATH and writes fake
-#   gh  claude  curl  loginctl  timeout
+#   gh  claude  curl  loginctl  timeout  systemctl  launchctl  crontab
 # plus a GitHub-App token minter exported as $GRID_APP_TOKEN_BIN.
 # Every stub appends one line of its argv to $STUB_LOG (empty args are shown as
 # "", newlines as spaces, so one call is one line and `--tools ""` greps
@@ -77,6 +77,9 @@
 #
 #   timeout
 #     Drops `-k N` / `--kill-after N` and the SECS argument, then execs the rest.
+#
+#   systemctl, launchctl, crontab
+#     Log their argv and do nothing: a test asserts they were never called.
 #
 #   curl  (answers the GitHub App token endpoints; honours -o FILE and -w '%{http_code}')
 #     STUB_INSTALLATIONS_JSON   body of GET  */app/installations   (default one element, id 4242)
@@ -336,6 +339,18 @@ exec "$@"
 EOF
   } > "$STUB_DIR/timeout"
   chmod +x "$STUB_DIR/timeout"
+
+  # ---- scheduler commands: log-only, so a test can prove nothing activates a scheduler ----
+  local sched
+  for sched in systemctl launchctl crontab; do
+    {
+      printf '%s\n' '#!/bin/bash'
+      printf '. %s\n' "$lib"
+      printf 'stub_log %s "$@"\n' "$sched"
+      printf 'exit 0\n'
+    } > "$STUB_DIR/$sched"
+    chmod +x "$STUB_DIR/$sched"
+  done
 
   # ---- curl (GitHub App token endpoints only) ----
   {
