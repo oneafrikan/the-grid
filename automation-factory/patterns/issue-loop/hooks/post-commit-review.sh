@@ -91,10 +91,11 @@ LOG_FILE="$HOME/.claude/hooks.log"
 
 # --- 4. Run the review in the background ---
 # ( ... ) & detaches immediately so Claude Code keeps going. Its stdio is closed
-# so the caller never waits on an inherited pipe.
+# so the caller never waits on an inherited pipe. (`--tools` takes a variable
+# number of values, so another flag follows it: the prompt must not be read as a tool name.)
 (
   REVIEW="$(GRID_REVIEW_RUNNING=1 "$CLAUDE_BIN" -p \
-    --model "$MODEL" --max-budget-usd "$BUDGET" --tools "" \
+    --model "$MODEL" --max-budget-usd "$BUDGET" --tools "" --output-format text \
     "You are a code reviewer for ${PROJECT_CONTEXT}.
 Review this commit and give 3-5 bullet points of actionable feedback.
 Focus on: ${REVIEW_FOCUS}. Be concise.

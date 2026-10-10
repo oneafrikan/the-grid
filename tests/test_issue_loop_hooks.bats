@@ -39,7 +39,8 @@ setup() {
 
 teardown() {
   clean_stubs
-  rm -rf "$T"
+  # a backgrounded review may still be writing its log; retry once rather than flake
+  rm -rf "$T" 2>/dev/null || { sleep 1; rm -rf "$T"; }
 }
 
 # ---------------------------------------------------------------- guard ---
@@ -227,7 +228,7 @@ settle() { sleep 0.5; }
   run_review 'echo "git committed"'
   run_review 'git status'
   settle
-  ! grep -q '^claude ' "$STUB_LOG"
+  refute grep -q '^claude ' "$STUB_LOG"
 }
 
 @test "review: a worktree commit is reviewed once, from the payload cwd" {
@@ -249,7 +250,7 @@ settle() { sleep 0.5; }
   export STUB_PR_NUMBER=5
   run_review 'git commit -m "fix thing #9"'
   wait_for_log "gh pr comment 5"
-  ! grep -q 'gh issue comment' "$STUB_LOG"
+  refute grep -q 'gh issue comment' "$STUB_LOG"
 }
 
 @test "review: falls back to the issue named in the subject, else logs only" {
@@ -261,8 +262,8 @@ settle() { sleep 0.5; }
   run_review 'git commit -m "no reference here"'
   wait_for_log "claude "
   settle
-  ! grep -q 'gh issue comment' "$STUB_LOG"
-  ! grep -q 'gh pr comment' "$STUB_LOG"
+  refute grep -q 'gh issue comment' "$STUB_LOG"
+  refute grep -q 'gh pr comment' "$STUB_LOG"
   grep -q 'no reference here' "$HOME/.claude/hooks.log"
 }
 
@@ -271,9 +272,9 @@ settle() { sleep 0.5; }
   run_review 'git commit -m "x #3"'
   wait_for_log "claude "
   line="$(grep '^claude ' "$STUB_LOG")"
-  [[ "$line" == *"--model sonnet"* ]]
-  [[ "$line" == *"--max-budget-usd 1"* ]]
-  [[ "$line" == *'--tools ""'* ]]
+  contains "$line" "--model sonnet"
+  contains "$line" "--max-budget-usd 1"
+  contains "$line" '--tools ""'
 }
 
 @test "review: model and budget are overridable by env" {
@@ -282,8 +283,8 @@ settle() { sleep 0.5; }
   run_review 'git commit -m "x #3"'
   wait_for_log "claude "
   line="$(grep '^claude ' "$STUB_LOG")"
-  [[ "$line" == *"--model haiku"* ]]
-  [[ "$line" == *"--max-budget-usd 0.25"* ]]
+  contains "$line" "--model haiku"
+  contains "$line" "--max-budget-usd 0.25"
 }
 
 @test "review: stands down for a headless worker and for its own reviewer" {
@@ -293,7 +294,7 @@ settle() { sleep 0.5; }
   GRID_REVIEW_RUNNING=1 run_review 'git commit -m "x #3"'
   [ "$status" -eq 0 ]
   settle
-  ! grep -q '^claude ' "$STUB_LOG"
+  refute grep -q '^claude ' "$STUB_LOG"
 }
 
 @test "review: the reviewer itself runs with GRID_REVIEW_RUNNING=1 (recursion guard)" {
@@ -368,7 +369,7 @@ EOF
   jq -e '[.hooks.PostToolUse[].hooks[].command] | index("/usr/local/bin/other-tool-hook.sh") != null' "$s"
   jq -e '[.hooks.PreToolUse[].hooks[].command] | index("/usr/local/bin/write-guard.sh") != null' "$s"
   [ "$(jq '[.hooks.PreToolUse[].hooks[].command | select(endswith("/guard-main-push.sh"))] | length' "$s")" -eq 1 ]
-  ! grep -q '/old/place' "$s"
+  refute grep -q '/old/place' "$s"
 }
 
 @test "setup: a guard that never blocks makes setup exit non-zero" {
@@ -376,7 +377,7 @@ EOF
   printf '#!/bin/bash\nexit 0\n' > "$T/bad/loop/hooks/guard-main-push.sh"
   run bash "$T/bad/loop/setup.sh"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"did NOT block"* ]]
+  contains "$output" "did NOT block"
 }
 
 @test "setup: a missing guard file removes its stale entry instead of wiring it" {
@@ -410,7 +411,7 @@ EOF
   [ "$output" = "$T/wts/issue-7" ]
   [ "$(git -C "$T/wts/issue-7" branch --show-current)" = "issue-7" ]
   # no upstream: a bare `git push` must not be able to aim at the base branch
-  ! git -C "$T/wts/issue-7" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null
+  refute git -C "$T/wts/issue-7" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null
 }
 
 # ------------------------------------------------------ prompt template ---
@@ -433,10 +434,10 @@ select_mode() {
 
 @test "template: pr mode never pushes the base branch or closes the issue, opens a PR to it" {
   out="$(select_mode pr)"
-  ! printf '%s\n' "$out" | grep -q 'git push origin {{BASE_BRANCH}}'
-  ! printf '%s\n' "$out" | grep -q 'git push origin main'
-  ! printf '%s\n' "$out" | grep -q 'gh issue close'
-  ! printf '%s\n' "$out" | grep -q '<!-- '
+  refute grep -q 'git push origin {{BASE_BRANCH}}' <<< "$out"
+  refute grep -q 'git push origin main' <<< "$out"
+  refute grep -q 'gh issue close' <<< "$out"
+  refute grep -q '<!-- ' <<< "$out"
   printf '%s\n' "$out" | grep -q 'gh pr create .*--base {{BASE_BRANCH}}'
   printf '%s\n' "$out" | grep -q 'Closes #<N>'
   printf '%s\n' "$out" | grep -q 'ready-for-human'
@@ -447,12 +448,12 @@ select_mode() {
   out="$(select_mode direct)"
   printf '%s\n' "$out" | grep -q 'git push origin {{BASE_BRANCH}}'
   printf '%s\n' "$out" | grep -q 'gh issue close'
-  ! printf '%s\n' "$out" | grep -q 'gh pr create'
-  ! printf '%s\n' "$out" | grep -q '<!-- '
+  refute grep -q 'gh pr create' <<< "$out"
+  refute grep -q '<!-- ' <<< "$out"
 }
 
 @test "template: no hard-coded main remains" {
-  ! grep -nE 'origin/main|--base main|push origin main' "$PAT_DIR/loop-prompt.template.md"
+  refute grep -nE 'origin/main|--base main|push origin main' "$PAT_DIR/loop-prompt.template.md"
 }
 
 @test "template: the verify-failure revert removes tracked changes AND untracked files" {
