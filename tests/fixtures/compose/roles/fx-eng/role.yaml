@@ -1,0 +1,6 @@
+name: fx-eng
+title: Fixture fx-eng
+summary: Fixture role fx-eng.
+default_model: sonnet
+orchestrator: false
+model_rationale: fixture

@@ -304,3 +304,15 @@ renders **lean** ones by default — a deterministic selection from the same rol
 writes them into a chosen project's `.claude/`. See the "Drift checks, the commit gate, and
 per-project agents" section of the repo `CLAUDE.md`. `compose.py --lint-roles` and
 `--check` keep roles and composed output honest.
+
+## Golden outputs and the neutral identity
+
+`scripts/compose-goldens.sh` composes a small fixture project (`tests/fixtures/compose/`) under
+every target and byte-compares it with the committed trees in `tests/fixtures/compose/golden/`.
+Any change to `compose.py`, `_core/`, a template, `models.yaml` or `openclaw/roster.json` changes
+that output, so run `bash scripts/compose-goldens.sh --update` in the same PR and review the diff
+(`--check` is the default; it is skipped, loudly, when the venv is absent). A new compose target is
+appended to `TARGETS` in the script. The fixture is composed with `GRID_USER_CONFIG` pointing at
+`agent-factory/user.public.yaml`, the tracked neutral identity (`machine: "your-machine"`), so no
+personal value or hostname reaches a tracked file. `GRID_USER_CONFIG` replaces `user.yaml` for any
+compose run; a set-but-missing path exits 1 instead of falling back to the hostname.
