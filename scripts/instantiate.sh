@@ -144,6 +144,12 @@ done
 [[ "$SCHEDULE_HOUR" =~ ^[0-9]+$ && "$((10#$SCHEDULE_HOUR))" -le 23 ]] || { echo "Error: --schedule-hour must be 0-23"; exit 1; }
 SCHEDULE_HOUR=$((10#$SCHEDULE_HOUR))
 [[ -z "$ROLE_LABELS" || "$ROLE_LABELS" =~ ^[A-Za-z0-9._,-]+$ ]] || { echo "Error: --role-labels is a comma-separated list of agent names"; exit 1; }
+# one-line values only: they are written into single-line assignments
+for v in GH_REPO PROJECT_CONTEXT VERIFY_CMD ISSUE_LABEL REVIEW_FOCUS BASE_BRANCH SETUP_CMD WORKER_MODEL REVIEW_MODEL; do
+  case "${!v}" in
+    *$'\n'*) echo "Error: the value for $v must be a single line"; exit 1 ;;
+  esac
+done
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -203,6 +209,26 @@ fill() {
       print line }'
 }
 
+# shq <text> — text as ONE shell word for a ${KEY:-word} default: empty stays empty, a value made only
+# of plainly safe characters stays bare (MODE=${MODE:-pr}), anything else is single-quoted
+# ('  becomes  '\''). Uses only ${s%%pat} and ${s#pat}, never ${s//a/b}, whose replacement
+# rules differ between bash versions.
+shq() {
+  local s="$1" out=""
+  if [[ -z "$s" ]]; then return 0; fi
+  case "$s" in
+    *[!A-Za-z0-9_./:@+=,%-]*) ;;
+    *) printf '%s' "$s"; return 0 ;;
+  esac
+  while :; do
+    case "$s" in
+      *\'*) out="$out${s%%\'*}'\\''"; s="${s#*\'}" ;;
+      *)    out="$out$s"; break ;;
+    esac
+  done
+  printf "'%s'" "$out"
+}
+
 # select_mode <mode> — stdin -> stdout: keep the <!-- MODE:x --> blocks for <mode>, drop the others, no markers left.
 select_mode() {
   awk -v keep="$1" '
@@ -236,8 +262,9 @@ detect_repo() {
     local remote_url
     remote_url=$(git -C "$TARGET_DIR" remote get-url origin 2>/dev/null || true)
     if [[ -n "$remote_url" ]]; then
+      # URL form (https://host/o/r, ssh://git@host/o/r) or scp form (git@host-alias:o/r)
       GH_REPO=$(echo "$remote_url" \
-        | sed -E 's#(git@github\.com:|https://github\.com/)##; s#\.git$##')
+        | sed -E -e 's#^[A-Za-z+]+://([^@/]+@)?[^/]+/##' -e 's#^[^@/:]+@[^:/]+:##' -e 's#\.git$##')
     fi
     [[ -z "$GH_REPO" ]] && {
       echo "Error: could not detect GitHub repo from git remote. Pass --repo <owner/name>"
@@ -357,16 +384,17 @@ instantiate_issue_loop() {
   copy_if_changed "$pattern_dir/.gitignore" "$loop_dir/.gitignore"
   chmod +x "$loop_dir/setup.sh"
 
-  # loop.conf: rendered ONCE. %q-quoting keeps spaces and && in values intact when it is sourced.
+  # loop.conf: rendered ONCE. Single-quoting (shq) keeps spaces, && and non-ASCII text in values
+  # intact when it is sourced, and stays readable (printf %q mangles UTF-8 on bash 3.2).
   local q_names="GH_REPO BASE_BRANCH ISSUE_LABEL MODE VERIFY_CMD SETUP_CMD PROJECT_CONTEXT REVIEW_FOCUS MAX_ISSUES MAX_TURNS ISSUE_TIMEOUT WORKER_MODEL REVIEW_MODEL"
   local conf_text
   conf_text=$(PH_NAMES="$q_names" \
-    PH_GH_REPO="$(printf '%q' "$GH_REPO")" PH_BASE_BRANCH="$(printf '%q' "$BASE_BRANCH")" \
-    PH_ISSUE_LABEL="$(printf '%q' "$ISSUE_LABEL")" PH_MODE="$(printf '%q' "$MODE")" \
-    PH_VERIFY_CMD="$(printf '%q' "$VERIFY_CMD")" PH_SETUP_CMD="$(printf '%q' "$SETUP_CMD")" \
-    PH_PROJECT_CONTEXT="$(printf '%q' "$PROJECT_CONTEXT")" PH_REVIEW_FOCUS="$(printf '%q' "$REVIEW_FOCUS")" \
+    PH_GH_REPO="$(shq "$GH_REPO")" PH_BASE_BRANCH="$(shq "$BASE_BRANCH")" \
+    PH_ISSUE_LABEL="$(shq "$ISSUE_LABEL")" PH_MODE="$(shq "$MODE")" \
+    PH_VERIFY_CMD="$(shq "$VERIFY_CMD")" PH_SETUP_CMD="$(shq "$SETUP_CMD")" \
+    PH_PROJECT_CONTEXT="$(shq "$PROJECT_CONTEXT")" PH_REVIEW_FOCUS="$(shq "$REVIEW_FOCUS")" \
     PH_MAX_ISSUES="$MAX_ISSUES" PH_MAX_TURNS="$MAX_TURNS" PH_ISSUE_TIMEOUT="$ISSUE_TIMEOUT" \
-    PH_WORKER_MODEL="$(printf '%q' "$WORKER_MODEL")" PH_REVIEW_MODEL="$(printf '%q' "$REVIEW_MODEL")" \
+    PH_WORKER_MODEL="$(shq "$WORKER_MODEL")" PH_REVIEW_MODEL="$(shq "$REVIEW_MODEL")" \
     fill < "$pattern_dir/loop.conf.template")
   if [[ ! -e "$loop_dir/loop.conf" ]]; then
     write_if_changed "$loop_dir/loop.conf" "$conf_text"
