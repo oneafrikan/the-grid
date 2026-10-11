@@ -65,3 +65,13 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" bash scripts/gate.s
   [[ "$output" == *"gate: FAIL — bats"* ]] || false
   [[ "$output" == *"==> catalog"* ]] || false      # earlier/other checks still ran
 }
+
+@test "with no python3 and no scripts/budget.py the budget check is skipped LOUDLY, not failed" {
+  # The copied gate has no scripts/budget.py and the stub PATH has no python3.
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python3 or scripts/budget.py absent"* ]] || false
+  # the final summary line lists budget among the skipped checks
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"budget"* ]] || false
+}

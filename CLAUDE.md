@@ -55,6 +55,7 @@ submodules into two tiers:
   not tracked** (#24/#39) — personal and not useful to a fork. On machines that want
   it, it's a symlink into a separate private repo; nothing in the-grid requires it
   to exist.
+- `scripts/budget.py` + `docs/budget-target.json` — measures the skill/role description listing (Claude Code shares one small description budget across all skills and drops the overflow silently) and gates it: `--check` runs in `gate.sh` against a committed ratchet (owned skills + roles always; the baseline scope only on a machine with `baseline-submodules.txt` and initialised submodules, else exit 3 = skipped). `--report` shows the numbers. Lowering a number is normal (`--update-target`); raising one needs `--allow-raise` and review.
 - `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
   repos as counts, reference (no-skill) repos in a footer. Deterministic output.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.

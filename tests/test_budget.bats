@@ -1,0 +1,265 @@
+#!/usr/bin/env bats
+# Tests for scripts/budget.py (listing-budget measurement + gate check) and
+# scripts/lib/baseline_wired.py. Every test builds a MOCK grid in a temp dir and
+# points GRID_DIR at it, so nothing reads the real repo, ~/.claude or the real home.
+
+load helpers/setup
+
+BUDGET="$REPO_ROOT/scripts/budget.py"
+
+setup() {
+  common_setup
+  # The baseline scope runs the mock grid's OWN scripts/wire.sh, so give the mock
+  # a copy of the real one (plus its sourced lib dir and the runtimes map).
+  mkdir -p "$MOCK_GRID/scripts" "$MOCK_GRID/docs"
+  cp "$REPO_ROOT/scripts/wire.sh" "$MOCK_GRID/scripts/wire.sh"
+  cp -R "$REPO_ROOT/scripts/lib" "$MOCK_GRID/scripts/lib"
+  # A developer's own GRID_BASELINE must not leak into the tests.
+  unset GRID_BASELINE GRID_HOST
+}
+
+teardown() {
+  common_teardown
+}
+
+# --- helpers ------------------------------------------------------------------
+
+# budget <args...> — run budget.py against the mock grid ($status / $output set).
+budget() { GRID_DIR="$MOCK_GRID" run python3 "$BUDGET" "$@"; }
+
+# jget <json> <dotted.path> — print one value out of a JSON document.
+jget() {
+  python3 -c 'import functools, json, sys
+d = json.loads(sys.argv[1])
+print(functools.reduce(lambda a, k: a[int(k)] if isinstance(a, list) else a[k], sys.argv[2].split("."), d))' "$1" "$2"
+}
+
+# write_target <skills> <orch> <agents> <baseline> <per_entry> <body_bytes>
+write_target() {
+  printf '{"schema":1,"truncate_at":1536,"per_entry_max_chars":%s,"owned":{"skills_max_chars":%s,"orchestrator_roles_max_chars":%s,"agent_roles_max_chars":%s,"skill_body_max_bytes":%s},"baseline":{"skills_max_chars":%s}}\n' \
+    "$5" "$1" "$2" "$3" "$6" "$4" > "$MOCK_GRID/docs/budget-target.json"
+}
+
+# skill_raw <name> <frontmatter lines...> — an owned skill with hand-written frontmatter.
+skill_raw() {
+  local name="$1"; shift
+  mkdir -p "$MOCK_GRID/skills/$name"
+  { echo "---"; printf '%s\n' "$@"; echo "---"; echo "body"; } > "$MOCK_GRID/skills/$name/SKILL.md"
+}
+
+# --- (a) totals match hand-counted entries ------------------------------------
+
+@test "totals match hand-counted entries: folded, when_to_use, disabled, 1536 cut" {
+  long="$(head -c 2000 /dev/zero | tr '\0' x)"
+  skill_raw alpha  "name: alpha"  "description: Does a thing"                 # 5+12+4  = 21
+  skill_raw folded "name: folded" "description: >" "  line one" "  line two"  # 6+17+4  = 27
+  skill_raw wtu    "name: wtu"    "description: abc" "when_to_use: def"        # 3+7+4   = 14
+  skill_raw off    "name: off"    "description: never listed" "disable-model-invocation: true"  # 3+0+4 = 7
+  skill_raw long   "name: long"   "description: $long"                         # 4+1536+4 = 1544
+  budget --json
+  [ "$status" -eq 0 ]
+  [ "$(jget "$output" owned.skills.count)" = "5" ]
+  [ "$(jget "$output" owned.skills.chars)" = "1613" ]
+}
+
+@test "quoted scalars: '' and \\\" escapes are decoded before counting" {
+  skill_raw sq "name: sq" "description: 'it''s ok'"          # it's ok = 7 -> 2+7+4 = 13
+  skill_raw dq "name: dq" 'description: "say \"hi\""'        # say "hi" = 8 -> 2+8+4 = 14
+  budget --json
+  [ "$(jget "$output" owned.skills.chars)" = "27" ]
+}
+
+@test "roles: description if present, else '<title>. <summary>'; orchestrators counted apart" {
+  mkdir -p "$MOCK_GRID/agent-factory/roles"/{legacy,explicit,boss}
+  # legacy: title carries a trailing YAML comment, summary is a folded >- block
+  printf 'name: legacy\ntitle: Legacy Role   # nameplate\nsummary: >-\n  Does old\n  things.\norchestrator: false\n' \
+    > "$MOCK_GRID/agent-factory/roles/legacy/role.yaml"            # "Legacy Role. Does old things." = 29 -> 6+29+4 = 39
+  printf 'name: explicit\ntitle: T\nsummary: ignored\ndescription: Short one.\n' \
+    > "$MOCK_GRID/agent-factory/roles/explicit/role.yaml"          # 8+10+4 = 22
+  printf 'name: boss\ntitle: Boss\nsummary: Runs it.\norchestrator: true\n' \
+    > "$MOCK_GRID/agent-factory/roles/boss/role.yaml"              # "Boss. Runs it." = 14 -> 4+14+4 = 22
+  budget --json
+  [ "$(jget "$output" owned.agent_roles.chars)" = "61" ]
+  [ "$(jget "$output" owned.agent_roles.count)" = "2" ]
+  [ "$(jget "$output" owned.orchestrator_roles.chars)" = "22" ]
+}
+
+# --- (b) --check against the target -------------------------------------------
+
+@test "--check passes at the target and fails when a description grows by 1 char" {
+  skill_raw alpha "name: alpha" "description: Does a thing"       # 21
+  write_target 21 0 0 0 5000 100000
+  budget --check
+  # 3 = owned OK, baseline scope skipped (no baseline file) - never 1
+  [ "$status" -eq 3 ]
+  skill_raw alpha "name: alpha" "description: Does a thingX"
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"owned.skills_max_chars: 22 chars > target 21"* ]] || false
+}
+
+@test "--check fails loudly when the target file is missing" {
+  skill_raw alpha "name: alpha" "description: Does a thing"
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docs/budget-target.json: missing"* ]] || false
+}
+
+# --- (c) per-entry limits name the file ---------------------------------------
+
+@test "an owned entry over per_entry_max_chars fails --check and names the file" {
+  skill_raw wordy "name: wordy" "description: twenty five chars exactly"  # 25 chars
+  write_target 1000 0 0 0 20 100000
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/wordy/SKILL.md: description is 25 chars (max 20)"* ]] || false
+}
+
+@test "a literal | description over several lines fails --check; a folded > one passes" {
+  skill_raw lit  "name: lit"  "description: |" "  line one" "  line two"
+  skill_raw fold "name: fold" "description: >" "  line one" "  line two"
+  write_target 1000 0 0 0 5000 100000
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/lit/SKILL.md: description spans more than one line"* ]] || false
+  [[ "$output" != *"skills/fold/SKILL.md"* ]] || false
+}
+
+@test "a disable-model-invocation skill is exempt from the per-entry limit" {
+  skill_raw off "name: off" "description: far too long for the limit" "disable-model-invocation: true"
+  write_target 1000 0 0 0 5 100000
+  budget --check
+  [ "$status" -eq 3 ]
+}
+
+@test "an owned SKILL.md over skill_body_max_bytes fails --check and names the file" {
+  skill_raw big "name: big" "description: x"
+  head -c 300 /dev/zero | tr '\0' y >> "$MOCK_GRID/skills/big/SKILL.md"
+  write_target 1000 0 0 0 5000 200
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/big/SKILL.md: SKILL.md is "* ]] || false
+}
+
+# --- (d) --update-target ratchet ----------------------------------------------
+
+@test "--update-target lowers a number, and refuses to raise one without --allow-raise" {
+  skill_raw alpha "name: alpha" "description: Does a thing"       # measures 21
+  write_target 100 0 0 0 5000 100000
+  budget --update-target
+  [ "$status" -eq 0 ]
+  [ "$(jget "$(cat "$MOCK_GRID/docs/budget-target.json")" owned.skills_max_chars)" = "21" ]
+
+  write_target 5 0 0 0 5000 100000
+  budget --update-target
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--allow-raise"* ]] || false
+  # all-or-nothing: the refused run left the file untouched
+  [ "$(jget "$(cat "$MOCK_GRID/docs/budget-target.json")" owned.skills_max_chars)" = "5" ]
+
+  budget --update-target --allow-raise
+  [ "$status" -eq 0 ]
+  [ "$(jget "$(cat "$MOCK_GRID/docs/budget-target.json")" owned.skills_max_chars)" = "21" ]
+}
+
+# --- (e)(f)(i)(j) baseline scope ------------------------------------------------
+
+@test "baseline scope is skipped (exit 3) without a baseline file" {
+  skill_raw alpha "name: alpha" "description: Does a thing"
+  write_target 21 0 0 0 5000 100000
+  budget --check
+  [ "$status" -eq 3 ]
+  budget --json
+  [ "$(jget "$output" baseline.skipped)" = "True" ]
+}
+
+@test "baseline scope is measured when a baseline file and a repo skill exist" {
+  make_skill "$MOCK_GRID/repos/x/skills/y" "y"                     # "Test skill y": 1+12+4 = 17
+  printf 'x\n' > "$OTHER_DIR/baseline.txt"
+  export GRID_BASELINE="$OTHER_DIR/baseline.txt"
+  budget --json
+  [ "$status" -eq 0 ]
+  [ "$(jget "$output" baseline.skills.count)" = "1" ]
+  [ "$(jget "$output" baseline.skills.chars)" = "17" ]
+  # and baseline_wired() itself reports the skill
+  run python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1] + "/scripts/lib")
+from baseline_wired import baseline_wired
+r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r])' "$REPO_ROOT" "$MOCK_GRID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"('y', 'x')"* ]] || false
+}
+
+@test "baseline is None when a submodule is uninitialised" {
+  git -C "$MOCK_GRID" init -q
+  printf 'x\n' > "$OTHER_DIR/baseline.txt"; export GRID_BASELINE="$OTHER_DIR/baseline.txt"
+  # a gitlink with no checkout shows as '-<sha> path' in `git submodule status`
+  git -C "$MOCK_GRID" update-index --add --cacheinfo 160000,1234567890123456789012345678901234567890,repos/x
+  git -C "$MOCK_GRID" config -f .gitmodules submodule.repos/x.path repos/x
+  git -C "$MOCK_GRID" config -f .gitmodules submodule.repos/x.url ./nowhere
+  budget --json
+  [ "$(jget "$output" baseline.skipped)" = "True" ]
+}
+
+@test "a per-machine overlay does not change the baseline measurement" {
+  make_skill "$MOCK_GRID/repos/x/skills/y" "y"
+  make_skill "$MOCK_GRID/repos/x/skills/z" "z"
+  printf 'x\n' > "$OTHER_DIR/baseline.txt"; export GRID_BASELINE="$OTHER_DIR/baseline.txt"
+  export GRID_HOST=testhost
+  budget --json
+  before="$output"
+  [ "$(jget "$before" baseline.skills.count)" = "2" ]
+  mkdir -p "$MOCK_GRID/machines"; printf -- '-x/y\n' > "$MOCK_GRID/machines/testhost.txt"
+  budget --json
+  [ "$output" = "$before" ]
+}
+
+@test "a baseline measurement never touches the real home (GRID_DRY_HOME honoured)" {
+  H="$(mktemp -d)"
+  mkdir -p "$H/.claude/skills"; echo keep > "$H/.claude/skills/sentinel"
+  make_skill "$MOCK_GRID/repos/x/skills/y" "y"
+  printf 'x\n' > "$OTHER_DIR/baseline.txt"; export GRID_BASELINE="$OTHER_DIR/baseline.txt"
+  snap() { ( cd "$H" && find . | LC_ALL=C sort && find . -type f -exec cat {} + ); }
+  before="$(snap)"
+  # Even an inherited SKILLS_DIR/AGENTS_DIR pointing into the home must be ignored.
+  HOME="$H" SKILLS_DIR="$H/.claude/skills" AGENTS_DIR="$H/.claude/agents" budget --json
+  [ "$status" -eq 0 ]
+  [ "$(jget "$output" baseline.skills.count)" = "1" ]
+  [ "$(snap)" = "$before" ]
+  rm -rf "$H"
+}
+
+@test "the gstack runtime-root link counts as exactly one entry named gstack" {
+  mkdir -p "$MOCK_GRID/repos/gstack"
+  printf -- '---\nname: gstack\ndescription: Headless browser and QA.\n---\n' > "$MOCK_GRID/repos/gstack/SKILL.md"
+  printf 'gstack\n' > "$OTHER_DIR/baseline.txt"; export GRID_BASELINE="$OTHER_DIR/baseline.txt"
+  budget --json
+  [ "$status" -eq 0 ]
+  [ "$(jget "$output" baseline.skills.count)" = "1" ]
+  [ "$(jget "$output" entries.baseline_skills.0.name)" = "gstack" ]
+  [ "$(jget "$output" entries.baseline_skills.0.path)" = "repos/gstack/SKILL.md" ]
+}
+
+# --- (g)(h) ---------------------------------------------------------------------
+
+@test "a role under roles/_retired is not counted" {
+  mkdir -p "$MOCK_GRID/agent-factory/roles"/{live,_retired/old}
+  printf 'name: live\ntitle: Live\nsummary: Counts.\n' > "$MOCK_GRID/agent-factory/roles/live/role.yaml"
+  printf 'name: old\ntitle: Old\nsummary: Does not count.\n' > "$MOCK_GRID/agent-factory/roles/_retired/old/role.yaml"
+  budget --json
+  [ "$(jget "$output" owned.agent_roles.count)" = "1" ]
+}
+
+@test "running twice gives identical --json output" {
+  skill_raw alpha "name: alpha" "description: Does a thing"
+  make_skill "$MOCK_GRID/repos/x/skills/y" "y"
+  printf 'x\n' > "$OTHER_DIR/baseline.txt"; export GRID_BASELINE="$OTHER_DIR/baseline.txt"
+  budget --json; first="$output"
+  budget --json; [ "$output" = "$first" ]
+}
+
+# --- the real repo --------------------------------------------------------------
+
+@test "the real repo passes its own committed target (exit 0, or 3 when baseline is skipped)" {
+  run env -u GRID_DIR python3 "$BUDGET" --check
+  [ "$status" -eq 0 ] || [ "$status" -eq 3 ]
+}
