@@ -2,13 +2,13 @@
 # the-grid — deploy_openclaw.sh
 #
 # Deploys a compose.py `write_openclaw()` rendered role (9-file identity set) into a
-# live OpenClaw workspace on this host (scout), and registers it with the running
+# live OpenClaw workspace on this host (a self-hosted OpenClaw gateway), and registers it with the running
 # `openclaw-gateway` container.
 #
-# This is a direct port of Guide's generate.sh regen logic + ADD-AN-AGENT.md's
-# register/bind/allowlist runbook (~/Guide/guide-core/agent-factory/), adapted for:
-#   - scout's Telegram-only messaging surface (no Slack)
-#   - the-grid's role source (compose.py output) instead of Guide's roles/*.env
+# This is a direct port of an earlier agent factory's regen logic and its
+# register/bind/allowlist runbook, adapted for:
+#   - a Telegram-only messaging surface (no Slack)
+#   - the-grid's role source (compose.py output) instead of per-role .env files
 #   - a single shared workspace dir per role, not channel/specialist/personal variants
 #
 # Session B3 scope: this script proves the mechanism against a THROWAWAY TEST AGENT.
@@ -29,7 +29,7 @@
 # No subcommand performs a `docker compose restart` — that is a separate, explicit
 # decision (see plan Session B3 step 5) and is deliberately NOT wired as a default
 # action of this script. If a restart turns out to be necessary, run it by hand
-# following jarvis-core/CLAUDE.md's safety dance; cron-snapshot/cron-verify above
+# following your gateway's own restart runbook; cron-snapshot/cron-verify above
 # are provided to support that by hand.
 
 set -euo pipefail
@@ -68,7 +68,7 @@ apply_permissions() {
 # Always overwrites IDENTITY/SOUL/AGENTS/USER.md (source of truth, regenerated every
 # run). Skips MEMORY/TOOLS/HEARTBEAT/EXPERTISE.md if they already exist AND are
 # non-empty (agent-writable / hand-authored — must not be clobbered on regen). This
-# is Guide's exact generate.sh condition (`-s "$output"` = file exists and is
+# is the earlier factory's exact regen condition (`-s "$output"` = file exists and is
 # non-empty), applied to all four preserve-on-regen files per the plan's B2 table.
 cmd_install() {
   local role="$1" src="$2"
@@ -162,12 +162,12 @@ cmd_bind() {
 
 # --- allowlist check (read-only) ---------------------------------------------------
 #
-# Reports the live equivalent of Guide's `channels.slack.channels` allowlist gate.
-# Does NOT modify openclaw.json. On scout, the gate is:
+# Reports the live equivalent of the Slack `channels.slack.channels` allowlist gate.
+# Does NOT modify openclaw.json. On a Telegram-only gateway, the gate is:
 #   channels.telegram.accounts.<accountId>.groupPolicy == "allowlist"
 #   channels.telegram.groups.<groupId>.allowFrom == [<telegram-user-id>, ...]
 # A group/DM not listed here is silently dropped by the gateway (same failure mode
-# Guide documents for Slack) — this must be added by hand before a real bind, and is
+# the Slack allowlist has) — this must be added by hand before a real bind, and is
 # explicitly out of scope to touch in this session.
 cmd_allowlist_check() {
   python3 - "$OPENCLAW_ROOT/openclaw.json" <<'PY'

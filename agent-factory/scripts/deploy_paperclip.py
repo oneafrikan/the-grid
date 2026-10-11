@@ -286,7 +286,7 @@ def agent_scratch_dir(project: str, role: str) -> Path:
 
 def desired_adapter_config(entry: dict, project: str) -> dict:
     """The adapterConfig this script wants an agent to have. Only claude_local
-    agents need a cwd (openclaw_gateway agents like Jarvis run elsewhere and
+    agents need a cwd (openclaw_gateway agents run elsewhere and
     are never in this manifest anyway)."""
     if entry.get("adapterType") == "claude_local":
         return {"cwd": str(agent_scratch_dir(project, entry["role"]))}
@@ -332,7 +332,7 @@ def build_hire_payload(entry: dict, reports_to_id: Optional[str], project: str) 
 def find_existing(existing_agents: list[dict], entry: dict) -> Optional[dict]:
     """Match an already-created Paperclip agent back to a manifest entry.
     Primary key: metadata.gridRole (set by this script on every hire it makes,
-    see build_hire_payload) — robust even if Gareth later renames the agent by
+    see build_hire_payload) — robust even if the operator later renames the agent by
     hand. Falls back to an exact `name` match for agents that predate this
     script (e.g. a hand-created agent that happens to share a name)."""
     for a in existing_agents:

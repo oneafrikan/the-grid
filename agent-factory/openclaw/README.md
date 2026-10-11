@@ -8,10 +8,9 @@ contain any renderer or deploy logic — that's session B2 (`compose.py
 write_openclaw()`) and session B3 (`deploy_openclaw.sh`) respectively. Nothing
 here has touched a live system: no docker exec, no writes to `~/.openclaw`.
 
-Shape ported from Gareth's proven Guide agent-factory
-(`~/Guide/guide-core/agent-factory/templates/specialist/` +
-`~/Guide/guide-core/agent-factory/roster.json`) — adapted, not copied
-verbatim. Guide targets Slack + personal Telegram instances for the safari
+Shape ported from an earlier, proven specialist-agent factory (a per-specialist
+template set plus a status-lifecycle `roster.json`) — adapted, not copied
+verbatim. That factory targeted Slack and Telegram instances for a single
 knowledge domain; this ports the same file shape and lifecycle discipline to
 grid's dev-team orchestrators.
 
@@ -45,15 +44,15 @@ So those 5 templates here are **thin passthroughs**: a single
 `write_openclaw()` calling `render_agent()` — no new merge logic, no
 duplicated content.
 
-`BOOT.md`, `TOOLS.md`, `HEARTBEAT.md` are genuinely new — scout's existing 3
-OpenClaw agents (`main`, `household`, `coach`) don't have a `BOOT.md` today;
-this plan introduces the boot/operate split Guide already uses (`BOOT.md` =
-one-time pre-load sequence, `AGENTS.md` = ongoing operating rules).
+`BOOT.md`, `TOOLS.md`, `HEARTBEAT.md` are genuinely new — a gateway's existing
+OpenClaw agents typically don't have a `BOOT.md`;
+this plan introduces the boot/operate split the earlier factory already used
+(`BOOT.md` = one-time pre-load sequence, `AGENTS.md` = ongoing operating rules).
 
 `EXPERTISE.md` is also new-in-shape but not new-in-content: per the plan doc,
 it holds the role's own `SKILL.md` **verbatim** (a direct port — the grid
-roles already have this content; Guide's EXPERTISE.md is hand-authored
-because Guide's specialists had no equivalent file to port).
+roles already have this content; the earlier factory's EXPERTISE.md was
+hand-authored because its specialists had no equivalent file to port).
 
 ## Token reference
 
@@ -81,18 +80,18 @@ Session B2 scheme, summarised here:
 | Files | Mode | Who writes | Preserved on regen? |
 |---|---|---|---|
 | `IDENTITY.md`, `SOUL.md` | 440 | Regenerated every run | No — always overwritten |
-| `AGENTS.md`, `USER.md`, `BOOT.md` | 644 | Gareth/engineer edits directly | No — always overwritten |
+| `AGENTS.md`, `USER.md`, `BOOT.md` | 644 | Operator/engineer edits directly | No — always overwritten |
 | `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md` | 664 | Agent-writable | **Yes** |
-| `EXPERTISE.md` | 640 | Gareth-maintained | **Yes** |
+| `EXPERTISE.md` | 640 | Operator-maintained | **Yes** |
 
 ## roster.json
 
 One entry per orchestrator role, `status: "planned"` (this session's baseline
-— nothing has been built or deployed yet). Shape ported from Guide's
-`roster.json`: a `_meta.statusValues` lifecycle
+— nothing has been built or deployed yet). Shape ported from the earlier
+factory's `roster.json`: a `_meta.statusValues` lifecycle
 (`planned → building → testing → production → paused`), a `securityDefaults`
-block, and a `permissionProfiles` map. Guide's version is tuned for its own
-personal/channel/main agent split; this is a first-pass adaptation for grid's
+block, and a `permissionProfiles` map. The earlier version is tuned for its own
+agent split; this is a first-pass adaptation for grid's
 orchestrator-only rollout — session C (security review, gates B4) is expected
 to scrutinize and likely tighten it before any real deploy.
 
