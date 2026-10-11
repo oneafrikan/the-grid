@@ -331,6 +331,8 @@ On each run, `scripts/wire.sh`:
 5. Leaves symlinks pointing elsewhere untouched.
 6. Regenerates `SKILLS.md` via `catalog.sh`.
 
+Opt-in coding-convention rule packs (`rules:<pack>` manifest entries) are documented in [docs/rules.md](docs/rules.md).
+
 Step 4 wires whatever `compose.py` last produced. Because that output is
 git-ignored, a freshly pulled machine must **recompose first** (see
 [BOOTSTRAP.md](BOOTSTRAP.md)) or `wire.sh` will wire a stale/empty agent set.
