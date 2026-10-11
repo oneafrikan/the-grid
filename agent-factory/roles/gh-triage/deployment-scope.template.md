@@ -13,9 +13,7 @@
   This template is the single canonical copy of the contract — there is no second
   hardcoded deployment. Copy it, fill the values, commit it to the owning repo.
 
-  Known deployments:
-    - Scout         → jarvis-core/config/gh-triage-scope.md   (org oneafrikan, Slack off)
-    - guide-server  → owned by guide-core                     (org gkwilderness, Slack on)
+  Each install keeps its own deployments table in its own infra repo.
 -->
 
 # gh-triage deployment scope — <machine>

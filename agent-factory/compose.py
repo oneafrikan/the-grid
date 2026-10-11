@@ -51,6 +51,7 @@ import re
 import shutil
 import socket
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 try:
@@ -711,6 +712,32 @@ def slugged(slug: str, role: str) -> str:
     return f"{slug}-{role}" if slug else role
 
 
+def render_subagent_body(agent: dict, slug: str, project_context: str = "") -> str:
+    """The full-profile body of a specialist subagent (everything after the frontmatter).
+
+    Shared by emit_cc_subagent and every harness agent emitter in AGENT_TARGETS, so all
+    harnesses carry one identical prompt. Extracted verbatim from emit_cc_subagent:
+    Claude output must stay byte-identical.
+    """
+    role = agent["role"]
+    title = role_meta(role).get("title") or role
+    skills = agent_skills(agent)
+    procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
+    bolt_ons = (
+        f"\n\nAdditional skills available to you: {', '.join(skills[1:])}."
+        if len(skills) > 1 else ""
+    )
+    context = f"## Project context\n\n{project_context.strip()}\n\n---\n\n" if project_context.strip() else ""
+    return (
+        f"You are the **{title}**, a specialist agent on a composed dev team. "
+        f"Adopt the identity, behaviour, and operating rules below as your own.\n\n"
+        f"{_flattened_identity(agent, slug=slug)}\n\n---\n\n"
+        f"{context}"
+        f"## Operating procedure\n\n"
+        f"{procedure}{bolt_ons}\n"
+    )
+
+
 def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
                      project_context: str = "", reference_path: str = "") -> tuple[str, str]:
     """A specialist role → one Claude Code subagent `.md` (spawnable).
@@ -723,7 +750,6 @@ def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
     role = agent["role"]
     slugged_name = slugged(slug, role)
     title = role_meta(role).get("title") or role
-    skills = agent_skills(agent)
 
     fields = {
         "name": slugged_name,
@@ -739,21 +765,7 @@ def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
         fields = {**{k: v for k, v in fields.items() if k != "model"}, "tools": ", ".join(tools), "model": fields["model"]}
     if profile == "lean":
         return f"{slugged_name}.md", _frontmatter(fields) + "\n" + render_lean_body(agent, slug, project_context, reference_path)
-    procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
-    bolt_ons = (
-        f"\n\nAdditional skills available to you: {', '.join(skills[1:])}."
-        if len(skills) > 1 else ""
-    )
-    context = f"## Project context\n\n{project_context.strip()}\n\n---\n\n" if project_context.strip() else ""
-    body = (
-        f"You are the **{title}**, a specialist agent on a composed dev team. "
-        f"Adopt the identity, behaviour, and operating rules below as your own.\n\n"
-        f"{_flattened_identity(agent, slug=slug)}\n\n---\n\n"
-        f"{context}"
-        f"## Operating procedure\n\n"
-        f"{procedure}{bolt_ons}\n"
-    )
-    return f"{slugged_name}.md", _frontmatter(fields) + "\n" + body
+    return f"{slugged_name}.md", _frontmatter(fields) + "\n" + render_subagent_body(agent, slug, project_context)
 
 
 def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
@@ -836,11 +848,46 @@ def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
     return cc_dir
 
 
+# ── generic harness agent writer ──────────────────────────────────────────────
+# Per-harness agent emitters (Codex, OpenCode, Gemini CLI, ...) register here as
+# {target: emit_fn}. emit_fn(agent, slug) -> (filename, contents) for ONE specialist,
+# built on render_subagent_body() so every harness carries the same prompt. Empty
+# until a harness group registers its emitter; --target choices are built from it.
+AGENT_TARGETS: dict[str, Callable[[dict, str], tuple[str, str]]] = {}
+
+
+def write_harness_agents(target: str, name: str, config: dict, out_dir: Path) -> Path:
+    """Emit the team's specialists for one harness under <out_dir>/<name>/_<target>/agents/.
+
+    Orchestrators are skipped (they are session skills, not spawnable agents).
+    Idempotent: the _<target> dir is wiped and rewritten each run, which is what
+    prevents orphaned files when a role is removed or renamed.
+    """
+    emit = AGENT_TARGETS[target]
+    slug = cc_slug(config, name)
+    target_dir = out_dir / name / f"_{target}"
+    if target_dir.is_symlink():
+        raise ValueError(f"refusing to write: {target_dir} is a symlink, not a dir")
+    # Run every emit BEFORE the wipe so an emitter error leaves the old tree untouched
+    # and writes nothing.
+    rendered = [
+        emit(agent, agent_slug(agent, slug))
+        for agent in config["agents"]
+        if not is_orchestrator(agent["role"])
+    ]
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    (target_dir / "agents").mkdir(parents=True)
+    for filename, contents in rendered:
+        (target_dir / "agents" / filename).write_text(contents, encoding="utf-8")
+    return target_dir
+
+
 # ── paperclip emitter ─────────────────────────────────────────────────────────
 # A third emit target: render a deploy-ready manifest for a live Paperclip
 # instance. Pure rendering only — no network calls, no talking to a Paperclip
 # API. A later deploy script (agent-factory/scripts/deploy_paperclip.py, see
-# docs/openclaw-paperclip-targets-plan.md Session A2) walks this manifest and
+# agent-factory/openclaw/README.md Session A2) walks this manifest and
 # does the actual POST/PATCH.
 #
 # The Paperclip roster is a curated subset of the team, fixed by the plan doc:
@@ -971,7 +1018,7 @@ def write_paperclip(name: str, config: dict, out_dir: Path) -> Path:
 # openclaw/README.md, Session B1) for the curated 5 grid orchestrator roles
 # named in openclaw/roster.json. Pure rendering only — no docker exec, no
 # writes under ~/.openclaw (that's agent-factory/scripts/deploy_openclaw.sh,
-# Session B3, per docs/openclaw-paperclip-targets-plan.md).
+# Session B3, per agent-factory/openclaw/README.md).
 #
 # Named "openclaw-native" (not "openclaw") because that name is already taken
 # by the legacy default target (write_project below) — the bare 5-file dump
@@ -1325,7 +1372,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=PROJECTS_DIR, help="output dir")
     parser.add_argument(
         "--target",
-        choices=["openclaw", "claude-code", "paperclip", "openclaw-native"],
+        choices=["openclaw", "claude-code", "paperclip", "openclaw-native", *sorted(AGENT_TARGETS)],
         default="openclaw",
         help="emit shape: openclaw = 5 files + agents.yaml (default, legacy bare dump); "
              "claude-code = CC skills (orchestrators) + subagents (specialists); "
@@ -1374,6 +1421,7 @@ def main() -> None:
         writers = {
             "claude-code": write_claude_code, "paperclip": write_paperclip,
             "openclaw-native": write_openclaw, "openclaw": write_project,
+            **{t: functools.partial(write_harness_agents, t) for t in AGENT_TARGETS},
         }
         with tempfile.TemporaryDirectory() as tmp:
             rendered = writers[args.target](name, config, Path(tmp))
@@ -1409,6 +1457,17 @@ def main() -> None:
             if missing:
                 print(f"[dry-run] not in this compose config, skipped: {', '.join(missing)}")
             return
+        if args.target in AGENT_TARGETS:
+            # Harness agent target: specialists only, one file each (orchestrators are skipped).
+            n = 0
+            for agent in agents:
+                if is_orchestrator(agent["role"]):
+                    continue
+                filename, _ = AGENT_TARGETS[args.target](agent, agent_slug(agent, cc_slug(config, name)))
+                print(f"  - {agent['role']:<20} -> _{args.target}/agents/{filename}")
+                n += 1
+            print(f"[dry-run] {n} specialists -> _{args.target}/agents/")
+            return
         for agent in agents:
             role = agent["role"]
             if args.target == "claude-code":
@@ -1432,6 +1491,12 @@ def main() -> None:
             slugged_name = slugged(agent_slug(agent, slug), role)
             shape = "skill" if is_orchestrator(role) else "subagent"
             print(f"  - {slugged_name} ({resolve_model(agent)}) -> CC {shape}")
+        return
+
+    if args.target in AGENT_TARGETS:
+        ha_dir = write_harness_agents(args.target, name, config, args.out)
+        n = len(list((ha_dir / "agents").iterdir()))
+        print(f"composed '{name}' ({args.target}): {n} specialists -> {ha_dir}/agents/")
         return
 
     if args.target == "paperclip":

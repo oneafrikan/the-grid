@@ -57,7 +57,7 @@ churn, and keep curated totals derived only from wired/root-owned skills.
 ## Agent instructions that must never be skipped need an explicit block — 2026-07-01
 <!-- learning-hash: a8196121 -->
 **Category:** convention
-**Source:** LOGS/2026-06-29-guide-server-gh-triage-wiring-context.md
+**Source:** LOGS/2026-06-29-<host>-gh-triage-wiring-context.md
 
 QA on the gh-triage composed agent found the LLM processed all 30 open
 issues instead of skipping ones already handled — the skip rule was only

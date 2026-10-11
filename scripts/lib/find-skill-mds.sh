@@ -8,7 +8,7 @@
 #
 # Why not plain `find`: some submodules generate untracked, gitignored copies
 # of their skills at setup time (gstack writes ~54 per host into .slate/,
-# .opencode/, .kiro/, .hermes/ ... — 482 stray SKILL.md on guide-server).
+# .opencode/, .kiro/, .hermes/ ... — 482 stray SKILL.md on one Linux box).
 # A raw find counts and wires those, so SKILLS.md flipped between ~239 and ~725
 # depending on which machine ran wire.sh last. Asking git for tracked files
 # gives the same answer on every machine.
