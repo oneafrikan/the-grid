@@ -8,6 +8,7 @@ summary: >-
   Threat models, audits code + dependencies + secrets, rates findings by
   severity, and gives remediation guidance. Advisory security gate — does not
   implement fixes.
+description: "Security Reviewer. Threat models, audits code, dependencies and secrets, rates findings by severity, advises remediation; does not implement fixes. Use for security review."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
 # Advisory role: audits and advises, does not change code. No Edit/Write. Bash stays so it can run

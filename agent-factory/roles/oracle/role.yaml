@@ -10,6 +10,7 @@ summary: >-
   style, goals, preferences, strengths and gaps, and the name, role and avatar
   they choose for themselves. Every entry is tagged stated, observed or inferred.
   Records and reflects back; does not decide for the operator.
+description: "Oracle. Interviews the operator and keeps a private, editable profile of working style, goals and preferences, tagged stated, observed or inferred. Use to build or review the operator profile."
 base_skills: []
 # Orchestrator in the compose sense only: orchestrator roles ship as Claude Code
 # SKILLS, which run in the main session. An interview needs the operator's replies;

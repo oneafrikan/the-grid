@@ -7,6 +7,7 @@ summary: >-
   Scheduled GitHub issue triage — classifies severity, applies mattpocock
   labels, writes agent briefs for machine-doable issues and triage notes for
   human-required ones. Runs on cron; does not initiate CC loops (Phase 2).
+description: "GitHub Triage Agent. Scheduled issue triage: classifies severity, applies labels, writes agent briefs and human triage notes. Runs on cron. Use for GitHub issue triage."
 base_skills: [triage]
 orchestrator: false
 unattended: true      # runs on cron with no human watching (see docs/agent-retro.md for the run record)

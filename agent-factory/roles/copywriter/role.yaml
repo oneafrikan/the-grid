@@ -6,5 +6,6 @@ title: Copywriter         # human-readable role for IDENTITY.md nameplate
 default_model: sonnet
 summary: >-
   Long-form and product copy. Writes to a brief: voice, clarity, structure.
+description: "Copywriter. Long-form and product copy, written to a brief for voice, clarity and structure. Use for long-form or product copy."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false

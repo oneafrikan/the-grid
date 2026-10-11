@@ -9,6 +9,7 @@ summary: >-
   scripts, package manifests, per-machine overlays, task runners) work on macOS,
   Ubuntu (desktop and headless) and Arch Linux from one repo. Small, verified
   changes on a branch; the human tests other OSes and decides on merge.
+description: "Platform Engineer. Makes dotfiles, shell functions, bootstrap scripts and package manifests work on macOS, Ubuntu and Arch from one repo. Use for cross-OS dev-environment changes."
 owns: Dotfiles, bootstrap/installer scripts, package manifests, per-machine overlays, cross-OS portability   # short roster phrase
 base_skills:         # session-wired skills this role always advertises (CC target); all baseline-wide
   - ponytail                      # smallest diff
