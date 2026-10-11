@@ -175,7 +175,7 @@ Reply:
 
 #### Digest (built locally by `analyse.py`, no model)
 
-Window = observation files since the last analysis. Items are one line each; sections are omitted when empty. Every item gets a reference id (`P1`, `C1`, `F1`, `E1`, `K1`) and the program keeps a private map `ref -> set of sids` that it uses for grounding. Text inside items is `sanitize()`d (newlines to spaces, control and hidden characters removed) and has `<<<`, `>>>` and the word `DIGEST` removed, so item text cannot forge the delimiters or a fake line.
+Window = observation files since the last analysis. Items are one line each; sections are omitted when empty. Every item gets a reference id (`P1`, `C1`, `F1`, `E1`, `K1`) and the program keeps a private map `ref -> set of sids` that it uses for grounding. Text inside items is `sanitize()`d (newlines to spaces, control and hidden characters removed) and has `<<<`, `>>>` and the word `DIGEST` removed, so item text cannot spoof the delimiters or a fake line.
 
 ```
 <<<DIGEST

@@ -68,6 +68,17 @@ submodules into two tiers:
 - `scripts/sources.sh` — regenerates `docs/SOURCES.md` (one upstream URL per
   submodule, tier from the baseline). `--check` HEADs every URL as a rot detector,
   non-zero exit on failure. Deterministic; never edit `SOURCES.md` by hand.
+- `scripts/check-personal.sh` — scans the **tracked** tree for personal data (emails,
+  home paths, tokens, private IPs, tailnet hosts, blocked file types, oversized files).
+  Three rule sources, merged: `scripts/personal-patterns.txt` (public generic rules),
+  the **private denylist** (`~/.the-grid-private/denylist.txt`, or `GRID_PRIVATE_DENYLIST`;
+  findings print only `[private:N]`, never the term), and `scripts/personal-allow-paths.txt`
+  (paths skipped entirely: add one **only with a `# reason`**; prefer rewording the line).
+  Voice rule: text rendered into other people's agents, skills, hooks or rules says "the
+  operator", never the author's name; prose docs may name the author. `GRID_REQUIRE_DENYLIST=1`
+  makes a missing denylist a failure; it is set in the loop's `VERIFY_CMD` environment so an
+  unattended build cannot pass on the generic half alone. CI has no denylist, so it runs the
+  generic half only (`GRID_PRIVATE_DENYLIST=` disables the private half on purpose).
 - `docs/model-selection.md` — which model for which job, with prices, independent
   benchmarks, worked cost maths, and a dated expiry watchlist. Refreshed on demand
   via the `core-researcher` subagent using the brief at the bottom of the file.
@@ -158,6 +169,8 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 - `scripts/gate.sh` — commit gate; `.githooks/pre-commit` delegates to it and it
   self-installs `core.hooksPath` on first run. `--pre-commit` aborts on unstaged
   changes. `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
+  It runs `check-personal.sh` as the `personal` check; with no private denylist on the
+  machine (CI, forks) it passes and prints `gate: PASS (skipped: personal-denylist)`.
 - Read-only drift detectors (exit 1 on drift, write nothing): `catalog.sh --check`,
   `wire.sh --check`, `agent-factory/compose.py <cfg> --target claude-code --check`,
   `compose.py --lint-roles` (every role; stable `E_*` codes; `roles/_retired/` is an
@@ -243,7 +256,7 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint + `compose.py --check`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`.
+All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint + `compose.py --check`, `check-personal.sh`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`.
 
 ## wire.sh contract
 

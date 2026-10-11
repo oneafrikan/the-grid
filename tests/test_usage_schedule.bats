@@ -28,8 +28,8 @@ setup() {
   export GRID_HOST=testhost
   # Commits need an identity; never read the real global git config.
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
-  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid
-  export GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com
+  export GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
   # HOME inside the sandbox: the plist bakes HOME in, and nothing may touch the real one.
   export HOME="$T/home"
   export LAUNCH_AGENTS_DIR="$T/la" SYSTEMD_USER_DIR="$T/sd"

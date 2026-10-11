@@ -95,7 +95,7 @@ The system SHALL compute occurrence and session counts for every digest item its
 - **THEN** the item is dropped with reason `no-correction` and the instinct stays active
 
 ### Requirement: Captured text is treated as hostile
-The system SHALL treat prompts and commands in the digest as data: the digest SHALL be delimited so item text cannot forge a delimiter or a reference line, the model call SHALL run without tools, hooks, MCP servers or skills, and any item whose trigger or action matches the unsafe-text list SHALL be dropped.
+The system SHALL treat prompts and commands in the digest as data: the digest SHALL be delimited so item text cannot spoof a delimiter or a reference line, the model call SHALL run without tools, hooks, MCP servers or skills, and any item whose trigger or action matches the unsafe-text list SHALL be dropped.
 
 #### Scenario: Delimiter forgery
 - **WHEN** a captured prompt contains the closing delimiter and a fake instinct line

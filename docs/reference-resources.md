@@ -303,7 +303,7 @@ Skills, SOUL.md, and MEMORY.md live in OpenClaw. Agent has a full life outside P
 ### Recommendation
 **Build in OpenClaw first, bind to Paperclip second.**
 
-Given the Z8 G4 / Ollama / LiteLLM / Tailscale stack already in place, agents should live in OpenClaw. Their SOUL.md and MEMORY.md are their identity — that should persist independently of Paperclip. Build and test each agent standalone in OpenClaw until the skills, personality, and memory are working correctly. Then bind to Paperclip once the agent is solid, resolving the gateway configuration one step at a time (token → device pairing → session key policy → multi-agent routing).
+Given a local-model stack (Ollama / LiteLLM) already in place, agents should live in OpenClaw. Their SOUL.md and MEMORY.md are their identity — that should persist independently of Paperclip. Build and test each agent standalone in OpenClaw until the skills, personality, and memory are working correctly. Then bind to Paperclip once the agent is solid, resolving the gateway configuration one step at a time (token → device pairing → session key policy → multi-agent routing).
 
 This avoids debugging gateway integration and agent behaviour simultaneously — the most common failure mode reported in the GitHub issues above.
 
