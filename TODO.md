@@ -51,7 +51,7 @@ full-roster port) and chunked into single-session specialist work:
 
 | # | Title | Labels |
 |---|-------|--------|
-| [#5](https://github.com/oneafrikan/the-grid/issues/5) | agent-factory: flesh stack overlays (LAMP + others) | needs-info |
+| [#5](https://github.com/oneafrikan/the-grid/issues/5) | agent-factory: flesh stack overlays (LAMP + others) | superseded by rule packs (docs/rules.md) |
 | [#6](https://github.com/oneafrikan/the-grid/issues/6) | agent-factory: populate `skills/` from repos submodules | needs-human |
 | [#13](https://github.com/oneafrikan/the-grid/issues/13) | Optional: deepen growth-hacker to marketing-director orchestrator | backlog |
 | [#20](https://github.com/oneafrikan/the-grid/issues/20) | Inject LEARNINGS.md into composed agents at compose time | ready-for-human |
