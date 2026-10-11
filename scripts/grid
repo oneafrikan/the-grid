@@ -8,7 +8,8 @@ validation", "Fetch mechanism").
 
 Group 1 landed the shared helpers, the grid.yaml reader, the typed-entry
 reader, the grid.lock reader with its input validation, and the `audit`
-passthrough. Group 2 adds the content-hash helpers, `lock` and `lock --check`.
+passthrough. Group 2 added the content-hash helpers, `lock` and `lock --check`.
+Group 3 adds the ledger, the fetch/verify/audit/place routine and `install`.
 The remaining subcommands are registered as stubs that exit 2 until their
 groups land.
 
@@ -26,6 +27,7 @@ import sys
 sys.dont_write_bytecode = True
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -36,6 +38,7 @@ import signal
 import socket
 import subprocess
 import tempfile
+import time
 
 # miniyaml lives next to us in scripts/lib, the same way audit.py finds it.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "lib"))
@@ -50,7 +53,7 @@ GIT_FLOOR = (2, 25)          # sparse-checkout `init --cone` + `set` needs 2.25
 GIT_TIMEOUT = 600            # seconds; a timeout is a failed fetch for that source
 
 # Subcommands whose behaviour lands in a later group of the change.
-STUB_COMMANDS = ("install", "doctor", "repair", "uninstall", "drift", "schedule")
+STUB_COMMANDS = ("doctor", "repair", "uninstall", "drift", "schedule")
 
 
 class GridError(Exception):
@@ -865,6 +868,682 @@ def report_findings(findings):
     return EXIT_FINDINGS if findings else EXIT_OK
 
 
+# --- ledger (design.md "File formats": Ledger) ---------------------------------------
+# What THIS machine's `grid` placed, one TSV row per placed skill directory. It is
+# machine-local state (${GRID_STATE_DIR:-$HOME/.grid}/installed.manifest), not
+# tracked. install writes it; doctor, repair and uninstall (group 4) read it, so
+# these are plain functions rather than part of cmd_install.
+
+LEDGER_NAME = "installed.manifest"
+LEDGER_COLS = ("kind", "name", "source", "sha", "path", "dest", "hash")
+
+
+def ledger_path():
+    return os.path.join(state_dir(), LEDGER_NAME)
+
+
+def _ledger_error(lineno, msg):
+    return GridError("grid: %s line %d: %s" % (LEDGER_NAME, lineno, msg))
+
+
+def read_ledger(path=None):
+    """Read the ledger; return (rows, foreign).
+
+    `rows` are dicts (LEDGER_COLS) for `kind` skill, each validated with the same
+    patterns as grid.lock (exit 2 naming the line). `foreign` are the RAW lines of
+    any other kind: skipped with one notice per kind, never an error, and handed
+    back so write_ledger can copy them through (a newer grid's rows must survive
+    an older grid's rewrite). A missing file is ([], []).
+    """
+    path = path or ledger_path()
+    try:
+        with open(path, "rb") as fh:
+            text = fh.read().decode("utf-8", "replace")
+    except FileNotFoundError:
+        return [], []
+    rows, foreign, seen = [], [], set()
+    for lineno, line in enumerate(text.split("\n"), 1):
+        if not line:
+            continue
+        cols = line.split("\t")
+        kind = cols[0]
+        if not kind:
+            raise _ledger_error(lineno, "empty kind")
+        if kind != "skill":
+            if kind not in seen:
+                seen.add(kind)
+                notice("grid: %s has rows of kind '%s', which this version does not handle; kept as they are"
+                       % (LEDGER_NAME, kind))
+            foreign.append(line)
+            continue
+        if len(cols) != len(LEDGER_COLS):
+            raise _ledger_error(lineno, "expected %d tab-separated columns, found %d"
+                                % (len(LEDGER_COLS), len(cols)))
+        row = dict(zip(LEDGER_COLS, cols))
+        try:
+            validate_label(row["name"], "name")
+            if not SOURCE_RE.fullmatch(row["source"]):
+                raise ValueError("source %r is not a valid directory name" % row["source"])
+            validate_path(row["path"])
+            validate_sha(row["sha"], "sha")
+            validate_hash(row["hash"])
+            if row["dest"] != dest_for(row["source"], row["path"]):
+                raise ValueError("dest %r is not repos/<source>/<path>" % row["dest"])
+        except ValueError as exc:
+            raise _ledger_error(lineno, str(exc))
+        rows.append(row)
+    return rows, foreign
+
+
+def write_ledger(rows, foreign=(), path=None):
+    """Write the ledger atomically, sorted bytewise (LC_ALL=C), no timestamp.
+
+    Returns True when the file changed. An unchanged ledger is not rewritten
+    (atomic_write skips it), so its inode and mtime prove a no-op re-run.
+    """
+    path = path or ledger_path()
+    lines = ["\t".join(row[c] for c in LEDGER_COLS) for row in rows] + list(foreign)
+    lines.sort(key=_b)
+    return atomic_write(path, "".join(line + "\n" for line in lines))
+
+
+# --- placed-directory helpers (shared with uninstall/repair in group 4) ---------------
+
+def dir_hash_or_none(path):
+    """On-disk content hash of a placed dir, or None if it is not a plain directory.
+
+    A symlink is never followed (a link where a skill dir should be is not
+    something grid wrote), and an unreadable tree counts as "unknown", which the
+    callers treat as modified.
+    """
+    if os.path.islink(path) or not os.path.isdir(path):
+        return None
+    try:
+        return disk_content_hash(path)
+    except (OSError, GridError):
+        return None
+
+
+def remove_placed_dir(grid_dir, row, force=False):
+    """Delete one placed skill dir with every safety check. Returns (status, detail).
+
+    status: "removed", "absent", "modified" (on-disk hash differs from the ledger
+    row's and `force` is off: kept) or "refused" (containment, `.git` or symlink
+    guard: kept). After removing, now-empty parent directories are removed up to
+    but not including repos/<source>. These are the rules `uninstall` uses.
+    """
+    source, dest = row["source"], row["dest"]
+    target = os.path.join(grid_dir, dest)
+    if os.path.lexists(os.path.join(grid_dir, "repos", source, ".git")):
+        return "refused", "repos/%s is a submodule checkout" % source
+    if not is_contained(grid_dir, source, dest):
+        return "refused", "%s resolves outside repos/%s" % (dest, source)
+    if os.path.islink(target):
+        return "refused", "%s is a symlink" % dest
+    if not os.path.lexists(target):
+        return "absent", dest
+    if not force and dir_hash_or_none(target) != row["hash"]:
+        return "modified", "%s differs from what grid placed" % dest
+    shutil.rmtree(target)
+    root = os.path.join(grid_dir, "repos", source)
+    parent = os.path.dirname(target)
+    while parent != root and parent.startswith(root + os.sep):
+        try:
+            os.rmdir(parent)                       # only succeeds while empty
+        except OSError:
+            break
+        parent = os.path.dirname(parent)
+    return "removed", dest
+
+
+# --- install: selection (design.md "Install algorithm" steps 1, 3-5) --------------------
+
+def read_runtime_sources(grid_dir):
+    """Repo names in scripts/lib/runtimes.txt (first `|` field, trimmed); absent file = none."""
+    path = os.path.join(grid_dir, "scripts", "lib", "runtimes.txt")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except FileNotFoundError:
+        return set()
+    names = set()
+    for line in lines:
+        head = line.split("#", 1)[0].split("|", 1)[0].strip()
+        if head:
+            names.add(head)
+    return names
+
+
+def wired_set_files(grid_dir, host):
+    """The files whose untyped entries select what this machine wires.
+
+    baseline-submodules.txt (or, before it is seeded, the tracked example it is
+    seeded from, which has the same content) plus this host's two overlays.
+    """
+    base = os.path.join(grid_dir, "baseline-submodules.txt")
+    if not os.path.isfile(base):
+        base = os.path.join(grid_dir, "baseline-submodules.example.txt")
+    return [base,
+            os.path.join(grid_dir, "machines", host + ".txt"),
+            os.path.join(grid_dir, "machines", host + ".local.txt")]
+
+
+def select_lock_entries(grid_dir, lock, host):
+    """Install steps 3-5: the lock entries this machine installs, plus the notices to print.
+
+    Drops entries denied by an untyped `-source` / `-source/skill` line (typed
+    lines were already ignored by read_wired_entries), entries whose source needs
+    a runtime (scripts/lib/runtimes.txt), and entries whose source is a
+    submodule checkout (the maintainer path, never written to). Returns
+    (selected, notices); notices are one line per source, sorted.
+    """
+    _adds, denies = read_wired_entries(wired_set_files(grid_dir, host))
+    denies = set(denies)
+    runtimes = read_runtime_sources(grid_dir)
+    selected, notices = [], {}
+    for entry in lock:
+        source = entry["source"]
+        if source in denies or "%s/%s" % (source, posixpath.basename(entry["path"])) in denies:
+            continue
+        if source in runtimes:
+            notices[source] = ("grid: %s needs a runtime; use the maintainer path for it: git submodule "
+                               "update --init repos/%s && bash scripts/runtime-setup.sh %s"
+                               % (source, source, source))
+            continue
+        if os.path.lexists(os.path.join(grid_dir, "repos", source, ".git")):
+            notices[source] = "grid: %s is a submodule checkout; left to the maintainer path" % source
+            continue
+        selected.append(entry)
+    return selected, [notices[k] for k in sorted(notices)]
+
+
+def overlay_notices(grid_dir, lock, host):
+    """Install step 11: untyped `repo/skill` entries that name a skill absent from the lock."""
+    adds, denies = read_wired_entries(wired_set_files(grid_dir, host))
+    known = set("%s/%s" % (e["source"], posixpath.basename(e["path"])) for e in lock)
+    out = []
+    for entry in sorted(set(adds) | set("-" + d for d in denies)):
+        bare = entry.lstrip("-")
+        if "/" in bare and bare not in known:
+            out.append("grid: %s names a skill that is not in grid.lock; skipped" % entry)
+    return out
+
+
+def check_source_urls(cfg):
+    """Install step 1: every source URL is https:// (file:// only behind GRID_ALLOW_FILE=1, for tests)."""
+    allow_file = os.environ.get("GRID_ALLOW_FILE") == "1"
+    for source in sorted(cfg["sources"]):
+        url = cfg["sources"][source]["url"]
+        if url.startswith("https://") or (allow_file and url.startswith("file://")):
+            continue
+        raise GridError("grid: source '%s' has a URL that is not https: %s" % (source, url))
+
+
+def audit_available(grid_dir):
+    """Install step 1: scripts/audit.py and policy.yaml exist, or fail unless GRID_AUDIT=warn.
+
+    Returns True when content can be vetted. With GRID_AUDIT=warn and no scanner
+    it prints the SKIPPED notice and returns False (placed unvetted, loudly).
+    Nothing is placed unvetted by accident: no scanner is exit 2 BEFORE any
+    network access (SEC13).
+    """
+    have = (os.path.isfile(os.path.join(grid_dir, "scripts", "audit.py"))
+            and os.path.isfile(os.path.join(grid_dir, "policy.yaml")))
+    if have:
+        return True
+    if os.environ.get("GRID_AUDIT") == "warn":
+        notice("grid: audit SKIPPED (no audit.py/policy.yaml) - placed unvetted")
+        return False
+    raise GridError("grid: refusing to place unvetted content (no audit.py/policy.yaml); "
+                    "set GRID_AUDIT=warn to override")
+
+
+def check_source_policy(grid_dir, cfg, sources, vetted):
+    """Install step 1: `audit.py --check-url` for each source that has a selected entry.
+
+    Runs before any network access. A disallowed source is exit 2 naming it (a
+    stderr warning under GRID_AUDIT=warn). A file:// source (tests only) skips
+    the check with a notice; with no scanner (GRID_AUDIT=warn) it is skipped
+    silently, the SKIPPED notice already said so.
+    """
+    warn = os.environ.get("GRID_AUDIT") == "warn"
+    for source in sorted(sources):
+        url = cfg["sources"][source]["url"]
+        if url.startswith("file://"):
+            notice("grid: %s: file:// source, --check-url skipped" % source)
+            continue
+        if not vetted:
+            continue
+        proc = subprocess.run(
+            [sys.executable, os.path.join(grid_dir, "scripts", "audit.py"),
+             "--grid-dir", grid_dir, "--check-url", url],
+            env=dict(os.environ, LC_ALL="C"), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            encoding="utf-8", errors="replace")
+        if proc.returncode == 0:
+            continue
+        reason = (proc.stdout.strip() or proc.stderr.strip() or "exit %d" % proc.returncode)
+        msg = "grid: source '%s' is not allowed by policy.yaml: %s" % (source, reason)
+        if warn:
+            notice(msg + " (continuing: GRID_AUDIT=warn)")
+        else:
+            raise GridError(msg)
+
+
+def seed_wired_files(grid_dir, host):
+    """Install step 2: create baseline-submodules.txt and machines/<host>.txt from their
+    tracked examples when absent. Never overwrites; a missing example is skipped."""
+    for src, dst in (("baseline-submodules.example.txt", "baseline-submodules.txt"),
+                     (os.path.join("machines", "example.txt"), os.path.join("machines", host + ".txt"))):
+        src, dst = os.path.join(grid_dir, src), os.path.join(grid_dir, dst)
+        if os.path.exists(src) and not os.path.exists(dst):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
+
+
+# --- install: classification (step 6) ----------------------------------------------------
+
+def classify_entries(grid_dir, selected, old_rows, force):
+    """Install step 6: label each selected entry current / adopt / protected / fetch / replace.
+
+    current   in the ledger with the locked sha and hash, dest re-hashes to it: nothing to do.
+    adopt     dest already re-hashes to the locked hash but the ledger does not say so
+              (crash between placing and the ledger write, or a lost ledger): record it.
+    protected dest exists and re-hashes to neither the ledger hash nor the locked hash
+              (a user edit, or a directory grid did not write): never touched. With
+              --force it becomes `replace`.
+    fetch     dest absent, or in the ledger at another sha/hash and unmodified (a lock bump).
+    Returns a list of (status, entry, old_row_or_None).
+    """
+    by_dest = dict((r["dest"], r) for r in old_rows)
+    plan = []
+    for entry in selected:
+        old = by_dest.get(entry["dest"])
+        target = os.path.join(grid_dir, entry["dest"])
+        if not os.path.lexists(target):
+            plan.append(("fetch", entry, old))
+            continue
+        disk = dir_hash_or_none(target)
+        if disk == entry["hash"]:
+            same = old is not None and old["sha"] == entry["sha"] and old["hash"] == entry["hash"]
+            plan.append(("current" if same else "adopt", entry, old))
+        elif old is not None and disk == old["hash"]:
+            plan.append(("fetch", entry, old))                 # unmodified older version: a lock bump
+        else:
+            plan.append(("replace" if force else "protected", entry, old))
+    return plan
+
+
+# --- install: fetch, verify, audit, place (step 7; design.md "Fetch mechanism") -------------
+
+TMP_DIRNAME = ".grid-tmp"
+STALE_SECONDS = 24 * 3600
+
+
+def sweep_stale_staging(grid_dir):
+    """Delete <grid>/.grid-tmp/* entries older than a day (leftovers of a SIGKILL).
+
+    A leftover staged SKILL.md must never be found by a whole-tree `find`, and a
+    killed scheduler job must not leave staging dirs for ever.
+    """
+    top = os.path.join(grid_dir, TMP_DIRNAME)
+    if not os.path.isdir(top):
+        return
+    cutoff = time.time() - STALE_SECONDS
+    for name in os.listdir(top):
+        full = os.path.join(top, name)
+        try:
+            if os.lstat(full).st_mtime >= cutoff:
+                continue
+            if os.path.isdir(full) and not os.path.islink(full):
+                shutil.rmtree(full, ignore_errors=True)
+            else:
+                os.unlink(full)
+        except OSError:
+            continue
+    try:
+        os.rmdir(top)                                          # only if now empty
+    except OSError:
+        pass
+
+
+@contextlib.contextmanager
+def staging_run(grid_dir):
+    """One staging run dir per invocation: <grid>/.grid-tmp/<pid>/, removed in a `finally`.
+
+    SIGTERM is turned into sys.exit(143) by main(), so the `finally` also runs
+    under a scheduler kill. The dir is inside the grid dir so the final rename
+    into place stays on one filesystem.
+    """
+    top = os.path.join(grid_dir, TMP_DIRNAME)
+    run = os.path.join(top, str(os.getpid()))
+    if os.path.lexists(run):
+        shutil.rmtree(run, ignore_errors=True)                 # a dead process's pid, reused
+    os.makedirs(run)
+    try:
+        yield run
+    finally:
+        shutil.rmtree(run, ignore_errors=True)
+        try:
+            os.rmdir(top)
+        except OSError:
+            pass
+
+
+def stage_source(run, source, url, sha, paths):
+    """Partial clone + cone sparse checkout of `paths` at `sha` into <run>/repos/<source>.
+
+    The recipe from design.md "Fetch mechanism". Raises GridError on any git
+    failure (the caller turns it into a failed source). Returns the repo dir.
+    """
+    repo = os.path.join(run, "repos", source)
+    os.makedirs(os.path.dirname(repo), exist_ok=True)
+    run_git(["init", "-q", repo])
+    # The user's global line-ending settings must not change bytes and fail verification.
+    run_git(["-C", repo, "config", "core.autocrlf", "false"])
+    run_git(["-C", repo, "config", "core.eol", "lf"])
+    run_git(["-C", repo, "remote", "add", "origin", url])
+    trace = os.environ.get("GRID_TRACE_FETCH")
+    if trace:                                                   # tests prove a no-op re-run with this
+        with open(trace, "a", encoding="utf-8") as fh:
+            fh.write("%s %s\n" % (source, sha))
+    run_git(["-C", repo, "fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", sha])
+    # `init --cone` then `set` (not `set --cone`, which needs git 2.35) works from 2.25.
+    run_git(["-C", repo, "sparse-checkout", "init", "--cone"])
+    run_git(["-C", repo, "sparse-checkout", "set"] + list(paths))
+    run_git(["-C", repo, "checkout", "-q", "FETCH_HEAD"])
+    return repo
+
+
+def _entry_error(entry, detail):
+    """GridError naming an entry; `detail` has no `grid: ` prefix."""
+    return GridError("grid: %s (%s): %s" % (entry["name"], entry["dest"], detail))
+
+
+def _strip_prefix(exc):
+    msg = str(exc)
+    return msg[len("grid: "):] if msg.startswith("grid: ") else msg
+
+
+def verify_staged(repo, entry):
+    """Check one staged skill dir against the lock. Raises GridError naming the entry."""
+    head = run_git(["-C", repo, "rev-parse", "HEAD"]).strip()
+    if head != entry["sha"]:
+        raise _entry_error(entry, "fetched commit %s is not the locked %s" % (head[:12], entry["sha"][:12]))
+    try:
+        tree = run_git(["-C", repo, "rev-parse", "HEAD:%s" % entry["path"]]).strip()
+    except GridError:
+        raise _entry_error(entry, "path %s not found at the locked commit" % entry["path"])
+    if tree != entry["tree"]:
+        raise _entry_error(entry, "tree %s differs from the locked %s" % (tree[:12], entry["tree"][:12]))
+    staged = os.path.join(repo, *entry["path"].split("/"))
+    try:
+        got = disk_content_hash(staged, check_escape=True)
+    except GridError as exc:
+        raise _entry_error(entry, _strip_prefix(exc))
+    if got != entry["hash"]:
+        raise _entry_error(entry, "content hash %s differs from the locked %s" % (got[:19], entry["hash"][:19]))
+
+
+def audit_staged(grid_dir, run, source, entries):
+    """Vet the staged copies of one source. Returns {dest: reason} for the entries that fail.
+
+    One `audit.py --format json` call per source over every verified path, with
+    --root at the staging run dir so reported paths read repos/<source>/..., which
+    is what CURATION.md allowlist entries written for the maintainer path match.
+    Exit 0: all pass. Exit 1: an entry fails when a finding has severity high,
+    is not allowed and lives under that entry's directory; the source's other
+    entries pass. Exit 2 or unparseable output: every entry of the source fails.
+    """
+    cmd = [sys.executable, os.path.join(grid_dir, "scripts", "audit.py"), "--format", "json",
+           "--root", run, "--grid-dir", grid_dir]
+    cmd += [os.path.join(run, "repos", source, *e["path"].split("/")) for e in entries]
+    proc = subprocess.run(cmd, env=dict(os.environ, LC_ALL="C"), stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, encoding="utf-8", errors="replace")
+    if proc.returncode == 0:
+        return {}
+    everything = dict((e["dest"], "audit could not vet it (audit.py exit %d)" % proc.returncode)
+                      for e in entries)
+    if proc.returncode != 1:
+        return everything
+    try:
+        findings = json.loads(proc.stdout)["findings"]
+    except (ValueError, KeyError, TypeError):
+        return everything
+    failed = {}
+    for entry in entries:
+        prefix = "repos/%s/%s/" % (source, entry["path"])
+        hits = [f for f in findings if isinstance(f, dict) and f.get("severity") == "high"
+                and not f.get("allowed") and str(f.get("path", "")).startswith(prefix)]
+        if hits:
+            failed[entry["dest"]] = "audit %s at %s" % (hits[0].get("rule"), hits[0].get("path"))
+    # Exit 1 means a high finding exists. If none maps to an entry, do not guess: fail the source.
+    return failed or everything
+
+
+def place_staged(grid_dir, run, repo, entry, counter):
+    """Copy a verified staged dir into place (SEC15). Raises GridError naming the entry.
+
+    The verified directory is copied ONCE (symlinks kept as links, never
+    followed) into <run>/place/<dest>, outside the staged git worktree; the
+    symlink-escape check and the content hash are repeated on that copy, and only
+    then is it renamed into <grid>/<dest>. So the bytes renamed into place are
+    the bytes just verified. An existing dest is first moved into <run>/old/<n>,
+    inside the staging dir and never beside dest: a leftover `*.grid-old` next to
+    a skill would be wired as a skill by wire.sh's plain-find fallback.
+    """
+    staged = os.path.join(repo, *entry["path"].split("/"))
+    copy = os.path.join(run, "place", *entry["dest"].split("/"))
+    os.makedirs(os.path.dirname(copy), exist_ok=True)
+    shutil.copytree(staged, copy, symlinks=True)
+    try:
+        got = disk_content_hash(copy, check_escape=True)
+    except GridError as exc:
+        raise _entry_error(entry, _strip_prefix(exc))
+    if got != entry["hash"]:
+        raise _entry_error(entry, "the copy to be placed hashes %s, not the locked %s"
+                           % (got[:19], entry["hash"][:19]))
+    # Re-check containment against the filesystem as it is NOW, just before the write.
+    if not is_contained(grid_dir, entry["source"], entry["dest"]):
+        raise _entry_error(entry, "%s escapes repos/%s" % (entry["dest"], entry["source"]))
+    final = os.path.join(grid_dir, entry["dest"])
+    os.makedirs(os.path.dirname(final), exist_ok=True)
+    moved = None
+    if os.path.lexists(final):
+        moved = os.path.join(run, "old", str(next(counter)))
+        os.makedirs(os.path.dirname(moved), exist_ok=True)
+        os.rename(final, moved)
+    try:
+        os.rename(copy, final)
+    except OSError as exc:
+        if moved is not None:
+            os.rename(moved, final)                             # put the old one back
+        raise _entry_error(entry, "cannot place it: %s" % exc)
+
+
+def _count():
+    n = 0
+    while True:
+        n += 1
+        yield n
+
+
+def fetch_and_place(grid_dir, cfg, todo, vetted):
+    """Install step 7: fetch, verify, audit and place `todo` (a list of lock entries).
+
+    Returns (placed, failed): `placed` is the list of entries now on disk at the
+    locked content; `failed` maps dest -> reason for the rest. A failed fetch
+    fails every entry of that source; one bad skill never blocks the others.
+    """
+    placed, failed = [], {}
+    warn = os.environ.get("GRID_AUDIT") == "warn"
+    by_source = {}
+    for entry in todo:
+        by_source.setdefault(entry["source"], []).append(entry)
+    counter = _count()
+    with staging_run(grid_dir) as run:
+        for source in sorted(by_source):
+            entries = by_source[source]
+            sha = entries[0]["sha"]
+            if any(e["sha"] != sha for e in entries):
+                # grid lock writes the one gitlink commit per source, so this is a hand-edit.
+                for e in entries:
+                    failed[e["dest"]] = "grid.lock pins source '%s' at more than one commit" % source
+                notice("grid: grid.lock pins source '%s' at more than one commit" % source)
+                continue
+            try:
+                repo = stage_source(run, source, cfg["sources"][source]["url"], sha,
+                                    sorted(set(e["path"] for e in entries)))
+            except GridError as exc:
+                notice("grid: %s: cannot fetch pinned commit %s (upstream may have removed it; the "
+                       "maintainer must re-run grid lock)\n%s" % (source, sha[:12], exc))
+                for e in entries:
+                    failed[e["dest"]] = "cannot fetch pinned commit"
+                continue
+            verified = []
+            for e in entries:
+                try:
+                    verify_staged(repo, e)
+                    verified.append(e)
+                except GridError as exc:
+                    failed[e["dest"]] = str(exc)
+                    notice(str(exc))
+            if verified and vetted:
+                bad = audit_staged(grid_dir, run, source, verified)
+                for e in list(verified):
+                    if e["dest"] not in bad:
+                        continue
+                    if warn:
+                        notice("grid: %s (%s): %s; placing it anyway (GRID_AUDIT=warn)"
+                               % (e["name"], e["dest"], bad[e["dest"]]))
+                    else:
+                        failed[e["dest"]] = bad[e["dest"]]
+                        notice("grid: %s (%s): not placed, %s" % (e["name"], e["dest"], bad[e["dest"]]))
+                        verified.remove(e)
+            for e in verified:
+                try:
+                    place_staged(grid_dir, run, repo, e, counter)
+                    placed.append(e)
+                except GridError as exc:
+                    failed[e["dest"]] = str(exc)
+                    notice(str(exc))
+    return placed, failed
+
+
+def run_wire(grid_dir, skills_dir=None):
+    """Install step 10: `GRID_NO_CATALOG=1 bash <grid>/scripts/wire.sh`; True on exit 0.
+
+    GRID_NO_CATALOG so a partial machine never rewrites the tracked SKILLS.md
+    (GRID_SKIP_CATALOG is not reused: it also suppresses .wired.manifest).
+    """
+    script = os.path.join(grid_dir, "scripts", "wire.sh")
+    if not os.path.isfile(script):
+        notice("grid: %s not found; skills are placed but not linked" % script)
+        return False
+    env = dict(os.environ, LC_ALL="C", GRID_DIR=grid_dir, GRID_NO_CATALOG="1", GRID_HOST=host_key())
+    if skills_dir:
+        env["SKILLS_DIR"] = skills_dir
+    rc = subprocess.call(["bash", script], env=env)
+    if rc != 0:
+        notice("grid: wire.sh failed (exit %d)" % rc)
+    return rc == 0
+
+
+def describe(entry):
+    return "%s (%s)" % (entry["name"], entry["dest"])
+
+
+def cmd_install(args):
+    """`grid install [--dry-run] [--force]`: place the locked skills without git submodules.
+
+    Steps are numbered as in design.md "Install algorithm". --dry-run runs 1-6
+    and prints the plan: no network, no seeding, no ledger, no wire.sh.
+    """
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    dry = args.dry_run
+    host = host_key()
+
+    # Step 1: read and validate everything, and refuse before any network access.
+    cfg = load_grid_yaml(grid_dir)
+    lock = read_grid_lock(grid_dir, cfg["sources"])
+    check_source_urls(cfg)
+    vetted = audit_available(grid_dir)
+    # Steps 3-5: what this machine installs.
+    selected, notices = select_lock_entries(grid_dir, lock, host)
+    for line in notices:
+        notice(line)
+    check_source_policy(grid_dir, cfg, set(e["source"] for e in selected), vetted)
+
+    if not dry:
+        sweep_stale_staging(grid_dir)
+        seed_wired_files(grid_dir, host)                       # step 2
+
+    # Step 6: classify against the ledger and the disk.
+    old_rows, foreign = read_ledger()
+    plan = classify_entries(grid_dir, selected, old_rows, args.force)
+    selected_dests = set(e["dest"] for e in selected)
+    stale_rows = [r for r in old_rows if r["dest"] not in selected_dests]
+
+    todo = [entry for status, entry, _old in plan if status in ("fetch", "replace")]
+    failed = {}
+    for status, entry, _old in plan:
+        if status == "protected":
+            failed[entry["dest"]] = "differs from what grid placed"
+            notice("grid: %s: %s differs from what grid placed; left alone (grid repair --force replaces it)"
+                   % (entry["name"], entry["dest"]))
+
+    if dry:
+        for status, entry, _old in plan:
+            if status in ("fetch", "replace"):
+                print("would fetch %s from %s at %s" % (describe(entry), entry["source"], entry["sha"][:12]))
+            elif status == "adopt":
+                print("would adopt %s" % describe(entry))
+        for row in stale_rows:
+            print("would remove %s" % row["dest"])
+        print("grid: dry run: %d to fetch, %d to remove, %d current"
+              % (len(todo), len(stale_rows), sum(1 for p in plan if p[0] == "current")))
+        return EXIT_OK
+
+    # Step 7: fetch, verify, audit, place.
+    placed = []
+    if todo:
+        placed, fetch_failed = fetch_and_place(grid_dir, cfg, todo, vetted)
+        failed.update(fetch_failed)
+        for entry in placed:
+            print("grid: placed %s" % describe(entry))
+
+    # Step 8: remove directories no longer selected, with uninstall's containment and
+    # modified-directory protection. A directory that is kept stays in the ledger.
+    kept_rows = []
+    for row in stale_rows:
+        status, detail = remove_placed_dir(grid_dir, row)
+        if status == "removed":
+            print("grid: removed %s" % row["dest"])
+        elif status in ("modified", "refused"):
+            notice("grid: %s: kept (%s)" % (row["dest"], detail))
+            kept_rows.append(row)
+
+    # Step 9: the ledger says what is on disk, even after a partial failure.
+    placed_dests = set(e["dest"] for e in placed)
+    new_rows = list(kept_rows)
+    for status, entry, old in plan:
+        if entry["dest"] in placed_dests or status in ("current", "adopt"):
+            new_rows.append(dict((c, entry[c]) for c in LEDGER_COLS if c in entry))
+        elif old is not None and os.path.lexists(os.path.join(grid_dir, entry["dest"])):
+            new_rows.append(old)                               # the older dir is still there
+    write_ledger(new_rows, foreign)
+
+    # Step 10: wire (links and .wired.manifest; never SKILLS.md).
+    wired_ok = run_wire(grid_dir, args.skills_dir)
+
+    # Steps 11 and 12: notices, then the exit code.
+    for line in overlay_notices(grid_dir, lock, host):
+        notice(line)
+    if failed:
+        notice("grid: %d entr%s not installed: %s" % (
+            len(failed), "y" if len(failed) == 1 else "ies", ", ".join(sorted(failed))))
+    return EXIT_OK if not failed and wired_ok else EXIT_FINDINGS
+
+
 # --- subcommands ---------------------------------------------------------------------
 
 def cmd_audit(args):
@@ -926,6 +1605,13 @@ def build_parser():
     p_lock.add_argument("--check", action="store_true",
                         help="regenerate in memory and report differences (exit 1); exit 3 if not checkable here")
     p_lock.set_defaults(func=cmd_lock)
+    p_install = sub.add_parser("install", parents=[shared],
+                               help="fetch the locked skills into repos/<source>/ and wire them (no submodules)")
+    p_install.add_argument("--dry-run", action="store_true",
+                           help="print the plan; no network access and no writes")
+    p_install.add_argument("--force", action="store_true",
+                           help="replace a directory that differs from the lock (an edit, or one grid did not write)")
+    p_install.set_defaults(func=cmd_install)
     for name in STUB_COMMANDS:
         p = sub.add_parser(name, parents=[shared], help="not implemented yet")
         p.set_defaults(func=make_stub(name))

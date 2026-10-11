@@ -192,9 +192,9 @@ print("denies=" + ",".join(denies))' "$F/m.txt"
 
 # --- (e) the other subcommands are stubs -------------------------------------------
 
-@test "install doctor repair uninstall drift schedule are stubs that exit 2" {
+@test "doctor repair uninstall drift schedule are stubs that exit 2" {
   local c
-  for c in install doctor repair uninstall drift schedule; do
+  for c in doctor repair uninstall drift schedule; do
     run python3 "$GRID" --grid-dir "$F" "$c"
     [ "$status" -eq 2 ]
     [[ "$output" == *"grid: $c: not implemented"* ]]
@@ -217,7 +217,8 @@ print("denies=" + ",".join(denies))' "$F/m.txt"
   local stub; stub=$(mktemp -d)
   printf '#!/bin/sh\necho "git version 2.25.0"\n' > "$stub/git"
   chmod +x "$stub/git"
-  PATH="$stub:$PATH" run python3 "$GRID" --grid-dir "$F" install
+  # `doctor` is still a stub (install is implemented since group 3).
+  PATH="$stub:$PATH" run python3 "$GRID" --grid-dir "$F" doctor
   rm -rf "$stub"
   # Past the floor check it reaches the stub.
   [ "$status" -eq 2 ]
