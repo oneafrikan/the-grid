@@ -1,0 +1,21 @@
+{
+  "name": "c04-failure-fix-recurs",
+  "why": "second signal type: a failed call followed by a different working call, in two sessions",
+  "obs": [
+    ["s1", "tool", "Bash", "pytest -x", true],
+    ["s1", "tool", "Bash", "python3 -m pytest -x", false],
+    ["s2", "tool", "Bash", "pytest -x", true],
+    ["s2", "tool", "Bash", "python3 -m pytest -x", false]
+  ],
+  "known": [],
+  "expect": {"items": "some", "must_include": [{"kind": "new", "domain": ["tooling", "testing"], "evidence_has": "F"}]},
+  "canned": {
+    "good": [
+      {"kind": "new", "id": "run-pytest-as-module", "trigger": "when running python tests", "action": "run pytest as python3 -m pytest -x", "domain": "tooling", "evidence": ["F1"]}
+    ],
+    "bad": [
+      {"kind": "confirm", "id": "no-such-habit", "trigger": "when running python tests", "action": "run pytest as python3 -m pytest -x", "domain": "tooling", "evidence": ["F1"]}
+    ],
+    "bad_reason": "unknown-id"
+  }
+}

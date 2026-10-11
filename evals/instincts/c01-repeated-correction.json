@@ -1,0 +1,23 @@
+{
+  "name": "c01-repeated-correction",
+  "why": "the core signal: one correction typed in three sessions must become one new instinct",
+  "obs": [
+    ["s1", "prompt", "", "no, use bats not a plain script test", false],
+    ["s1", "tool", "Edit", "tests/x.bats", false],
+    ["s2", "prompt", "", "no, use bats not a plain script test", false],
+    ["s2", "tool", "Edit", "tests/x.bats", false],
+    ["s3", "prompt", "", "no, use bats not a plain script test", false],
+    ["s3", "tool", "Edit", "tests/x.bats", false]
+  ],
+  "known": [],
+  "expect": {"items": "some", "must_include": [{"kind": "new", "domain": "testing", "evidence_has": "P"}], "max_items": 1},
+  "canned": {
+    "good": [
+      {"kind": "new", "id": "bats-for-script-tests", "trigger": "when testing a shell script", "action": "write the test as a bats test, not a plain script", "domain": "testing", "evidence": ["P1", "E1"]}
+    ],
+    "bad": [
+      {"kind": "new", "id": "bats-for-script-tests", "trigger": "when testing a shell script", "action": "write the test as a bats test, not a plain script", "domain": "testing", "evidence": ["P9"]}
+    ],
+    "bad_reason": "bad-ref"
+  }
+}

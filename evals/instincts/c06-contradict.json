@@ -1,0 +1,21 @@
+{
+  "name": "c06-contradict",
+  "why": "reversal: the developer now says the opposite of a stored habit, so it is contradicted, not confirmed",
+  "obs": [
+    ["s1", "prompt", "", "stop using bats for the docs scripts, use a plain shell test", false],
+    ["s2", "prompt", "", "stop using bats for the docs scripts, use a plain shell test", false]
+  ],
+  "known": [
+    {"id": "bats-for-shell-tests", "trigger": "when testing a shell script", "action": "write the test as a bats test, not a plain shell script", "domain": "testing"}
+  ],
+  "expect": {"items": "some", "must_include": [{"kind": "contradict", "id": "bats-for-shell-tests"}], "max_items": 1},
+  "canned": {
+    "good": [
+      {"kind": "contradict", "id": "bats-for-shell-tests", "trigger": "when testing a shell script", "action": "write the test as a bats test, not a plain shell script", "domain": "testing", "evidence": ["P1"]}
+    ],
+    "bad": [
+      {"kind": "contradict", "id": "bats-for-shell-tests", "trigger": "when testing a shell script", "action": "write the test as a bats test, not a plain shell script", "domain": "testing", "evidence": ["C1"]}
+    ],
+    "bad_reason": "no-correction"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "c03-one-session-only",
+  "why": "one session is not a habit: four repeats in a single session are still one session",
+  "obs": [
+    ["s1", "prompt", "", "always run shellcheck before commit", false],
+    ["s1", "prompt", "", "always run shellcheck before commit", false],
+    ["s1", "prompt", "", "always run shellcheck before commit", false],
+    ["s1", "prompt", "", "always run shellcheck before commit", false]
+  ],
+  "known": [],
+  "expect": {"items": "none"},
+  "canned": {
+    "good": [],
+    "bad": [
+      {"kind": "new", "id": "shellcheck-before-commit", "trigger": "before committing", "action": "run shellcheck on the changed shell scripts", "domain": "tooling", "evidence": ["P1"]}
+    ],
+    "bad_reason": "thin-evidence"
+  }
+}

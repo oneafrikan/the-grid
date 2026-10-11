@@ -40,3 +40,7 @@ GRID_EVALS=1 agent-factory/.venv/bin/python agent-factory/run_evals.py --changed
   - Selected roles are intersected with the roles that have cases (and with `--role` / `--case`). Roles with no cases are listed on the `changed:` line, not an error. No match prints `no eval-relevant changes` and exits 0.
 - **Cap.** `--max-total USD` (default 5.00): if the plan's worst case (the figure on the `plan:` line) is higher, `--changed` exits 2 before any spend, even with `--dry-run`. Narrow with `--role` or raise `--max-total`.
 - `--validate` also checks `evals/touchfiles.yaml` (`E_CASE: touchfiles.yaml: ...`).
+
+## Instincts prompt cases (`evals/instincts/`)
+
+The analyser prompt of the `instincts` feature has its own twelve labelled cases, `evals/instincts/c01-*.json` to `c12-*.json`, outside `evals/cases/` because `run_evals.py` is role-shaped and does not fit them. `scripts/instincts.sh eval-prompt --validate` is free and runs in the gate (canned good and bad replies through the shipping validator, plus a check of the prompt file). `GRID_EVALS=1 scripts/instincts.sh eval-prompt --yes [--runs N] [--budget USD] [--case NAME]` is the paid, opt-in live run (defaults 3 runs, $0.05 per call; it prints the worst-case spend first and appends one line per run to `${GRID_STATE_DIR:-$HOME/.grid}/instincts/eval-results.jsonl`). Case format and pass bar: `openspec/changes/instincts/design.md` (Labelled prompt cases).

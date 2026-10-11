@@ -25,6 +25,10 @@
 #                                   is a no-op unless --force
 #   instincts.sh status [--project ID]
 #                                   funnel (ret/valid/kept), drop reasons and WARN rules
+#   instincts.sh eval-prompt --validate
+#                                   free checks of the labelled prompt cases (no model call)
+#   instincts.sh eval-prompt --yes [--runs N] [--budget USD] [--case NAME]
+#                                   PAID live eval of the prompt; also needs GRID_EVALS=1
 #   instincts.sh help               this text
 #
 # Exit codes: 0 ok, 1 command-specific failure, 2 usage error (unknown subcommand).
@@ -38,6 +42,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$SCRIPT_DIR/instincts/lib.py"
 ANALYSE="$SCRIPT_DIR/instincts/analyse.py"
+EVALCASES="$SCRIPT_DIR/instincts/evalcases.py"
 
 usage() {
   cat <<'EOF'
@@ -58,6 +63,10 @@ Usage:
                                   weekly analysis of local observations
   instincts.sh status [--project ID]
                                   analysis funnel and warnings
+  instincts.sh eval-prompt --validate
+                                  check the labelled prompt cases (free, no model call)
+  instincts.sh eval-prompt --yes [--runs N] [--budget USD] [--case NAME]
+                                  live prompt eval; costs money, needs GRID_EVALS=1
   instincts.sh help               show this help
 
 Exit codes: 0 ok, 1 failure (project-id: no git remote; analyse: a project errored),
@@ -86,6 +95,9 @@ case "$cmd" in
   analyse|status)
     # analyse.py adds its own directory to sys.path (python3 -I does not).
     exec python3 -I "$ANALYSE" "$cmd" "$@" ;;
+  eval-prompt)
+    # evalcases.py adds its own directory to sys.path (python3 -I does not).
+    exec python3 -I "$EVALCASES" "$@" ;;
   *)
     echo "instincts: unknown subcommand '$cmd'" >&2
     usage >&2

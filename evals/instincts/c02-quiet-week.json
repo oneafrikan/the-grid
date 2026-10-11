@@ -1,0 +1,16 @@
+{
+  "name": "c02-quiet-week",
+  "why": "the 0-instinct case must be a clean ok, not an error: nothing here is a habit",
+  "obs": [
+    ["s1", "prompt", "", "fix the login bug", false]
+  ],
+  "known": [],
+  "expect": {"items": "none"},
+  "canned": {
+    "good": [],
+    "bad": [
+      {"kind": "new", "id": "fix-login-bug-first", "trigger": "when work starts", "action": "fix the login bug before anything else", "domain": "workflow", "evidence": ["P1"]}
+    ],
+    "bad_reason": "thin-evidence"
+  }
+}
