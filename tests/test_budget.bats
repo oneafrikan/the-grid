@@ -263,3 +263,36 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
   run env -u GRID_DIR python3 "$BUDGET" --check
   [ "$status" -eq 0 ] || [ "$status" -eq 3 ]
 }
+
+# --- owned skill descriptions (budget-and-usage group 3) ------------------------
+
+@test "every listed owned skill description is one line, <= 250 chars, with no 'invokes /'" {
+  # Real repo, read-only. Listed = no `disable-model-invocation: true` in frontmatter.
+  run python3 - "$REPO_ROOT" <<'PY'
+import glob, re, sys
+bad = []
+for p in sorted(glob.glob(sys.argv[1] + "/skills/*/SKILL.md")):
+    text = open(p, encoding="utf-8").read()
+    m = re.match(r"---\n(.*?)\n---\n", text, re.S)
+    fm = m.group(1) if m else ""
+    if re.search(r"^disable-model-invocation:\s*true\s*$", fm, re.M):
+        continue  # not listed, exempt
+    lines = fm.split("\n")
+    idx = [i for i, l in enumerate(lines) if l.startswith("description:")]
+    if not idx:
+        bad.append(p + ": no description")
+        continue
+    i = idx[0]
+    desc = lines[i][len("description:"):].strip()
+    # One line means a value on the key line and no folded or indented continuation.
+    if not desc or desc in (">", ">-", "|", "|-") or (i + 1 < len(lines) and lines[i + 1][:1] in (" ", "\t")):
+        bad.append(p + ": description is not a single line")
+    if len(desc) > 250:
+        bad.append("%s: description is %d chars" % (p, len(desc)))
+    if "invokes /" in desc:
+        bad.append(p + ": contains 'invokes /'")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+PY
+  [ "$status" -eq 0 ]
+}

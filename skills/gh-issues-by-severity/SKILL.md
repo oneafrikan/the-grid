@@ -1,12 +1,6 @@
 ---
 name: gh-issues-by-severity
-description: >
-  List open GitHub issues for the current repo grouped by severity (highest
-  first, then issue number ascending within each group), pulling severity
-  from whatever severity:* label scheme the repo actually uses. Use when the
-  user asks to see open issues by severity, wants a standup-style issue scan,
-  or invokes /gh-issues-by-severity. Works in any repo — discovers the
-  severity label vocabulary rather than assuming one.
+description: List open GitHub issues for the current repo grouped by severity, highest first, using the repo's own severity:* labels. Use when the user asks to see open issues by severity or wants a standup-style issue scan.
 ---
 
 # gh-issues-by-severity
