@@ -11,6 +11,10 @@
 #   GRID_HOST   — machine key for the overlay (default: hostname -s)
 #   GRID_BASELINE — baseline manifest file (default: $GRID_DIR/baseline-submodules.txt)
 #   GRID_SKIP_CATALOG=1 — don't regenerate SKILLS.md at the end (used by --check)
+#   GRID_SKIP_AUDIT=1 — skip the pre-wire audit (step 0). Set by audit.sh's own dry run
+#                   so the audit does not recurse into itself; not for everyday use.
+#   GRID_AUDIT=warn — a high-severity audit finding prints a warning and wiring continues
+#                   (default: it blocks, exit 3, before any link is touched)
 #   GRID_NO_CATALOG=1 — skip ONLY the SKILLS.md refresh (step 4); .wired.manifest is still
 #                   written. Set by `grid install`: on a machine without submodules most
 #                   library repos are empty, so a refresh would rewrite the tracked SKILLS.md.
@@ -21,6 +25,8 @@
 #                   GRID_HARNESS_HOME are forced under it; every later home-derived
 #                   target (~/.grid state) MUST be forced under it in this same block.
 #                   Every dry-run caller sets ONLY this (plus GRID_HOST/GRID_BASELINE).
+#
+# Exit codes: 0 wired | 1 --check found drift | 3 blocked by the audit (nothing changed)
 #
 # Usage:
 #   bash wire.sh           # wire (idempotent)
@@ -191,6 +197,27 @@ mkdir -p "$SKILLS_DIR" "$AGENTS_DIR"
 
 # Audit trail for the manifest written at the end: one row per decision.
 MANIFEST_ROWS=()
+
+# --- 0. Vet before touching any link -------------------------------------------
+# Skipped in --check's throwaway run (GRID_SKIP_CATALOG) and in audit.sh's own
+# dry run (GRID_SKIP_AUDIT, prevents recursion). Skipped LOUDLY when the tool or
+# policy is absent, so mock grids in tests and bare machines still wire.
+# Runs BEFORE teardown: a blocked wire changes nothing, so a bad upstream bump
+# can never leave a machine half-wired. audit.sh exit 2 (broken policy) blocks too.
+if [ -z "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_SKIP_CATALOG:-}" ]; then
+  if [ ! -f "$GRID_DIR/policy.yaml" ]; then
+    echo "wire: no policy.yaml - audit skipped"
+  elif ! command -v python3 >/dev/null 2>&1; then
+    echo "wire: python3 missing - audit SKIPPED, skills wired unaudited" >&2
+  elif ! bash "$(dirname "$0")/audit.sh" --wired --quiet; then
+    if [ "${GRID_AUDIT:-}" = warn ]; then
+      echo "wire: audit found high-severity issues; GRID_AUDIT=warn so wiring continues" >&2
+    else
+      echo "wire: BLOCKED by audit (nothing was changed). Fix, allowlist in CURATION.md with a reason, or set GRID_AUDIT=warn once." >&2
+      exit 3
+    fi
+  fi
+fi
 
 # --- 1. Tear down ALL grid-owned symlinks (rebuilt below) ---
 # A symlink is grid-owned if its target is under GRID_DIR. We remove every one

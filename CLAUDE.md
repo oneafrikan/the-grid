@@ -86,6 +86,9 @@ submodules into two tiers:
 - `loop/` + `scripts/instantiate.sh` + `scripts/lib/render-schedule.sh` + `scripts/lib/gh-app-token.sh` — the-grid's own issue-loop (PR mode to `next`, headless runner `loop/run-issues.sh`, GitHub App token, systemd/launchd units written but never activated). See `loop/README.md` and `automation-factory/patterns/issue-loop/README.md`.
 - `scripts/instincts.sh` — habit learning from your own sessions (opt-in per project with `learning: on`): capture, weekly analysis, injection, `clusters` for tank `evolve`. Data stays in `${GRID_STATE_DIR:-~/.grid}` and the private repo. See `docs/instincts.md`.
 - `scripts/run-record.sh` — appends one JSON line per agent run to a local private log (`${GRID_RUN_LOG:-~/.the-grid-private/runs.jsonl}`); `docs/agent-retro.md` is the review loop that starts from it.
+- `policy.yaml` — vetting policy read by `scripts/audit.py`: rule regexes with severities (`high` blocks, `low` warns), file classes, `owned_roots`, and `sources.allowed_repos` (the single source allowlist; no other file carries one). Restricted-YAML subset read by `scripts/lib/miniyaml.py`; every regex is a single-quoted scalar.
+- `CURATION.md` — the human-readable trust record: a `### repos/<name>` section per trusted wired repo, an `## Exclusions` table, and the fenced `audit-allow` block (rule + path glob + `contains` + mandatory `reason`) that `audit.py` reads as its allowlist. Only the headings and the allowlist block are machine-checked.
+- `scripts/audit.sh` / `scripts/audit.py` — the offline, deterministic scanner for wired content (`audit.py` scans; `audit.sh` chooses what). The D3 interface other changes build on: `python3 scripts/audit.py --format json --root <root> DIR...` and `bash scripts/audit.sh --owned|--wired|--gate [TARGET...]`. `wire.sh` runs `--wired` before touching any link; `gate.sh` runs `--gate` as the `audit` check. See `openspec/changes/vetting/design.md`.
 - `agent-factory/models.yaml` — the one tier-to-model map for generated Claude Code agents (default: tier maps to itself); `role.yaml` also takes `tools:` (subagent allowlist) and `unattended:`. See `agent-factory/README.md`.
 - `scripts/compose-goldens.sh` — golden-output check for `compose.py` over a fixture project, all four targets (`--check` default, `--update` to regenerate `tests/fixtures/compose/golden/`; run `--update` in any PR that changes compose output). See `agent-factory/README.md`.
 - `agent-factory/user.public.yaml` — tracked neutral identity (`machine: "your-machine"`); use via `GRID_USER_CONFIG` for anything composed into a tracked or shipped file.
@@ -172,6 +175,9 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
   changes. `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
   It runs `check-personal.sh` as the `personal` check; with no private denylist on the
   machine (CI, forks) it passes and prints `gate: PASS (skipped: personal-denylist)`.
+  It runs `audit.sh --gate --quiet` as the `audit` check (owned assets + the baseline's
+  wired set; skipped loudly if `python3` or `scripts/audit.sh` is absent, and the wired half
+  is skipped by `audit.sh` while submodules are uninitialised).
 - Read-only drift detectors (exit 1 on drift, write nothing): `catalog.sh --check`,
   `wire.sh --check`, `agent-factory/compose.py <cfg> --target claude-code --check`,
   `compose.py --lint-roles` (every role; stable `E_*` codes; `roles/_retired/` is an
@@ -282,6 +288,12 @@ All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: 
   wired (legacy fallback). `catalog.sh` reads the **baseline only** (machine-agnostic,
   deterministic `SKILLS.md`).
 - **Machine key:** `GRID_HOST` env var overrides the overlay host (default `hostname -s`).
+- **Audit before wiring (step 0):** before any teardown `wire.sh` runs `audit.sh --wired --quiet`.
+  A high-severity finding (or a broken policy) blocks with **exit 3** and changes nothing,
+  so existing links survive a bad upstream bump. `GRID_AUDIT=warn` prints a warning and
+  wires anyway. `GRID_SKIP_AUDIT=1` skips it (audit.sh's own dry run sets it to avoid
+  recursion). It is also skipped, with a printed notice, when `policy.yaml` or `python3`
+  is absent, and under `--check` / `GRID_SKIP_CATALOG`.
 - **Runtime map:** `scripts/lib/runtimes.txt` (`repo | link | marker | needs | setup`)
   lists wired repos whose skills need more than files on disk (gstack: its browse
   daemon). wire.sh keeps the runtime-root link `$SKILLS_DIR/<link> -> $GRID_DIR/repos/<repo>`
