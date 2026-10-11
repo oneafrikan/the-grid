@@ -32,10 +32,22 @@ only.
 |---|---|---|---|---|
 | `pre-bash-no-bypass` | PreToolUse / Bash | closed | Blocks `--no-verify` (any git subcommand), `git commit -n`, `-c core.hooksPath=`, `git config` writes of `core.hooksPath` or of an alias hiding `--no-verify`/`-n`, the `GIT_CONFIG_COUNT` / `GIT_CONFIG_PARAMETERS` / `GIT_CONFIG_KEY_*` / `HUSKY=0` assignments, and force pushes (`--force`, `--mirror`, `+refspec`, `-f` clusters). `--force-with-lease` is allowed. | 0 tokens; about 20 ms per Bash call; about 60 tokens only when it blocks |
 | `pre-bash-secret-scan` | PreToolUse / Bash | closed | On `git commit`: scans the added lines of the staged diff (and of the working tree when the commit names paths or uses `-a`/`-i`/`-o`) for secret patterns, and blocks sensitive file names. On `git add`: blocks sensitive file names. | 0 tokens; no work unless the command is `git commit` or `git add`; a short file:line list only when it blocks |
+| `instincts-capture-tool` | PostToolUse / Bash, Edit, Write, MultiEdit, NotebookEdit | open | Opt-in (`learning: on`). Appends one scrubbed line (tool, summarised input) to a local file. | 0 tokens; about 30 ms per tool call; prints nothing |
+| `instincts-capture-failure` | PostToolUseFailure / same tools | open | Opt-in. Same, for a failed tool call, with an error flag. | 0 tokens; about 30 ms per failed call; prints nothing |
+| `instincts-capture-prompt` | UserPromptSubmit | open | Opt-in. Appends one scrubbed, truncated line per prompt to a local file. | 0 tokens; about 30 ms per prompt; prints nothing |
+| `instincts-inject` | SessionStart | open | Opt-in. Prints the project's learned habit hints into the session. | 0 tokens to run; about 100 to 300 tokens of hints when instincts exist, nothing otherwise |
 | `auto-handoff` | SessionEnd | open | Writes a handoff with the real `/handoff` skill when a session of 5+ human turns did not run one. Machine-level, not a project profile. | One Sonnet run per qualifying session; capped by `--max-budget-usd 1.00`, `--max-turns 25` and a 900 s wall clock |
 
 The machine-readable version of this table is `catalogue.json` (the only place scope,
 profile and cost are defined). Every entry has a non-empty `cost`.
+
+**Opt-in hooks (`instincts-*`).** These four are in no profile. A project turns them on
+with a top-level `learning: on` in its `.grid/project.yaml` (the YAML `true` works too),
+and `deploy_hooks.py` then emits them under every profile, including `off`. Setting the
+flag back to off and re-running removes exactly those four entries. In the catalogue they
+carry `"opt_in": "learning"` in place of `min_profile`, and `--list` shows `opt-in:learning`
+in the profile column. What is captured, where it goes and how to forget it:
+`docs/instincts.md`.
 
 ## How it fits together
 
@@ -217,7 +229,8 @@ ts=<UTC time> session=<id> action=<skip|spawn|done|error> reason=<token> [turns=
    `lib/common.sh`, call `grid_require_jq closed` (a guard) or `open` (a background hook),
    and comment the script.
 2. Add one entry to `catalogue.json`: `id`, `scope` (`project` or `user`), `event`,
-   `matcher` (omit for events without one), `min_profile` (project hooks only), `fail`
+   `matcher` (omit for events without one), `min_profile` or `"opt_in": "learning"` (project
+   hooks only, exactly one of them; `opt_in` hooks are emitted by the project flag, not a profile), `fail`
    (`closed` or `open`), `timeout`, `model_cost`, a non-empty `cost`, and `description`.
 3. Add tests to `tests/test_hooks.bats`. The suite fails if a catalogue id has no script,
    a script has no catalogue entry, or a `cost` is empty.

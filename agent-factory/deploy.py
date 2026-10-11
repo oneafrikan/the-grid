@@ -118,11 +118,11 @@ def load_context(project: Path) -> tuple[str, dict[str, str]]:
         die(f"{path}: invalid YAML: {str(exc).splitlines()[0]}")
     if not isinstance(data, dict):
         die(f"{path}: must be a mapping")
-    # `hooks` belongs to deploy_hooks.py; it is allowed here (and ignored) so one
-    # project.yaml can configure both tools.
-    unknown = set(data) - {"project", "context", "roles", "hooks"}
+    # `hooks` and `learning` belong to deploy_hooks.py; they are allowed here (and ignored)
+    # so one project.yaml can configure both tools.
+    unknown = set(data) - {"project", "context", "roles", "hooks", "learning"}
     if unknown:
-        die(f"{path}: unknown key(s) {sorted(unknown)} (allowed: project, context, roles, hooks)")
+        die(f"{path}: unknown key(s) {sorted(unknown)} (allowed: project, context, roles, hooks, learning)")
     roles = data.get("roles") or {}
     if not isinstance(roles, dict):
         die(f"{path}: 'roles' must be a mapping of role -> markdown")
