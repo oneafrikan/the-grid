@@ -1,8 +1,7 @@
 # project-factory
 
 The-grid's tier for **bootstrapping whole projects** — a sibling to
-[`skills-factory/`](../skills-factory/) (builds skills), [`agent-factory/`](../agent-factory/)
-(composes AI personas), and [`automation-factory/`](../automation-factory/) (cuts
+[`agent-factory/`](../agent-factory/) (composes AI personas) and [`automation-factory/`](../automation-factory/) (cuts
 automation patterns into an existing repo).
 
 ## The template → project model

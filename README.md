@@ -91,7 +91,6 @@ different asset type:
 
 | Factory | Produces | Deployed via |
 |---------|----------|---------------|
-| `skills-factory/` | New skills (built via a Karpathy loop elsewhere, dropped into `skills/`) | `scripts/wire.sh` symlinks |
 | `agent-factory/` | Composed AI agents (`role × stack × skills`) — 4 public projects (`core`, `grid`, `finance-desk`, `learning-desk`; 38 roles, 7 orchestrators + 31 specialists) plus any private desk composed separately | `scripts/wire.sh` (Claude Code target); OpenClaw + Paperclip targets next |
 | `automation-factory/` | Reusable automation patterns (e.g. `issue-loop`) | Cut into a target repo's tracked `loop/` folder |
 | `project-factory/` | Whole new project scaffolds from a template | `scripts/cut-project.sh` (seed or retrofit) |
@@ -218,7 +217,6 @@ never touches its history.
     models.yaml         ← the one tier-to-model map for generated agents
     run_evals.py        ← runs the golden cases in evals/ (opt-in, spend-capped)
   evals/                ← golden cases that check how agent roles behave
-  skills-factory/       ← scaffolding for generating new skills (early)
   automation-factory/   ← reusable automation patterns (e.g. issue-loop), cut into target repos
   project-factory/      ← scaffolds brand-new projects from a template
   repos/                ← sibling repos as git submodules
