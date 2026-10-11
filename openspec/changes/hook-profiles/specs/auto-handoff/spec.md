@@ -98,15 +98,15 @@ The worker SHALL skip a session when the transcript shows a handoff already ran 
 - **THEN** the worker starts `claude`; with an unreadable transcript it still logs `reason=no-transcript`
 
 ### Requirement: Capped, verified run of the real skill that commits only its own files
-The worker SHALL run `claude -p` in the session's `cwd` with a prompt beginning `/handoff`, `--model sonnet`, `--max-budget-usd`, a tool set limited to `Read`, `Write` scoped by path to the target and fallback directories (never bare `Write`) and read-only Bash with `Edit` and all git denied, a wall-clock timeout and a compact transcript digest file, and MUST instruct the child to write only the two handoff files and run no git. The worker itself SHALL then scan every new file under `cwd` (no depth limit) and the fallback directory, refuse to commit (moving nothing) if any new path is outside the verified handoff pair, never move or delete anything under `.git/`, refuse to commit if `.git/config` or `.git/hooks/` changed during the child run, verify that the expected handoff files exist, secret-scan them, commit only them by explicit path, push only the private repo and only when that commit is the sole unpushed one, log every decision and record the outcome with `scripts/run-record.sh`.
+The worker SHALL run `claude -p` in the session's `cwd` with a prompt beginning `/handoff`, `--model sonnet`, `--max-budget-usd`, a tool set limited to `Read`, write access scoped by path to the target and fallback directories (`Edit(//<abs dir>/**)` allow rules in default permission mode, never a bare `Write` or `Edit`) and read-only Bash with `Edit` and all git denied, a wall-clock timeout and a compact transcript digest file, and MUST instruct the child to write only the two handoff files and run no git. The worker itself SHALL then scan every new file under `cwd` (no depth limit) and the fallback directory, refuse to commit (moving nothing) if any new path is outside the verified handoff pair, never move or delete anything under `.git/`, refuse to commit if `.git/config` or `.git/hooks/` changed during the child run, verify that the expected handoff files exist, secret-scan them, commit only them by explicit path, push only the private repo and only when that commit is the sole unpushed one, log every decision and record the outcome with `scripts/run-record.sh`.
 
 #### Scenario: Invocation shape
 - **WHEN** the worker spawns the child with the stub `claude` that `make_stubs` exports as `GRID_CLAUDE`
-- **THEN** the stub receives `-p` with a prompt starting `/handoff`, `--model sonnet`, `--max-budget-usd`, `--tools` without `Edit`, `--allowedTools` with no `git` pattern, no bare `Write` and a `Write(<dir>/**)` rule for the fallback dir (and for the resolved target directory when it exists: the matching `handoff-locations.md` row, else `<cwd>/LOGS`), `--disallowedTools` naming `Edit` and `Bash(git:*)`, and `--append-system-prompt-file`, receives `--max-turns` only if group 0 recorded it as accepted, and its working directory equals the payload `cwd`
+- **THEN** the stub receives `-p` with a prompt starting `/handoff`, `--model sonnet`, `--max-budget-usd`, `--tools` without `Edit`, `--allowedTools` with no `git` pattern, no bare `Write` or `Edit` and an `Edit(//<abs dir>/**)` rule for the fallback dir (and for the resolved target directory when it exists: the matching `handoff-locations.md` row, else `<cwd>/LOGS`), `--disallowedTools` naming `Edit` and `Bash(git:*)`, and `--append-system-prompt-file`, receives `--max-turns 25` and no `--permission-mode`, and its working directory equals the payload `cwd`
 
 #### Scenario: Write-only rules are in the system prompt
 - **WHEN** the test reads `hooks/lib/auto-handoff-system.md`
-- **THEN** it contains `do not run git`, `never push`, `write nothing else`, `if a write is denied, write both files to the fallback dir`, and the fallback directory variable `GRID_HANDOFF_FALLBACK_DIR`
+- **THEN** it contains `do not run git`, `never push`, `write nothing else`, `if a write is denied, write both files to the fallback dir`, `run single commands only`, and the fallback directory variable `GRID_HANDOFF_FALLBACK_DIR`
 
 #### Scenario: Unexpected file refused
 - **WHEN** the stub child writes the two handoff files and also `.git/hooks/x`
@@ -122,7 +122,7 @@ The worker SHALL run `claude -p` in the session's `cwd` with a prompt beginning 
 
 #### Scenario: Mapped handoff location
 - **WHEN** `~/.the-grid-private/handoff-locations.md` has a row matching the cwd that maps it to an existing `notes/handoffs` directory
-- **THEN** the child's `--allowedTools` holds `Write(<cwd>/notes/handoffs/**)` and no rule for `LOGS`
+- **THEN** the child's `--allowedTools` holds `Edit(//<cwd>/notes/handoffs/**)` and no rule for `LOGS`
 
 #### Scenario: Secret in a handoff file
 - **WHEN** the stub child writes a handoff file containing a secret-shaped token
