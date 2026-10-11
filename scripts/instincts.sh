@@ -18,11 +18,16 @@
 #   instincts.sh retire ID [PROJECT]  retire an instinct (this host's file)
 #   instincts.sh forget PROJECT --yes delete local observations + this host's instincts
 #   instincts.sh clusters           clusters and strong global instincts, as plain text for Tank
-#   instincts.sh analyse [--all] [--project ID] [--dry-run] [--force]
+#   instincts.sh analyse [--all] [--project ID] [--dry-run] [--force] [--no-sync]
 #                                   weekly analysis of local observations (one cheap model
 #                                   call per project, capped); --dry-run prints the digest and
 #                                   plan and calls nothing; a second run in the same ISO week
-#                                   is a no-op unless --force
+#                                   is a no-op unless --force; a real run ends with `sync`
+#                                   unless --no-sync
+#   instincts.sh sync               pull/commit/push this host's instincts in the private repo
+#                                   (best effort: failures warn, exit stays 0)
+#   instincts.sh schedule           PRINT the weekly job (launchd or systemd text, activation
+#                                   commands, crontab line); installs nothing
 #   instincts.sh status [--project ID]
 #                                   funnel (ret/valid/kept), drop reasons and WARN rules
 #   instincts.sh eval-prompt --validate
@@ -59,8 +64,10 @@ Usage:
   instincts.sh retire ID [PROJECT]  retire an instinct on this host
   instincts.sh forget PROJECT --yes delete local observations and this host's instincts
   instincts.sh clusters           clusters and strong global instincts (input for tank)
-  instincts.sh analyse [--all] [--project ID] [--dry-run] [--force]
+  instincts.sh analyse [--all] [--project ID] [--dry-run] [--force] [--no-sync]
                                   weekly analysis of local observations
+  instincts.sh sync               commit and push this host's instincts to the private repo
+  instincts.sh schedule           print the weekly schedule (nothing is installed)
   instincts.sh status [--project ID]
                                   analysis funnel and warnings
   instincts.sh eval-prompt --validate
@@ -72,6 +79,67 @@ Usage:
 Exit codes: 0 ok, 1 failure (project-id: no git remote; analyse: a project errored),
 2 unknown subcommand or bad arguments.
 EOF
+}
+
+# cmd_schedule — render the weekly analysis job and PRINT it. Writes no file and never
+# runs crontab, launchctl, systemctl or loginctl: activation is a human step, so the
+# commands are printed for the person to run. All text comes from the one shared
+# renderer (scripts/lib/render-schedule.sh); there is no second renderer here.
+# Exit 2 on any argument (there is deliberately no --install) or when the renderer
+# rejects the repo/state path (a character it cannot escape); nothing is printed then.
+cmd_schedule() {
+  if [ $# -gt 0 ]; then
+    echo "instincts: schedule takes no arguments (it only prints; install by hand)" >&2
+    return 2
+  fi
+  local root state logdir logfile sched label unit job
+  # Repo root from this script's own location, never a hardcoded clone path.
+  root="$(cd "$SCRIPT_DIR/.." && pwd)"
+  # shellcheck source=scripts/lib/render-schedule.sh
+  . "$root/scripts/lib/render-schedule.sh" || return 2
+  state="${GRID_STATE_DIR:-$HOME/.grid}"
+  logdir="$state/logs"
+  logfile="$logdir/instincts.log"
+  sched="weekly:Mon:06:00"          # Monday 06:00 local time
+  label="io.the-grid.instincts"     # launchd label
+  unit="grid-instincts"             # systemd unit base name
+  job="$root/scripts/instincts.sh"  # CMD `bash`, then ARGs as separate words (no quotes)
+
+  # Render EVERYTHING first; any rejection exits 2 before a byte is printed.
+  local plist_text="" svc_text="" tmr_text="" cron_line="" activate="" cron_activate="" plist_path=""
+  cron_line="$(render_crontab_line "$sched" "$logfile" "$root" bash "$job" analyse --all)" || return 2
+  cron_activate="$(render_activation_commands cron "$cron_line")" || return 2
+  if [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+    plist_path="$HOME/Library/LaunchAgents/$label.plist"
+    plist_text="$(render_launchd_plist "$label" "$HOME" "$root" "$logdir" "$sched" bash "$job" analyse --all)" || return 2
+    activate="$(render_activation_commands launchd "$plist_path")" || return 2
+  else
+    # 1800 s cap: a hung analysis must not wedge the unit forever.
+    svc_text="$(render_systemd_service "the-grid weekly instincts analysis" "$root" 1800 bash "$job" analyse --all)" || return 2
+    tmr_text="$(render_systemd_timer "the-grid weekly instincts analysis" "$unit.service" "$sched")" || return 2
+    activate="$(render_activation_commands systemd "$unit.timer")" || return 2
+  fi
+
+  echo "# Weekly instincts analysis (Mon 06:00 local). Nothing below has been installed."
+  echo
+  if [ -n "$plist_text" ]; then
+    echo "# launchd: save as $plist_path"
+    printf '%s\n' "$plist_text"
+  else
+    echo "# systemd user service: save as ~/.config/systemd/user/$unit.service"
+    printf '%s\n' "$svc_text"
+    echo
+    echo "# systemd user timer: save as ~/.config/systemd/user/$unit.timer"
+    printf '%s\n' "$tmr_text"
+  fi
+  echo
+  echo "# Activate by hand:"
+  printf '%s\n' "$activate"
+  echo
+  echo "# Alternative: this crontab line (run the command below to add it, or use crontab -e)"
+  printf '%s\n' "$cron_line"
+  printf '%s\n' "$cron_activate"
+  return 0
 }
 
 cmd="${1:-help}"
@@ -92,12 +160,15 @@ case "$cmd" in
   inject)
     # SessionStart hook body; inject.py puts its own directory on sys.path (-I drops it).
     exec python3 -I "$SCRIPT_DIR/instincts/inject.py" "$@" ;;
-  analyse|status)
+  analyse|status|sync)
     # analyse.py adds its own directory to sys.path (python3 -I does not).
     exec python3 -I "$ANALYSE" "$cmd" "$@" ;;
   eval-prompt)
     # evalcases.py adds its own directory to sys.path (python3 -I does not).
     exec python3 -I "$EVALCASES" "$@" ;;
+  schedule)
+    cmd_schedule "$@"
+    exit $? ;;
   *)
     echo "instincts: unknown subcommand '$cmd'" >&2
     usage >&2
