@@ -16,6 +16,7 @@ Path and returns a list of problem strings (empty = valid), and decorating it wi
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Callable
@@ -62,6 +63,86 @@ def check_codex_agent(path: Path) -> list[str]:
     return problems
 
 
+# ── opencode-agent ───────────────────────────────────────────────────────────
+# Frontmatter reading reuses scripts/lib/skill_frontmatter.py (stdlib only, the same reader
+# wire.sh uses), loaded by path because `python3 -I` puts neither this dir nor PYTHONPATH on
+# sys.path.
+def _frontmatter_reader():
+    import importlib.util
+    path = Path(__file__).resolve().parents[2] / "scripts" / "lib" / "skill_frontmatter.py"
+    spec = importlib.util.spec_from_file_location("skill_frontmatter", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# The values OpenCode accepts for a permission key (opencode.ai/docs/agents).
+OPENCODE_PERMISSION_VALUES = {"ask", "allow", "deny"}
+
+
+@command("opencode-agent")
+def check_opencode_agent(path: Path) -> list[str]:
+    """An OpenCode subagent file: a leading frontmatter block with a non-empty `description`
+    and `mode: subagent`; a `permission:` map, when present, holds only ask/allow/deny values."""
+    fm_mod = _frontmatter_reader()
+    lines = fm_mod.frontmatter_lines(str(path))
+    if lines is None:
+        return ["no frontmatter block"]
+    problems = []
+    if not fm_mod.scalar(lines, "description").strip():
+        problems.append("missing or empty frontmatter key: description")
+    mode = fm_mod.scalar(lines, "mode")
+    if mode != "subagent":
+        problems.append(f"mode must be 'subagent', got {mode!r}")
+    # The permission block is the indented lines after a top-level `permission:`.
+    in_perm = False
+    for line in lines:
+        if line.startswith("permission:"):
+            in_perm = True
+            continue
+        if in_perm:
+            if line.strip() and line[0] not in " \t":
+                break   # next top-level key
+            if line.strip():
+                key, _, value = line.strip().partition(":")
+                if value.strip() not in OPENCODE_PERMISSION_VALUES:
+                    problems.append(f"permission {key!r} has invalid value {value.strip()!r}")
+    return problems
+
+
+# ── skill ────────────────────────────────────────────────────────────────────
+# Agent Skills format as OpenCode enforces it (the strictest reader of the shared dir):
+# the dir name matches a lowercase-hyphen regex and is at most 64 chars, the frontmatter
+# `name` equals the dir name, and the description is 1 to 1024 chars.
+SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+
+@command("skill")
+def check_skill(path: Path) -> list[str]:
+    """A skill directory (or a symlink to one, as wired into the shared skills dir).
+
+    `path.name` is deliberately NOT resolved: the harness sees the link's name, and that is
+    the name that must match the frontmatter."""
+    skill_md = path / "SKILL.md"
+    if not skill_md.is_file():
+        return ["no SKILL.md"]
+    problems = []
+    dirname = path.name
+    if len(dirname) > 64 or not SKILL_NAME_RE.match(dirname):
+        problems.append(f"dir name {dirname!r} must match {SKILL_NAME_RE.pattern} and be at most 64 chars")
+    fm_mod = _frontmatter_reader()
+    lines = fm_mod.frontmatter_lines(str(skill_md))
+    if lines is None:
+        return problems + ["no frontmatter block"]
+    name = fm_mod.scalar(lines, "name")
+    if name != dirname:
+        problems.append(f"frontmatter name {name!r} must equal the dir name {dirname!r}")
+    desc = fm_mod.scalar(lines, "description")
+    if not 1 <= len(desc) <= 1024:
+        problems.append(f"description must be 1 to 1024 chars, got {len(desc)}")
+    return problems
+
+
 # ── driver ───────────────────────────────────────────────────────────────────
 def main(argv: list[str]) -> int:
     if len(argv) < 3 or argv[1] not in COMMANDS:
@@ -75,7 +156,7 @@ def main(argv: list[str]) -> int:
     failed = False
     for name in argv[2:]:
         path = Path(name)
-        problems = checker(path) if path.is_file() else ["no such file"]
+        problems = checker(path) if path.exists() else ["no such file"]
         for problem in problems:
             print(f"{name}: {problem}", file=sys.stderr)
             failed = True

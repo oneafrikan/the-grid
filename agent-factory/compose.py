@@ -941,6 +941,46 @@ def emit_codex_agent(agent: dict, slug: str) -> tuple[str, str]:
 AGENT_TARGETS["codex"] = emit_codex_agent
 
 
+# ── OpenCode agent emitter ────────────────────────────────────────────────────
+# OpenCode reads ~/.config/opencode/agents/<name>.md (the filename is the agent id):
+# YAML frontmatter with a required `description`, `mode` and an optional `permission` map,
+# then the system prompt as the body. The frontmatter is written with PyYAML via
+# _frontmatter(), so descriptions containing ': ' or quotes are quoted correctly.
+def emit_opencode_agent(agent: dict, slug: str) -> tuple[str, str]:
+    """A specialist role → one OpenCode subagent `<name>.md`. Returns (filename, contents).
+
+    Key order is description, mode, permission. `mode` is always `subagent` (orchestrators
+    are skills, never agent files). `permission` is written only when the role has a `tools:`
+    allowlist AND that allowlist denies something; keys, in order:
+      edit: deny     if neither Edit nor Write is listed
+      bash: deny     if Bash is absent
+      webfetch: deny if neither WebFetch nor WebSearch is listed
+    Absent keys inherit OpenCode's default. `model` is never written (model ids are
+    provider-specific; inheriting the session model is always valid) and neither is the
+    deprecated `tools` key.
+    """
+    role = agent["role"]
+    name = slugged(slug, role)
+    fields: dict = {"description": subagent_description(role), "mode": "subagent"}
+    tools = role_meta(role).get("tools")
+    if tools:
+        allowed = set(tools)
+        permission = {}
+        if not {"Edit", "Write"} & allowed:
+            permission["edit"] = "deny"
+        if "Bash" not in allowed:
+            permission["bash"] = "deny"
+        if not {"WebFetch", "WebSearch"} & allowed:
+            permission["webfetch"] = "deny"
+        if permission:   # an allowlist that denies nothing needs no block
+            fields["permission"] = permission
+    # Blank line after the fence, as the Claude subagent has it.
+    return f"{name}.md", _frontmatter(fields) + "\n" + render_subagent_body(agent, slug)
+
+
+AGENT_TARGETS["opencode"] = emit_opencode_agent
+
+
 # ── portable persona writer ──────────────────────────────────────────────────
 # One plain-Markdown file per role (orchestrators included) for pasting into a chat-UI
 # Project. Not a harness agent: no frontmatter, no tools, no permissions, so it does not

@@ -39,7 +39,7 @@ GOLDEN_DIR="${GOLDEN_DIR:-tests/fixtures/compose/golden}"
 # One golden tree per compose target. When compose.py gains a new --target, append it here and
 # run --update; do not build a second golden harness. Targets must not share one --out: each
 # emitter wipes and rewrites its own directory under it.
-TARGETS=(claude-code openclaw paperclip openclaw-native portable codex)
+TARGETS=(claude-code openclaw paperclip openclaw-native portable codex opencode)
 
 usage() {
   echo "usage: $0 [--check | --update]" >&2
