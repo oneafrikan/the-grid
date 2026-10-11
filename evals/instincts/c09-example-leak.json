@@ -1,0 +1,16 @@
+{
+  "name": "c09-example-leak",
+  "why": "the prompt's own example ids must not be copied into a quiet week",
+  "obs": [
+    ["s1", "prompt", "", "fix the login bug", false]
+  ],
+  "known": [],
+  "expect": {"must_not_match": ["bats-for-shell-script-tests|pytest-via-python-m"]},
+  "canned": {
+    "good": [],
+    "bad": [
+      {"kind": "new", "id": "bats-for-shell-script-tests", "trigger": "when testing a shell script", "action": "write the test as a bats test", "domain": "testing", "evidence": ["P1"]}
+    ],
+    "bad_reason": "thin-evidence"
+  }
+}
