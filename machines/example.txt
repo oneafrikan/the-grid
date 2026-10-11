@@ -11,6 +11,10 @@
 #   -project:<name>      → un-gate a baseline project on this machine
 #   rules:<pack>         → also wire a rule pack (rules/<pack>/*.md -> ~/.claude/rules/grid/)
 #   -rules:<pack>        → un-gate a baseline rule pack on this machine
+#   harness:<name>       → also wire skills (and composed agents) into another harness:
+#                          codex | opencode | gemini | antigravity | pi | openclaw
+#                          (`harness:claude` is always on). See docs/harnesses.md.
+#   -harness:<name>      → un-gate a harness (removes its grid links on the next wire)
 #   -hook:auto-handoff   → switch OFF the SessionEnd auto-handoff hook here
 #                          (on by default; `hook:auto-handoff` re-enables it)
 #
