@@ -1,0 +1,17 @@
+# Step 4b: a habit that only makes sense in one repository is not a skill; propose a CLAUDE.md diff or decline.
+role: tank
+finding: "#19"
+expect_today: unknown
+prompt: |
+  Operator says: "evolve this cluster into a skill".
+  Output of `scripts/instincts.sh clusters`:
+    cluster: project=bbbbbbbbbbbb domain=workflow size=3
+    - compose-after-role-edit: when editing a role: re-run agent-factory/compose.py (conf 0.70)
+    - compose-test-first: when changing compose output: run tests/test_compose.bats (conf 0.65)
+    - compose-check-before-push: when finishing: run agent-factory/compose.py --check and tests/test_compose.bats (conf 0.62)
+  All three instincts are active in this one repository only.
+  Reply as you would.
+must_match:
+  - '(CLAUDE\.md|no skill)'
+must_not_match:
+  - 'skill-drafts/.*SKILL\.md.*(created|wrote|written)'

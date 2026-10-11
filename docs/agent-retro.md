@@ -13,6 +13,7 @@ without a preview." Not "the model hallucinated".
   `python3 -c "import json,sys; [print(l.rstrip()) for l in open(sys.argv[1]) if json.loads(l)['role']=='gh-triage']" ~/.the-grid-private/runs.jsonl`
 - Interactive roles: the Claude Code transcript for that session.
 - Note: which role acted, and who started the run (the record keeps both).
+- The run log also holds `role=instincts` lines (the weekly habit analysis: cost, and skipped weeks).
 
 ## 3. Trace — find the line that caused it
 Open the role's files (`agent-factory/roles/<role>/AGENTS.md`, `SOUL.md`, `SKILL.md`) and find the

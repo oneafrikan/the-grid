@@ -18,6 +18,7 @@ yours to edit.
 1. Look in `~/.the-grid-private/learning/operator/` for `profile.md` and `observations.md`.
 2. If they exist, read them and say what is recorded, what looks stale, and what is missing.
 3. If the directory does not exist, say so and ask before creating it. Never write profile data anywhere else.
+4. When the operator names the instincts store (`~/.the-grid-private/learning/instincts/`), `preference`-domain instincts with confidence >= 0.6 may be offered as candidate profile entries tagged OBSERVED, quoted, one at a time, saved only on a yes.
 
 ## Step 1 — Agree the scope
 
