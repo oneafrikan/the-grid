@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """instincts weekly analyser (openspec change `instincts`, group 3).
 
-    python3 -I analyse.py analyse [--all | --project ID] [--dry-run] [--force]
+    python3 -I analyse.py analyse [--all | --project ID] [--dry-run] [--force] [--no-sync]
     python3 -I analyse.py status  [--project ID]
+    python3 -I analyse.py sync
 
-Run through scripts/instincts.sh (`instincts.sh analyse`, `instincts.sh status`).
+Run through scripts/instincts.sh (`instincts.sh analyse`, `status`, `sync`).
 
 What `analyse` does, per opted-in project (a local observation dir exists):
 
@@ -20,6 +21,8 @@ What `analyse` does, per opted-in project (a local observation dir exists):
              model text.
   5. RECORD  status.json (machine-local funnel + idempotency marker) and one
              run-record line per project.
+  6. SYNC    Unless --dry-run or --no-sync: pull, commit and push this host's
+             instincts in the private repo (run_sync; best effort, never fatal).
 
 Why the funnel is counted (ret / valid / kept): a prior system captured 10,557
 observations and produced 0 instincts with no way to tell "the model saw no
@@ -963,6 +966,9 @@ def cmd_analyse(args) -> int:
     if not (skipped or todo):
         print("instincts: no projects to analyse")
     run_promote()
+    if not args.no_sync:
+        # Best effort and exit-code neutral: the analysis result is what the run reports.
+        run_sync()
     return 1 if errors else 0
 
 
@@ -1099,6 +1105,93 @@ def cmd_status(args) -> int:
 
 
 # --------------------------------------------------------------------------
+# Private-repo sync (group 5)
+# --------------------------------------------------------------------------
+
+GIT_TIMEOUT_S = 120   # one hung network call must not wedge the weekly job
+
+
+def _sync_warn(msg: str) -> None:
+    """A sync problem is a warning, never a failure: the analysis already succeeded."""
+    print(f"instincts: sync warning: {msg}", file=sys.stderr)
+
+
+def _private_git(priv: Path, *args: str) -> subprocess.CompletedProcess:
+    """Run `git -C <private> ARGS`. Hook-exported GIT_* vars are dropped so the call
+    targets the private repo, and prompts are disabled so a missing credential fails
+    fast instead of waiting on a terminal (cron has none)."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return subprocess.run(["git", "-C", str(priv), *args], capture_output=True, text=True,
+                          timeout=GIT_TIMEOUT_S, env=env)
+
+
+def _store_pathspec(priv: Path) -> str:
+    """The synced instincts path relative to the private repo (default learning/instincts).
+    The ONLY path sync ever stages; it is never `-A`."""
+    try:
+        return str(lib.store_dir().resolve().relative_to(priv.resolve()))
+    except ValueError:
+        return "learning/instincts"
+
+
+def run_sync() -> int:
+    """pull --rebase --autostash, stage the instincts path, commit if staged, push.
+
+    Each host writes only its own <host>.jsonl files, so the rebase is conflict-free.
+    Always returns 0: any git, network or filesystem failure prints a warning.
+    """
+    try:
+        priv = lib.private_dir()
+        if not priv.is_dir():
+            print(f"instincts: sync skipped: {priv} is not a directory")
+            return 0
+        # Require the private dir to BE a repo root, not a folder inside some other
+        # repo, so a mis-set GRID_PRIVATE_DIR cannot commit into an unrelated project.
+        top = _private_git(priv, "rev-parse", "--show-toplevel")
+        if top.returncode != 0 or Path(top.stdout.strip()).resolve() != priv.resolve():
+            print(f"instincts: sync skipped: {priv} is not a git repo")
+            return 0
+        pathspec = _store_pathspec(priv)
+        msg = f"instincts: {lib.host_name()} {lib.current_week()}"
+
+        r = _private_git(priv, "pull", "--rebase", "--autostash")
+        if r.returncode != 0:
+            # Keep going: committing and pushing local work is still worth trying.
+            _sync_warn("git pull failed: " + (r.stderr.strip() or r.stdout.strip()))
+        # On a machine that has produced no instincts yet the path does not exist and
+        # `git add` would fail on it; there is simply nothing to stage then.
+        if (priv / pathspec).exists():
+            r = _private_git(priv, "add", "--", pathspec)
+            if r.returncode != 0:
+                _sync_warn("git add failed: " + r.stderr.strip())
+                return 0
+        # diff --cached --quiet: exit 0 = nothing staged, 1 = staged change.
+        staged = _private_git(priv, "diff", "--cached", "--quiet", "--", pathspec)
+        if staged.returncode == 0:
+            print("instincts: sync: no changes to commit")
+        elif staged.returncode == 1:
+            # Commit only our path so anything else already staged in the private repo is left alone.
+            r = _private_git(priv, "commit", "-m", msg, "--", pathspec)
+            if r.returncode != 0:
+                _sync_warn("git commit failed: " + (r.stderr.strip() or r.stdout.strip()))
+                return 0
+            print(f"instincts: sync: committed '{msg}'")
+        else:
+            _sync_warn("git diff failed: " + staged.stderr.strip())
+            return 0
+        r = _private_git(priv, "push")
+        if r.returncode != 0:
+            _sync_warn("git push failed: " + (r.stderr.strip() or r.stdout.strip()))
+        else:
+            print("instincts: sync: pushed")
+    except (OSError, subprocess.SubprocessError, lib.RepoPathError) as e:
+        _sync_warn(str(e))
+    return 0
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -1110,6 +1203,8 @@ def main(argv: list[str]) -> int:
     a.add_argument("--project", metavar="ID", help="only this project id")
     a.add_argument("--dry-run", action="store_true", help="print the digest and plan; call and write nothing")
     a.add_argument("--force", action="store_true", help="re-analyse even if done this ISO week")
+    a.add_argument("--no-sync", action="store_true", help="do not pull/commit/push the private repo afterwards")
+    sub.add_parser("sync", help="pull, commit and push this host's instincts in the private repo")
     s = sub.add_parser("status", help="funnel and warnings")
     s.add_argument("--project", metavar="ID")
     try:
@@ -1120,6 +1215,8 @@ def main(argv: list[str]) -> int:
         return cmd_analyse(args)
     if args.cmd == "status":
         return cmd_status(args)
+    if args.cmd == "sync":
+        return run_sync()
     ap.print_usage(sys.stderr)
     return 2
 
