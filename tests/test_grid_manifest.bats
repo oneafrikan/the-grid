@@ -190,16 +190,9 @@ print("denies=" + ",".join(denies))' "$F/m.txt"
   [[ "$output" == *"audit.sh not found"* ]]
 }
 
-# --- (e) the other subcommands are stubs -------------------------------------------
-
-@test "doctor repair uninstall are stubs that exit 2" {
-  local c
-  for c in doctor repair uninstall; do
-    run python3 "$GRID" --grid-dir "$F" "$c"
-    [ "$status" -eq 2 ]
-    [[ "$output" == *"grid: $c: not implemented"* ]]
-  done
-}
+# --- (e) no stub subcommands remain ---------------------------------------------------
+# (Group 4 implemented doctor, repair and uninstall, the last stubs; their tests
+# live in test_grid_health.bats.)
 
 # --- (f) git floor ------------------------------------------------------------------
 
@@ -217,12 +210,13 @@ print("denies=" + ",".join(denies))' "$F/m.txt"
   local stub; stub=$(mktemp -d)
   printf '#!/bin/sh\necho "git version 2.25.0"\n' > "$stub/git"
   chmod +x "$stub/git"
-  # `doctor` is still a stub (install is implemented since group 3).
-  PATH="$stub:$PATH" run python3 "$GRID" --grid-dir "$F" doctor
+  PATH="$stub:$PATH" run python3 "$GRID" --grid-dir "$F" install
   rm -rf "$stub"
-  # Past the floor check it reaches the stub.
+  # Past the floor check it reaches install proper, which stops on the fixture's
+  # missing grid.yaml (exit 2) rather than on the git version.
   [ "$status" -eq 2 ]
-  [[ "$output" == *"not implemented"* ]]
+  [[ "$output" == *"grid.yaml not found"* ]]
+  [[ "$output" != *"or newer is required"* ]]
 }
 
 # --- (g) shared helpers --------------------------------------------------------------
