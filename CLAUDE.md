@@ -56,6 +56,7 @@ submodules into two tiers:
   it, it's a symlink into a separate private repo; nothing in the-grid requires it
   to exist.
 - `scripts/budget.py` + `docs/budget-target.json` — measures the skill/role description listing (Claude Code shares one small description budget across all skills and drops the overflow silently) and gates it: `--check` runs in `gate.sh` against a committed ratchet (owned skills + roles always; the baseline scope only on a machine with `baseline-submodules.txt` and initialised submodules, else exit 3 = skipped). `--report` shows the numbers. Lowering a number is normal (`--update-target`); raising one needs `--allow-raise` and review.
+- `scripts/usage/weekly.sh` + `scripts/usage/install-schedule.sh` — the weekly usage job (extract, then commit `usage/<host>.json` to the private repo) and the installer that renders its launchd/systemd/cron schedule via `scripts/lib/render-schedule.sh`. The installer only writes files and PRINTS the activation commands; activating is a human step. See `docs/usage.md`.
 - `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
   repos as counts, reference (no-skill) repos in a footer. Deterministic output.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
