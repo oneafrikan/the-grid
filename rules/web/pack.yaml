@@ -1,0 +1,4 @@
+# Flat "key: value" lines only. Parsed by rules.py (no YAML library).
+summary: Web platform - semantic HTML and accessibility, CSS, Core Web Vitals, CSP and SRI, security headers
+tier: 2
+adapted_from: affaan-m/ECC rules/web @ ef648e0 (MIT)

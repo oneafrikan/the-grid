@@ -1,0 +1,4 @@
+# Flat "key: value" lines only. Parsed by rules.py (no YAML library).
+summary: React - Rules of Hooks, Effects, state placement, Server Components boundary, XSS and Server Functions, Testing Library
+tier: 2
+adapted_from: affaan-m/ECC rules/react @ ef648e0 (MIT)
