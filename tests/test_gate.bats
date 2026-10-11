@@ -75,3 +75,13 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" bash scripts/gate.s
   last="$(printf '%s\n' "$output" | tail -n 1)"
   [[ "$last" == "gate: PASS (skipped:"*"budget"* ]] || false
 }
+
+@test "with no scripts/build-personas.sh the personas check is skipped LOUDLY, not failed" {
+  # The copied gate has no scripts/build-personas.sh (and no venv) in the fake grid.
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"build-personas.sh or agent-factory/.venv absent"* ]] || false
+  # the final summary line lists personas among the skipped checks
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"personas"* ]] || false
+}

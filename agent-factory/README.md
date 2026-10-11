@@ -76,6 +76,10 @@ one 5-file source, a different artifact shape per `--target`:
 # Claude Code target: orchestrators -> CC skills, specialists -> CC subagents
 .venv/bin/python compose.py examples/grid.yaml --target claude-code
 .venv/bin/python compose.py examples/grid.yaml --target claude-code --dry-run
+
+# Portable target: one plain-Markdown persona per role (orchestrators too), no frontmatter.
+# The committed copies live in dist/personas/; regenerate them with scripts/build-personas.sh
+.venv/bin/python compose.py examples/grid.yaml --target portable
 ```
 
 Output is regenerable and idempotent: re-running with an unchanged config
