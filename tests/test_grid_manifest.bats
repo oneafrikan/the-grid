@@ -63,10 +63,17 @@ VALID_YAML='version: 1\nsources:\n  alpha:\n    url: https://example.com/a.git\n
 }
 
 @test "scripts/grid parses as Python 3.8 syntax and leaves no __pycache__" {
+  # Other suites (usage, audit) may legitimately leave __pycache__ dirs behind, so
+  # compare before/after rather than asserting there is none.
+  local before after
+  before=$(find "$REPO_ROOT/scripts" -name __pycache__ | LC_ALL=C sort)
   run python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), feature_version=(3, 8))' "$GRID"
   [ "$status" -eq 0 ]
-  [ ! -e "$REPO_ROOT/scripts/__pycache__" ]
-  [ ! -e "$REPO_ROOT/scripts/lib/__pycache__" ]
+  # Running the CLI (which imports miniyaml) must not create one either.
+  run python3 "$GRID" --grid-dir "$F" lock
+  [ "$status" -eq 2 ]
+  after=$(find "$REPO_ROOT/scripts" -name __pycache__ | LC_ALL=C sort)
+  [ "$before" = "$after" ]
 }
 
 # --- (b) grid.yaml --------------------------------------------------------------
