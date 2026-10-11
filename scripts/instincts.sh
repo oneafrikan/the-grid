@@ -11,6 +11,13 @@
 #   instincts.sh scrub              read stdin, print it with secrets redacted
 #   instincts.sh capture            hook entry: read one hook JSON payload on stdin,
 #                                   append one observation; always exit 0, no stdout
+#   instincts.sh inject             SessionStart hook: print habit hints (silent if none/opted out)
+#   instincts.sh promote            list global-promotion candidates (writes no instinct)
+#   instincts.sh approve ID         promote candidate ID to a global instinct
+#   instincts.sh show [PROJECT]     table of merged instincts (default: current repo)
+#   instincts.sh retire ID [PROJECT]  retire an instinct (this host's file)
+#   instincts.sh forget PROJECT --yes delete local observations + this host's instincts
+#   instincts.sh clusters           clusters and strong global instincts, as plain text for Tank
 #   instincts.sh help               this text
 #
 # Exit codes: 0 ok, 1 command-specific failure, 2 usage error (unknown subcommand).
@@ -32,6 +39,13 @@ Usage:
   instincts.sh project-id [DIR]   print the project id for the repo at DIR (default .)
   instincts.sh scrub              redact secrets from stdin to stdout
   instincts.sh capture            record one hook event from stdin (used by the hooks)
+  instincts.sh inject             SessionStart hook: print habit hints for this project
+  instincts.sh promote            list instincts ready to become global (pending approval)
+  instincts.sh approve ID         make a pending candidate a global instinct
+  instincts.sh show [PROJECT]     list merged instincts for PROJECT (id; default: this repo)
+  instincts.sh retire ID [PROJECT]  retire an instinct on this host
+  instincts.sh forget PROJECT --yes delete local observations and this host's instincts
+  instincts.sh clusters           clusters and strong global instincts (input for tank)
   instincts.sh help               show this help
 
 Exit codes: 0 ok, 1 failure (project-id: no git remote), 2 unknown subcommand.
@@ -44,7 +58,7 @@ cmd="${1:-help}"
 case "$cmd" in
   help|-h|--help)
     usage ;;
-  project-id|scrub)
+  project-id|scrub|promote|approve|show|retire|forget|clusters)
     # -I: isolated mode, so a stray PYTHONPATH or cwd file cannot shadow stdlib.
     exec python3 -I "$LIB" "$cmd" "$@" ;;
   capture)
@@ -53,6 +67,9 @@ case "$cmd" in
     # catch-all). stdin passes through to the python process.
     python3 -I "$SCRIPT_DIR/instincts/capture.py" "$@" 2>/dev/null
     exit 0 ;;
+  inject)
+    # SessionStart hook body; inject.py puts its own directory on sys.path (-I drops it).
+    exec python3 -I "$SCRIPT_DIR/instincts/inject.py" "$@" ;;
   *)
     echo "instincts: unknown subcommand '$cmd'" >&2
     usage >&2
