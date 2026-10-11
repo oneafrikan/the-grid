@@ -59,7 +59,7 @@ check() {
 
 run_shellcheck() {
   command -v shellcheck >/dev/null || { echo "    shellcheck not installed — skipped"; SKIPPED+=(shellcheck); return 0; }
-  shellcheck -S warning scripts/*.sh scripts/lib/*.sh contexts/*.sh .githooks/pre-commit \
+  shellcheck -S warning scripts/*.sh scripts/lib/*.sh scripts/usage/*.sh contexts/*.sh .githooks/pre-commit \
     automation-factory/patterns/*/*.sh automation-factory/patterns/*/hooks/*.sh
 }
 
