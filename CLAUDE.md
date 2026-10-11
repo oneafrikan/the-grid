@@ -74,6 +74,7 @@ submodules into two tiers:
 - `agent-factory/models.yaml` — the one tier-to-model map for generated Claude Code agents (default: tier maps to itself); `role.yaml` also takes `tools:` (subagent allowlist) and `unattended:`. See `agent-factory/README.md`.
 - `scripts/compose-goldens.sh` — golden-output check for `compose.py` over a fixture project, all four targets (`--check` default, `--update` to regenerate `tests/fixtures/compose/golden/`; run `--update` in any PR that changes compose output). See `agent-factory/README.md`.
 - `agent-factory/user.public.yaml` — tracked neutral identity (`machine: "your-machine"`); use via `GRID_USER_CONFIG` for anything composed into a tracked or shipped file.
+- `contexts/` — opt-in working-mode prompts (`dev.md`, `research.md`, `review.md`, each <=1200 bytes) and `aliases.sh`, a snippet a human sources from `~/.zshrc`/`~/.bashrc` to get `claude-dev`/`claude-research`/`claude-review` (`claude --append-system-prompt-file`). Not wired by `wire.sh`; Claude Code only.
 - `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
 - `TODO.md` — current outstanding work.

@@ -133,6 +133,21 @@ Composing an agent-factory persona, wiring skills, or adding an automation-facto
 pattern into the new project all happen *after* the cut, as normal steps in that
 repo.
 
+## Context modes
+
+Optional: start Claude Code already in a working mode (dev, research or review).
+Add this line to `~/.zshrc` or `~/.bashrc`, then open a new shell:
+
+```bash
+source "$HOME/.the-grid/contexts/aliases.sh"
+```
+
+You then have `claude-dev`, `claude-research` and `claude-review`. Each is
+`claude --append-system-prompt-file <mode file>`, so the mode text is added to
+Claude Code's own prompt, not a replacement for it. Extra arguments pass through,
+e.g. `claude-review "check PR 12"`. The mode files are in `contexts/` (each under
+1200 bytes); edit them to taste.
+
 ## Growing what's wired
 
 - **Found a useful skill in the library (or on the internet)?** Run `/skill-scout`
