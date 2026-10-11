@@ -352,3 +352,140 @@ mkskill() {
   echo "$output"
   [ "$status" -eq 0 ]
 }
+
+# ================================================================ gemini-cli (multi-harness group 5)
+# Gemini CLI subagents: ~/.gemini/agents/<name>.md, YAML frontmatter `name`, `description`,
+# optional `tools` (written as a block list), never `model`. Self-contained block: it appends
+# to this file so it rebases cleanly next to the OpenCode block (group 4).
+
+# gemini_env: pin compose.py to the fixture roles and the neutral public identity, as
+# scripts/compose-goldens.sh does (so no personal value reaches a test result).
+gemini_env() {
+  export GRID_PRIVATE_ROLES_DIR="$REPO_ROOT/tests/fixtures/compose/roles"
+  export GRID_USER_CONFIG="$REPO_ROOT/agent-factory/user.public.yaml"
+  export GRID_MODELS_FILE="$REPO_ROOT/agent-factory/models.yaml"
+}
+
+# gemini_roles ROLE=TOOLS... : copy the fixture roles into $TMP/roles and add one role per
+# argument (ROLE=comma-separated tools, e.g. zz-a=Read,Teleport) plus $TMP/zz.yaml listing
+# them. Lets a test exercise a tool list the shared fixture does not have.
+gemini_roles() {
+  local roles="$TMP/roles" spec r t cfg=$'project: zz\nslug: zz\nagents:\n'
+  cp -R "$REPO_ROOT/tests/fixtures/compose/roles" "$roles"
+  for spec in "$@"; do
+    r="${spec%%=*}"; t="${spec#*=}"
+    cp -R "$roles/fx-eng" "$roles/$r"
+    sed -i "s/^name: .*/name: $r/" "$roles/$r/role.yaml"
+    printf 'tools: [%s]\n' "${t//,/, }" >> "$roles/$r/role.yaml"
+    cfg+="  - role: $r"$'\n'
+  done
+  printf '%s' "$cfg" > "$TMP/zz.yaml"
+  gemini_env
+  export GRID_PRIVATE_ROLES_DIR="$roles"
+}
+
+@test "gemini: the validator accepts every golden .md" {
+  mapfile -t files < <(golden_files gemini-cli md)
+  # Guard against a vacuous pass: the fixture has three specialists.
+  [ "${#files[@]}" -eq 3 ]
+  run python3 -I "$VALIDATE" gemini-agent "${files[@]}"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "gemini: goldens list the mapped tools in order for the read-only role, none and no model elsewhere" {
+  local d; d=$(dirname "$(golden_files gemini-cli md | head -1)")
+  # Exact frontmatter slice: the block list, in the allowlist's order (Read, Grep, Glob, Bash).
+  run sed -n '/^tools:/,/^---$/p' "$d/fx-fx-readonly.md"
+  [ "$output" = $'tools:\n- read_file\n- read_many_files\n- grep_search\n- glob\n- list_directory\n- run_shell_command\n---' ]
+  lacks '^tools:' "$d/fx-fx-eng.md" "$d/fx-product-manager.md"
+  lacks '^model:' "$d"/*.md
+  # Orchestrators are skills, never agent files.
+  [ "$(ls "$d" | wc -l)" -eq 3 ]
+  lacks 'orchestrator|tech-lead|growth-hacker' <(ls "$d")
+}
+
+@test "gemini: the validator rejects a bad name, an empty description, no frontmatter, a string tools value and a model" {
+  printf -- '---\nname: ok_name-1\ndescription: d\ntools:\n- read_file\n---\nbody\n' > "$TMP/ok.md"
+  run python3 -I "$VALIDATE" gemini-agent "$TMP/ok.md"
+  [ "$status" -eq 0 ]
+  printf -- '---\nname: Bad Name\ndescription: d\n---\nbody\n' > "$TMP/badname.md"
+  run python3 -I "$VALIDATE" gemini-agent "$TMP/badname.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"name"* ]]
+  printf -- '---\nname: x\ndescription:\n---\nbody\n' > "$TMP/nodesc.md"
+  run python3 -I "$VALIDATE" gemini-agent "$TMP/nodesc.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"description"* ]]
+  printf 'name: x\ndescription: d\n' > "$TMP/nofm.md"
+  run python3 -I "$VALIDATE" gemini-agent "$TMP/nofm.md"
+  [ "$status" -eq 1 ]
+  # Claude's comma-string `tools: Read, Grep` is not a Gemini list.
+  printf -- '---\nname: x\ndescription: d\ntools: Read, Grep\n---\n' > "$TMP/str.md"
+  run python3 -I "$VALIDATE" gemini-agent "$TMP/str.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tools"* ]]
+  printf -- '---\nname: x\ndescription: d\nmodel: sonnet\n---\n' > "$TMP/model.md"
+  run python3 -I "$VALIDATE" gemini-agent "$TMP/model.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"model"* ]]
+}
+
+@test "gemini: an unmapped tool exits 1 with E_TOOL_UNMAPPED naming role and tool, and writes no _gemini-cli dir" {
+  gemini_roles zz-bad=Read,Teleport
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target gemini-cli --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_TOOL_UNMAPPED"* ]] && [[ "$output" == *"zz-bad"* ]] && [[ "$output" == *"Teleport"* ]]
+  [ ! -e "$TMP/out/zz/_gemini-cli" ]
+}
+
+@test "gemini: an unmapped tool in a later role leaves an existing _gemini-cli tree untouched" {
+  # The check runs before the wipe, so a failed compose must not destroy the previous output.
+  gemini_roles zz-ok=Read zz-bad=Teleport
+  mkdir -p "$TMP/out/zz/_gemini-cli/agents"
+  printf 'keep\n' > "$TMP/out/zz/_gemini-cli/agents/keep.md"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target gemini-cli --out "$TMP/out"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$TMP/out/zz/_gemini-cli/agents/keep.md")" = "keep" ]
+  [ "$(ls "$TMP/out/zz/_gemini-cli/agents" | wc -l)" -eq 1 ]
+}
+
+@test "gemini: every mapped tool, de-duplicated, in the role's listed order" {
+  # The fixture only exercises Read/Grep/Glob/Bash; build a role touching the other mappings,
+  # with repeats to prove the first occurrence wins.
+  gemini_roles zz-all=Write,Read,WebSearch,Edit,Read,WebFetch,Glob,Grep,Bash,Glob
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target gemini-cli --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  run sed -n '/^tools:/,/^---$/p' "$TMP/out/zz/_gemini-cli/agents/zz-zz-all.md"
+  [ "$output" = $'tools:\n- write_file\n- read_file\n- read_many_files\n- google_web_search\n- replace\n- web_fetch\n- glob\n- list_directory\n- grep_search\n- run_shell_command\n---' ]
+}
+
+@test "gemini: recomposing wipes a stray file from _gemini-cli and writes no file for orchestrators" {
+  gemini_env
+  mkdir -p "$TMP/fx/_gemini-cli/agents"
+  printf 'stale\n' > "$TMP/fx/_gemini-cli/agents/stray.md"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/tests/fixtures/compose/fixture.yaml" \
+    --target gemini-cli --out "$TMP"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TMP/fx/_gemini-cli/agents/stray.md" ]
+  [ -f "$TMP/fx/_gemini-cli/agents/fx-fx-readonly.md" ]
+  [ "$(ls "$TMP/fx/_gemini-cli/agents" | wc -l)" -eq 3 ]
+}
+
+@test "gemini: the body and description match the Claude Code subagent" {
+  # One prompt on every harness: the Gemini file's body equals the claude-code body.
+  gemini_env
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/tests/fixtures/compose/fixture.yaml" \
+    --target gemini-cli --out "$TMP/g"
+  [ "$status" -eq 0 ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/tests/fixtures/compose/fixture.yaml" \
+    --target claude-code --out "$TMP/c"
+  [ "$status" -eq 0 ]
+  local g="$TMP/g/fx/_gemini-cli/agents/fx-fx-readonly.md" c="$TMP/c/fx/_claude-code/agents/fx-fx-readonly.md"
+  # Everything after the closing frontmatter fence.
+  [ "$(awk 'f{print} /^---$/{n++; if(n==2) f=1}' "$g")" = "$(awk 'f{print} /^---$/{n++; if(n==2) f=1}' "$c")" ]
+  [ "$(grep -A1 '^description:' "$g")" = "$(grep -A1 '^description:' "$c")" ]
+}
