@@ -629,3 +629,25 @@ description: >
   run python3 -I "$py" "$d/9.md"; [ "$status" -eq 1 ]
   run python3 -I "$py" "$d/missing.md"; [ "$status" -eq 1 ]
 }
+
+# ---------------------------------------------------------------- opencode agents (group 4)
+
+@test "GRID_HARNESS=opencode links composed _opencode agents into .config/opencode/agents; a second run changes nothing" {
+  stub_agent opencode x.md
+  stub_agent opencode y.md
+  GRID_HARNESS=opencode wire
+  [ "$status" -eq 0 ]
+  [ -L "$GRID_HARNESS_HOME/.config/opencode/agents/x.md" ]
+  [ -L "$GRID_HARNESS_HOME/.config/opencode/agents/y.md" ]
+  # The link resolves to the composed file inside the (mock) grid.
+  [ "$(readlink "$GRID_HARNESS_HOME/.config/opencode/agents/x.md")" = "$MOCK_GRID/agent-factory/projects/p/_opencode/agents/x.md" ]
+  local t1 m1
+  t1="$(tree "$GRID_HARNESS_HOME")"; m1="$(cat "$MANIFEST")"
+  GRID_HARNESS=opencode wire
+  [ "$status" -eq 0 ]
+  [ "$(tree "$GRID_HARNESS_HOME")" = "$t1" ]
+  [ "$(cat "$MANIFEST")" = "$m1" ]
+  # Only the OpenCode agents dir was written: no Codex or Gemini agent dir appears.
+  [ ! -e "$GRID_HARNESS_HOME/.codex" ]
+  [ ! -e "$GRID_HARNESS_HOME/.gemini" ]
+}
