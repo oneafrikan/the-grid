@@ -12,4 +12,3 @@ paths:
 - Validate a CSRF token on every state-changing request with the project's chosen CSRF or form extension; Flask has none built in.
 - Set `Content-Security-Policy`; Jinja escaping does not stop `javascript:` URIs in `href`.
 - Set the `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN` and `Strict-Transport-Security` response headers.
-- Pass SQL values as driver parameters (`?` with `sqlite3`); string formatting makes the app open to SQL injection.

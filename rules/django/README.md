@@ -8,7 +8,7 @@ Path scope is by file name (`settings.py`, `apps.py`, `models.py`, `views.py`, a
 
 | Rule file | Source |
 |---|---|
-| structure.md | https://docs.djangoproject.com/en/stable/topics/settings/ https://docs.djangoproject.com/en/stable/howto/deployment/checklist/ https://docs.djangoproject.com/en/stable/internals/contributing/writing-code/coding-style/ |
+| structure.md | https://docs.djangoproject.com/en/stable/howto/deployment/checklist/ |
 | apps.md | https://docs.djangoproject.com/en/stable/ref/applications/ |
 | orm.md | https://docs.djangoproject.com/en/stable/ref/models/querysets/ https://docs.djangoproject.com/en/stable/ref/models/instances/ https://docs.djangoproject.com/en/stable/ref/models/expressions/ https://docs.djangoproject.com/en/stable/topics/db/transactions/ |
 | migrations.md | https://docs.djangoproject.com/en/stable/topics/migrations/ |
