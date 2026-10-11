@@ -17,3 +17,11 @@
 # roles:                       # extra facts for one deployed role only
 #   sdet: |
 #     - Test suites live in <path>; fixtures in <path>.
+
+# hooks:                       # opt in to the-grid's guard hooks; `agent-factory/deploy_hooks.py <this-repo>` writes them
+#   profile: off               # off      - nothing (the default when this key is absent)
+#                              # minimal  - blocks git --no-verify, hook-disabling config and force-push
+#                              # standard - minimal + blocks commits that add a secret-looking line
+#                              # strict   - same as standard for now
+#   target: local              # local  - .claude/settings.local.json (machine-local, the default)
+#                              # shared - .claude/settings.json (committed; commands carry no absolute path)

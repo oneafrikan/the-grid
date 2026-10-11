@@ -34,6 +34,8 @@ come from an optional <project-dir>/.grid/project.yaml, never from the grid:
     roles:
       sdet: |         # extra markdown for one role
         ...
+    hooks:            # read by deploy_hooks.py, ignored here (profile, target)
+      profile: standard
 
 Trust: .grid/project.yaml text is written verbatim into the deployed agents'
 system prompts. Anyone who can commit to the project can steer its agents through
@@ -116,9 +118,11 @@ def load_context(project: Path) -> tuple[str, dict[str, str]]:
         die(f"{path}: invalid YAML: {str(exc).splitlines()[0]}")
     if not isinstance(data, dict):
         die(f"{path}: must be a mapping")
-    unknown = set(data) - {"project", "context", "roles"}
+    # `hooks` belongs to deploy_hooks.py; it is allowed here (and ignored) so one
+    # project.yaml can configure both tools.
+    unknown = set(data) - {"project", "context", "roles", "hooks"}
     if unknown:
-        die(f"{path}: unknown key(s) {sorted(unknown)} (allowed: project, context, roles)")
+        die(f"{path}: unknown key(s) {sorted(unknown)} (allowed: project, context, roles, hooks)")
     roles = data.get("roles") or {}
     if not isinstance(roles, dict):
         die(f"{path}: 'roles' must be a mapping of role -> markdown")
