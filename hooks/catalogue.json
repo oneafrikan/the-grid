@@ -24,6 +24,16 @@
       "model_cost": false,
       "cost": "0 tokens; no work unless the command is git commit or git add; prints a short file:line list only when it blocks.",
       "description": "Blocks git commit when an added line looks like a secret, and git add of key and .env files."
+    },
+    {
+      "id": "auto-handoff",
+      "scope": "user",
+      "event": "SessionEnd",
+      "fail": "open",
+      "timeout": 5,
+      "model_cost": true,
+      "cost": "One Sonnet run per session with 5+ human turns and no manual handoff; capped by --max-budget-usd 1.00, --max-turns 25 and a 900 s wall clock.",
+      "description": "Writes a handoff via the real /handoff skill when the session did not run one."
     }
   ]
 }

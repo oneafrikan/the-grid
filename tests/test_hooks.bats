@@ -177,10 +177,16 @@ STUB
   run catalogue_problems "$REPO_ROOT"
   [ "$status" -eq 0 ]
   [ -z "$output" ] || { echo "$output" >&2; false; }
-  # both entries carry the fields design.md requires
-  run jq -e '.version == 1 and (.hooks | length) == 2
-    and all(.hooks[]; .scope == "project" and .event == "PreToolUse" and .matcher == "Bash"
+  # the two guard entries carry the fields design.md requires
+  run jq -e '.version == 1 and (.hooks | length) == 3
+    and all(.hooks[] | select(.scope == "project"); .event == "PreToolUse" and .matcher == "Bash"
       and .fail == "closed" and .timeout == 5 and .model_cost == false and (.cost | length) > 0)' \
+    "$REPO_ROOT/hooks/catalogue.json"
+  [ "$status" -eq 0 ]
+  # the user-scope auto-handoff entry: SessionEnd, no matcher, no min_profile, fail open
+  run jq -e '.hooks[] | select(.id == "auto-handoff")
+    | .scope == "user" and .event == "SessionEnd" and (has("matcher") | not) and (has("min_profile") | not)
+      and .fail == "open" and .timeout == 5 and .model_cost == true and (.cost | length) > 0' \
     "$REPO_ROOT/hooks/catalogue.json"
   [ "$status" -eq 0 ]
   run jq -r '.hooks[] | "\(.id) \(.min_profile)"' "$REPO_ROOT/hooks/catalogue.json"
