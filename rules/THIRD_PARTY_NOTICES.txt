@@ -33,3 +33,5 @@ Adapted packs
 # One pack name per line (the directory name under rules/), added by the PR that
 # adds the tier 2 pack. `rules.py lint` (E_ATTRIBUTION) fails a tier 2 pack whose
 # name is not listed here. Lines starting with # are comments. Initially empty.
+python
+typescript
