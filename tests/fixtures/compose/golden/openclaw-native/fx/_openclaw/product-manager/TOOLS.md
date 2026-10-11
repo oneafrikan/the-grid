@@ -1,6 +1,6 @@
 <!--
 Thin scaffold — genuinely new for the grid (no claude-code equivalent). Ported
-from Guide's templates/specialist/TOOLS.md shape, trimmed to what's known at
+from an earlier factory's TOOLS.md shape, trimmed to what's known at
 B1 time. Session B3's deploy script fills in the real workspace/agent-dir
 paths once a target host/agent-dir layout is decided; session C reviews the
 exec/tool permission profile referenced below before B4's pilot.
@@ -13,9 +13,10 @@ See openclaw/README.md for the full token list.
 
 ## This Machine
 
-- Hostname: scout (Beelink SER8, Ubuntu 24.04)
-- Runs inside the `openclaw-gateway` Docker container alongside `main`,
-  `household`, and `coach`.
+- Host: the `machine` field in `agent-factory/user.yaml` names where this
+  install's agents run.
+- Runs inside the `openclaw-gateway` Docker container alongside the
+  gateway's other agents.
 
 ## Key Paths
 

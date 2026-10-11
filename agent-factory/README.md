@@ -285,7 +285,7 @@ per-machine overlay control which composed projects `wire.sh` links. With no
 
 - The canonical agent is the **live OpenClaw 5-file model** (SOUL / IDENTITY /
   AGENTS / USER / MEMORY) + skills — verified against the running system on
-  guide-server, not the (outdated 3-file) playbook.
+  a Linux box, not the (outdated 3-file) playbook.
 - Target surface is **Claude Code + ACP** (swappable coding CLI), not Claude Code
   alone. Content stays LCD (lowest common denominator) where possible.
 - Memory starts as flat **MEMORY.md** / signal files; a queryable DB (gbrain)

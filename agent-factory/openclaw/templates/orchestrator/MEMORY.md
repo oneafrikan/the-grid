@@ -7,6 +7,6 @@ token list.
 Agent-writable in the deployed workspace (mode 664) per B2's file-permission
 scheme, and PRESERVED ON REGEN — once a live agent has appended real memory,
 re-running the deploy script must not clobber it with this template's
-rendered content again (matches Guide's generate.sh regen contract).
+rendered content again (matches the earlier factory's regen contract).
 -->
 {{RENDERED_CONTENT}}

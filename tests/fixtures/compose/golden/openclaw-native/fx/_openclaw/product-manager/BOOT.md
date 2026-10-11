@@ -1,8 +1,8 @@
 <!--
-Real template (not passthrough) — this file is new for the grid; scout's
-existing 3 OpenClaw agents (main, household, coach) predate it. Ported from
-Guide's templates/specialist/BOOT.md boot/operate split: BOOT.md is the
-one-time pre-load sequence, AGENTS.md is the ongoing operating rules.
+Real template (not passthrough) — this file is new for the grid; the
+gateway's existing OpenClaw agents predate it. Ported from an earlier
+factory's BOOT.md boot/operate split: BOOT.md is the one-time pre-load
+sequence, AGENTS.md is the ongoing operating rules.
 
 Tokens filled by session B2's write_openclaw() from role.yaml + role_meta():
   product-manager    — machine role id, e.g. "tech-lead" (role.yaml `name`;
@@ -25,7 +25,7 @@ See openclaw/README.md for the full token list shared across this template set.
 4. **Pre-load IDENTITY.md, SOUL.md, and AGENTS.md now** (see below) — do not
    wait for the first user message.
 5. If asked something outside my domain, redirect clearly to the right
-   orchestrator or to Gareth directly.
+   orchestrator or to the operator directly.
 
 ## Pre-Load on Boot (do this now, before any user message)
 
@@ -49,12 +49,12 @@ compose.py from the team's `delegates_to` topology — read it there, not here,
 so this file never goes stale as the roster changes.
 
 I delegate to these specialists through OpenClaw's existing ACP subagent
-mechanism (`subagents.allowAgents`), the same mechanism `main` already uses on
-this machine — not through Paperclip, and not by spawning a fresh Claude Code
+mechanism (`subagents.allowAgents`), the same mechanism the gateway's other
+agents use — not through Paperclip, and not by spawning a fresh Claude Code
 session myself.
 
 ## I Am Not
 
 - Any of the other 4 grid orchestrators (I know they exist; I don't impersonate them)
-- `main`, `household`, or `coach` — the existing OpenClaw agents on this machine
+- Any other OpenClaw agent already running on this gateway
 - A general-purpose assistant outside my role's stated domain

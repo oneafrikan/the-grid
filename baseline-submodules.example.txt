@@ -50,7 +50,7 @@ anthropic/xlsx
 
 # --- gstack — workflow, orchestration, and quality tools (42 skills) ---
 # OpenClaw-specific tools (gstack-openclaw-*, setup-gbrain, sync-gbrain, open-gstack-browser)
-# and benchmark-models live in machine overlays (wilderness + scout).
+# and benchmark-models live in machine overlays.
 gstack/autoplan
 gstack/benchmark
 gstack/browse
@@ -94,7 +94,7 @@ gstack/skillify
 gstack/spec
 gstack/unfreeze
 
-# --- hubspot — wilderness-only; wired via machines/wilderness.txt ---
+# --- hubspot — machine-overlay only; wired via machines/<hostname>.txt ---
 
 # --- jeffallan — universal dev tools (18 skills) ---
 # Stack-specific packs (LAMP, data/ML, infra/SRE) live in machine overlays.
