@@ -1,0 +1,4 @@
+# Flat "key: value" lines only. Parsed by rules.py (no YAML library).
+summary: Go - error wrapping, context and goroutine lifetimes, standard-library security, testing package pitfalls
+tier: 2
+adapted_from: affaan-m/ECC rules/golang @ ef648e0 (MIT)
