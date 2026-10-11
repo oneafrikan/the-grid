@@ -192,9 +192,9 @@ print("denies=" + ",".join(denies))' "$F/m.txt"
 
 # --- (e) the other subcommands are stubs -------------------------------------------
 
-@test "doctor repair uninstall drift schedule are stubs that exit 2" {
+@test "doctor repair uninstall are stubs that exit 2" {
   local c
-  for c in doctor repair uninstall drift schedule; do
+  for c in doctor repair uninstall; do
     run python3 "$GRID" --grid-dir "$F" "$c"
     [ "$status" -eq 2 ]
     [[ "$output" == *"grid: $c: not implemented"* ]]
