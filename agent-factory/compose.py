@@ -738,6 +738,16 @@ def render_subagent_body(agent: dict, slug: str, project_context: str = "") -> s
     )
 
 
+def subagent_description(role: str) -> str:
+    """The description of a specialist subagent, identical on every harness.
+
+    A role.yaml `description:` (one line, budget-and-usage) replaces the legacy formula
+    verbatim; roles without it keep the old text byte-for-byte.
+    """
+    title = role_meta(role).get("title") or role
+    return role_description(role) or f"{title}. {role_summary(role)} Use this subagent for {role} work."
+
+
 def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
                      project_context: str = "", reference_path: str = "") -> tuple[str, str]:
     """A specialist role → one Claude Code subagent `.md` (spawnable).
@@ -749,15 +759,10 @@ def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
     """
     role = agent["role"]
     slugged_name = slugged(slug, role)
-    title = role_meta(role).get("title") or role
 
     fields = {
         "name": slugged_name,
-        # A role.yaml `description:` (one line, budget-and-usage) replaces the
-        # legacy formula verbatim; roles without it keep the old text byte-for-byte.
-        "description": role_description(role) or
-                       f"{title}. {role_summary(role)} "
-                       f"Use this subagent for {role} work.",
+        "description": subagent_description(role),
         "model": model_id(resolve_model(agent)),
     }
     tools = role_meta(role).get("tools")
@@ -881,6 +886,59 @@ def write_harness_agents(target: str, name: str, config: dict, out_dir: Path) ->
     for filename, contents in rendered:
         (target_dir / "agents" / filename).write_text(contents, encoding="utf-8")
     return target_dir
+
+
+# ── Codex agent emitter ───────────────────────────────────────────────────────
+# Codex CLI reads ~/.codex/agents/<name>.toml: `name`, `description` and
+# `developer_instructions` are required; `name` (not the filename) is the identity.
+# The stdlib has no TOML writer, so strings are escaped by hand; the output is checked
+# by round-tripping through tomllib (tests/test_harness_formats.bats).
+def _toml_clean(s: str) -> str:
+    """Drop the control characters TOML forbids in strings (everything below U+0020 except
+    tab and newline, plus DEL), so a stray CR or NUL cannot make the file invalid."""
+    return "".join(c for c in s if c in "\n\t" or (c >= " " and c != "\x7f"))
+
+
+def toml_basic(s: str) -> str:
+    """A TOML single-line basic string literal, including the quotes."""
+    out = _toml_clean(s).replace("\\", "\\\\").replace('"', '\\"')
+    return '"' + out.replace("\n", "\\n").replace("\t", "\\t") + '"'
+
+
+def toml_multiline(s: str) -> str:
+    """A TOML multi-line basic string literal, including the delimiters.
+
+    Only `\\` and runs of three quotes need escaping inside; trailing quotes are escaped
+    too, since they would otherwise merge with the closing delimiter. The newline right
+    after the opening delimiter is trimmed by TOML, so the parsed value equals `s`.
+    """
+    cleaned = _toml_clean(s)
+    # Peel trailing quotes off BEFORE escaping, so the escapes below cannot be re-split.
+    body = cleaned.rstrip('"')
+    trailing = len(cleaned) - len(body)
+    out = body.replace("\\", "\\\\").replace('"""', '\\"\\"\\"') + '\\"' * trailing
+    return '"""\n' + out + '"""'
+
+
+def emit_codex_agent(agent: dict, slug: str) -> tuple[str, str]:
+    """A specialist role → one Codex subagent `<name>.toml`. Returns (filename, contents).
+
+    Key order is name, description, sandbox_mode (only when the role has a `tools:` allowlist
+    with neither Edit nor Write), developer_instructions. `model` is never written, so Codex
+    uses the session's model. A read-only sandbox also blocks writes through Bash: stricter
+    than Claude's Bash-can-write, which errs safe for read-only roles (qa, security).
+    """
+    role = agent["role"]
+    name = slugged(slug, role)
+    lines = [f"name = {toml_basic(name)}", f"description = {toml_basic(subagent_description(role))}"]
+    tools = role_meta(role).get("tools")
+    if tools and not {"Edit", "Write"} & set(tools):
+        lines.append('sandbox_mode = "read-only"')
+    lines.append(f"developer_instructions = {toml_multiline(render_subagent_body(agent, slug))}")
+    return f"{name}.toml", "\n".join(lines) + "\n"
+
+
+AGENT_TARGETS["codex"] = emit_codex_agent
 
 
 # ── portable persona writer ──────────────────────────────────────────────────
