@@ -18,6 +18,5 @@ paths:
 - In BigQuery, list the largest table first in a `JOIN`, then the smallest.
 - In BigQuery, join on `INT64` keys rather than `STRING` keys; they compare faster.
 - In BigQuery, replace a self-join with a window function or `PIVOT`.
-- In BigQuery, avoid joins that produce more rows than they read, such as a `CROSS JOIN`.
 - In BigQuery, write results used more than once to a temporary table; a repeatedly referenced CTE may be evaluated each time.
 - In BigQuery, keep `ORDER BY` in the outermost query or a window function, not mid-query.
