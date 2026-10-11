@@ -69,6 +69,11 @@ submodules into two tiers:
 - `scripts/sources.sh` — regenerates `docs/SOURCES.md` (one upstream URL per
   submodule, tier from the baseline). `--check` HEADs every URL as a rot detector,
   non-zero exit on failure. Deterministic; never edit `SOURCES.md` by hand.
+- `rules/` + `scripts/rules.py` — path-scoped rule packs (`rules/<pack>/<topic>.md`, frontmatter
+  `paths:` only). Opt-in via `rules:<pack>` / `-rules:<pack>` manifest entries (symlinked to
+  `$RULES_DIR/grid/<pack>/` by wire.sh, see the wire.sh contract). `rules.py lint|list|emit`
+  (stdlib only): `lint` runs in the gate, `list` is the pack inventory, `emit` renders Cursor
+  `.mdc` or an `AGENTS.md`/`GEMINI.md` block. Authoring: `rules/README.md`; user docs: `docs/rules.md`.
 - `scripts/check-personal.sh` — scans the **tracked** tree for personal data (emails,
   home paths, tokens, private IPs, tailnet hosts, blocked file types, oversized files).
   Three rule sources, merged: `scripts/personal-patterns.txt` (public generic rules),
