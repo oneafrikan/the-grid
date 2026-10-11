@@ -1,0 +1,4 @@
+# Flat "key: value" lines only. Parsed by rules.py (no YAML library).
+summary: Vue 3 - script setup, style guide essentials, reactivity, composables, XSS, test utilities
+tier: 2
+adapted_from: affaan-m/ECC rules/vue @ ef648e0 (MIT)

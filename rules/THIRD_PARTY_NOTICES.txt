@@ -34,4 +34,7 @@ Adapted packs
 # adds the tier 2 pack. `rules.py lint` (E_ATTRIBUTION) fails a tier 2 pack whose
 # name is not listed here. Lines starting with # are comments. Initially empty.
 python
+react
 typescript
+vue
+web
