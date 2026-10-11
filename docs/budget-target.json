@@ -4,8 +4,8 @@
   "per_entry_max_chars": 754,
   "owned": {
     "skills_max_chars": 3864,
-    "orchestrator_roles_max_chars": 2018,
-    "agent_roles_max_chars": 7140,
+    "orchestrator_roles_max_chars": 1374,
+    "agent_roles_max_chars": 5672,
     "skill_body_max_bytes": 6854
   },
   "baseline": {

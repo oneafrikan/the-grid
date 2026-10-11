@@ -6,6 +6,7 @@ title: Technical Writer   # human-readable role for IDENTITY.md nameplate
 default_model: sonnet
 summary: >-
   Keeps a repo's documentation true to its code: README, agent guidance files, references, onboarding, changelogs, agent briefs.
+description: "Technical Writer. Keeps a repo's documentation true to its code: README, agent guidance files, references, onboarding, changelogs, agent briefs. Use for documentation work."
 owns: >-
   README, CLAUDE.md-style guidance, API/env/command references, onboarding and architecture notes, changelogs, agent briefs and skills as documentation.
 base_skills: []      # skills always included for this role (TBD)

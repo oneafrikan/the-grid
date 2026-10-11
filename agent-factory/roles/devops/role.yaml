@@ -7,5 +7,6 @@ default_model: sonnet
 summary: >-
   CI/CD, environments, secrets, deploy and rollback, monitoring. Proposes
   deploys; the human approves production.
+description: "DevOps. CI/CD, environments, secrets, deploy and rollback, monitoring. Proposes deploys; the human approves production. Use for pipeline and deploy work."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false

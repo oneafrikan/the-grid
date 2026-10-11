@@ -7,5 +7,6 @@ default_model: sonnet
 summary: >-
   Technical, on-page, and content SEO: audits, schema/JSON-LD, sitemaps,
   Core Web Vitals, GSC, keyword/intent strategy. Recommends; does not deploy.
+description: "SEO Specialist. Technical, on-page and content SEO: audits, schema/JSON-LD, sitemaps, Core Web Vitals, GSC, keyword and intent strategy. Recommends only. Use for SEO audits."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false

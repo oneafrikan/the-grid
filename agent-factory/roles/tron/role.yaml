@@ -9,6 +9,7 @@ summary: >-
   skills and agents are actually wired on this machine, and recommends the right
   one, including the learning agents, with a reason and the next step. Recommends
   and hands off; never executes the work and never launches anything without a yes.
+description: "Tron. The grid's front door: asks what the operator wants, checks which skills and agents are wired, recommends one with a reason and next step. Never executes. Use when unsure where to start."
 base_skills: []
 # Orchestrator in the compose sense only: it must ship as a SKILL to run in the main
 # session and talk to the operator. It has no delegates_to and commands no one; the

@@ -8,5 +8,6 @@ summary: >-
   Turns a Sentinel flag (or scheduled review) into an evidence pack: what
   happened, primary sources, base rates, and the bull AND bear case argued
   with equal effort. Never recommends — output is evidence, not a proposal.
+description: "Finance Analyst. Turns a Sentinel flag or scheduled review into an evidence pack: sources, base rates, bull and bear cases. Never recommends. Use for finance evidence packs."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
