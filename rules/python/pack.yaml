@@ -1,0 +1,4 @@
+# Flat "key: value" lines only. Parsed by rules.py (no YAML library).
+summary: Python - PEP 8 and PEP 484 pitfalls, standard-library security, pytest conventions, FastAPI handlers
+tier: 2
+adapted_from: affaan-m/ECC rules/python @ ef648e0 (MIT)
