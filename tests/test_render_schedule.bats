@@ -90,21 +90,21 @@ in_proc() {
 }
 
 @test "launchd plist: label, program args without a login shell, HOME/PATH, calendar, one log file" {
-  rs render_launchd_plist io.the-grid.issue-loop.owner-name /Users/x /srv/repo /Users/x/.grid/logs daily:02:00 /bin/bash /srv/repo/loop/run-issues.sh
+  rs render_launchd_plist io.the-grid.issue-loop.owner-name /Users/you /srv/repo /Users/you/.grid/logs daily:02:00 /bin/bash /srv/repo/loop/run-issues.sh
   [ "$status" -eq 0 ]
   contains "$output" "<string>io.the-grid.issue-loop.owner-name</string>"
   contains "$output" "<string>/bin/bash</string>"
   contains "$output" "<string>/srv/repo/loop/run-issues.sh</string>"
   lacks "$output" "<string>-l</string>"
   lacks "$output" "-lc"
-  contains "$output" "<string>/Users/x/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>"
+  contains "$output" "<string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>"
   contains "$output" "<key>HOME</key>"
   contains "$output" "<string>/srv/repo</string>"
   contains "$output" "<integer>2</integer>"
   contains "$output" "<integer>0</integer>"
   lacks "$output" "Weekday"
   contains "$output" "<key>StandardOutPath</key>"
-  contains "$output" "<string>/Users/x/.grid/logs/io.the-grid.issue-loop.owner-name.log</string>"
+  contains "$output" "<string>/Users/you/.grid/logs/io.the-grid.issue-loop.owner-name.log</string>"
   # well-formed XML
   printf '%s\n' "$output" > "$T/p.plist"
   if command -v plutil >/dev/null 2>&1; then plutil -lint "$T/p.plist"; fi
@@ -120,9 +120,9 @@ in_proc() {
 }
 
 @test "crontab line: daily and weekly" {
-  rs render_crontab_line daily:02:00 /home/u/.grid/logs/issue-loop-owner-name.log /srv/repo /bin/bash /srv/repo/loop/run-issues.sh
+  rs render_crontab_line daily:02:00 /home/user/.grid/logs/issue-loop-owner-name.log /srv/repo /bin/bash /srv/repo/loop/run-issues.sh
   [ "$status" -eq 0 ]
-  [ "$output" = "00 02 * * * mkdir -p /home/u/.grid/logs && cd /srv/repo && /bin/bash /srv/repo/loop/run-issues.sh >> /home/u/.grid/logs/issue-loop-owner-name.log 2>&1" ]
+  [ "$output" = "00 02 * * * mkdir -p /home/user/.grid/logs && cd /srv/repo && /bin/bash /srv/repo/loop/run-issues.sh >> /home/user/.grid/logs/issue-loop-owner-name.log 2>&1" ]
   rs render_crontab_line weekly:Sun:04:30 /l/x.log /srv/repo /bin/true
   [ "$output" = "30 04 * * 0 mkdir -p /l && cd /srv/repo && /bin/true >> /l/x.log 2>&1" ]
 }
@@ -130,8 +130,8 @@ in_proc() {
 @test "activation commands: printed text for the three schedulers" {
   rs render_activation_commands systemd issue-loop-owner-name.timer
   [ "$output" = "systemctl --user daemon-reload && systemctl --user enable --now issue-loop-owner-name.timer" ]
-  rs render_activation_commands launchd /Users/x/Library/LaunchAgents/io.the-grid.issue-loop.owner-name.plist
-  [ "$output" = 'launchctl bootstrap gui/$(id -u) /Users/x/Library/LaunchAgents/io.the-grid.issue-loop.owner-name.plist' ]
+  rs render_activation_commands launchd /Users/you/Library/LaunchAgents/io.the-grid.issue-loop.owner-name.plist
+  [ "$output" = 'launchctl bootstrap gui/$(id -u) /Users/you/Library/LaunchAgents/io.the-grid.issue-loop.owner-name.plist' ]
   rs render_activation_commands cron '00 02 * * * cd /srv && /bin/true >> /l 2>&1'
   [ "$output" = "(crontab -l 2>/dev/null; echo '00 02 * * * cd /srv && /bin/true >> /l 2>&1') | crontab -" ]
   rs render_activation_commands upstart foo

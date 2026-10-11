@@ -11,13 +11,14 @@ setup() {
   mkdir -p "$G/scripts" "$G/.githooks" "$G/tests/lib/bats-core/bin" "$G/stubbin"
   cp "$REPO_ROOT/scripts/gate.sh" "$G/scripts/gate.sh"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$G/scripts/catalog.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$G/scripts/check-personal.sh"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$G/.githooks/pre-commit"
   printf '#!/usr/bin/env bash\necho "1..0"\nexit 0\n' > "$G/tests/lib/bats-core/bin/bats"
   chmod +x "$G"/scripts/*.sh "$G/.githooks/pre-commit" "$G/tests/lib/bats-core/bin/bats"
   ( cd "$G" && git init -q && git config user.email t@t && git config user.name t \
       && git add -A && git commit -q -m init )
-  # PATH with essentials but no shellcheck
-  for t in git bash env dirname grep cat rm mktemp uname sed; do
+  # PATH with essentials but no shellcheck (tr/wc/xargs: needed by the real check-personal.sh)
+  for t in git bash env dirname grep cat rm mktemp uname sed tr wc xargs; do
     ln -s "$(command -v $t)" "$G/stubbin/$t" 2>/dev/null || true
   done
 }
@@ -84,4 +85,32 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" bash scripts/gate.s
   # the final summary line lists personas among the skipped checks
   last="$(printf '%s\n' "$output" | tail -n 1)"
   [[ "$last" == "gate: PASS (skipped:"*"personas"* ]] || false
+}
+
+@test "G3: with scripts/check-personal.sh absent the personal check is skipped LOUDLY, not failed" {
+  rm "$G/scripts/check-personal.sh"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"check-personal.sh absent"* ]] || false
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"personal"* ]] || false
+}
+
+# Uses the REAL scanner and patterns in the fake grid. HOME is $G, so no private
+# denylist exists: the scan runs generic-only and the gate records the skip.
+@test "personal check passes generic-only and lists personal-denylist as skipped; a home path makes it FAIL" {
+  cp "$REPO_ROOT/scripts/check-personal.sh" "$G/scripts/check-personal.sh"
+  cp "$REPO_ROOT/scripts/personal-patterns.txt" "$REPO_ROOT/scripts/personal-allow-paths.txt" "$G/scripts/"
+  ( cd "$G" && git add -A && git commit -q -m scan )
+  run run_gate
+  [ "$status" -eq 0 ]
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"personal-denylist"* ]] || false
+
+  # A real-looking home path in a tracked file must fail the gate.
+  printf 'cd /home/%s/work\n' someone > "$G/notes.txt"
+  ( cd "$G" && git add -A && git commit -q -m leak )
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — personal"* ]] || false
 }

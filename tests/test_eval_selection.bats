@@ -42,7 +42,7 @@ teardown() {
 
 commit() {
   git -C "$R" add -A
-  git -C "$R" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q -m "$1"
+  git -C "$R" -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -q -m "$1"
 }
 
 # Append a line to a file in the temp repo and commit it as the one change under test.

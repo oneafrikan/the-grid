@@ -103,7 +103,7 @@ Why so much isolation (loops design, Q1 and Q13 revised): the worker runs with `
 
 9. `[browser]` Generate the private key: App settings > Private keys > Generate a private key. The browser downloads `<app-slug>.<date>.private-key.pem`. Do not paste it into chat, a repo or a shell history line, and delete the download after step 10.
 
-   Success: the `.pem` exists and `head -1 <file>` prints `-----BEGIN RSA PRIVATE KEY-----`.
+   Success: the `.pem` exists and `head -1 <file>` prints a `-----BEGIN ... PRIVATE KEY-----` line.
 
 10. `[sudo]` Put the key and the ids on the box. The runner PARSES the env file (never sources it) and reads only `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `GH_APP_KEY_FILE` (optional, defaults to the path below), `LOOP_TRUSTED_ACTORS` and `LOOP_OPERATOR_HOME`. The env file and the key file must both be mode 600 or the runner refuses to start, and a `GH_TOKEN=` line in the env file is refused.
     ```bash
