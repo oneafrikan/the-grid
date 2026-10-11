@@ -304,7 +304,7 @@ def clean(text: str) -> str:
 
 
 def strip_delims(text: str) -> str:
-    """Remove the digest delimiters from item text so it cannot forge a fake line.
+    """Remove the digest delimiters from item text so it cannot imitate a real line.
 
     `<<<`, `>>>` and the word DIGEST go; what is left is plain text. Whitespace
     is re-collapsed afterwards.
