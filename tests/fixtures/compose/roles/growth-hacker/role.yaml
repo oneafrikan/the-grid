@@ -1,0 +1,6 @@
+name: growth-hacker
+title: Fixture growth-hacker
+summary: Fixture role growth-hacker.
+default_model: sonnet
+orchestrator: true
+model_rationale: fixture
