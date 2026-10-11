@@ -70,7 +70,7 @@ VALID_YAML='version: 1\nsources:\n  alpha:\n    url: https://example.com/a.git\n
   run python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), feature_version=(3, 8))' "$GRID"
   [ "$status" -eq 0 ]
   # Running the CLI (which imports miniyaml) must not create one either.
-  run python3 "$GRID" --grid-dir "$F" lock
+  run python3 "$GRID" --grid-dir "$F" install
   [ "$status" -eq 2 ]
   after=$(find "$REPO_ROOT/scripts" -name __pycache__ | LC_ALL=C sort)
   [ "$before" = "$after" ]
@@ -192,9 +192,9 @@ print("denies=" + ",".join(denies))' "$F/m.txt"
 
 # --- (e) the other subcommands are stubs -------------------------------------------
 
-@test "lock install doctor repair uninstall drift schedule are stubs that exit 2" {
+@test "install doctor repair uninstall drift schedule are stubs that exit 2" {
   local c
-  for c in lock install doctor repair uninstall drift schedule; do
+  for c in install doctor repair uninstall drift schedule; do
     run python3 "$GRID" --grid-dir "$F" "$c"
     [ "$status" -eq 2 ]
     [[ "$output" == *"grid: $c: not implemented"* ]]
@@ -207,7 +207,7 @@ print("denies=" + ",".join(denies))' "$F/m.txt"
   local stub; stub=$(mktemp -d)
   printf '#!/bin/sh\necho "git version 2.20.1"\n' > "$stub/git"
   chmod +x "$stub/git"
-  PATH="$stub:$PATH" run python3 "$GRID" --grid-dir "$F" lock
+  PATH="$stub:$PATH" run python3 "$GRID" --grid-dir "$F" install
   rm -rf "$stub"
   [ "$status" -eq 2 ]
   [[ "$output" == *"grid: git 2.25 or newer is required (found 2.20.1)"* ]]
@@ -217,7 +217,7 @@ print("denies=" + ",".join(denies))' "$F/m.txt"
   local stub; stub=$(mktemp -d)
   printf '#!/bin/sh\necho "git version 2.25.0"\n' > "$stub/git"
   chmod +x "$stub/git"
-  PATH="$stub:$PATH" run python3 "$GRID" --grid-dir "$F" lock
+  PATH="$stub:$PATH" run python3 "$GRID" --grid-dir "$F" install
   rm -rf "$stub"
   # Past the floor check it reaches the stub.
   [ "$status" -eq 2 ]
