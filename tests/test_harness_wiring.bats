@@ -651,3 +651,42 @@ description: >
   [ ! -e "$GRID_HARNESS_HOME/.codex" ]
   [ ! -e "$GRID_HARNESS_HOME/.gemini" ]
 }
+
+# ================================================================ Gemini / Antigravity (multi-harness group 5)
+# gemini links specialists into .gemini/agents and skills into the shared .agents/skills;
+# antigravity is skills-only, into its OWN skills dir (path unverified, see docs/harnesses.md).
+
+@test "GRID_HARNESS=gemini links _gemini-cli agents into .gemini/agents and skills into the shared dir" {
+  stub_all_agents
+  GRID_HARNESS=gemini wire
+  [ "$status" -eq 0 ]
+  [ -L "$HS/skill-alpha" ] && [ -L "$HS/skill-beta" ]
+  [ -L "$GRID_HARNESS_HOME/.gemini/agents/a.md" ]
+  [ "$(readlink "$GRID_HARNESS_HOME/.gemini/agents/a.md")" = "$MOCK_GRID/agent-factory/projects/p/_gemini-cli/agents/a.md" ]
+  # Only the gemini agent target was linked: nothing from the codex/opencode/openclaw stubs,
+  # and no Antigravity dir (.gemini holds just agents/ and agents/a.md).
+  [ "$(find "$GRID_HARNESS_HOME/.gemini" -mindepth 1 | wc -l | tr -d ' ')" -eq 2 ]
+  [ ! -e "$GRID_HARNESS_HOME/.gemini/antigravity-cli" ]
+  [ ! -e "$GRID_HARNESS_HOME/.codex" ] && [ ! -e "$GRID_HARNESS_HOME/.config" ]
+  # Idempotent, and no drift afterwards.
+  local t1; t1="$(tree "$GRID_HARNESS_HOME")"
+  GRID_HARNESS=gemini wire
+  [ "$status" -eq 0 ]
+  [ "$(tree "$GRID_HARNESS_HOME")" = "$t1" ]
+  GRID_HARNESS=gemini wire --check
+  [ "$status" -eq 0 ]
+}
+
+@test "GRID_HARNESS=antigravity links skills into .gemini/antigravity-cli/skills and creates no agents dir" {
+  stub_all_agents
+  GRID_HARNESS=antigravity wire
+  [ "$status" -eq 0 ]
+  [ -L "$GRID_HARNESS_HOME/.gemini/antigravity-cli/skills/skill-alpha" ]
+  [ -L "$GRID_HARNESS_HOME/.gemini/antigravity-cli/skills/skill-beta" ]
+  # Skills-only: no agents dir, no agent link, and the shared dir is not used.
+  [ ! -e "$GRID_HARNESS_HOME/.gemini/agents" ]
+  [ ! -e "$GRID_HARNESS_HOME/.agents" ]
+  [ "$(find "$GRID_HARNESS_HOME" \( -name 'a.md' -o -name 'a.toml' \) | wc -l | tr -d ' ')" -eq 0 ]
+  GRID_HARNESS=antigravity wire --check
+  [ "$status" -eq 0 ]
+}
