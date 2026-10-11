@@ -1,0 +1,4 @@
+# Flat "key: value" lines only. Parsed by rules.py (no YAML library).
+summary: Ruby and Rails - rescue and hash pitfalls, injection and deserialization, controller, model and view hazards, RSpec
+tier: 2
+adapted_from: affaan-m/ECC rules/ruby @ ef648e0 (MIT)
