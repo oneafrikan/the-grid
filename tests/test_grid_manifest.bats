@@ -367,3 +367,25 @@ except ValueError:
     print("rejected")'
   [ "$output" = "rejected" ]
 }
+
+# Docs guard (group 7): every `grid <subcommand>` the "Install without submodules"
+# section of BOOTSTRAP.md names must be a real subcommand in `grid --help`, so the
+# install docs cannot drift from the CLI. Only a backticked `grid <word>` or a
+# `scripts/grid <word>` counts as a subcommand mention (plain prose such as "grid
+# placed" is ignored).
+@test "BOOTSTRAP.md install section: every grid subcommand it names is in grid --help" {
+  local section cmds help cmd n=0
+  # The section runs from its heading to the next level-2 heading.
+  section=$(awk '/^## Install without submodules/{f=1;next} /^## /{f=0} f' "$REPO_ROOT/BOOTSTRAP.md")
+  [ -n "$section" ]
+  cmds=$(printf '%s\n' "$section" | grep -oE '(`grid|scripts/grid) [a-z]+' | awk '{print $2}' | sort -u)
+  [ -n "$cmds" ]
+  help=$(python3 "$GRID" --help)
+  for cmd in $cmds; do
+    n=$((n + 1))
+    # Match the COMMAND list lines only (indented, name first).
+    printf '%s\n' "$help" | grep -qE "^ +$cmd( |$)" || { echo "not in grid --help: $cmd"; return 1; }
+  done
+  # Guard against the extraction silently matching nothing useful.
+  [ "$n" -ge 5 ]
+}
