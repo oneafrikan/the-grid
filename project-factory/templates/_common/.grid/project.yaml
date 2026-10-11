@@ -25,3 +25,10 @@
 #                              # strict   - same as standard for now
 #   target: local              # local  - .claude/settings.local.json (machine-local, the default)
 #                              # shared - .claude/settings.json (committed; commands carry no absolute path)
+
+# learning: on                 # opt in to instincts: learn working habits from your own sessions in this repo
+#                              # captures: tool names, scrubbed and truncated command/prompt text (secrets redacted)
+#                              # stored:   raw observations in ~/.grid/instincts/ on this machine only (never synced, never committed)
+#                              # forget:   scripts/instincts.sh forget <project-id> --yes
+#                              # emitted by `agent-factory/deploy_hooks.py <this-repo>` under any hooks profile, even off
+#                              # see docs/instincts.md in the-grid
