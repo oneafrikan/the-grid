@@ -43,6 +43,15 @@
 #     STUB_PLANT_PREPUSH       path: the worker plants a pre-push hook that touches it
 #     STUB_STDIN_DUMP          path: the last `-p` call's stdin is copied there
 #     STUB_CLAUDE_STDIN        path: every `-p` call's drained stdin is copied there (same as STUB_STDIN_DUMP)
+#     Every call also records, in $STUB_DIR: claude.cwd, claude.child-env (GRID_AUTOHANDOFF_CHILD),
+#     claude.pgid, claude.pid, claude.umask (auto-handoff tests).
+#     STUB_CLAUDE_MODE         unset = the behaviour above. handoff-logs | handoff-fallback | handoff-target |
+#                              handoff-extra | handoff-stray act like the auto-handoff child: write
+#                              2026-01-01-testhost-stub-{handoff,context}.md (body ${STUB_HANDOFF_BODY:-stub}) into
+#                              $PWD/LOGS, $GRID_HANDOFF_FALLBACK_DIR/<basename PWD>, $STUB_HANDOFF_DIR, $PWD/LOGS
+#                              (+ .git/hooks/x and a line in .git/config), $PWD/LOGS (+ a/b/c/d/e/stray.md), then
+#                              exit $STUB_CLAUDE_EXIT (default 0). They first sleep STUB_CLAUDE_SLEEP seconds and
+#                              copy the digest named in the prompt to $STUB_DIR/claude.digest.
 #     An "analyser" call (argv has --system-prompt: scripts/instincts/analyse.py) is neither worker nor
 #     review: it sleeps STUB_CLAUDE_SLEEP seconds first, then prints STUB_CLAUDE_JSON verbatim (default
 #     the success envelope) and exits STUB_CLAUDE_EXIT (default 0).
@@ -151,6 +160,46 @@ case "${1:-}" in
     exit 0 ;;
 esac
 stub_log claude "$@"
+# ---- auto-handoff worker call (hook-profiles group 3) ----
+# Facts about this process, recorded on every run for the worker tests: cwd, the
+# recursion-guard env value, the process group (compared with the test's own), the pid
+# (killed or checked by the timeout test) and the umask. Nothing else reads them.
+if [ -n "${STUB_DIR:-}" ]; then
+  pwd > "$STUB_DIR/claude.cwd"
+  printf '%s' "${GRID_AUTOHANDOFF_CHILD:-}" > "$STUB_DIR/claude.child-env"
+  ps -o pgid= -p $$ | tr -d ' ' > "$STUB_DIR/claude.pgid"
+  echo $$ > "$STUB_DIR/claude.pid"
+  umask > "$STUB_DIR/claude.umask"
+fi
+# STUB_CLAUDE_MODE=handoff-* acts like the real child of hooks/lib/auto-handoff-worker.sh:
+# it writes the two handoff files and leaves. Unset (the default) = the old behaviour below.
+case "${STUB_CLAUDE_MODE:-}" in
+  handoff-*)
+    # Keep a copy of the digest the prompt names, so a test can read what the child saw.
+    digest="$(printf '%s' "$*" | sed -n 's/.*digest file \([^ ]*\), not this session.*/\1/p')"
+    if [ -n "$digest" ] && [ -f "$digest" ] && [ -n "${STUB_DIR:-}" ]; then cp "$digest" "$STUB_DIR/claude.digest"; fi
+    if [ -n "${STUB_CLAUDE_SLEEP:-}" ]; then sleep "$STUB_CLAUDE_SLEEP"; fi
+    hf=2026-01-01-testhost-stub-handoff.md
+    cf=2026-01-01-testhost-stub-context.md
+    body="${STUB_HANDOFF_BODY:-stub}"
+    # write_pair <dir>: both handoff files into <dir>
+    write_pair() { mkdir -p "$1"; printf '%s\n' "$body" > "$1/$hf"; printf '%s\n' "$body" > "$1/$cf"; }
+    case "$STUB_CLAUDE_MODE" in
+      handoff-logs)     write_pair "$PWD/LOGS" ;;
+      handoff-fallback) write_pair "$GRID_HANDOFF_FALLBACK_DIR/$(basename "$PWD")" ;;
+      handoff-target)   write_pair "$STUB_HANDOFF_DIR" ;;
+      handoff-extra)    # a planted git hook and a changed git config (the write-only boundary failing)
+        write_pair "$PWD/LOGS"
+        mkdir -p "$PWD/.git/hooks"
+        printf '#!/bin/sh\n' > "$PWD/.git/hooks/x"
+        echo '[stub] changed = 1' >> "$PWD/.git/config" ;;
+      handoff-stray)    # a deep stray file (deeper than the old depth-4 scan)
+        write_pair "$PWD/LOGS"
+        mkdir -p "$PWD/a/b/c/d/e"
+        echo stray > "$PWD/a/b/c/d/e/stray.md" ;;
+    esac
+    exit "${STUB_CLAUDE_EXIT:-0}" ;;
+esac
 # issue number from the worktree name (issue-N), if any
 n=""
 case "$(basename "$(pwd)")" in issue-[0-9]*) n="${PWD##*issue-}" ;; esac
