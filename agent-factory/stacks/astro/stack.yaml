@@ -1,6 +1,7 @@
 # stack.yaml — astro (STUB)
 # Overlay injected into a role's SKILL.md at compose time. Fragment files live
 # beside this. Stacks are optional overlays, not the spine.
+# Conventions for this stack live in rule packs: typescript, web (see docs/rules.md).
 name: astro
 summary: >-
   Astro, Alpine.js, Content Collections, islands.
