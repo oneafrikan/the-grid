@@ -883,6 +883,36 @@ def write_harness_agents(target: str, name: str, config: dict, out_dir: Path) ->
     return target_dir
 
 
+# ── portable persona writer ──────────────────────────────────────────────────
+# One plain-Markdown file per role (orchestrators included) for pasting into a chat-UI
+# Project. Not a harness agent: no frontmatter, no tools, no permissions, so it does not
+# go through AGENT_TARGETS. The lean body (empty slug, no project context) carries no
+# nameplate, boot sequence or memory plumbing, hence no machine or operator values and
+# no user-config override is needed.
+def write_portable(name: str, config: dict, out_dir: Path) -> Path:
+    """Emit <out_dir>/<name>/_portable/<role>.md for every role in the config.
+
+    Each file is `# <Title>` + blank line + render_lean_body(agent, ""). Idempotent: the
+    _portable dir is wiped and rewritten each run, so a removed role leaves no orphan.
+    """
+    target_dir = out_dir / name / "_portable"
+    if target_dir.is_symlink():
+        raise ValueError(f"refusing to write: {target_dir} is a symlink, not a dir")
+    # Render everything BEFORE the wipe so a render error leaves the old tree untouched.
+    rendered = [
+        (f"{agent['role']}.md",
+         f"# {role_meta(agent['role']).get('title') or agent['role']}\n\n"
+         + render_lean_body(agent, ""))
+        for agent in config["agents"]
+    ]
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    target_dir.mkdir(parents=True)
+    for filename, contents in rendered:
+        (target_dir / filename).write_text(contents, encoding="utf-8")
+    return target_dir
+
+
 # ── paperclip emitter ─────────────────────────────────────────────────────────
 # A third emit target: render a deploy-ready manifest for a live Paperclip
 # instance. Pure rendering only — no network calls, no talking to a Paperclip
@@ -1372,13 +1402,14 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=PROJECTS_DIR, help="output dir")
     parser.add_argument(
         "--target",
-        choices=["openclaw", "claude-code", "paperclip", "openclaw-native", *sorted(AGENT_TARGETS)],
+        choices=["openclaw", "claude-code", "paperclip", "openclaw-native", "portable", *sorted(AGENT_TARGETS)],
         default="openclaw",
         help="emit shape: openclaw = 5 files + agents.yaml (default, legacy bare dump); "
              "claude-code = CC skills (orchestrators) + subagents (specialists); "
              "paperclip = _paperclip/manifest.json for the curated Paperclip roster; "
              "openclaw-native = _openclaw/<role>/ 9-file workspace set for roster.json's "
-             "5 orchestrator roles (whichever are present in this config)",
+             "5 orchestrator roles (whichever are present in this config); "
+             "portable = _portable/<role>.md plain-Markdown persona per role, orchestrators included",
     )
     parser.add_argument(
         "--lint-roles", action="store_true",
@@ -1421,6 +1452,7 @@ def main() -> None:
         writers = {
             "claude-code": write_claude_code, "paperclip": write_paperclip,
             "openclaw-native": write_openclaw, "openclaw": write_project,
+            "portable": write_portable,
             **{t: functools.partial(write_harness_agents, t) for t in AGENT_TARGETS},
         }
         with tempfile.TemporaryDirectory() as tmp:
@@ -1456,6 +1488,11 @@ def main() -> None:
             print(f"[dry-run] {len(roles)} of 5 roster.json roles rendered -> _openclaw/<role>/")
             if missing:
                 print(f"[dry-run] not in this compose config, skipped: {', '.join(missing)}")
+            return
+        if args.target == "portable":
+            for agent in agents:
+                print(f"  - {agent['role']:<20} -> _portable/{agent['role']}.md")
+            print(f"[dry-run] {len(agents)} personas -> _portable/")
             return
         if args.target in AGENT_TARGETS:
             # Harness agent target: specialists only, one file each (orchestrators are skipped).
@@ -1497,6 +1534,11 @@ def main() -> None:
         ha_dir = write_harness_agents(args.target, name, config, args.out)
         n = len(list((ha_dir / "agents").iterdir()))
         print(f"composed '{name}' ({args.target}): {n} specialists -> {ha_dir}/agents/")
+        return
+
+    if args.target == "portable":
+        pp_dir = write_portable(name, config, args.out)
+        print(f"composed '{name}' (portable): {len(agents)} personas -> {pp_dir}")
         return
 
     if args.target == "paperclip":
