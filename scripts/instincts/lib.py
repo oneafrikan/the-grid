@@ -6,6 +6,8 @@ a tiny CLI for the shell dispatcher (scripts/instincts.sh):
 
     python3 -I lib.py project-id [DIR]   print the project id of the repo at DIR (default .)
     python3 -I lib.py scrub              read stdin, write the scrubbed text to stdout
+    python3 -I lib.py promote|approve ID|show [PROJECT]|retire ID [PROJECT]|forget PROJECT --yes|clusters
+                                         store commands (group 4), see the functions below
 
 Exit codes (CLI): 0 ok, 1 no git remote (project-id), 2 usage error.
 
@@ -21,9 +23,12 @@ Stdlib only; no network.
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import unicodedata
@@ -395,6 +400,328 @@ def validate_instinct(obj) -> dict | None:
 
 
 # --------------------------------------------------------------------------
+# Store reading and the read-time merge (design: Instinct line, Merge across hosts)
+# --------------------------------------------------------------------------
+
+GLOBAL_DIR = "_global"          # <store>/_global/<host>.jsonl holds approved global instincts
+PROJECT_DIR_RE = re.compile(r"^[0-9a-f]{12}$")
+
+# The exact key set of a STORED line (design: Instinct line). validate_instinct
+# silently drops unknown keys, but a stored line carrying extras is tampered or
+# from a different writer, so the reader rejects it outright.
+_STORED_KEYS = frozenset(["id", "trigger", "action", "domain", "scope", "project", "confidence",
+                          "weeks_seen", "first_seen", "last_seen", "misses", "status", "host"])
+_STORED_REQUIRED = ("confidence", "last_seen", "status")
+
+
+def current_week() -> str:
+    """ISO week `YYYY-Www` of today; INSTINCTS_NOW=YYYY-MM-DD overrides (tests)."""
+    raw = os.environ.get("INSTINCTS_NOW", "")
+    try:
+        day = datetime.date.fromisoformat(raw) if raw else datetime.date.today()
+    except ValueError:
+        day = datetime.date.today()
+    iso = day.isocalendar()
+    return f"{iso[0]}-W{iso[1]:02d}"
+
+
+def _valid_scope_dir(name: str) -> bool:
+    """A store sub-directory name we accept from callers: `_global` or a 12-hex project id."""
+    return name == GLOBAL_DIR or bool(PROJECT_DIR_RE.match(name))
+
+
+def read_lines(scope_dir: str) -> list[dict]:
+    """Every valid instinct line of every host file under <store>/<scope_dir>/.
+
+    Invalid JSON, failed validate_instinct (incl. UNSAFE_RE), extra keys or missing
+    bookkeeping fields: the line is skipped, never repaired. Files are read in
+    sorted order so the result is deterministic. Each result carries `_file`, the
+    host file stem it came from (not a stored key).
+    """
+    if not _valid_scope_dir(scope_dir):
+        return []
+    d = store_dir() / scope_dir
+    out: list[dict] = []
+    for f in sorted(d.glob("*.jsonl")) if d.is_dir() else []:
+        try:
+            raw_lines = f.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for raw in raw_lines:
+            try:
+                obj = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(obj, dict) or not set(obj) <= _STORED_KEYS \
+                    or any(k not in obj for k in _STORED_REQUIRED):
+                continue
+            v = validate_instinct(obj)
+            if v is not None:
+                v["_file"] = f.stem
+                out.append(v)
+    return out
+
+
+def _line_order(l: dict):
+    """Sort key: newest last_seen, then highest confidence, then host (deterministic ties)."""
+    return (l["last_seen"], l["confidence"], l.get("_file", ""))
+
+
+def merge_instincts(scope_dir: str) -> list[dict]:
+    """Read-time merge of one project's (or `_global`'s) host files; one dict per id.
+
+    Group lines by id. Among ACTIVE lines take the max confidence and the latest
+    last_seen (text fields come from the newest active line). The id is `retired`
+    when some host's retired line has last_seen >= the latest last_seen of every
+    active line; an id with only retired lines is retired too. Result is sorted by id
+    and includes retired ids (status field), so callers filter on status.
+    `scope_dir` is a 12-hex project id or `_global`.
+    """
+    groups: dict[str, list[dict]] = {}
+    for l in read_lines(scope_dir):
+        groups.setdefault(l["id"], []).append(l)
+    merged = []
+    for iid in sorted(groups):
+        lines = groups[iid]
+        active = [l for l in lines if l["status"] == "active"]
+        retired = [l for l in lines if l["status"] == "retired"]
+        newest_active = max(active, key=_line_order) if active else None
+        if retired and (newest_active is None
+                        or max(r["last_seen"] for r in retired) >= newest_active["last_seen"]):
+            m = dict(max(retired, key=_line_order), status="retired")
+        else:
+            m = dict(newest_active, status="active")
+            m["confidence"] = max(l["confidence"] for l in active)
+            firsts = [l["first_seen"] for l in active if "first_seen" in l]
+            if firsts:
+                m["first_seen"] = min(firsts)
+            weeks = [l["weeks_seen"] for l in active if "weeks_seen" in l]
+            if weeks:
+                m["weeks_seen"] = max(weeks)
+        m["scope"] = "global" if scope_dir == GLOBAL_DIR else "project"
+        m["project"] = None if scope_dir == GLOBAL_DIR else scope_dir
+        m.pop("_file", None)
+        merged.append(m)
+    return merged
+
+
+def project_dirs() -> list[str]:
+    """Project ids that have a directory in the synced store (sorted; excludes `_global`)."""
+    d = store_dir()
+    if not d.is_dir():
+        return []
+    return sorted(p.name for p in d.iterdir() if p.is_dir() and PROJECT_DIR_RE.match(p.name))
+
+
+# --------------------------------------------------------------------------
+# Promotion (design: Promotion; Q4 = a global line needs an explicit `approve`)
+# --------------------------------------------------------------------------
+
+PROMOTE_MIN_CONF = 0.5
+PROMOTE_MIN_PROJECTS = 2
+
+# Key order of a written line, as in the design's example (stable, diff-friendly).
+_LINE_KEY_ORDER = ("id", "trigger", "action", "domain", "scope", "project", "confidence",
+                   "weeks_seen", "first_seen", "last_seen", "misses", "status", "host")
+
+
+def _stored_line(m: dict, host: str) -> dict:
+    """The line to write for merged/candidate instinct m: stored keys only, host set."""
+    line = dict(m, host=host)
+    return {k: line[k] for k in _LINE_KEY_ORDER if k in line}
+
+
+def _append_line(scope_dir: str, host: str, line: dict) -> None:
+    """Append one JSON line to <store>/<scope_dir>/<host>.jsonl (creating it)."""
+    path = store_dir() / scope_dir / f"{host}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(line) + "\n")
+
+
+def promotion_candidates() -> list[dict]:
+    """Ids active at confidence >= 0.5 in >= 2 distinct project dirs (merged view).
+
+    Each result is the proposed global line: confidence = LOWEST contributing
+    confidence (conservative, design Decisions), last_seen = latest, text from the
+    most recently seen contributor, plus `projects` (a count, not a stored key).
+    Sorted by id. Includes ids that are already approved; callers split those off.
+    """
+    by_id: dict[str, list[dict]] = {}
+    for pid in project_dirs():
+        for m in merge_instincts(pid):
+            if m["status"] == "active" and m["confidence"] >= PROMOTE_MIN_CONF:
+                by_id.setdefault(m["id"], []).append(m)
+    out = []
+    for iid in sorted(by_id):
+        contrib = by_id[iid]
+        if len(contrib) < PROMOTE_MIN_PROJECTS:
+            continue
+        top = max(contrib, key=_line_order)
+        cand = dict(top, scope="global", project=None, status="active", misses=0,
+                    confidence=min(c["confidence"] for c in contrib),
+                    last_seen=max(c["last_seen"] for c in contrib),
+                    weeks_seen=max(c.get("weeks_seen", 1) for c in contrib),
+                    projects=len(contrib))
+        firsts = [c["first_seen"] for c in contrib if "first_seen" in c]
+        if firsts:
+            cand["first_seen"] = min(firsts)
+        out.append(cand)
+    return out
+
+
+def _status_path() -> Path:
+    return instincts_state_dir() / "status.json"
+
+
+def _write_if_changed(path: Path, text: str) -> None:
+    """Write text only when it differs, so an idempotent re-run touches nothing."""
+    try:
+        if path.read_text(encoding="utf-8") == text:
+            return
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def promote() -> list[dict]:
+    """Deterministic, model-free promotion pass; returns the PENDING candidates.
+
+    * An id already approved (any line in any host's `_global/*.jsonl`) is never
+      pending; if THIS host holds an active line for it, that line's confidence and
+      last_seen are refreshed from the current candidates (only when they differ).
+    * Every other candidate is pending: recorded under `pending_global` in
+      status.json and NEVER written to the store (that needs `approve`).
+    Re-running changes no file (status.json is written canonically, only on change).
+    """
+    host = host_name()
+    global_lines = read_lines(GLOBAL_DIR)
+    approved = {l["id"] for l in global_lines}
+    # This host's latest line per id (read order = file order, so last wins).
+    own = {l["id"]: l for l in global_lines if l["_file"] == host}
+    pending = []
+    for cand in promotion_candidates():
+        iid = cand["id"]
+        if iid not in approved:
+            pending.append(cand)
+            continue
+        mine = own.get(iid)
+        # Each host writes only its own files, so only an own active line is refreshed.
+        if mine and mine["status"] == "active" and (
+                mine["confidence"] != cand["confidence"] or mine["last_seen"] != cand["last_seen"]):
+            _append_line(GLOBAL_DIR, host, _stored_line(
+                dict(mine, confidence=cand["confidence"], last_seen=cand["last_seen"]), host))
+    # Record pending candidates for `status`. Sorted keys, no timestamps: byte-stable.
+    sp = _status_path()
+    try:
+        status = json.loads(sp.read_text(encoding="utf-8"))
+        if not isinstance(status, dict):
+            status = {}
+    except (OSError, ValueError):
+        status = {}
+    if pending:
+        status["pending_global"] = [{"id": c["id"], "projects": c["projects"],
+                                     "conf": round(c["confidence"], 2)} for c in pending]
+    else:
+        status.pop("pending_global", None)
+    if sp.exists() or status:
+        _write_if_changed(sp, json.dumps(status, indent=2, sort_keys=True) + "\n")
+    return pending
+
+
+def approve(iid: str) -> tuple[bool, str]:
+    """Write the `scope: global` line for a CURRENT candidate; returns (ok, message).
+
+    Not a candidate: (False, "not a promotion candidate") and nothing written.
+    Already approved: a no-op success (file untouched).
+    """
+    if not ID_RE.match(iid or ""):
+        return False, "not a promotion candidate"
+    if any(l["id"] == iid for l in read_lines(GLOBAL_DIR)):
+        return True, f"already approved: {iid}"
+    cand = next((c for c in promotion_candidates() if c["id"] == iid), None)
+    if cand is None:
+        return False, "not a promotion candidate"
+    _append_line(GLOBAL_DIR, host_name(), _stored_line(cand, host_name()))
+    return True, f"approved global: {iid} conf={cand['confidence']:.2f}"
+
+
+# --------------------------------------------------------------------------
+# Operator commands: show, retire, forget, clusters
+# --------------------------------------------------------------------------
+
+def cmd_show(scope_dir: str) -> str:
+    """Plain-text table of merged instincts for one project plus the global set."""
+    lines = []
+    for sd in (scope_dir, GLOBAL_DIR):
+        for m in merge_instincts(sd):
+            lines.append("%-7s %-7s %.2f  %-8s %-10s %s | %s -> %s" % (
+                m["scope"], m["status"], m["confidence"], m["last_seen"], m["domain"],
+                m["id"], m["trigger"], m["action"]))
+    if not lines:
+        return "no instincts"
+    return "\n".join(["scope   status  conf  last     domain     id | trigger -> action"] + lines)
+
+
+def retire(iid: str, scope_dirs: list[str]) -> list[str]:
+    """Append a retired line (this host's file) in each scope where iid is active.
+
+    last_seen is the later of this week and the merged line's, so the retired line
+    wins the read-time merge. Returns the scopes written (empty = nothing retired).
+    """
+    done = []
+    host = host_name()
+    for sd in scope_dirs:
+        m = next((x for x in merge_instincts(sd) if x["id"] == iid and x["status"] == "active"), None)
+        if m is None:
+            continue
+        _append_line(sd, host, _stored_line(
+            dict(m, status="retired", last_seen=max(current_week(), m["last_seen"])), host))
+        done.append(sd)
+    return done
+
+
+def forget(pid: str) -> list[Path]:
+    """Delete local observations and THIS host's instinct file for a project; returns paths removed."""
+    removed = []
+    obs = instincts_state_dir() / pid
+    if obs.is_dir():
+        shutil.rmtree(obs)
+        removed.append(obs)
+    mine = store_dir() / pid / f"{host_name()}.jsonl"
+    if mine.is_file():
+        mine.unlink()
+        removed.append(mine)
+    return removed
+
+
+CLUSTER_MIN_SIZE = 3
+CLUSTER_MIN_CONF = 0.6
+GLOBAL_LIST_CONF = 0.75
+
+
+def cmd_clusters() -> str:
+    """Plain text for Tank: per-project domain clusters (>= 3 active, conf >= 0.6) and strong globals."""
+    def fmt(m):
+        return "%s: %s: %s (conf %.2f)" % (m["id"], m["trigger"], m["action"], m["confidence"])
+    out = []
+    for pid in project_dirs():
+        by_domain: dict[str, list[dict]] = {}
+        for m in merge_instincts(pid):
+            if m["status"] == "active" and m["confidence"] >= CLUSTER_MIN_CONF:
+                by_domain.setdefault(m["domain"], []).append(m)
+        for dom in sorted(by_domain):
+            if len(by_domain[dom]) >= CLUSTER_MIN_SIZE:
+                out.append(f"cluster: project={pid} domain={dom} size={len(by_domain[dom])}")
+                out.extend("- " + fmt(m) for m in by_domain[dom])
+    for m in merge_instincts(GLOBAL_DIR):
+        if m["status"] == "active" and m["confidence"] >= GLOBAL_LIST_CONF:
+            out.append("global: " + fmt(m))
+    return "\n".join(out)
+
+
+# --------------------------------------------------------------------------
 # CLI (called by scripts/instincts.sh as `python3 -I lib.py <cmd> ...`)
 # --------------------------------------------------------------------------
 
@@ -412,7 +739,54 @@ def main(argv: list[str]) -> int:
         data = sys.stdin.buffer.read().decode("utf-8", errors="replace")
         sys.stdout.write(scrub(data))
         return 0
-    print("usage: lib.py project-id [DIR] | scrub", file=sys.stderr)
+    if cmd in ("promote", "clusters") and len(argv) == 1:
+        if cmd == "clusters":
+            text = cmd_clusters()
+            if text:
+                print(text)
+            return 0
+        for c in promote():
+            print(f"pending global: {c['id']} projects={c['projects']} conf={c['confidence']:.2f}")
+        return 0
+    if cmd == "approve" and len(argv) == 2:
+        ok, msg = approve(argv[1])
+        print(msg, file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 1
+    if cmd == "show" and len(argv) <= 2:
+        pid = argv[1] if len(argv) == 2 else git_project_id(".")
+        if pid is None or not PROJECT_DIR_RE.match(pid):
+            print("instincts: pass a project id (12 hex), or run inside a repo with a git remote",
+                  file=sys.stderr)
+            return 1
+        print(cmd_show(pid))
+        return 0
+    if cmd == "retire" and len(argv) in (2, 3):
+        # Scopes: the named (or current) project, plus the global set.
+        pid = argv[2] if len(argv) == 3 else git_project_id(".")
+        scopes = ([pid] if pid and PROJECT_DIR_RE.match(pid) else []) + [GLOBAL_DIR]
+        if len(argv) == 3 and not scopes[0] == pid:
+            print("instincts: bad project id", file=sys.stderr)
+            return 1
+        done = retire(argv[1], scopes)
+        if not done:
+            print(f"instincts: no active instinct '{argv[1]}' to retire", file=sys.stderr)
+            return 1
+        print(f"retired {argv[1]} in: {', '.join(done)}")
+        return 0
+    if cmd == "forget" and len(argv) in (2, 3) and (len(argv) == 2 or argv[2] == "--yes"):
+        if not PROJECT_DIR_RE.match(argv[1]):
+            print("instincts: forget needs a project id (12 hex)", file=sys.stderr)
+            return 1
+        if len(argv) == 2:
+            # Destructive: refuse without an explicit --yes, delete nothing.
+            print(f"instincts: would delete local observations and this host's instincts "
+                  f"for {argv[1]}; re-run with --yes", file=sys.stderr)
+            return 1
+        for p in forget(argv[1]):
+            print(f"deleted {p}")
+        return 0
+    print("usage: lib.py project-id [DIR] | scrub | promote | approve ID | show [PROJECT] "
+          "| retire ID [PROJECT] | forget PROJECT --yes | clusters", file=sys.stderr)
     return 2
 
 
