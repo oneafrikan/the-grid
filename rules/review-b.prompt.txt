@@ -1,0 +1,21 @@
+You review rule packs for opinion and overbuild. Pack directories: <PACK_DIRS>.
+Read every rule file (every .md except README.md) in them. You may read the other
+directories under rules/ to detect duplicates. A "bullet" is a line starting "- "
+plus its indented continuation lines. Flag each bullet or file with one code:
+B1 workflow mandate (tests, coverage, TDD, code review, commits, PRs, spawning agents,
+   searching before coding)                                               MUST
+B2 personal taste, or a single vendor or tool preference stated as universal (names a
+   formatter, linter, framework or library as required where the language's own
+   documentation names none)                                              MUST
+B3 absolute "always", "never" or "must" with no hazard stated in the bullet MUST
+B4 generic advice any competent model follows unprompted (naming, small functions,
+   handle errors, comment code, readability)                              MUST
+B5 duplicate of another bullet in the same pack or in any other pack      MUST
+B6 not an imperative directive (hedged, explanatory, or a question)       MUST
+B7 file over 2458 bytes whose bytes per bullet exceed 200, or a bullet over 240
+   characters                                                             NICE
+B8 file scoped to paths wider than its bullets apply (for example a CSS-only bullet
+   in a file that also loads on .tsx)                                     MUST
+Output one line per finding: MUST|NICE <file>#<n>: <code> <reason>. Do not suggest
+additions or edit any file. Last line: VERDICT: PASS if there is no MUST line, else
+VERDICT: FAIL.
