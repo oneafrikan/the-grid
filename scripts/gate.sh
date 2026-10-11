@@ -9,6 +9,8 @@
 #                there is no baseline-submodules.txt / initialised submodules)
 #   compose      every role lints clean (compose.py --lint-roles) and composed
 #                output is current for every public project (compose.py --check; skipped with a notice if the venv is absent)
+#   personas     dist/personas/*.md is current (build-personas.sh --check; skipped with a
+#                notice if the script or the venv is absent)
 #   bats         the test suite
 #
 # Modes:
@@ -113,6 +115,19 @@ run_bats() {
 check catalog    run_catalog_check
 check budget     run_budget_check
 check compose    run_compose_check
+# Portable personas (dist/personas) are committed output of compose.py --target portable.
+# Skip loudly (and record it) on a fork or machine without the script or the venv: the
+# script's own venv-absent exit 0 would otherwise pass silently instead of being listed.
+run_personas_check() {
+  if [ ! -f scripts/build-personas.sh ] || [ ! -x agent-factory/.venv/bin/python ]; then
+    echo "    build-personas.sh or agent-factory/.venv absent — skipped"; SKIPPED+=(personas); return 0
+  fi
+  bash scripts/build-personas.sh --check
+}
+
+# Stale committed personas fail the gate; listed before bats so drift is reported even
+# when the (slow) suite also fails.
+check personas   run_personas_check
 check bats       run_bats
 
 echo
