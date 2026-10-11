@@ -88,6 +88,17 @@ mk_skill() {
   [ "$status" -eq 2 ]
 }
 
+# plugin-marketplace#2: generated plugin bundles are owned content, so they are scanned too.
+@test "--owned scans plugins/: hidden Unicode in a plugin skill is a high finding" {
+  mkdir -p "$T/plugins/grid-core/skills/x"
+  # U+202E (right-to-left override) is a hidden-unicode high finding anywhere.
+  { printf -- '---\nname: x\ndescription: d\n---\nPlain '; printf '\xe2\x80\xae'; printf ' prose.\n'; } \
+    > "$T/plugins/grid-core/skills/x/SKILL.md"
+  run bash "$AUDIT" --owned
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"plugins/grid-core/skills/x/SKILL.md"* ]]
+}
+
 @test "--wired alone with nothing wired is a clean pass (wire.sh must not block an empty wire)" {
   run bash "$AUDIT" --wired
   [ "$status" -eq 0 ]

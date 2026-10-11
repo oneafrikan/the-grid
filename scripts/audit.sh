@@ -64,7 +64,8 @@ baseline=""  # file passed as --baseline (the one the dry run used)
 add_owned() {
   local p
   for p in "$GRID_DIR"/skills/*/ "$GRID_DIR"/agents/*.md "$GRID_DIR/rules" "$GRID_DIR/hooks" \
-           "$GRID_DIR"/agent-factory/roles/*/ "$GRID_DIR/agent-factory/_core"; do
+           "$GRID_DIR"/agent-factory/roles/*/ "$GRID_DIR/agent-factory/_core" \
+           "$GRID_DIR/plugins"; do
     # An unmatched glob stays literal, so the -e test also drops it.
     [ -e "$p" ] && targets+=("${p%/}")
   done

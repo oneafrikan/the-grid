@@ -37,6 +37,10 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" bash scripts/gate.s
   [[ "$output" == *"shellcheck"* ]] || false
   [[ "$output" == *"catalog"* ]] || false
   [[ "$output" == *"compose"* ]] || false
+  # plugin-marketplace checks: both land in the skipped list, not silently passed
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"plugins"* ]] || false
+  [[ "$last" == *"plugins-validate"* ]] || false
 }
 
 @test "a missing bats submodule is a FAIL with a hint, not a silent pass" {
@@ -202,4 +206,46 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" bash scripts/gate.s
   [ "$status" -eq 0 ]
   last="$(printf '%s\n' "$output" | tail -n 1)"
   [[ "$last" != *"lock"* ]] || false
+}
+
+# --- plugins / plugins-validate checks (plugin-marketplace#2) ------------------------------
+# `plugins` needs python3 + scripts/build-plugins.py + the agent-factory venv; any one
+# absent is a loud skip. `plugins-validate` needs `claude` + .claude-plugin/marketplace.json.
+
+@test "G3: venv present but scripts/build-plugins.py absent is a loud skip of the plugins check" {
+  mkdir -p "$G/agent-factory/.venv/bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$G/agent-factory/.venv/bin/python"
+  chmod +x "$G/agent-factory/.venv/bin/python"
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"scripts/build-plugins.py absent"* ]] || false
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"plugins"* ]] || false
+}
+
+# mk_plugin_tree: a marketplace file plus one plugin dir, so plugins-validate has work to do.
+mk_plugin_tree() {
+  mkdir -p "$G/.claude-plugin" "$G/plugins/x"
+  printf '{}\n' > "$G/.claude-plugin/marketplace.json"
+}
+
+@test "plugins-validate: a claude that exits 1 FAILS the gate and names plugins-validate" {
+  mk_plugin_tree
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$G/stubbin/claude"
+  chmod +x "$G/stubbin/claude"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"plugins-validate"* ]] || false
+  [[ "$output" == *"gate: FAIL"* ]] || false
+}
+
+@test "plugins-validate: a claude that exits 0 passes and plugins-validate is not listed as skipped" {
+  mk_plugin_tree
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$G/stubbin/claude"
+  chmod +x "$G/stubbin/claude"
+  run run_gate
+  [ "$status" -eq 0 ]
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" != *"plugins-validate"* ]] || false
 }
