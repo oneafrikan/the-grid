@@ -198,6 +198,23 @@ only_shared_dir() {
   [ "$(grep -c "^skill@~/.agents/skills	dup	" "$MANIFEST")" -eq 1 ]
 }
 
+# ---------------------------------------------------------------- codex agents (group 3)
+
+@test "GRID_HARNESS=codex links a composed _codex agent into .codex/agents; a second run changes nothing" {
+  stub_agent codex x.toml
+  GRID_HARNESS=codex wire
+  [ "$status" -eq 0 ]
+  [ -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
+  # The link resolves to the composed file inside the (mock) grid.
+  [ "$(readlink "$GRID_HARNESS_HOME/.codex/agents/x.toml")" = "$MOCK_GRID/agent-factory/projects/p/_codex/agents/x.toml" ]
+  local t1 m1
+  t1="$(tree "$GRID_HARNESS_HOME")"; m1="$(cat "$MANIFEST")"
+  GRID_HARNESS=codex wire
+  [ "$status" -eq 0 ]
+  [ "$(tree "$GRID_HARNESS_HOME")" = "$t1" ]
+  [ "$(cat "$MANIFEST")" = "$m1" ]
+}
+
 # ---------------------------------------------------------------- space / XDG
 
 @test "paths with a space: OpenCode agents land under GRID_HARNESS_HOME, XDG_CONFIG_HOME ignored" {
