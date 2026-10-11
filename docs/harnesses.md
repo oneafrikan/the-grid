@@ -2,7 +2,7 @@
 
 the-grid wires its curated skills into Claude Code by default. With a harness opted in, `scripts/wire.sh` also fans the same wired set out to the other agent harnesses (Codex CLI, OpenCode, Gemini CLI, Pi, OpenClaw, Antigravity CLI). Nothing is hand-copied: the registry drives it, and the links are generated on every run.
 
-This page covers the skill wiring (spec `harness-wiring`). Agent formats, rules delivery and the real-install smoke table are added as those parts land.
+This page covers the skill wiring (spec `harness-wiring`) and rules delivery (spec `harness-rules-delivery`). Agent formats and the real-install smoke table are added as those parts land.
 
 ## Shared-dir finding
 
@@ -97,6 +97,36 @@ Rows are `skill@<~dir>` / `agent@<~dir>` (the dir in `~/` form, so the file is h
 ## Drift check
 
 `wire.sh --check` stays read-only. It wires into a throwaway dry home (`GRID_DRY_HOME`) and diffs every distinct non-Claude registry dir against the live one, active or not: a stale grid link in a deactivated harness is drift. A destination occupied by a real entry or foreign symlink is never drift, because a real wire would skip it too.
+
+## Rules delivery
+
+`rules:<pack>` entries (see `docs/rules.md`) are also delivered to the global instruction file of each active harness, by calling `scripts/rules.py emit` on it. Nothing is injected by default: **you opt in per harness by creating the file yourself** (a regular file, not a symlink; an empty one is enough), and `wire.sh` never creates it.
+
+| Harness | Instruction file (`rules_file`) | `rules.py emit --harness` |
+|---|---|---|
+| Codex | `~/.codex/AGENTS.md` | `agents-md` |
+| OpenCode | `~/.config/opencode/AGENTS.md` | `agents-md` |
+| Gemini CLI | `~/.gemini/GEMINI.md` | `gemini` |
+| Pi | `~/.pi/agent/AGENTS.md` | `agents-md` |
+| Antigravity, OpenClaw | none (`-`): never touched | none |
+
+What `wire.sh` does for each file in that column:
+
+| Situation | Result |
+|---|---|
+| Harness active, a pack wired, regular file | the managed block is written (or refreshed); text outside it is left as it was |
+| Same, file absent | no file is created; `.wired.manifest` row `rules@<~file>`, status `skipped`, reason `rules-file-absent` |
+| Same, file is a symlink | the target is not written through; same row with reason `rules-file-symlink` |
+| Same, path is a directory or other non-regular file | not written; same row with reason `rules-file-not-regular` |
+| Harness inactive, or no pack wired, file holds a block | the block is removed |
+| Harness inactive, or no pack wired, file has no block | no call at all, so an empty opt-in file stays |
+
+- **Token cost:** the block is loaded on every session (these harnesses have no path scoping). `rules.py` caps it and refuses an over-cap selection rather than truncating; wire only the packs you want always loaded.
+- **Removal can delete the file:** if removing the block leaves the file empty, `rules.py` deletes it, and the opt-in is gone. Recreate the file to opt back in. Removal also leaves the one blank separator line it added before the block.
+- **Codex prefers `AGENTS.override.md`** over `AGENTS.md` when it exists. The grid only manages `AGENTS.md`, so the block is not read while an override file is present.
+- A symlinked instruction file is never edited, not even to remove an old block, because the target may belong to another tool or be regenerated elsewhere.
+- A `rules.py` failure is reported on stderr, the rest of the wire still runs, and `wire.sh` then exits 1.
+- `wire.sh --check` runs the same decisions with `rules.py emit --check` against the live files (read-only): a hand-edited block, a missing block, or a block that should be gone is drift. An absent or symlinked file is not.
 
 ## Paths and environment
 

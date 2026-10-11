@@ -20,6 +20,8 @@ One source (`rules/<pack>/<topic>.md`), four ways to consume it:
 | Codex, OpenCode | `rules.py emit --harness agents-md` | one managed block in `AGENTS.md` | always (no path scoping) |
 | Gemini CLI | `rules.py emit --harness gemini` | one managed block in `GEMINI.md` | always (no path scoping) |
 
+For an active harness (`harness:<name>`), `wire.sh` makes the Codex, OpenCode and Gemini calls itself, into the global instruction file you created; see "Rules delivery" in `docs/harnesses.md`.
+
 ## `rules:<pack>` manifest grammar
 
 `rules:<pack>` and `-rules:<pack>` go in the same untracked files as skills:
