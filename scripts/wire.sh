@@ -11,6 +11,9 @@
 #   GRID_HOST   — machine key for the overlay (default: hostname -s)
 #   GRID_BASELINE — baseline manifest file (default: $GRID_DIR/baseline-submodules.txt)
 #   GRID_SKIP_CATALOG=1 — don't regenerate SKILLS.md at the end (used by --check)
+#   GRID_NO_CATALOG=1 — skip ONLY the SKILLS.md refresh (step 4); .wired.manifest is still
+#                   written. Set by `grid install`: on a machine without submodules most
+#                   library repos are empty, so a refresh would rewrite the tracked SKILLS.md.
 #   GRID_DRY_HOME — dry-run home: when set, HOME is exported to it and SKILLS_DIR,
 #                   AGENTS_DIR, CLAUDE_CONFIG_DIR, RULES_DIR and GRID_HARNESS_HOME
 #                   are FORCED under it (inherited values ignored), and nothing is
@@ -405,7 +408,7 @@ fi
 # --- 4. Refresh the skill catalogue so wiring and SKILLS.md never drift ---
 # Coupled on purpose: any change to what's wired re-renders the catalogue.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/catalog.sh" ] && [ -z "${GRID_SKIP_CATALOG:-}" ]; then
+if [ -f "$SCRIPT_DIR/catalog.sh" ] && [ -z "${GRID_SKIP_CATALOG:-}" ] && [ -z "${GRID_NO_CATALOG:-}" ]; then
   # env prefix is intentional; value is identical in the parent shell
   # shellcheck disable=SC2097,SC2098
   GRID_DIR="$GRID_DIR" bash "$SCRIPT_DIR/catalog.sh" "$GRID_DIR/SKILLS.md"
