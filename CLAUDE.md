@@ -330,6 +330,11 @@ All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: 
   `GRID_HARNESS_HOME`; inherited values are ignored) and skips the `SKILLS.md` /
   `.wired.manifest` writes. Every dry-run caller must use it (and nothing else);
   `--check` and `tests/helpers/wired.bash` do.
+- **Rule packs:** `rules:<pack>` / `-rules:<pack>` manifest entries (baseline or overlay)
+  symlink each `rules/<pack>/*.md` (never `README.md`) to `$RULES_DIR/grid/<pack>/`
+  (`RULES_DIR`, default `~/.claude/rules`; only `grid/` is grid-owned). Opt-in: no
+  `rules:` entry means nothing is wired. An unknown or unsafe pack name warns and is
+  skipped (`rule` row in `.wired.manifest`); `--check` also reports rules drift.
 - **Composed agents:** wire.sh also wires `agent-factory/projects/*/_claude-code/`
   output — orchestrator skills into `SKILLS_DIR`, specialist subagents into
   `AGENTS_DIR`. Gated per machine by `project:<name>` manifest entries; with no
