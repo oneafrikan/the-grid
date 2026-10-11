@@ -72,6 +72,8 @@ submodules into two tiers:
 - `loop/` + `scripts/instantiate.sh` + `scripts/lib/render-schedule.sh` + `scripts/lib/gh-app-token.sh` — the-grid's own issue-loop (PR mode to `next`, headless runner `loop/run-issues.sh`, GitHub App token, systemd/launchd units written but never activated). See `loop/README.md` and `automation-factory/patterns/issue-loop/README.md`.
 - `scripts/run-record.sh` — appends one JSON line per agent run to a local private log (`${GRID_RUN_LOG:-~/.the-grid-private/runs.jsonl}`); `docs/agent-retro.md` is the review loop that starts from it.
 - `agent-factory/models.yaml` — the one tier-to-model map for generated Claude Code agents (default: tier maps to itself); `role.yaml` also takes `tools:` (subagent allowlist) and `unattended:`. See `agent-factory/README.md`.
+- `scripts/compose-goldens.sh` — golden-output check for `compose.py` over a fixture project, all four targets (`--check` default, `--update` to regenerate `tests/fixtures/compose/golden/`; run `--update` in any PR that changes compose output). See `agent-factory/README.md`.
+- `agent-factory/user.public.yaml` — tracked neutral identity (`machine: "your-machine"`); use via `GRID_USER_CONFIG` for anything composed into a tracked or shipped file.
 - `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
 - `TODO.md` — current outstanding work.

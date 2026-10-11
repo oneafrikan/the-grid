@@ -1,0 +1,13 @@
+# Fixture for scripts/compose-goldens.sh. These roles intentionally shadow real role names
+# (via GRID_PRIVATE_ROLES_DIR) so the paperclip and openclaw-native targets, which look roles
+# up by name, are exercised. Role prose is fixed; _core/, templates and emitters are what is pinned.
+project: fx
+slug: fx
+agents:
+  - role: ceo-orchestrator
+    delegates_to: [tech-lead, growth-hacker, product-manager]
+  - role: tech-lead
+    delegates_to: [fx-eng]
+  - role: growth-hacker
+  - role: product-manager
+  - role: fx-eng

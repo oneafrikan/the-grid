@@ -68,7 +68,11 @@ STACKS_DIR = HERE / "stacks"
 SKILLS_DIR = HERE / "skills"
 CORE_DIR = HERE / "_core"
 PROJECTS_DIR = HERE / "projects"
-USER_CONFIG_PATH = HERE / "user.yaml"
+# GRID_USER_CONFIG: path to the identity file; replaces agent-factory/user.yaml when set and
+# non-empty. Used by goldens, committed personas and plugin bundles so no personal value or
+# hostname reaches a tracked file. A set-but-missing path is a hard error (no silent hostname
+# fallback) -- see load_user_config(). Relative paths resolve against the current directory.
+USER_CONFIG_PATH = Path(os.environ["GRID_USER_CONFIG"]) if os.environ.get("GRID_USER_CONFIG") else HERE / "user.yaml"
 
 # A role normally lives under ROLES_DIR (committed, public). GRID_PRIVATE_ROLES_DIR
 # names an optional second roles/ tree — outside this repo, never committed — for
@@ -233,6 +237,10 @@ def load_user_config() -> dict[str, str]:
     per-install config, not per-project. `machine` falls back to the local
     hostname so a fresh install with no user.yaml still gets a sane value."""
     cfg: dict = {}
+    # An explicit GRID_USER_CONFIG that points nowhere is a typo, not "no config": exiting
+    # here stops a tracked build silently falling back to user.yaml or the hostname.
+    if os.environ.get("GRID_USER_CONFIG") and not USER_CONFIG_PATH.is_file():
+        sys.exit(f"GRID_USER_CONFIG not found: {USER_CONFIG_PATH}")
     if USER_CONFIG_PATH.is_file():
         cfg = yaml.safe_load(_read(USER_CONFIG_PATH)) or {}
     machine = str(cfg.get("machine") or "").strip()
