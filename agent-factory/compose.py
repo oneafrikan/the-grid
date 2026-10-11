@@ -200,6 +200,12 @@ def role_meta(role: str) -> dict:
     return {}
 
 
+def role_description(role: str) -> str:
+    """The role.yaml `description:` collapsed to one line, or '' when the role has none."""
+    desc = role_meta(role).get("description")
+    return " ".join(str(desc).split()) if desc else ""
+
+
 MODEL_SECTIONS = ("tiers", "openclaw")   # tiers = Claude Code agents; openclaw = OpenClaw/Paperclip agents.yaml
 
 
@@ -709,7 +715,10 @@ def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
 
     fields = {
         "name": slugged_name,
-        "description": f"{title}. {role_summary(role)} "
+        # A role.yaml `description:` (one line, budget-and-usage) replaces the
+        # legacy formula verbatim; roles without it keep the old text byte-for-byte.
+        "description": role_description(role) or
+                       f"{title}. {role_summary(role)} "
                        f"Use this subagent for {role} work.",
         "model": model_id(resolve_model(agent)),
     }
@@ -752,7 +761,9 @@ def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
 
     fields = {
         "name": slugged_name,
-        "description": f"{title} orchestrator. {role_summary(role)} "
+        # An explicit role.yaml `description:` wins; otherwise the legacy formula.
+        "description": role_description(role) or
+                       f"{title} orchestrator. {role_summary(role)} "
                        f"Invoke with /{slugged_name}"
                        # Only team orchestrators (those with reports) coordinate dev-team work.
                        + (" or when coordinating a multi-step dev-team feature." if agent.get("delegates_to") else "."),
@@ -1075,7 +1086,8 @@ def write_project(name: str, config: dict, out_dir: Path) -> Path:
 # config. Every finding carries a stable code so tests (and humans grepping CI
 # output) can match the exact failure mode, and every finding names the file.
 ROLE_YAML_KEYS = {"name", "title", "summary", "owns", "default_model", "cron_model",
-                  "base_skills", "orchestrator", "tools", "unattended", "model_rationale"}
+                  "base_skills", "orchestrator", "tools", "unattended", "model_rationale",
+                  "description"}
 ROLE_MODELS = {"opus", "sonnet", "haiku", "fable"}
 
 

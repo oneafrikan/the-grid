@@ -8,6 +8,7 @@ summary: >-
   Polls prices, portfolio state, RSS/filings, and FX against threshold rules.
   95% deterministic; the model only classifies and flags. Never analyses,
   never recommends — its entire vocabulary is "nothing to report" or a flag.
+description: "Finance Sentinel. Polls prices, portfolio state, RSS/filings and FX against threshold rules; only classifies and flags. Use for finance monitoring."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
 unattended: true      # runs on a cron heartbeat with no human watching (flags only, read-only data in)

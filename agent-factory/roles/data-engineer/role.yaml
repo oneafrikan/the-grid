@@ -6,6 +6,7 @@ title: Data Engineer       # human-readable role for IDENTITY.md nameplate
 default_model: sonnet
 summary: >-
   Pipelines, warehousing, transforms, data quality. Builds to a pipeline spec.
+description: "Data Engineer. Pipelines, warehousing, transforms and data quality, built to a pipeline spec. Use for data pipeline work."
 base_skills:         # session-wired skills this role always advertises (CC target)
   - python-pro
   - pandas-pro

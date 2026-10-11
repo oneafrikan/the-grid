@@ -10,6 +10,7 @@ summary: >-
   explicit confidence level, and the strongest argument against its own
   proposal. May not amend the Investment Policy in the same session it
   proposes trades.
+description: "Finance Strategist. Turns an evidence pack, Investment Policy and portfolio state into a proposal with size, confidence and the strongest counter-argument. Use to draft a finance proposal."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
 model_rationale: >-
