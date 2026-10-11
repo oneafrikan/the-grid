@@ -8,7 +8,7 @@
   at runtime — the `SKILL.md` files are shells. Without the binary they
   dead-end immediately:
   ```bash
-  npm install -g @fission-ai/openspec@latest    # needs Node >= 20.19.0
+  npm install -g @fission-ai/openspec@1.12.0    # needs Node >= 20.19.0; matches repos/openspec
   ```
 - **Default profile is `core`.** That controls which skills `init` scaffolds
   locally — **not** which CLI commands work. Every command works under `core`.
