@@ -11,6 +11,12 @@
 #                there is no baseline-submodules.txt / initialised submodules)
 #   compose      every role lints clean (compose.py --lint-roles) and composed
 #                output is current for every public project (compose.py --check; skipped with a notice if the venv is absent)
+#   plugins      generated plugin bundles + marketplace.json are current
+#                (build-plugins.py --check; skipped with a notice if python3, the script or
+#                the agent-factory venv is absent)
+#   plugins-validate  claude plugin validate --strict on the marketplace, each plugin and
+#                their skills/ and agents/ dirs (skipped with a notice if `claude` or
+#                .claude-plugin/marketplace.json is absent; CI has no claude)
 #   audit        vetting scan of owned assets + the baseline's wired set (audit.sh --gate --quiet;
 #                skipped with a notice if python3 or scripts/audit.sh is absent; the wired half
 #                is skipped by audit.sh itself where submodules are uninitialised)
@@ -160,6 +166,32 @@ check catalog    run_catalog_check
 check lock       run_lock_check
 check budget     run_budget_check
 check compose    run_compose_check
+
+# Generated plugin bundles (change `plugin-marketplace`) are committed output of
+# build-plugins.py, like SKILLS.md: stale output fails, an absent tool skips loudly (G3).
+run_plugins_check() {
+  command -v python3 >/dev/null || { echo "    python3 absent — skipped"; SKIPPED+=(plugins); return 0; }
+  [ -f scripts/build-plugins.py ] || { echo "    scripts/build-plugins.py absent — skipped"; SKIPPED+=(plugins); return 0; }
+  [ -x agent-factory/.venv/bin/python ] || { echo "    agent-factory venv absent — skipped"; SKIPPED+=(plugins); return 0; }
+  python3 scripts/build-plugins.py --check
+}
+check plugins    run_plugins_check
+
+# Claude's own validator, strict, over the marketplace, each plugin and its component
+# dirs. Independent of the venv-dependent check above so either can skip alone.
+run_plugins_validate() {
+  command -v claude >/dev/null || { echo "    claude absent — skipped"; SKIPPED+=(plugins-validate); return 0; }
+  [ -f .claude-plugin/marketplace.json ] || { echo "    .claude-plugin/marketplace.json absent — skipped"; SKIPPED+=(plugins-validate); return 0; }
+  local rc=0 d
+  # A failing target sets rc=1 but the remaining targets still run.
+  claude plugin validate --strict . || rc=1
+  for d in plugins/*/ plugins/*/skills plugins/*/agents; do
+    [ -d "$d" ] || continue   # unmatched glob stays literal; a bundle may lack skills/ or agents/
+    claude plugin validate --strict "${d%/}" || rc=1
+  done
+  return $rc
+}
+check plugins-validate run_plugins_validate
 # Vetting audit (change `vetting`). Absent tool = skipped loudly and recorded, so an
 # old checkout or a stub grid still gates; a present tool that finds a high FAILS.
 run_audit() {

@@ -61,6 +61,7 @@ submodules into two tiers:
 - `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
   repos as counts, reference (no-skill) repos in a footer. Deterministic output.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
+- `scripts/build-plugins.py` + `plugins/` + `docs/PLUGINS.md` — generates the two Claude Code plugin bundles (`grid-core`, `grid-agents`) and `.claude-plugin/marketplace.json` from `plugins/bundles.json`. `plugins/` is generated output: regenerate with `python3 scripts/build-plugins.py` (needs `agent-factory/.venv`), never hand-edit. `gate.sh` runs `--check` and `claude plugin validate --strict`; `audit.sh --owned` scans `plugins/`.
 - `site-files.txt` + `scripts/stage-site.sh` — define what GitHub Pages publishes:
   the list names repo-relative paths (index.html, assets), the script copies exactly
   those into `_site/` for `.github/workflows/pages.yml` (never `repos/`, `.git*`,
