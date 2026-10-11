@@ -214,9 +214,9 @@
 
 | Resource | Notes |
 |---|---|
-| ai-dev-team-playbook.pdf (uploaded) | 154-page playbook by "Neo". Converted to markdown in this session |
-| ai-dev-team-playbook.md (generated) | Full markdown conversion — available in outputs |
-| openclaw-lamp-team-prompt.md (generated) | Opus 4 prompt to build LAMP-stack agent team — available in outputs |
+| ai-dev-team-playbook.pdf | 154-page playbook by "Neo". Kept privately |
+| ai-dev-team-playbook.md | Full markdown conversion. Kept privately |
+| openclaw-lamp-team-prompt.md | Opus 4 prompt to build LAMP-stack agent team. Kept privately |
 
 ---
 

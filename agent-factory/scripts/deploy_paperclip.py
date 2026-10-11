@@ -2,7 +2,7 @@
 """deploy_paperclip.py — walk a compose.py --target=paperclip manifest and make
 it live in a real Paperclip company.
 
-Session A2 of docs/openclaw-paperclip-targets-plan.md. This script is the
+Session A2 of agent-factory/openclaw/README.md. This script is the
 DEPLOY half of the Paperclip target (compose.py's write_paperclip() is the
 pure-rendering half, Session A1). It is idempotent by construction: running it
 twice against the same manifest and the same company state issues zero
