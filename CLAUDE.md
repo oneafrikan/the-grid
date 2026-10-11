@@ -346,7 +346,9 @@ All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: 
   registry `scripts/lib/harnesses.txt` (codex, opencode, gemini, antigravity, pi,
   openclaw; `~/.agents/skills` is shared by five). Opt-in; an unknown name exits 2.
   Never replaces an existing entry in those dirs; skip reasons land in
-  `.wired.manifest`. See `docs/harnesses.md`.
+  `.wired.manifest`. `rules:` packs are also delivered into an active harness's global
+  instruction file via `rules.py emit`, but only if the operator created that file
+  (never created, never written through a symlink). See `docs/harnesses.md`.
 - **Composed agents:** wire.sh also wires `agent-factory/projects/*/_claude-code/`
   output — orchestrator skills into `SKILLS_DIR`, specialist subagents into
   `AGENTS_DIR`. Gated per machine by `project:<name>` manifest entries; with no

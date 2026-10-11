@@ -12,6 +12,10 @@
 #                               rules_harness. Prints nothing for an unknown name.
 #   harness_valid <name>        exit 0 when <name> is a registry row
 #   harness_path <value>        expand a registry path value (see below)
+#   harness_rules_action <file> <active 0|1> <csv>
+#                               what rules delivery should do for one instruction file
+#   harness_rules_emit <rules_harness> <csv> <file> [--check]
+#                               run `rules.py emit` for one instruction file
 #
 # HARNESS_REGISTRY overrides the registry file (tests); the default sits next to
 # this file, so a mock GRID_DIR never needs its own copy.
@@ -78,4 +82,45 @@ harness_path() {
       printf '%s/%s\n' "$base" "${v#"~/"}" ;;
     *) printf '%s\n' "$v" ;;   # already absolute (or a future non-home value)
   esac
+}
+
+# Rules delivery (multi-harness group 7). The decision is kept here, apart from the
+# wire.sh step that acts on it, so the real run and `wire.sh --check` cannot disagree.
+#
+# harness_rules_action <file> <active 0|1> <csv>   prints exactly one word:
+#   emit                        deliver <csv> (active harness, packs wired, regular file)
+#   remove                      take a previous block out (everything else that holds one)
+#   skip:rules-file-absent      active + packs wired, but the operator has not created the file
+#   skip:rules-file-symlink     active + packs wired, but the file is a symlink (never written through)
+#   skip:rules-file-not-regular active + packs wired, but the path is a dir or special file
+#   none                        nothing to do
+# The grid never creates an instruction file: the operator opts in by creating a regular
+# file (even an empty one). Removal is only ever attempted when the literal marker is
+# already in the file, because rules.py deletes a file that removal leaves empty, and an
+# operator's empty opt-in file with no block must never be touched.
+harness_rules_action() {
+  local file="$1" active="$2" csv="$3"
+  if [ "$active" = 1 ] && [ -n "$csv" ]; then
+    if [ -L "$file" ]; then echo "skip:rules-file-symlink"
+    elif [ -f "$file" ]; then echo "emit"
+    elif [ -e "$file" ]; then echo "skip:rules-file-not-regular"
+    else echo "skip:rules-file-absent"
+    fi
+    return 0
+  fi
+  # -f and not -L: a symlinked file is never edited, not even to remove a block.
+  if [ -f "$file" ] && [ ! -L "$file" ] && grep -qF 'BEGIN the-grid rules' "$file" 2>/dev/null; then
+    echo "remove"
+  else
+    echo "none"
+  fi
+}
+
+# harness_rules_emit <rules_harness> <csv> <file> [--check]: the one place rules.py is
+# called. rules.py sits next to lib/ (scripts/rules.py); --root points it at the grid whose
+# rules/ it renders (GRID_DIR, set by wire.sh). An empty <csv> is the empty selection, which
+# removes a previous block. rules.py exits 0 done / no drift, 1 drift (--check only), 2 refused.
+harness_rules_emit() {
+  python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/rules.py" emit \
+    --root "$GRID_DIR" --harness "$1" --packs "$2" --out "$3" ${4:+"$4"}
 }
