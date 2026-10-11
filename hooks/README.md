@@ -3,12 +3,12 @@
 Claude Code hooks that ship with the-grid. Shell scripts, zero model calls, one
 launcher, one catalogue.
 
-> **Status.** Built so far: the launcher, the catalogue, the two guard hooks and the
-> auto-handoff hook with its worker (below). Not built yet: the emitter that writes
-> hooks into a project's settings (`agent-factory/deploy_hooks.py`), the `hooks:` key in
-> `.grid/project.yaml`, and `wire.sh` wiring of auto-handoff into the user settings.
-> Until then the profile table below describes the design; to use a hook now, add the
-> launcher command to a settings file by hand (see "Calling a hook").
+> **Status.** Built so far: the launcher, the catalogue, the two guard hooks, the
+> auto-handoff hook with its worker (below), and the project emitter. To opt a project
+> in, set `hooks: {profile: standard}` in its `.grid/project.yaml` and run
+> `agent-factory/.venv/bin/python agent-factory/deploy_hooks.py <project>`
+> (`--list` shows every hook's cost; `--check` reports drift). Not built yet: `wire.sh`
+> wiring of auto-handoff into the user settings (`deploy_hooks.py --user`).
 
 **These guards are a mistake-catcher, not a security boundary.** They stop an agent
 from tripping over the common ways of skipping git's safety nets. A determined process
