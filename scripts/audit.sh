@@ -154,6 +154,15 @@ for t in ${targets[@]+"${targets[@]}"}; do
   [ "$dup" = 1 ] || uniq_targets+=("$t")
 done
 
+# --wired alone with an EMPTY wired set (nothing to link, e.g. `grid install` into a
+# grid where every source was skipped) is a clean pass, not a usage error: wire.sh
+# runs this before every wire and must not block a wire that has nothing to vet.
+# --owned / --gate with nothing to scan stay a usage error (audit.py exits 2).
+if [ "$want_wired" = 1 ] && [ "$want_owned" = 0 ] && [ ${#uniq_targets[@]} -eq 0 ]; then
+  echo "audit: nothing wired - nothing to scan"
+  exit 0
+fi
+
 args=()
 [ -z "$baseline" ] || args+=(--baseline "$baseline")
 # User options after ours so a user's own --baseline/--root wins.

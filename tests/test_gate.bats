@@ -171,6 +171,30 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" bash scripts/gate.s
   [[ "$output" == *"gate: FAIL — "*"lock"* ]] || false
 }
 
+# --- audit check (vetting#5) -------------------------------------------------------------
+# The check skips loudly when scripts/audit.sh or python3 is absent, and FAILS (named
+# `audit`) when the tool is present and exits non-zero. The stub PATH has no python3 by
+# default, so the failure case must symlink one in or it would skip instead of fail.
+
+@test "with no scripts/audit.sh and no python3 the audit check is skipped LOUDLY, not failed" {
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"scripts/audit.sh absent - skipped"* ]] || false
+  # the final summary line lists audit among the skipped checks
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"audit"* ]] || false
+}
+
+@test "audit check: a scripts/audit.sh that exits 1 FAILS the gate and names audit" {
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$G/scripts/audit.sh"
+  chmod +x "$G/scripts/audit.sh"
+  # Without python3 on the stub PATH the check would skip, not fail.
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — "*"audit"* ]] || false
+}
+
 @test "lock check: exit 0 passes and lock is not listed as skipped" {
   ln -s "$(command -v python3)" "$G/stubbin/python3"
   printf 'import sys\nsys.exit(0)\n' > "$G/scripts/grid"

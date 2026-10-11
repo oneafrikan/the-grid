@@ -11,6 +11,9 @@
 #                there is no baseline-submodules.txt / initialised submodules)
 #   compose      every role lints clean (compose.py --lint-roles) and composed
 #                output is current for every public project (compose.py --check; skipped with a notice if the venv is absent)
+#   audit        vetting scan of owned assets + the baseline's wired set (audit.sh --gate --quiet;
+#                skipped with a notice if python3 or scripts/audit.sh is absent; the wired half
+#                is skipped by audit.sh itself where submodules are uninitialised)
 #   personas     dist/personas/*.md is current (build-personas.sh --check; skipped with a
 #                notice if the script or the venv is absent)
 #   personal     no personal data in the tracked tree (check-personal.sh); with no private
@@ -157,6 +160,14 @@ check catalog    run_catalog_check
 check lock       run_lock_check
 check budget     run_budget_check
 check compose    run_compose_check
+# Vetting audit (change `vetting`). Absent tool = skipped loudly and recorded, so an
+# old checkout or a stub grid still gates; a present tool that finds a high FAILS.
+run_audit() {
+  [ -f scripts/audit.sh ] || { echo "    scripts/audit.sh absent - skipped"; SKIPPED+=(audit); return 0; }
+  command -v python3 >/dev/null || { echo "    python3 absent - skipped"; SKIPPED+=(audit); return 0; }
+  bash scripts/audit.sh --gate --quiet
+}
+check audit      run_audit
 # Portable personas (dist/personas) are committed output of compose.py --target portable.
 # Skip loudly (and record it) on a fork or machine without the script or the venv: the
 # script's own venv-absent exit 0 would otherwise pass silently instead of being listed.

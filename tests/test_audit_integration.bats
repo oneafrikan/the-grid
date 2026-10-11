@@ -88,6 +88,12 @@ mk_skill() {
   [ "$status" -eq 2 ]
 }
 
+@test "--wired alone with nothing wired is a clean pass (wire.sh must not block an empty wire)" {
+  run bash "$AUDIT" --wired
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing wired"* ]]
+}
+
 # ---------------------------------------------------------------- --wired
 
 # A mock repo with one skill, wired by a baseline that names it.
@@ -212,4 +218,130 @@ STUB
   run bash "$AUDIT" --owned --wired --format json
   [ "$status" -eq 1 ]
   [ "$(printf '%s\n' "$output" | grep -c '"rule": "curl-pipe-shell"')" -eq 1 ]
+}
+
+# ---------------------------------------------------------------- wire.sh step 0 (group 5)
+#
+# wire.sh vets the wired set BEFORE it touches a link. These tests run the real
+# wire.sh against the same mock grid (real policy.yaml, empty allowlist) with
+# SKILLS_DIR/AGENTS_DIR pointing at the common_setup temp dirs.
+
+# wire_links DIR -> sorted "path -> target" lines for every symlink in DIR: a
+# stable fingerprint (no mtimes) to prove links are unchanged or identical.
+wire_links() { find "$1" -type l -printf '%p -> %l\n' | LC_ALL=C sort; }
+
+# run_wire [ARGS...] -> `run` the real wire.sh against the mock grid.
+run_wire() { run bash "$REPO_ROOT/scripts/wire.sh" "$@"; }
+
+# add_wired REPO [BODY] -> a one-skill repo named in the BASELINE (blocks when BODY is bad).
+add_wired() {
+  mk_skill "$T/repos/$1" s "${2:-Plain prose.}"
+  printf '%s\n' "$1" >> "$T/baseline-submodules.txt"
+}
+
+# gitmodules_entry REPO URL -> a submodule entry so the source checks apply to repos/REPO.
+gitmodules_entry() {
+  printf '[submodule "repos/%s"]\n\tpath = repos/%s\n\turl = %s\n' "$1" "$1" "$2" >> "$T/.gitmodules"
+}
+
+@test "wire (a): a bad wired skill blocks with exit 3 and leaves existing links unchanged" {
+  add_wired good
+  run_wire
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/s" ]
+  before="$(wire_links "$MOCK_SKILLS")"
+  # A second repo arrives with a pipe-to-shell: the next wire must refuse BEFORE teardown.
+  mk_skill "$T/repos/evil" e "$BAD"
+  printf 'evil\n' >> "$T/baseline-submodules.txt"
+  run_wire
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"BLOCKED by audit"* ]]
+  [[ "$output" == *"repos/evil/e"* ]]
+  [ "$before" = "$(wire_links "$MOCK_SKILLS")" ]
+  [ ! -e "$MOCK_SKILLS/e" ]
+}
+
+@test "wire (b): GRID_AUDIT=warn wires anyway and prints the warning" {
+  add_wired evil "$BAD"
+  GRID_AUDIT=warn run_wire
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"GRID_AUDIT=warn so wiring continues"* ]]
+  [ -L "$MOCK_SKILLS/s" ]
+}
+
+@test "wire (c): a low-only finding warns nowhere and does not block" {
+  # @latest in prose is a LOW latest-tag; --quiet hides it and the wire proceeds.
+  add_wired lowrepo 'Install it with npm i some-tool@latest when needed.'
+  run_wire
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"BLOCKED"* ]]
+  [ -L "$MOCK_SKILLS/s" ]
+}
+
+@test "wire (d): no policy.yaml wires with the skipped notice" {
+  add_wired evil "$BAD"                       # would block if the audit ran
+  rm "$T/policy.yaml"
+  run_wire
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"wire: no policy.yaml - audit skipped"* ]]
+  [ -L "$MOCK_SKILLS/s" ]
+}
+
+@test "wire (e): PATH without python3 wires with the loud notice" {
+  add_wired evil "$BAD"                       # would block if the audit ran
+  nopy="$(path_without 'python3*' python)"
+  PATH="$nopy" run_wire
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python3 missing - audit SKIPPED, skills wired unaudited"* ]]
+  [ -L "$MOCK_SKILLS/s" ]
+}
+
+@test "wire (f): --check starts no audit; a second real wire leaves identical links" {
+  add_wired good
+  run_wire
+  [ "$status" -eq 0 ]
+  first="$(wire_links "$MOCK_SKILLS")"
+  # Make the grid bad: --check must still just compare links, never audit.
+  printf '%s\n' "$BAD" >> "$T/repos/good/s/SKILL.md"
+  run_wire --check
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"audit"* ]]
+  [[ "$output" != *"BLOCKED"* ]]
+  [ "$first" = "$(wire_links "$MOCK_SKILLS")" ]
+  # And on a clean grid a second real wire is a no-op.
+  printf -- '---\nname: s\ndescription: Test skill s\n---\nPlain prose.\n' > "$T/repos/good/s/SKILL.md"
+  run_wire
+  [ "$status" -eq 0 ]
+  [ "$first" = "$(wire_links "$MOCK_SKILLS")" ]
+}
+
+@test "wire (h): an overlay-only repo with no CURATION heading warns; the same repo in the baseline blocks" {
+  add_wired base
+  mk_skill "$T/repos/ovl" o
+  gitmodules_entry ovl https://github.com/obra/superpowers   # an allowed source
+  mkdir -p "$T/machines"; printf 'ovl\n' > "$T/machines/$GRID_HOST.txt"
+  run_wire
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"source-uncurated"* ]]
+  [ -L "$MOCK_SKILLS/o" ]
+  # Same repo, now baseline: source-uncurated is high, so wire exits 3.
+  rm "$T/machines/$GRID_HOST.txt"
+  printf 'ovl\n' >> "$T/baseline-submodules.txt"
+  run_wire
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"source-uncurated"* ]]
+}
+
+@test "wire (i): an overlay-only repo whose URL is not allowed warns and still wires" {
+  add_wired base
+  mk_skill "$T/repos/ovl" o
+  gitmodules_entry ovl https://example.net/someone/else
+  # Curated (heading present) so only the source check is in play.
+  printf '### repos/ovl\n\n```audit-allow\n```\n' > "$T/CURATION.md"
+  mkdir -p "$T/machines"; printf 'ovl\n' > "$T/machines/$GRID_HOST.txt"
+  run_wire
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"source-not-allowed"* ]]
+  [[ "$output" != *"source-uncurated"* ]]
+  [ -L "$MOCK_SKILLS/o" ]
 }

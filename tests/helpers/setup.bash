@@ -48,3 +48,31 @@ make_skill() {
   mkdir -p "$dir"
   printf -- "---\nname: %s\ndescription: Test skill %s\n---\n" "$name" "$name" > "$dir/SKILL.md"
 }
+
+# path_without GLOB... -> prints a temp dir holding a symlink to every executable
+# found on the CURRENT $PATH whose basename matches none of the globs. The caller
+# sets PATH to that dir to simulate a machine without a tool, e.g.
+#   PATH="$(path_without 'python3*' python)" run bash wire.sh
+# Earlier PATH entries win on duplicate names, like a normal lookup. The dir is
+# created under BATS_TEST_TMPDIR when set (bats removes it), else TMPDIR or /tmp.
+path_without() {
+  local dir d f base g skip
+  dir="$(mktemp -d "${BATS_TEST_TMPDIR:-${TMPDIR:-/tmp}}/pathwithout.XXXXXX")"
+  local IFS=:
+  for d in $PATH; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -f "$f" ] && [ -x "$f" ] || continue
+      base="$(basename "$f")"
+      skip=0
+      for g in "$@"; do
+        # $g is deliberately an unquoted glob pattern.
+        # shellcheck disable=SC2254
+        case "$base" in $g) skip=1; break ;; esac
+      done
+      [ "$skip" = 0 ] || continue
+      [ -e "$dir/$base" ] || [ -L "$dir/$base" ] || ln -s "$f" "$dir/$base"
+    done
+  done
+  printf '%s\n' "$dir"
+}
