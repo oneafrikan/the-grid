@@ -180,6 +180,29 @@ if [ "${1:-}" = "--check" ]; then
     cat "$tmp/rules.diff" >&2
     rc=1
   fi
+  # Rules delivery to the harness instruction files: the dry-run child left, per harness
+  # that has one, "<name> TAB <active 0|1> TAB <packs csv>" in $tmp/home/.rules-wanted (one
+  # source of truth for the manifest grammar). Repeat the decision against the LIVE files
+  # with rules.py --check, which writes nothing; harness_rules_action is the same function
+  # the real run uses, so the two cannot disagree. An absent or symlinked file is not drift.
+  if [ -s "$tmp/home/.rules-wanted" ]; then
+    while IFS=$'\t' read -r rw_name rw_active rw_csv; do
+      rw_raw="$(harness_field "$rw_name" rules_file)"
+      if ! rw_file="$(harness_path "$rw_raw")"; then rc=1; continue; fi
+      rw_action="$(harness_rules_action "$rw_file" "$rw_active" "$rw_csv")"
+      case "$rw_action" in
+        emit|remove)
+          [ "$rw_action" = remove ] && rw_csv=""
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo "wire --check: python3 not found; rules in $rw_file not checked" >&2
+          elif ! rw_out="$(harness_rules_emit "$(harness_field "$rw_name" rules_harness)" "$rw_csv" "$rw_file" --check 2>&1)"; then
+            echo "wire --check: rules drift in $rw_file ($rw_name):" >&2
+            [ -z "$rw_out" ] || printf '%s\n' "$rw_out" >&2
+            rc=1
+          fi ;;
+      esac
+    done < "$tmp/home/.rules-wanted"
+  fi
   # Machine-level hooks: the dry-run child above resolved the manifest and left the
   # list it would wire in $tmp/home/.hooks-wanted (one source of truth for the
   # hook:/-hook: grammar). Compare it with the LIVE settings file; writes nothing.
@@ -617,6 +640,7 @@ fi
 # warns on stderr and is recorded as skipped; it never fails the wire. A real file at a
 # target is left alone, as with skills and agents.
 rules_done=" "   # packs already handled this run (a pack named in baseline AND overlay)
+RULES_EFFECTIVE=()   # the wired packs that exist (input to step 3f, rules delivery)
 for rule_pack in "${WIRED_RULES[@]:-}"; do
   [ -n "$rule_pack" ] || { echo "warning: empty rules: entry ignored" >&2; continue; }
   rule_is_denied "$rule_pack" && continue
@@ -631,6 +655,8 @@ for rule_pack in "${WIRED_RULES[@]:-}"; do
     MANIFEST_ROWS+=("rule	$rule_pack	$GRID_DIR/rules/$rule_pack	skipped	no such pack")
     continue
   fi
+  # An existing, valid, not-denied pack: this is the set rules delivery (3f) hands to rules.py.
+  RULES_EFFECTIVE+=("$rule_pack")
   rule_dest="$RULES_DIR/grid/$rule_pack"
   if ! mkdir -p "$rule_dest" 2>/dev/null; then
     echo "warning: rules:$rule_pack - cannot create $rule_dest; skipped" >&2
@@ -775,6 +801,59 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ]; then
   done
 fi
 
+# --- 3f. Rules delivery into harness instruction files (rules.py emit) ---
+# rule-packs owns the format and the emitter; this step only decides WHICH files get a call.
+# The wired set is RULES_EFFECTIVE (rules:<pack> minus -rules:<pack>, existing packs only),
+# comma-joined in C-locale order. Per harness that has a rules_file in the registry:
+#   active, packs wired, regular file     -> emit --harness <rules_harness> --packs <csv>
+#   active, packs wired, absent/symlink   -> NO call; manifest row rules@<~file> ... skipped
+#                                            (the grid never creates an instruction file, and
+#                                            never writes through a symlink)
+#   anything else holding the literal marker `BEGIN the-grid rules` in a regular file
+#                                         -> emit --packs '' (removes the block; no marker, no call)
+# So nothing is injected by default, and an operator's empty opt-in file is never touched.
+# A rules.py failure is reported, the remaining steps still run, and wire exits 1 at the end.
+# Under GRID_DRY_HOME (the --check sub-run) nothing is delivered: the decision inputs are
+# recorded in $GRID_DRY_HOME/.rules-wanted for the parent's --check to replay with --check.
+rules_failed=0
+rules_csv=""
+if [ "${#RULES_EFFECTIVE[@]}" -gt 0 ]; then
+  rules_csv="$(printf '%s\n' "${RULES_EFFECTIVE[@]}" | LC_ALL=C sort -u | paste -sd, -)"
+fi
+[ -z "${GRID_DRY_HOME:-}" ] || : > "$GRID_DRY_HOME/.rules-wanted"
+rl_done=()   # distinct instruction files handled this run (two harnesses must never share one)
+while IFS= read -r h_name; do
+  [ "$h_name" = claude ] && continue
+  rl_raw="$(harness_field "$h_name" rules_file)"
+  [ "$rl_raw" != "-" ] || continue
+  ! in_list "$rl_raw" "${rl_done[@]:-}" || continue
+  rl_done+=("$rl_raw")
+  rl_active=0; if in_list "$h_name" "${ACTIVE_HARNESSES[@]:-}"; then rl_active=1; fi
+  if [ -n "${GRID_DRY_HOME:-}" ]; then
+    printf '%s\t%s\t%s\n' "$h_name" "$rl_active" "$rules_csv" >> "$GRID_DRY_HOME/.rules-wanted"
+    continue
+  fi
+  if ! rl_file="$(harness_path "$rl_raw")"; then
+    echo "wire: rules delivery failed for $rl_raw: cannot resolve the path" >&2; rules_failed=1; continue
+  fi
+  rl_action="$(harness_rules_action "$rl_file" "$rl_active" "$rules_csv")"
+  case "$rl_action" in
+    skip:*)
+      MANIFEST_ROWS+=("rules@$rl_raw	$h_name	-	skipped	${rl_action#skip:}") ;;
+    emit|remove)
+      rl_packs="$rules_csv"; [ "$rl_action" = remove ] && rl_packs=""
+      if ! command -v python3 >/dev/null 2>&1; then
+        echo "warning: python3 not found; rules in $rl_raw not updated" >&2
+        MANIFEST_ROWS+=("rules@$rl_raw	$h_name	-	skipped	python3 not found")
+      elif rl_out="$(harness_rules_emit "$(harness_field "$h_name" rules_harness)" "$rl_packs" "$rl_file" 2>&1)"; then
+        [ -z "$rl_out" ] || echo "  rules ($rl_raw): $rl_out"
+      else
+        echo "wire: rules delivery failed for $rl_raw ($h_name): $rl_out" >&2
+        rules_failed=1
+      fi ;;
+  esac
+done < <(harness_names)
+
 # --- 3d. Write the wiring manifest (audit trail) ---
 # One row per decision (kind, name, target, status, reason), sorted, no
 # timestamp — so an unchanged wiring leaves the file byte-identical and it is
@@ -800,5 +879,9 @@ if [ -f "$SCRIPT_DIR/catalog.sh" ] && [ -z "${GRID_SKIP_CATALOG:-}" ] && [ -z "$
   GRID_DIR="$GRID_DIR" bash "$SCRIPT_DIR/catalog.sh" "$GRID_DIR/SKILLS.md"
 fi
 
-
+# Rules delivery (3f) finishes every other step first, then fails the run.
+if [ "$rules_failed" != 0 ]; then
+  echo "wire: done, but rules delivery failed (see above)" >&2
+  exit 1
+fi
 echo "Done."
