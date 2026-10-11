@@ -249,3 +249,25 @@ mk_plugin_tree() {
   last="$(printf '%s\n' "$output" | tail -n 1)"
   [[ "$last" != *"plugins-validate"* ]] || false
 }
+
+# --- rules check (rule-packs#1) ----------------------------------------------------------
+# Like the other checks, `rules` skips loudly (and is recorded in the final line) when its
+# tool is absent. Neither case puts python3 on the stub PATH, so even a PRESENT
+# scripts/rules.py is skipped: the check needs both python3 and the script.
+
+@test "G3: with no scripts/rules.py the rules check is skipped LOUDLY, not failed" {
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python3 or scripts/rules.py absent"* ]] || false
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"rules"* ]] || false
+}
+
+@test "G3: a placeholder scripts/rules.py but no python3 on PATH is still a loud skip of the rules check" {
+  printf 'import sys\nsys.exit(1)\n' > "$G/scripts/rules.py"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python3 or scripts/rules.py absent"* ]] || false
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"rules"* ]] || false
+}
