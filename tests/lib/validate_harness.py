@@ -143,6 +143,42 @@ def check_skill(path: Path) -> list[str]:
     return problems
 
 
+# ── gemini-agent ─────────────────────────────────────────────────────────────
+# (group 5) Reuses the frontmatter reader above.
+@command("gemini-agent")
+def check_gemini_agent(path: Path) -> list[str]:
+    """A Gemini CLI subagent file: a `---` frontmatter block whose `name` matches
+    ^[a-z0-9_-]+$ and whose `description` is non-empty. Also (the-grid's own contract, not a
+    Gemini rule): `tools`, when present, is a block list of non-empty items (not Claude's
+    comma string), and there is no `model` key (the role's model is never pinned)."""
+    fm = _frontmatter_reader()
+    lines = fm.frontmatter_lines(str(path))
+    if lines is None:
+        return ["no `---` frontmatter block"]
+    problems = []
+    name = fm.scalar(lines, "name")
+    if not re.fullmatch(r"[a-z0-9_-]+", name):
+        problems.append(f"name {name!r} does not match ^[a-z0-9_-]+$")
+    if not fm.scalar(lines, "description").strip():
+        problems.append("description is empty")
+    top = [ln for ln in lines if ln and ln[0] not in " \t"]
+    if any(re.match(r"model\s*:", ln) for ln in top):
+        problems.append("model must not be set")
+    for i, ln in enumerate(lines):
+        if re.match(r"tools\s*:", ln):
+            items = []
+            for nxt in lines[i + 1:]:
+                m = re.match(r"^\s*-\s+(\S.*)$", nxt)
+                if not m:
+                    break
+                items.append(m.group(1))
+            # `tools:` with text after it (a string / inline list) or with no items is not
+            # the block list this repo writes.
+            if ln.split(":", 1)[1].strip() or not items:
+                problems.append("tools must be a non-empty YAML block list")
+    return problems
+
+
 # ── driver ───────────────────────────────────────────────────────────────────
 def main(argv: list[str]) -> int:
     if len(argv) < 3 or argv[1] not in COMMANDS:

@@ -222,3 +222,58 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
 ## Single-file personas
 
 Single-file personas for chat-UI Projects: `dist/personas/<role>.md`
+
+## Gemini CLI and Antigravity
+
+### Gemini CLI (agent target `gemini-cli`)
+
+Compose, then wire (Gemini only reads the files once wire.sh has linked them into `~/.gemini/agents/`; skills come from the shared `~/.agents/skills`):
+
+```
+agent-factory/.venv/bin/python agent-factory/compose.py agent-factory/examples/grid.yaml --target gemini-cli
+GRID_HARNESS=gemini bash scripts/wire.sh        # or put harness:gemini in machines/<host>.txt
+```
+
+Output: `agent-factory/projects/<project>/_gemini-cli/agents/<name>.md`, one per specialist, `<name>` = `<slug>-<role>` (`grid-qa-engineer`).
+
+```markdown
+---
+name: grid-qa-engineer
+description: QA Engineer. The release gate. ... Use this subagent for qa-engineer work.
+tools:
+- read_file
+- read_many_files
+- grep_search
+- glob
+- list_directory
+- run_shell_command
+---
+
+You are the **QA Engineer**, a specialist agent on a composed dev team. ...
+```
+
+- Key order is fixed: `name`, `description`, `tools`. `model` is never written (Gemini's default is `inherit`).
+- `tools` is written only when the role's `role.yaml` has a `tools:` allowlist. A role with none gets no `tools` key and inherits every tool, as on Claude.
+- The allowlist is mapped in the role's listed order, first occurrence wins (`GEMINI_TOOLS` in `compose.py`):
+
+  | Claude tool | Gemini tools |
+  |---|---|
+  | `Read` | `read_file`, `read_many_files` |
+  | `Grep` | `grep_search` |
+  | `Glob` | `glob`, `list_directory` |
+  | `Bash` | `run_shell_command` |
+  | `Edit` | `replace` |
+  | `Write` | `write_file` |
+  | `WebFetch` | `web_fetch` |
+  | `WebSearch` | `google_web_search` |
+
+- A tool with no mapping is a hard error: `E_TOOL_UNMAPPED: <role>: tool '<tool>' has no Gemini CLI mapping`, exit 1. The check runs before the `_gemini-cli` dir is wiped, so a failed compose leaves the previous output (and any other target) untouched. Dropping the tool silently would change what a read-only role can do.
+- The docs say only "tool names" for `tools`, with no syntax shown, so the list is a YAML block list (the natural form). Not verified on a real Gemini CLI yet (the real-install smoke test is a later, optional, human step).
+- `tests/lib/validate_harness.py gemini-agent FILE...` checks a generated file: `name` matches `^[a-z0-9_-]+$`, `description` is non-empty, `tools` (if present) is a block list, and there is no `model`.
+- Subagents cannot call subagents on Gemini CLI, so a role that delegates (an orchestrator) is never emitted as an agent file; it reaches Gemini as a skill.
+
+### Antigravity CLI (skills-only)
+
+- Gemini CLI's successor for individual-tier users since **2026-06-18** (Google's transition post). `agy` is the binary.
+- The registry row `antigravity` has `-` for `agents_dir`, `compose_target` and `rules_file`: `GRID_HARNESS=antigravity` links the wired skills into `~/.gemini/antigravity-cli/skills/` and creates no agents dir and no `~/.agents/skills`. Its subagent location and a global `AGENTS.md` are undocumented, so no emitter and no rules delivery.
+- **The skills path is unverified.** Google's migration docs give `~/.gemini/antigravity-cli/skills/`; third-party sources disagree (`~/.antigravity` vs `~/.gemini`). Confirm on a real `agy` install before relying on the row (optional human smoke test, tasks 9.4). If the path is wrong, edit the one row in `scripts/lib/harnesses.txt`.
