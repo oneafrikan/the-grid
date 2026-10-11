@@ -1,0 +1,111 @@
+# policy.yaml — what `grid audit` flags. Restricted YAML subset (see design.md).
+version: 1
+
+# Directories (relative to --root) whose content the-grid owns; everything else is upstream tier.
+owned_roots: [skills, agents, rules, hooks, agent-factory]
+skip_dirs: ['.git']          # node_modules is NOT skipped: it is reported as builtin vendored-deps
+
+sources:
+  allowed_hosts: [github.com]
+  allowed_repos:
+    - anthropics/skills
+    - garrytan/gstack
+    - jeffallan/claude-skills
+    - mattpocock/skills
+    - obra/superpowers
+    - Fission-AI/openspec
+    - DietrichGebert/ponytail
+
+limits:
+  max_file_bytes: 1048576
+
+negation: '(?i)\b(?:never|do not|don.t|must not|mustn.t|avoid|reject|refuse)\b'
+
+classes:
+  - name: test
+    globs: ['test/**', 'tests/**', '**/test/**', '**/tests/**', '**/__tests__/**', '**/*.test.*', '**/*.spec.*', '**/fixtures/**', 'evals/**']
+  - name: hook
+    globs: ['hooks/**', '**/hooks/**', '**/hooks.json', '**/*-hook', '**/*-hook.*']
+  - name: script
+    globs: ['**/*.sh', '**/*.bash', '**/*.zsh', '**/*.py', '**/*.js', '**/*.mjs', '**/*.cjs', '**/*.ts', '**/*.rb', '**/*.ps1', '**/bin/**']
+  - name: config
+    globs: ['**/*.json', '**/*.toml', '**/*.yaml', '**/*.yml', '**/.mcp.json']
+  - name: doc
+    globs: ['**/*.md', '**/*.mdx', '**/*.txt', '**/*.tmpl']
+
+builtin:
+  hidden-unicode: high
+  symlink-escape: high
+  binary-exec: low
+  oversize-file: low           # high for script/hook/config class, SKILL.md and agent .md (rule 7)
+  vendored-deps: high          # a node_modules/ directory inside a target; not descended into
+  source-not-allowed: low      # raised to high for repos named in the baseline (see --baseline)
+  source-uncurated: low        # raised to high for repos named in the baseline (see --baseline)
+  allow-unused: low
+  allow-stale: low             # sha256-pinned allowlist entry whose file no longer matches; entry inactive
+
+rules:
+  - id: curl-pipe-shell
+    severity: high
+    message: downloads and executes remote code
+    regex: '\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:(?:ba|z|fi|da)?sh|python3?|node|ruby|perl)\b|\b(?:ba|z)?sh\s+<\(\s*(?:curl|wget)|\b(?:bash|sh|zsh|eval|source|python3?|perl|ruby|node)\b[^\n]*["'']?\$\(\s*(?:curl|wget)\b|(?:\bsource|(?:^|\s)\.)\s+<\(\s*(?:curl|wget)|\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n]*\|\s*iex\b|\biex\s*\(\s*(?:iwr|irm)\b'
+    downgrade: [negation, comment, test]
+  - id: npx-unpinned
+    severity: high
+    message: npx -y runs whatever is currently published; pin pkg@x.y.z
+    regex: '\bnpx\s+(?:-y|--yes)\b|"args"\s*:\s*\[\s*"(?:-y|--yes)"'
+    ignore_regex: '\bnpx\s+(?:(?:-y|--yes)\s+)+(?:--?\S+\s+)*@?[\w./-]+@\d|"(?:-y|--yes)"\s*,\s*"@?[\w./-]+@\d'
+    downgrade: [negation, comment, test]
+  - id: latest-tag
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: '@latest is unpinned; pin an exact version'
+    regex: '@latest\b'
+    downgrade: [negation, comment, test]
+  - id: uvx-unpinned
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: uvx without a pinned version
+    regex: '\buvx\s+[-\w.]'
+    ignore_regex: '\buvx\s+(?:--?\S+\s+(?:\d[\w.]*\s+)?)*[\w.-]+(?:==|@)\d|--from\s+\S+=='
+    downgrade: [negation, comment, test]
+  - id: secret-shape
+    severity: high
+    message: looks like a credential
+    regex: '(?<![A-Za-z0-9])(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{22,}|sk-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35})|-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'
+    ignore_regex: 'EXAMPLE|(?i:placeholder|your[_-]|x{6,}|dummy|fake|redacted)|\.\.\.'
+    downgrade: []
+  - id: home-path
+    severity: low
+    owned_severity: high
+    message: absolute per-user home path (non-portable, may leak a username)
+    regex: '(?<![\w.~:/-])/(?:Users|home)/(?!(?:you|user|username|me|name|someone|yourname|youruser|runner|\$|<|\{|\.\.\.|\*))[A-Za-z0-9_.-]+/|[A-Za-z]:\\Users\\(?!(?:you|user|username|name)\\)[A-Za-z0-9_.-]+\\'
+    downgrade: [test]
+  - id: ssh-write
+    severity: high
+    message: writes to ~/.ssh
+    regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install|rsync|scp)\b[^\n|;&]*?|\bsed\s+-i\S*[^\n|;&]*?)\s*["'']?(?:~|\$HOME|\$\{HOME\})/\.ssh/'
+    downgrade: [negation, comment, test]
+  - id: shell-rc-write
+    severity: high
+    message: modifies a shell startup file
+    regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install)\b[^\n|;&]*?|\bsed\s+-i\S*[^\n|;&]*?)\s*["'']?(?:~|\$HOME|\$\{HOME\})/\.(?:zshrc|zprofile|zshenv|bashrc|bash_profile|profile)\b|(?:>>?|\btee\b(?:\s+-a)?)\s*["'']?(?:~|\$HOME)/\.config/fish/config\.fish'
+    downgrade: [negation, comment, test]
+  - id: prompt-injection
+    severity: high
+    message: text that tries to override the agent's instructions
+    regex: '(?i)\b(?:ignore|disregard|forget)\s+(?:all\s+|any\s+|your\s+)?(?:previous|prior|above|earlier|preceding)\s+(?:instructions|prompts|rules|guidelines|context)|\byou\s+are\s+now\s+(?:in\s+)?(?:developer\s+mode|DAN|jailbroken|unrestricted)|\b(?:do\s+not|don.t|never)\s+(?:tell|inform|reveal\s+(?:this\s+)?to|mention\s+(?:this\s+)?to)\s+the\s+user'
+    downgrade: [negation, test]
+  - id: hook-network
+    severity: high
+    applies: [hook]
+    message: hook makes a network call
+    regex: '\b(?:curl|wget|nc|ncat|telnet|ssh|scp)\s|https?://|\bfetch\s*\(|requests\.(?:get|post|put)|\burllib|\bhttp\.client|Invoke-WebRequest|XMLHttpRequest'
+    ignore_regex: 'https?://(?:localhost|127\.0\.0\.1|\[::1\])'
+    downgrade: [comment, test]
+  - id: credential-read
+    severity: low
+    severity_by_class: {script: high, hook: high}
+    message: reads a credential store
+    regex: '(?:~|\$HOME|\$\{HOME\})/(?:\.ssh/id_\w+|\.aws/credentials|\.netrc|\.config/gh/hosts\.yml|\.docker/config\.json|\.npmrc|\.git-credentials)|Library/Keychains|security\s+find-(?:generic|internet)-password'
+    downgrade: [negation, comment, test]
