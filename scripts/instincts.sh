@@ -18,6 +18,13 @@
 #   instincts.sh retire ID [PROJECT]  retire an instinct (this host's file)
 #   instincts.sh forget PROJECT --yes delete local observations + this host's instincts
 #   instincts.sh clusters           clusters and strong global instincts, as plain text for Tank
+#   instincts.sh analyse [--all] [--project ID] [--dry-run] [--force]
+#                                   weekly analysis of local observations (one cheap model
+#                                   call per project, capped); --dry-run prints the digest and
+#                                   plan and calls nothing; a second run in the same ISO week
+#                                   is a no-op unless --force
+#   instincts.sh status [--project ID]
+#                                   funnel (ret/valid/kept), drop reasons and WARN rules
 #   instincts.sh help               this text
 #
 # Exit codes: 0 ok, 1 command-specific failure, 2 usage error (unknown subcommand).
@@ -30,6 +37,7 @@ set -u
 # Resolve our own directory (follows no symlinks; the repo layout is fixed).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$SCRIPT_DIR/instincts/lib.py"
+ANALYSE="$SCRIPT_DIR/instincts/analyse.py"
 
 usage() {
   cat <<'EOF'
@@ -46,9 +54,14 @@ Usage:
   instincts.sh retire ID [PROJECT]  retire an instinct on this host
   instincts.sh forget PROJECT --yes delete local observations and this host's instincts
   instincts.sh clusters           clusters and strong global instincts (input for tank)
+  instincts.sh analyse [--all] [--project ID] [--dry-run] [--force]
+                                  weekly analysis of local observations
+  instincts.sh status [--project ID]
+                                  analysis funnel and warnings
   instincts.sh help               show this help
 
-Exit codes: 0 ok, 1 failure (project-id: no git remote), 2 unknown subcommand.
+Exit codes: 0 ok, 1 failure (project-id: no git remote; analyse: a project errored),
+2 unknown subcommand or bad arguments.
 EOF
 }
 
@@ -70,6 +83,9 @@ case "$cmd" in
   inject)
     # SessionStart hook body; inject.py puts its own directory on sys.path (-I drops it).
     exec python3 -I "$SCRIPT_DIR/instincts/inject.py" "$@" ;;
+  analyse|status)
+    # analyse.py adds its own directory to sys.path (python3 -I does not).
+    exec python3 -I "$ANALYSE" "$cmd" "$@" ;;
   *)
     echo "instincts: unknown subcommand '$cmd'" >&2
     usage >&2
