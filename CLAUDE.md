@@ -335,6 +335,13 @@ All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: 
   (`RULES_DIR`, default `~/.claude/rules`; only `grid/` is grid-owned). Opt-in: no
   `rules:` entry means nothing is wired. An unknown or unsafe pack name warns and is
   skipped (`rule` row in `.wired.manifest`); `--check` also reports rules drift.
+- **Harnesses:** `harness:<name>` / `-harness:<name>` manifest entries (or
+  `GRID_HARNESS=a,b`, which replaces the manifest set for one run) also link the wired
+  skills, and composed `_<compose_target>/agents/*`, into other harnesses' dirs from the
+  registry `scripts/lib/harnesses.txt` (codex, opencode, gemini, antigravity, pi,
+  openclaw; `~/.agents/skills` is shared by five). Opt-in; an unknown name exits 2.
+  Never replaces an existing entry in those dirs; skip reasons land in
+  `.wired.manifest`. See `docs/harnesses.md`.
 - **Composed agents:** wire.sh also wires `agent-factory/projects/*/_claude-code/`
   output — orchestrator skills into `SKILLS_DIR`, specialist subagents into
   `AGENTS_DIR`. Gated per machine by `project:<name>` manifest entries; with no
