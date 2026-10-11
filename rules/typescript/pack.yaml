@@ -1,0 +1,4 @@
+# Flat "key: value" lines only. Parsed by rules.py (no YAML library).
+summary: TypeScript and JavaScript - strict tsconfig, unknown over any, runtime validation, errors and promises
+tier: 2
+adapted_from: affaan-m/ECC rules/typescript @ ef648e0 (MIT)
