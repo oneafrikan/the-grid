@@ -12,7 +12,7 @@ tags: [llm-session, claude-code, <relevant topic tags>]
 - **Machine:** <hostname>
 - **Directory:** <working directory>
 - **Project:** <project name>
-- **CLAUDE.md active:** yes/no — <key constraints or phase active, e.g. "Jarvis Phase 0 — CLI only">
+- **CLAUDE.md active:** yes/no — <key constraints or phase active, e.g. "Phase 0 - CLI only">
 
 ## What we did
 - <bullet>
