@@ -156,3 +156,199 @@ PYEOF
   lacks '^sandbox_mode' "$d/zz-zz-write.toml"
   grep -qx 'sandbox_mode = "read-only"' "$d/zz-zz-ro.toml"
 }
+
+# ================================================================ opencode (group 4) ====
+# OpenCode subagents are <name>.md with YAML frontmatter (`description`, `mode`, optional
+# `permission`) and the prompt as the body. The skill checks below apply to every harness that
+# reads the shared skills dir. Author's own checks, not independent verification.
+
+@test "opencode: the validator accepts every golden .md" {
+  mapfile -t files < <(golden_files opencode md)
+  # Guard against a vacuous pass: the fixture has three specialists.
+  [ "${#files[@]}" -eq 3 ]
+  run python3 -I "$VALIDATE" opencode-agent "${files[@]}"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "opencode: goldens map the allowlist to permission and never write model or tools" {
+  local d; d=$(dirname "$(golden_files opencode md | head -1)")
+  # fx-readonly has [Read, Grep, Glob, Bash]: no edit and no web access, but Bash allowed.
+  grep -qx '  edit: deny' "$d/fx-fx-readonly.md"
+  grep -qx '  webfetch: deny' "$d/fx-fx-readonly.md"
+  lacks 'bash:' "$d/fx-fx-readonly.md"
+  grep -qx 'mode: subagent' "$d/fx-fx-readonly.md"
+  # No allowlist, no permission block.
+  lacks '^permission' "$d/fx-fx-eng.md" "$d/fx-product-manager.md"
+  # `model` is never written; `tools` is deprecated in OpenCode so it is never written either.
+  lacks '^(model|tools):' "$d"/*.md
+  # Orchestrators are skills, never agent files.
+  [ "$(ls "$d" | wc -l)" -eq 3 ]
+  lacks 'orchestrator|tech-lead|growth-hacker' <(ls "$d")
+}
+
+@test "opencode: the frontmatter parses as YAML with description first, then mode" {
+  # Descriptions can contain ': ' and quotes, so a hand-built frontmatter could break; read it
+  # back with PyYAML.
+  run "$PY" - "$(dirname "$(golden_files opencode md | head -1)")" <<'PYEOF'
+import sys, pathlib, yaml
+for f in sorted(pathlib.Path(sys.argv[1]).glob("*.md")):
+    text = f.read_text(encoding="utf-8")
+    assert text.startswith("---\n"), f
+    fm_text, body = text[4:].split("\n---\n", 1)
+    fm = yaml.safe_load(fm_text)
+    assert fm["mode"] == "subagent", f
+    assert list(fm)[:2] == ["description", "mode"], list(fm)   # fixed key order
+    assert fm["description"].strip(), f
+    assert "You are the **" in body, f
+print("ok")
+PYEOF
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "opencode: the validator rejects a missing description, the wrong mode and a bad permission" {
+  printf -- '---\ndescription: d\nmode: subagent\npermission:\n  edit: deny\n---\nbody\n' > "$TMP/ok.md"
+  run python3 -I "$VALIDATE" opencode-agent "$TMP/ok.md"
+  [ "$status" -eq 0 ]
+  printf -- '---\nmode: subagent\n---\nbody\n' > "$TMP/nodesc.md"
+  run python3 -I "$VALIDATE" opencode-agent "$TMP/nodesc.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"description"* ]]
+  printf -- '---\ndescription: d\nmode: primary\n---\nbody\n' > "$TMP/primary.md"
+  run python3 -I "$VALIDATE" opencode-agent "$TMP/primary.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mode"* ]]
+  printf -- '---\ndescription: d\nmode: subagent\npermission:\n  edit: maybe\n---\nbody\n' > "$TMP/perm.md"
+  run python3 -I "$VALIDATE" opencode-agent "$TMP/perm.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"permission"* ]]
+  printf 'no frontmatter here\n' > "$TMP/nofm.md"
+  run python3 -I "$VALIDATE" opencode-agent "$TMP/nofm.md"
+  [ "$status" -eq 1 ]
+}
+
+@test "opencode: each allowlist tool maps to exactly its permission key (temp roles)" {
+  # The shared fixture has one allowlisted role (no Edit/Write/WebFetch, with Bash), so it can
+  # only prove ONE direction of each condition. Build the other cases from temp roles: one role
+  # per row, each with a different allowlist.
+  local roles="$TMP/roles" r
+  cp -R "$REPO_ROOT/tests/fixtures/compose/roles" "$roles"
+  mk() {   # mk <role> <tools yaml list, or empty for no allowlist>
+    cp -R "$roles/fx-eng" "$roles/$1"
+    sed -i "s/^name: .*/name: $1/" "$roles/$1/role.yaml"
+    [ -z "$2" ] || printf 'tools: %s\n' "$2" >> "$roles/$1/role.yaml"
+  }
+  mk zz-edit   '[Read, Edit]'                   # edit allowed; bash and web denied
+  mk zz-write  '[Read, Write]'                  # Write alone also allows edit
+  mk zz-nobash '[Read, Grep]'                   # no Bash: bash denied
+  mk zz-fetch  '[Read, WebFetch]'               # WebFetch alone allows webfetch
+  mk zz-search '[Read, WebSearch]'              # WebSearch alone allows webfetch
+  mk zz-all    '[Read, Edit, Bash, WebFetch]'   # nothing denied: no permission block at all
+  mk zz-none   ''                               # no allowlist: no permission block
+  printf 'project: zz\nslug: zz\nagents:\n' > "$TMP/zz.yaml"
+  for r in zz-edit zz-write zz-nobash zz-fetch zz-search zz-all zz-none; do
+    printf '  - role: %s\n' "$r" >> "$TMP/zz.yaml"
+  done
+  export GRID_PRIVATE_ROLES_DIR="$roles"
+  export GRID_USER_CONFIG="$REPO_ROOT/agent-factory/user.public.yaml"
+  export GRID_MODELS_FILE="$REPO_ROOT/agent-factory/models.yaml"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target opencode --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  local d="$TMP/out/zz/_opencode/agents"
+  # Every generated file must itself be valid.
+  run python3 -I "$VALIDATE" opencode-agent "$d"/*.md
+  [ "$status" -eq 0 ]
+  # An allowed capability has no key; the denied ones are written in the fixed order
+  # edit, bash, webfetch.
+  lacks 'edit:' "$d/zz-zz-edit.md" "$d/zz-zz-write.md"
+  grep -qx '  bash: deny' "$d/zz-zz-edit.md"
+  grep -qx '  webfetch: deny' "$d/zz-zz-edit.md"
+  grep -qx '  edit: deny' "$d/zz-zz-nobash.md"
+  grep -qx '  bash: deny' "$d/zz-zz-nobash.md"
+  grep -qx '  webfetch: deny' "$d/zz-zz-nobash.md"
+  [ "$(grep -E '^  (edit|bash|webfetch):' "$d/zz-zz-nobash.md" | cut -d: -f1 | tr -d ' ' | paste -sd, -)" = "edit,bash,webfetch" ]
+  lacks 'webfetch:' "$d/zz-zz-fetch.md" "$d/zz-zz-search.md"
+  grep -qx '  edit: deny' "$d/zz-zz-fetch.md"
+  grep -qx '  edit: deny' "$d/zz-zz-search.md"
+  lacks '^permission' "$d/zz-zz-all.md" "$d/zz-zz-none.md"
+}
+
+# ---------------------------------------------------------------- skill (shared dir)
+
+# mkskill DIR NAME DESC — a skill dir with the given frontmatter name and description
+mkskill() {
+  mkdir -p "$1"
+  printf -- '---\nname: %s\ndescription: %s\n---\nbody\n' "$2" "$3" > "$1/SKILL.md"
+}
+
+@test "skill: the validator accepts a well-formed skill dir" {
+  mkskill "$TMP/good-skill" good-skill "A fine description."
+  run python3 -I "$VALIDATE" skill "$TMP/good-skill"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "skill: the validator rejects a bad dir name, a name mismatch and a bad description" {
+  # Dir name: uppercase, underscore, double hyphen, leading and trailing hyphen break the regex.
+  local bad
+  for bad in Upper under_score dbl--hyphen -lead trail-; do
+    mkskill "$TMP/$bad" "$bad" "d"
+    run python3 -I "$VALIDATE" skill "$TMP/$bad"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"dir name"* ]]
+  done
+  # Dir name longer than 64 chars fails; exactly 64 passes.
+  local long ok64
+  long=$(printf 'a%.0s' $(seq 1 65)); ok64=$(printf 'a%.0s' $(seq 1 64))
+  mkskill "$TMP/$long" "$long" "d"
+  run python3 -I "$VALIDATE" skill "$TMP/$long"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"64"* ]]
+  mkskill "$TMP/$ok64" "$ok64" "d"
+  run python3 -I "$VALIDATE" skill "$TMP/$ok64"
+  [ "$status" -eq 0 ]
+  # Frontmatter name differs from the dir.
+  mkskill "$TMP/mismatch" other-name "d"
+  run python3 -I "$VALIDATE" skill "$TMP/mismatch"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"name"* ]]
+  # Description: empty and 1025 chars fail, exactly 1024 passes.
+  mkskill "$TMP/empty-desc" empty-desc ""
+  run python3 -I "$VALIDATE" skill "$TMP/empty-desc"
+  [ "$status" -eq 1 ]
+  mkskill "$TMP/too-long" too-long "$(printf 'x%.0s' $(seq 1 1025))"
+  run python3 -I "$VALIDATE" skill "$TMP/too-long"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1024"* ]]
+  mkskill "$TMP/max-ok" max-ok "$(printf 'x%.0s' $(seq 1 1024))"
+  run python3 -I "$VALIDATE" skill "$TMP/max-ok"
+  [ "$status" -eq 0 ]
+  # No frontmatter at all, and no SKILL.md at all.
+  mkdir -p "$TMP/nofm"; printf 'plain\n' > "$TMP/nofm/SKILL.md"
+  run python3 -I "$VALIDATE" skill "$TMP/nofm"
+  [ "$status" -eq 1 ]
+  mkdir -p "$TMP/nofile"
+  run python3 -I "$VALIDATE" skill "$TMP/nofile"
+  [ "$status" -eq 1 ]
+}
+
+@test "skill: every entry wire.sh links into the shared dir passes the validator" {
+  # A fixture wire for OpenCode: portable skills go to $GRID_HARNESS_HOME/.agents/skills.
+  # `template` (frontmatter name template-skill != dir) is filtered out by wire.sh, so what
+  # remains must all be valid. The count guard keeps the test from passing vacuously.
+  mkdir -p "$MOCK_GRID/machines"
+  make_skill "$MOCK_GRID/skills/skill-alpha" skill-alpha
+  make_skill "$MOCK_GRID/skills/skill-beta" skill-beta
+  make_skill "$MOCK_GRID/skills/template" template-skill
+  GRID_DIR="$MOCK_GRID" GRID_HARNESS=opencode run bash "$REPO_ROOT/scripts/wire.sh"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  local shared="$GRID_HARNESS_HOME/.agents/skills"
+  mapfile -t entries < <(find "$shared" -mindepth 1 -maxdepth 1 | LC_ALL=C sort)
+  [ "${#entries[@]}" -eq 2 ]
+  run python3 -I "$VALIDATE" skill "${entries[@]}"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
