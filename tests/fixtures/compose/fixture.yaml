@@ -11,3 +11,4 @@ agents:
   - role: growth-hacker
   - role: product-manager
   - role: fx-eng
+  - role: fx-readonly
