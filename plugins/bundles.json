@@ -1,0 +1,25 @@
+{
+  "marketplace": {
+    "name": "the-grid",
+    "owner": "the-grid",
+    "description": "Skills and composed dev-team agents from the-grid."
+  },
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": "https://github.com/oneafrikan/the-grid",
+  "bundles": {
+    "grid-core": {
+      "description": "the-grid's own skills plus the cross-desk core agents (researcher, librarian, gh-triage, platform-engineer) and /tron.",
+      "skills": ["gh-issues-by-severity", "grid-help", "mine-learnings", "openspec-help",
+                 "rubber-duck", "spec-scout", "standup", "tighten", "un-claudish"],
+      "compose": ["core"],
+      "agents": []
+    },
+    "grid-agents": {
+      "description": "The composed dev team: CEO, tech-lead and growth-hacker orchestrators plus 21 specialist subagents.",
+      "skills": [],
+      "compose": ["grid"],
+      "agents": ["grid-ponytail"]
+    }
+  }
+}
