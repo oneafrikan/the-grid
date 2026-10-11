@@ -7,4 +7,7 @@ scripts/personal-patterns.txt	# the rules themselves contain the patterns they m
 scripts/personal-denylist.example.txt	# placeholder rows for the private denylist format
 scripts/personal-allow-paths.txt	# this file: reasons may quote what they exempt
 tests/test_check_personal.bats	# fixtures deliberately contain flaggable strings
+tests/test_audit.bats	# fixtures deliberately contain flaggable home-path strings (positive and negative cases for the audit rule)
+openspec/changes/vetting/design.md	# quotes the audit test fixtures verbatim (home paths, PEM header); the strings are the spec
+openspec/changes/hook-profiles/design.md	# quotes a placeholder-token fixture the hook must exempt; the string is the spec
 the-grid.png	# hero image is over the size limit; remove this line when the front-door change replaces it

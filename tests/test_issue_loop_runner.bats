@@ -33,7 +33,7 @@ setup() {
   CLONE="$T/clone"
   git init -q -b next "$CLONE"
   git -C "$CLONE" config user.name tester
-  git -C "$CLONE" config user.email tester@example.invalid
+  git -C "$CLONE" config user.email tester@example.com
   git -C "$CLONE" remote add origin "https://example.invalid/owner/name.git"
   git -C "$CLONE" config "url.file://$ORIGIN.insteadOf" "https://example.invalid/owner/name.git"
 

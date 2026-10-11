@@ -11,6 +11,9 @@
 #                output is current for every public project (compose.py --check; skipped with a notice if the venv is absent)
 #   personas     dist/personas/*.md is current (build-personas.sh --check; skipped with a
 #                notice if the script or the venv is absent)
+#   personal     no personal data in the tracked tree (check-personal.sh); with no private
+#                denylist on this machine (CI, forks) only the generic patterns run and the
+#                skip is listed; skipped if the script is absent
 #   bats         the test suite
 #
 # Modes:
@@ -105,6 +108,24 @@ run_budget_check() {
   return "$rc"
 }
 
+# Personal-data scan (depersonalise). Absent script = skipped loudly (G3), so an old
+# checkout or a stub grid still gates. A clean scan that could only apply the generic
+# patterns (no private denylist here, e.g. CI) still passes but records the skip.
+# GRID_REQUIRE_DENYLIST is deliberately NOT set here: only the unattended loop sets it.
+run_personal_check() {
+  if [ ! -f scripts/check-personal.sh ]; then
+    echo "    check-personal.sh absent — skipped"; SKIPPED+=(personal); return 0
+  fi
+  local out rc=0
+  out="$(bash scripts/check-personal.sh 2>&1)" || rc=$?
+  printf '%s\n' "$out"
+  # Match the script's own notice line (see check-personal.sh), not a loose word.
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q '^personal: private denylist not found'; then
+    SKIPPED+=(personal-denylist)
+  fi
+  return "$rc"
+}
+
 run_bats() {
   if [ ! -x tests/lib/bats-core/bin/bats ]; then
     echo "    bats missing — run: git submodule update --init" >&2; return 1
@@ -128,6 +149,7 @@ run_personas_check() {
 # Stale committed personas fail the gate; listed before bats so drift is reported even
 # when the (slow) suite also fails.
 check personas   run_personas_check
+check personal   run_personal_check
 check bats       run_bats
 
 echo

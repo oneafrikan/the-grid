@@ -185,7 +185,7 @@ rsetup() { GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scri
 @test "runtime-setup: tracked-file dirt inside the submodule is warned about, exit stays 0" {
   git -C "$MOCK_GRID/repos/gstack" init -q
   git -C "$MOCK_GRID/repos/gstack" add -A
-  git -C "$MOCK_GRID/repos/gstack" -c user.name=t -c user.email=t@example.invalid commit -q -m fixture
+  git -C "$MOCK_GRID/repos/gstack" -c user.name=t -c user.email=t@example.com commit -q -m fixture
   STUB_DIRTY=1 run rsetup gstack
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARNING: setup modified tracked files in the submodule"* ]]

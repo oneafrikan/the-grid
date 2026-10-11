@@ -24,7 +24,7 @@ setup() {
   REPO="$T/repo"
   git init -q -b main "$REPO"
   git -C "$REPO" config user.name tester
-  git -C "$REPO" config user.email tester@example.invalid
+  git -C "$REPO" config user.email tester@example.com
   echo seed > "$REPO/README.md"
   git -C "$REPO" add -A
   git -C "$REPO" commit -q -m seed
