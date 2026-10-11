@@ -1,0 +1,5 @@
+# Names the prune report must never propose to drop, even when unused for months.
+# One name per line; `#` starts a comment. These are front-door skills: they are
+# rarely invoked on purpose but must always stay reachable.
+handoff
+grid-help

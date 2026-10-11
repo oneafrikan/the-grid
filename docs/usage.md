@@ -153,3 +153,102 @@ The extractor knows nothing about transcript formats. A harness is one module in
 
 `--registry module:ATTR` swaps in a different registry for testing; see
 `tests/fixtures/usage/fake_adapter.py`.
+
+## Usage data and the prune report
+
+Per-host usage files (written by `scripts/usage/extract.py`) feed a read-only
+report that proposes what to drop from the always-wired baseline. This page
+covers the report, what is stored, and how to read it. Design background:
+`openspec/changes/budget-and-usage/design.md` (sections 3 and 5).
+
+### What is stored
+
+One `<host>.json` per machine under `${GRID_PRIVATE_DIR:-~/.the-grid-private}/usage/`
+(schema 1), per UTC day:
+
+- `skills`, `agents`, `slash`: counts per name.
+- `hooks`: fires per `hookName` (for example `PreToolUse:Bash`). Name only: the
+  hook command, which holds absolute paths, is never read or stored.
+- `tokens`: per model `msgs`, `in`, `out`, `cache_read`, `cache_write`.
+
+Counts only: no prompt text, paths, project names, session ids or message ids.
+
+**Names are stored as seen.** A private skill, agent or slash command named after
+a client or a project lands in the usage file, and so in the private repo. Never
+copy a usage file or a report built from one into the public repo.
+
+**De-duplication** happens in the adapter before anything is stored (resumed
+sessions copy history into new transcript files, so a raw sum double counts):
+
+- Skill and agent calls: once per `tool_use` id across all files.
+- Slash commands and hook fires: once per record `uuid` across all files.
+- Tokens: once per `message.id`, taking the field-wise MAX over a message's
+  streamed chunks (not first-seen: a first chunk can hold `out` 8 against a
+  final 680).
+
+Stored counts only ever go up (max-merge), so a de-duplication bug fixed later
+leaves inflated history until the host file is deleted and re-extracted.
+
+### The prune report
+
+```
+bash scripts/prune-report.sh [--window-days 90] [--rare 2] [--min-days 28]
+                             [--usage-dir DIR] [--out FILE] [--json]
+```
+
+- Read-only: writes stdout (or `--out`) and nothing else; run it twice, get the same text.
+- `--usage-dir` defaults to `${GRID_PRIVATE_DIR:-~/.the-grid-private}/usage`;
+  `GRID_DIR` overrides the repo root.
+- Candidates are the skills the baseline wires (`scripts/lib/baseline_wired.py`).
+  No baseline on the machine (no `baseline-submodules.txt`, or uninitialised
+  submodules): it prints `no baseline on this machine` and exits 0.
+- Window: the last `--window-days` days, ending at the latest day stored (not
+  today). Skills use = Skill-tool calls + slash invocations of the same name,
+  summed over all hosts. State: `never` (0), `rare` (1..`--rare`), `used`. A
+  skill used on one host only is `used`.
+- Fewer than `--min-days` days of coverage (first to last stored day, all hosts):
+  prints `insufficient history: N days of M required`, no proposals, then the
+  evidence section.
+
+Proposals are numbered, largest saving first, so you can reply "apply 2, skip 3":
+
+- **A. Demote a repo.** A whole-repo baseline entry where at least 90% of its
+  wired skills are `never`/`rare`: move it to library (delete the line) or
+  replace it with per-skill entries for the used ones. Saving is the listing
+  entry chars of the dropped skills. A repo holding a keep-listed skill is never
+  proposed for demotion.
+- **B. `name-only` a skill.** Any other `never`/`rare` skill; saving is its
+  listing chars. All B items are also printed as one paste-ready
+  `{"skillOverrides": {...}}` block. The report never writes settings.
+- **C. Unused agents.** Wired agents with zero uses, with a `-project:<name>`
+  overlay hint when the name starts with a composed project's slug (from
+  `agent-factory/examples/*.yaml`). No saving figure: agents are a separate budget.
+
+`docs/prune-keep.txt` (one name per line, `#` comments) lists names that are never
+proposed (`handoff`, `grid-help`: front doors that are rarely invoked on purpose).
+
+`--json` prints the same report as one JSON object (counts, proposals,
+`skillOverrides`, `ignored`).
+
+#### Caveats
+
+- Only Skill-tool calls and slash invocations are visible. A model that reads a
+  `SKILL.md` directly is not counted, so `never` can still be in use.
+- Slash and Skill events can double-count one use; this only matters for `rare`.
+- Usage files that do not parse, or carry an unknown `schema`, are skipped and
+  named in the evidence section; the run still exits 0.
+- The report never reads `tokens` or `hooks`.
+
+### Reading tokens and hooks
+
+`scripts/usage/aggregate.py` has no CLI; `aggregate(dir, window_days)` is
+importable. Monthly tokens per model, summed over all hosts and all stored days:
+
+```
+python3 -c 'import sys; sys.path.insert(0, "scripts/usage"); import aggregate, json; print(json.dumps(aggregate.aggregate(sys.argv[1], 90)["claude-code"]["tokens"], indent=2, sort_keys=True))' "$HOME/.the-grid-private/usage"
+```
+
+Run it from the repo root (set `PYTHONDONTWRITEBYTECODE=1` to avoid leaving a
+`__pycache__` behind). Swap `["tokens"]` for `["hooks"]` to get hook fires per
+`hookName` over the window. Try it against the synthetic fixtures with
+`tests/fixtures/usage/hosts` as the directory argument.

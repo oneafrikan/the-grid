@@ -1,0 +1,301 @@
+{
+  "harnesses": {
+    "claude-code": {
+      "days": {
+        "2026-09-20": {
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-09-21": {
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-09-22": {
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-09-23": {
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-09-24": {
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-09-25": {
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-09-26": {
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-09-27": {
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-09-28": {
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-09-29": {
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-09-30": {
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-10-01": {
+          "hooks": {
+            "Stop": 1
+          },
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-10-02": {
+          "hooks": {
+            "Stop": 1
+          },
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-10-03": {
+          "hooks": {
+            "Stop": 1
+          },
+          "skills": {
+            "a-rare": 1
+          },
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-10-04": {
+          "hooks": {
+            "Stop": 1
+          },
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-10-05": {
+          "agents": {
+            "grid-qa-engineer": 2
+          },
+          "hooks": {
+            "Stop": 1
+          },
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-10-06": {
+          "hooks": {
+            "Stop": 1
+          },
+          "slash": {
+            "b-slash": 1
+          },
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-10-07": {
+          "hooks": {
+            "Stop": 1
+          },
+          "slash": {
+            "b-slash": 1
+          },
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-10-08": {
+          "hooks": {
+            "Stop": 1
+          },
+          "slash": {
+            "b-slash": 1
+          },
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-10-09": {
+          "hooks": {
+            "Stop": 1
+          },
+          "slash": {
+            "b-slash": 1
+          },
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        },
+        "2026-10-10": {
+          "hooks": {
+            "Stop": 1
+          },
+          "tokens": {
+            "claude-sonnet-5-5": {
+              "cache_read": 10,
+              "cache_write": 2,
+              "in": 1,
+              "msgs": 1,
+              "out": 4
+            }
+          }
+        }
+      },
+      "wired": {
+        "agents": [
+          "grid-qa-engineer",
+          "solo-bot"
+        ],
+        "skills": [
+          "a-used",
+          "a-rare",
+          "b-slash"
+        ]
+      }
+    }
+  },
+  "host": "hostB",
+  "schema": 1,
+  "updated": "2026-10-10"
+}
