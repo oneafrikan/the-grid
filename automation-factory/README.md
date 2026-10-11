@@ -2,7 +2,7 @@
 
 The-grid's tier for **reusable automation patterns** — the orchestration layer of
 the agent ecosystem, a sibling to [`agent-factory/`](../agent-factory/) (composes
-agents) and `skills-factory/` (builds skills).
+agents).
 
 ## The pattern → instance model
 
