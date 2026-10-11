@@ -44,14 +44,11 @@ which is shared across machines). The contract template is
 `roles/gh-triage/deployment-scope.template.md`; the agent reads the scope in Step 0
 of its SKILL.md.
 
-| Deployment | Org | Scope file | Slack |
-|---|---|---|---|
-| [redacted] | `oneafrikan` | `[redacted]/config/gh-triage-scope.md` | off |
-| [redacted] | `[redacted]` | owned by [redacted] | `#[redacted]` |
+Each install keeps its own deployment table (org, scope file path, Slack on/off)
+in its own infra repo.
 
 Each scope file lists its repos with a live-system description + default severity
-ceiling (e.g. [redacted]: `[redacted]` → [redacted] runtime, ceiling critical;
-for [redacted]: `[redacted]` → [redacted] stack, ceiling critical). The
+ceiling (e.g. a repo that backs a production runtime gets ceiling critical). The
 agent injects the matching row into the classification prompt.
 
 ---
@@ -118,7 +115,7 @@ All comments open with:
 ## Slack ingestion
 
 Conditional — only runs when the deployment scope sets Slack `enabled: true`
-(e.g. [redacted]'s `#[redacted]`; [redacted] it off).
+(e.g. a deployment with a backlog channel; others leave it off).
 
 - Channel: named in the scope file (name + id)
 - Agent polls for new messages since last run

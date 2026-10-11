@@ -27,13 +27,13 @@ target already uses — no new merge logic here) and substitutes the result for
 | Operator |  |
 | Channels |  |
  below, verbatim. This file exists only so the openclaw
-template set has a complete, browsable 9-file shape mirroring Guide's
-templates/specialist/ — see openclaw/README.md for the full token list and
+template set has a complete, browsable 9-file shape mirroring the earlier factory's
+template set — see openclaw/README.md for the full token list and
 which files are real templates (BOOT/TOOLS/HEARTBEAT/EXPERTISE) vs. passthrough
 (this one).
 
 Per B2/roadmap docs, this file is regenerated from source every run and is
-Gareth/engineer read-only in the deployed workspace (mode 440) — never
+Operator/engineer read-only in the deployed workspace (mode 440) — never
 agent-writable, never hand-edited downstream.
 -->
 <!--

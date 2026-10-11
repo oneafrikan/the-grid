@@ -1975,7 +1975,7 @@ bash scripts/reconcile.sh --force  # remove + re-wire</code></pre>
 
         <ul>
           <li><strong>It will change under you.</strong> No versioning, no deprecation cycle.</li>
-          <li><strong>It is opinionated and partly personal.</strong> Machine names, account routing, and a few paths are still Gareth-shaped. Splitting the framework from the personal config is open work, not done.</li>
+          <li><strong>It is opinionated and partly personal.</strong> Personal config (machine overlays, your baseline, the dev-journal) is gitignored or kept in a private repo, and <code>scripts/check-personal.sh</code> scans the tracked tree for personal data.</li>
           <li><strong>Fork rather than depend.</strong> The wiring model — manifest, symlinks, compose-then-wire — is the transferable part. Copy it and point it at your own skills.</li>
           <li><strong><code>wire.sh</code> only touches symlinks that point into this repo.</strong> It won't clobber a real directory or a foreign symlink in <code>~/.claude/skills/</code>. Read it before running it anyway — it writes to your home directory.</li>
         </ul>
