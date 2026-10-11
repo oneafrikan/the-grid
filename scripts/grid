@@ -6,10 +6,11 @@ restricted-YAML reader scripts/lib/miniyaml.py. Design: openspec change
 `manifest-lock-install` (design.md "CLI shape", "File formats", "Input
 validation", "Fetch mechanism").
 
-This file is the SKELETON (group 1): the shared helpers, the grid.yaml reader,
-the typed-entry reader, the grid.lock reader with its input validation, and the
-`audit` passthrough. The other subcommands are registered as stubs that exit 2
-until their groups land.
+Group 1 landed the shared helpers, the grid.yaml reader, the typed-entry
+reader, the grid.lock reader with its input validation, and the `audit`
+passthrough. Group 2 adds the content-hash helpers, `lock` and `lock --check`.
+The remaining subcommands are registered as stubs that exit 2 until their
+groups land.
 
 Python 3.8 floor: no str.removeprefix/removesuffix, no `dict | dict`, no
 `list[str]` annotations evaluated at runtime, no `match`. Checked with
@@ -25,9 +26,12 @@ import sys
 sys.dont_write_bytecode = True
 
 import argparse
+import hashlib
 import json
 import os
+import posixpath
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -46,7 +50,7 @@ GIT_FLOOR = (2, 25)          # sparse-checkout `init --cone` + `set` needs 2.25
 GIT_TIMEOUT = 600            # seconds; a timeout is a failed fetch for that source
 
 # Subcommands whose behaviour lands in a later group of the change.
-STUB_COMMANDS = ("lock", "install", "doctor", "repair", "uninstall", "drift", "schedule")
+STUB_COMMANDS = ("install", "doctor", "repair", "uninstall", "drift", "schedule")
 
 
 class GridError(Exception):
@@ -444,6 +448,423 @@ def read_grid_lock(grid_dir, sources):
     return entries
 
 
+# --- content hash (design.md "File formats": Content hash) ---------------------------
+# One hash describes a skill directory. It is computed two ways that MUST agree:
+# from git objects (lock time, install verification) and from disk (doctor,
+# placing). Both build the same lines, `<class> <relpath> <sha256-of-content>\n`
+# sorted by relpath bytes, and hash the concatenation. class is
+#   x  executable file (mode 100755 / any execute bit)
+#   -  regular file    (mode 100644)
+#   l  symlink, including a symlink to a directory (content = the link target)
+# Only the execute bit is hashed, never the full mode, so umask cannot matter.
+
+def _b(text):
+    """str (possibly carrying surrogate-escaped bytes) -> bytes, for byte-order sorting."""
+    return text.encode("utf-8", "surrogateescape")
+
+
+def is_excluded(rel):
+    """Shared exclusion rule, applied on BOTH the git and the disk side.
+
+    Excluded: any file named .DS_Store, any file ending .pyc, and anything below
+    a directory named __pycache__. Finder and Python create these inside placed
+    skill dirs; they are not user edits, so they must never change the hash.
+    `rel` is relative to the skill dir, forward slashes.
+    """
+    parts = rel.split("/")
+    return ("__pycache__" in parts) or parts[-1] == ".DS_Store" or parts[-1].endswith(".pyc")
+
+
+def symlink_escapes(rel, target):
+    """True when symlink `rel` (relative to the skill dir) points outside the skill dir.
+
+    Lexical on purpose: it never touches the filesystem, so the same answer comes
+    from a git blob and from a staged copy. An absolute target is always outside.
+    """
+    if target.startswith("/"):
+        return True
+    joined = posixpath.normpath(posixpath.join(posixpath.dirname(rel), target))
+    return joined == ".." or joined.startswith("../")
+
+
+def _combine(items):
+    """items: iterable of (class, relpath, content-sha256-hex) -> 'sha256:<hex>'."""
+    digest = hashlib.sha256()
+    for cls, rel, content in sorted(items, key=lambda item: _b(item[1])):
+        digest.update(_b("%s %s %s\n" % (cls, rel, content)))
+    return "sha256:" + digest.hexdigest()
+
+
+class BlobReader(object):
+    """One `git cat-file --batch` process per source, reused for every blob.
+
+    `lock --check` runs in the commit gate on every commit, so thousands of
+    per-file git processes are not acceptable. Use as a context manager.
+    """
+
+    def __init__(self, repo_dir):
+        self.repo_dir = repo_dir
+        self.proc = None
+
+    def __enter__(self):
+        try:
+            self.proc = subprocess.Popen(
+                ["git", "-C", self.repo_dir, "cat-file", "--batch"], env=git_env(),
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            raise GridError("grid: git is required but not on PATH")
+        return self
+
+    def __exit__(self, *exc):
+        if self.proc is not None:
+            self.proc.stdin.close()
+            self.proc.stdout.close()
+            self.proc.wait()
+        return False
+
+    def read(self, oid):
+        """Return the bytes of blob `oid`. One request, one reply: no pipe deadlock."""
+        self.proc.stdin.write(oid.encode("ascii") + b"\n")
+        self.proc.stdin.flush()
+        header = self.proc.stdout.readline().split()
+        if len(header) != 3 or header[1] != b"blob":
+            raise GridError("grid: %s: cannot read blob %s" % (self.repo_dir, oid))
+        data = self.proc.stdout.read(int(header[2]))
+        self.proc.stdout.read(1)                      # the newline git appends
+        return data
+
+
+# Git mode -> hash class. 160000 (a nested submodule) is handled before this.
+_MODE_CLASS = {"100755": "x", "100644": "-", "120000": "l"}
+
+
+def git_content_hash(repo_dir, sha, path, blobs, label):
+    """Content hash of <path> at commit <sha>, read from git objects only.
+
+    `git ls-tree -r -z` (NUL-delimited, so any filename is safe) lists the tracked
+    files; blob contents come from `blobs`, a BlobReader on the same repo. Exit 2
+    (naming `label` + the file) for a nested submodule or a symlink that escapes
+    the skill dir.
+    """
+    listing = run_git(["-C", repo_dir, "ls-tree", "-r", "-z", "%s:%s" % (sha, path)])
+    items = []
+    for record in listing.split("\0"):
+        if not record:
+            continue
+        meta, rel = record.split("\t", 1)
+        mode, _kind, oid = meta.split(" ")
+        if is_excluded(rel):
+            continue
+        if mode == "160000":
+            raise GridError("grid: %s: nested submodule at %s cannot be pinned by a content hash"
+                            % (label, rel))
+        if mode not in _MODE_CLASS:
+            raise GridError("grid: %s: %s has unsupported git mode %s" % (label, rel, mode))
+        content = blobs.read(oid)
+        if mode == "120000":
+            target = content.decode("utf-8", "surrogateescape")
+            if symlink_escapes(rel, target):
+                raise GridError("grid: %s: symlink %s -> %s points outside the skill directory"
+                                % (label, rel, target))
+        items.append((_MODE_CLASS[mode], rel, hashlib.sha256(content).hexdigest()))
+    return _combine(items)
+
+
+def disk_content_hash(top, check_escape=False):
+    """Content hash of directory `top` on disk; equals git_content_hash for a clean checkout.
+
+    os.walk(followlinks=False): EVERY file under `top` counts (so an added file
+    changes the hash). A symlink, including one to a directory (os.walk lists
+    those under dirnames, so both lists are checked), is class `l` with its
+    link target as content and is never followed. With `check_escape`, a link
+    that points outside `top` is exit 2 (used when staging for install).
+    """
+    items = []
+
+    def add(full, rel):
+        if is_excluded(rel):
+            return
+        if os.path.islink(full):
+            target = os.readlink(full)
+            if check_escape and symlink_escapes(rel, target):
+                raise GridError("grid: %s: symlink %s -> %s points outside the skill directory"
+                                % (top, rel, target))
+            items.append(("l", rel, hashlib.sha256(_b(target)).hexdigest()))
+            return
+        digest = hashlib.sha256()
+        with open(full, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+        executable = os.stat(full).st_mode & 0o111
+        items.append(("x" if executable else "-", rel, digest.hexdigest()))
+
+    for root, dirnames, filenames in os.walk(top, followlinks=False):
+        reldir = os.path.relpath(root, top).replace(os.sep, "/")
+        prefix = "" if reldir == "." else reldir + "/"
+        for name in list(dirnames):
+            if os.path.islink(os.path.join(root, name)):
+                dirnames.remove(name)                 # a link to a dir: hashed as a link, not walked
+                add(os.path.join(root, name), prefix + name)
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in filenames:
+            add(os.path.join(root, name), prefix + name)
+    return _combine(items)
+
+
+# --- grid lock (design.md "grid lock") -------------------------------------------------
+
+# Env that would redirect wire.sh's targets. GRID_DRY_HOME forces all of them
+# under the temp home anyway; they are also dropped so nothing inherited can leak.
+_LOCK_STRIPPED_ENV = ("SKILLS_DIR", "AGENTS_DIR", "RULES_DIR", "GRID_HARNESS_HOME",
+                      "CLAUDE_CONFIG_DIR")
+
+
+def wired_skill_links(grid_dir, baseline):
+    """Run wire.sh for the tracked baseline in a throwaway home; return the repo-sourced skill links.
+
+    Lock and wire can never read the baseline differently: wire.sh itself
+    resolves the set. The run writes only under a temp dir (GRID_DRY_HOME and
+    HOME both point at <tmp>/home), so the operator's real home is untouched.
+    Returns a sorted list of (name, source, path, target_dir).
+    """
+    script = os.path.join(grid_dir, "scripts", "wire.sh")
+    if not os.path.isfile(script):
+        raise GridError("grid: %s not found" % script)
+    tmp = tempfile.mkdtemp(prefix="grid-lock-")
+    try:
+        home = os.path.join(tmp, "home")
+        env = dict(os.environ)
+        for var in _LOCK_STRIPPED_ENV:
+            env.pop(var, None)
+        env.update({
+            "LC_ALL": "C",
+            "GRID_DIR": grid_dir,                     # the realpath, so link targets are realpaths
+            "GRID_BASELINE": baseline,
+            "GRID_HOST": "__baseline__",              # sentinel host: no machine overlay applies
+            "GRID_HARNESS": "claude",
+            "GRID_SKIP_CATALOG": "1",
+            "GRID_SKIP_AUDIT": "1",
+            "GRID_DRY_HOME": home,
+            "HOME": home,
+        })
+        proc = subprocess.run(["bash", script], env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, encoding="utf-8", errors="surrogateescape")
+        if proc.returncode != 0:
+            raise GridError("grid: wire.sh failed while resolving the wired set (exit %d):\n%s"
+                            % (proc.returncode, proc.stderr.strip()))
+        # GRID_DRY_HOME puts the skills dir at <home>/.claude/skills (not <tmp>/skills).
+        skills = os.path.join(home, ".claude", "skills")
+        prefix = grid_dir + "/repos/"
+        found = []
+        for name in sorted(os.listdir(skills)) if os.path.isdir(skills) else []:
+            link = os.path.join(skills, name)
+            if not os.path.islink(link):
+                continue
+            target = os.readlink(link)
+            if not target.startswith(prefix):
+                continue                              # root skills/, composed agents, foreign links
+            source, _, path = target[len(prefix):].rstrip("/").partition("/")
+            # No path = the runtime-root link (repos/<source> itself); no SKILL.md = not a skill.
+            if not path or not os.path.isfile(os.path.join(target, "SKILL.md")):
+                continue
+            found.append((name, source, path, target))
+        return found
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def gitlink_sha(grid_dir, source):
+    """The commit the parent repo records for repos/<source>, from the INDEX.
+
+    The index (not HEAD) so a staged pointer bump is seen before it is committed.
+    """
+    rel = "repos/%s" % source
+    out = run_git(["-C", grid_dir, "ls-files", "-s", "--", rel])
+    for line in out.splitlines():
+        meta, _, name = line.partition("\t")
+        fields = meta.split(" ")
+        if name == rel and len(fields) == 3 and fields[0] == "160000" and fields[2] == "0":
+            return fields[1]
+    raise GridError("grid: %s is not a recorded submodule (no gitlink in the parent repo)" % rel)
+
+
+def dirty_paths(repo_dir, path):
+    """Tracked changes (and untracked non-litter files) under <path> in a checkout.
+
+    Untracked .DS_Store / __pycache__ / *.pyc are ignored: they are not part of
+    the hash (is_excluded), so they must not block a lock either.
+    """
+    out = run_git(["-C", repo_dir, "status", "--porcelain", "-z", "--untracked-files=all",
+                   "--", path])
+    tokens = out.split("\0")
+    dirty, i = [], 0
+    while i < len(tokens):
+        token = tokens[i]
+        i += 1
+        if not token:
+            continue
+        xy, changed = token[:2], token[3:]
+        if xy[0] in "RC":
+            i += 1                                    # a rename/copy is followed by its origin path
+        rel = changed[len(path) + 1:] if changed.startswith(path + "/") else changed
+        if xy == "??" and is_excluded(rel):
+            continue
+        dirty.append(changed)
+    return dirty
+
+
+def generate_lock(grid_dir, cfg, warn=True):
+    """Build the grid.lock entries (sorted list of dicts) from the real submodule checkouts.
+
+    Exit 2 (GridError) when a skill path is unsafe, a checkout is missing, not at
+    the commit the parent records, or dirty, or a skill holds a nested submodule
+    or an escaping symlink. `warn` controls the `../` stderr warning (off in --check).
+    """
+    baseline = os.path.join(grid_dir, cfg["wired"]["baseline"])
+    if not os.path.isfile(baseline):
+        raise GridError("grid: baseline %s not found" % cfg["wired"]["baseline"])
+    links = wired_skill_links(grid_dir, baseline)
+
+    by_source = {}
+    for name, source, path, target in links:
+        # Same validation as the lock reader: a skill whose path fails it cannot be locked.
+        try:
+            validate_label(name, "name")
+            validate_source(source, cfg["sources"])
+            validate_path(path)
+        except ValueError as exc:
+            raise GridError("grid: cannot lock skill '%s' (repos/%s/%s): %s" % (name, source, path, exc))
+        by_source.setdefault(source, []).append((name, path, target))
+
+    entries = []
+    for source in sorted(by_source):
+        repo = os.path.join(grid_dir, "repos", source)
+        if not os.path.exists(os.path.join(repo, ".git")):
+            raise GridError("grid: repos/%s is not a checkout; run git submodule update --init repos/%s"
+                            % (source, source))
+        sha = gitlink_sha(grid_dir, source)
+        head = run_git(["-C", repo, "rev-parse", "HEAD"]).strip()
+        if head != sha:
+            raise GridError("grid: repos/%s is at %s but the parent repo records %s; check out the "
+                            "recorded commit (or stage the pointer bump) before locking"
+                            % (source, head[:12], sha[:12]))
+        with BlobReader(repo) as blobs:
+            for name, path, target in sorted(by_source[source]):
+                label = "repos/%s/%s" % (source, path)
+                dirty = dirty_paths(repo, path)
+                if dirty:
+                    raise GridError("grid: repos/%s: %s has uncommitted changes (%s); the lock must "
+                                    "describe committed state only" % (source, path, dirty[0]))
+                entries.append({
+                    "hash": git_content_hash(repo, sha, path, blobs, label),
+                    "kind": "skill",
+                    "name": name,
+                    "path": path,
+                    "sha": sha,
+                    "source": source,
+                    "tree": run_git(["-C", repo, "rev-parse", "%s:%s" % (sha, path)]).strip(),
+                })
+                if warn:
+                    with open(os.path.join(target, "SKILL.md"), encoding="utf-8",
+                              errors="replace") as fh:
+                        if "../" in fh.read():
+                            notice("grid: warning: %s: SKILL.md mentions '../'; check it still works "
+                                   "when the skill is installed on its own" % label)
+    entries.sort(key=lambda e: (_b(e["kind"]), _b(e["name"]), _b(e["source"])))
+    return entries
+
+
+def render_lock(entries):
+    """grid.lock text: sorted keys, 2-space indent, trailing newline (stable diffs)."""
+    return json.dumps({"lockVersion": 1, "entries": entries}, indent=2, sort_keys=True) + "\n"
+
+
+def _gitmodules_urls(grid_dir):
+    """{path: url} from <grid>/.gitmodules, or {} when there is none."""
+    path = os.path.join(grid_dir, ".gitmodules")
+    if not os.path.isfile(path):
+        return {}
+    proc = subprocess.run(["git", "config", "-f", path, "--get-regexp", r"^submodule\..*\.(path|url)$"],
+                          env=git_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          encoding="utf-8", errors="surrogateescape")
+    if proc.returncode not in (0, 1):                 # 1 = no match, not an error
+        raise GridError("grid: cannot read .gitmodules: %s" % proc.stderr.strip())
+    by_name = {}
+    for line in proc.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        # Section names may contain dots, so split the variable off the right.
+        section, _, var = key.rpartition(".")
+        by_name.setdefault(section[len("submodule."):], {})[var] = value
+    return dict((v["path"], v.get("url")) for v in by_name.values() if "path" in v)
+
+
+def manifest_findings(grid_dir, cfg):
+    """Manifest checks shared by `lock --check` and (later) doctor: list of (kind, name, detail).
+
+    HTTPS only (file:// only behind GRID_ALLOW_FILE=1, for tests); each source URL
+    equals the .gitmodules URL for repos/<name> where one exists; every untyped
+    baseline repo has a `sources` entry.
+    """
+    findings = []
+    allow_file = os.environ.get("GRID_ALLOW_FILE") == "1"
+    modules = _gitmodules_urls(grid_dir)
+    for source in sorted(cfg["sources"]):
+        url = cfg["sources"][source]["url"]
+        if not (url.startswith("https://") or (allow_file and url.startswith("file://"))):
+            findings.append(("url", source, "source URL is not https: %s" % url))
+        theirs = modules.get("repos/%s" % source)
+        if theirs is not None and theirs != url:
+            findings.append(("url", source, "grid.yaml has %s but .gitmodules has %s" % (url, theirs)))
+    baseline = os.path.join(grid_dir, cfg["wired"]["baseline"])
+    if not os.path.isfile(baseline):
+        findings.append(("baseline", cfg["wired"]["baseline"], "baseline file not found"))
+    adds, _denies = read_wired_entries([baseline])
+    for repo in sorted(set(a.split("/")[0] for a in adds)):
+        if repo not in cfg["sources"]:
+            findings.append(("source-missing", repo,
+                             "baseline names repos/%s but grid.yaml has no sources entry for it" % repo))
+    return findings
+
+
+def lock_check(grid_dir, cfg):
+    """`grid lock --check`: 0 clean, 1 findings, 3 not checkable here (exit codes per CLI shape)."""
+    findings = [("manifest", kind, name, detail) for kind, name, detail in manifest_findings(grid_dir, cfg)]
+    if findings:
+        # No point regenerating against a manifest that is itself wrong.
+        return report_findings(findings)
+
+    locked = read_grid_lock(grid_dir, cfg["sources"])
+    for source in sorted(set(e["source"] for e in locked)):
+        if not os.path.exists(os.path.join(grid_dir, "repos", source, ".git")):
+            sys.stderr.write("grid: lock --check not possible here: repos/%s is not a checkout\n" % source)
+            return EXIT_NOT_CHECKABLE
+
+    # Regenerate in memory and diff by (name, source). Only `kind: skill` entries
+    # are compared: the reader already skipped other kinds with a notice.
+    fresh = dict(((e["name"], e["source"]), e) for e in generate_lock(grid_dir, cfg, warn=False))
+    have = dict(((e["name"], e["source"]), e) for e in locked)
+    for key in sorted(fresh):
+        if key not in have:
+            findings.append(("lock", "added", key[0], "%s: in the checkouts but not in grid.lock" % key[1]))
+    for key in sorted(have):
+        if key not in fresh:
+            findings.append(("lock", "removed", key[0], "%s: in grid.lock but no longer wired" % key[1]))
+        else:
+            diff = [f for f in LOCK_FIELDS if have[key].get(f) != fresh[key].get(f)]
+            if diff:
+                findings.append(("lock", "changed", key[0], "%s: %s differ" % (key[1], ", ".join(diff))))
+    if findings:
+        sys.stderr.write("grid: grid.lock is stale; run: python3 scripts/grid lock\n")
+    return report_findings(findings)
+
+
+def report_findings(findings):
+    """Print `<check> <kind> <name> <detail>` lines (sorted); return 1 if any else 0."""
+    for check, kind, name, detail in sorted(findings):
+        print("%s %s %s %s" % (check, kind, name, detail))
+    return EXIT_FINDINGS if findings else EXIT_OK
+
+
 # --- subcommands ---------------------------------------------------------------------
 
 def cmd_audit(args):
@@ -459,6 +880,20 @@ def cmd_audit(args):
     rc = subprocess.call(["bash", script] + list(args.args))
     # A signal death is a negative returncode; report it the shell way.
     return rc if rc >= 0 else 128 - rc
+
+
+def cmd_lock(args):
+    """`grid lock [--check]`: write grid.lock from the submodule checkouts, or verify it."""
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    cfg = load_grid_yaml(grid_dir)
+    if args.check:
+        return lock_check(grid_dir, cfg)
+    entries = generate_lock(grid_dir, cfg)
+    # atomic_write leaves an unchanged file alone, so a second run is byte-identical
+    # (same inode, same mtime).
+    wrote = atomic_write(os.path.join(grid_dir, "grid.lock"), render_lock(entries))
+    print("grid: grid.lock %s (%d entries)" % ("written" if wrote else "unchanged", len(entries)))
+    return EXIT_OK
 
 
 def make_stub(name):
@@ -487,6 +922,10 @@ def build_parser():
     shared = argparse.ArgumentParser(add_help=False)
     shared.add_argument("--grid-dir", default=argparse.SUPPRESS)
     shared.add_argument("--skills-dir", default=argparse.SUPPRESS)
+    p_lock = sub.add_parser("lock", parents=[shared], help="write grid.lock from the submodule checkouts")
+    p_lock.add_argument("--check", action="store_true",
+                        help="regenerate in memory and report differences (exit 1); exit 3 if not checkable here")
+    p_lock.set_defaults(func=cmd_lock)
     for name in STUB_COMMANDS:
         p = sub.add_parser(name, parents=[shared], help="not implemented yet")
         p.set_defaults(func=make_stub(name))

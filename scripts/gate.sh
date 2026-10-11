@@ -4,6 +4,8 @@
 # Checks (each runs even if an earlier one fails; one PASS/FAIL summary at the end):
 #   lint         shellcheck warnings and errors in scripts/, contexts/, .githooks/ and automation-factory/patterns/
 #   catalog      SKILLS.md is current           (catalog.sh --check)
+#   lock         grid.lock matches the submodule checkouts (grid lock --check; skipped with a
+#                notice if python3 or scripts/grid is absent, or a locked source is not checked out)
 #   budget       skill/role description listing stays within docs/budget-target.json
 #                (budget.py --check; the baseline half is skipped with a notice where
 #                there is no baseline-submodules.txt / initialised submodules)
@@ -94,6 +96,24 @@ run_catalog_check() {
   bash scripts/catalog.sh --check
 }
 
+# grid.lock must describe the committed submodule state, so a pointer bump or a
+# baseline edit without `python3 scripts/grid lock` fails the commit. `grid lock
+# --check` exits 3 when a locked source has no checkout (a fork, CI without
+# submodules): not checkable here, so skip loudly like the catalog check rather
+# than fail. Any other non-zero exit is a real failure. bash never parses the lock.
+run_lock_check() {
+  if ! command -v python3 >/dev/null || [ ! -f scripts/grid ]; then
+    echo "    python3 or scripts/grid absent — skipped"; SKIPPED+=(lock); return 0
+  fi
+  local rc=0
+  # GRID_DIR pinned so a stray exported GRID_DIR cannot point it at another tree.
+  GRID_DIR="$GRID_DIR" python3 scripts/grid lock --check || rc=$?
+  if [ "$rc" -eq 3 ]; then
+    echo "    a locked source is not checked out — skipped"; SKIPPED+=(lock); return 0
+  fi
+  return "$rc"
+}
+
 # Skill/role listing budget. budget.py exits 0 (ok), 1 (regression/limit breach)
 # or 3 (owned scope ok, baseline scope not measurable here - same "skip loudly"
 # precedent as the catalog check, so 3 counts as a pass).
@@ -134,6 +154,7 @@ run_bats() {
 }
 
 check catalog    run_catalog_check
+check lock       run_lock_check
 check budget     run_budget_check
 check compose    run_compose_check
 # Portable personas (dist/personas) are committed output of compose.py --target portable.
