@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "description": "Status-lifecycle roster for the 5 grid orchestrator roles deployed as real OpenClaw agents on scout. Source of truth for the-grid's OpenClaw target (see agent-factory/docs/openclaw-paperclip-targets-plan.md, Session B1). Ported from ~/Guide/guide-core/agent-factory/roster.json's shape, adapted for an orchestrator-only rollout.",
+    "description": "Status-lifecycle roster for the 5 grid orchestrator roles deployed as real OpenClaw agents on scout. Source of truth for the-grid's OpenClaw target (see agent-factory/openclaw/README.md, Session B1). Ported from ~/Guide/guide-core/agent-factory/roster.json's shape, adapted for an orchestrator-only rollout.",
     "updated": "2026-07-05",
     "statusValues": {
       "planned": "Designed but no build work started",

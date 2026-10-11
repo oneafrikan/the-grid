@@ -817,7 +817,7 @@ def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
 # A third emit target: render a deploy-ready manifest for a live Paperclip
 # instance. Pure rendering only — no network calls, no talking to a Paperclip
 # API. A later deploy script (agent-factory/scripts/deploy_paperclip.py, see
-# docs/openclaw-paperclip-targets-plan.md Session A2) walks this manifest and
+# agent-factory/openclaw/README.md Session A2) walks this manifest and
 # does the actual POST/PATCH.
 #
 # The Paperclip roster is a curated subset of the team, fixed by the plan doc:
@@ -948,7 +948,7 @@ def write_paperclip(name: str, config: dict, out_dir: Path) -> Path:
 # openclaw/README.md, Session B1) for the curated 5 grid orchestrator roles
 # named in openclaw/roster.json. Pure rendering only — no docker exec, no
 # writes under ~/.openclaw (that's agent-factory/scripts/deploy_openclaw.sh,
-# Session B3, per docs/openclaw-paperclip-targets-plan.md).
+# Session B3, per agent-factory/openclaw/README.md).
 #
 # Named "openclaw-native" (not "openclaw") because that name is already taken
 # by the legacy default target (write_project below) — the bare 5-file dump
