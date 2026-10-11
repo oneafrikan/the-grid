@@ -271,3 +271,23 @@ mk_plugin_tree() {
   last="$(printf '%s\n' "$output" | tail -n 1)"
   [[ "$last" == "gate: PASS (skipped:"*"rules"* ]] || false
 }
+
+# --- hooks/ in the lint file list (hook-profiles#1) -------------------------------------------
+# The gate must hand the three hooks/ globs to shellcheck. A stub shellcheck records its
+# arguments; the stub repo gets one file per glob so each expands to a real path.
+
+@test "lint check: shellcheck is given the hooks/ run.sh, lib and scripts files" {
+  mkdir -p "$G/hooks/lib" "$G/hooks/scripts"
+  : > "$G/hooks/run.sh"; : > "$G/hooks/lib/common.sh"; : > "$G/hooks/scripts/x.sh"
+  # the files the existing globs need (so only the hooks/ paths are under test)
+  mkdir -p "$G/scripts/lib" "$G/scripts/usage" "$G/contexts" "$G/automation-factory/patterns/p/hooks"
+  : > "$G/scripts/lib/a.sh"; : > "$G/scripts/usage/b.sh"; : > "$G/contexts/c.sh"
+  : > "$G/automation-factory/patterns/p/d.sh"; : > "$G/automation-factory/patterns/p/hooks/e.sh"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/shellcheck.args"\nexit 0\n' "$G" > "$G/stubbin/shellcheck"
+  chmod +x "$G/stubbin/shellcheck"
+  run run_gate
+  [ "$status" -eq 0 ]
+  grep -qx 'hooks/run.sh' "$G/shellcheck.args"
+  grep -qx 'hooks/lib/common.sh' "$G/shellcheck.args"
+  grep -qx 'hooks/scripts/x.sh' "$G/shellcheck.args"
+}

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "hooks": [
+    {
+      "id": "pre-bash-no-bypass",
+      "scope": "project",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "min_profile": "minimal",
+      "fail": "closed",
+      "timeout": 5,
+      "model_cost": false,
+      "cost": "0 tokens; ~20 ms per Bash call; prints ~60 tokens only when it blocks.",
+      "description": "Blocks git --no-verify (and commit -n), hook-disabling config, and force-push."
+    },
+    {
+      "id": "pre-bash-secret-scan",
+      "scope": "project",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "min_profile": "standard",
+      "fail": "closed",
+      "timeout": 5,
+      "model_cost": false,
+      "cost": "0 tokens; no work unless the command is git commit or git add; prints a short file:line list only when it blocks.",
+      "description": "Blocks git commit when an added line looks like a secret, and git add of key and .env files."
+    }
+  ]
+}

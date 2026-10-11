@@ -2,7 +2,7 @@
 # gate.sh — the commit gate: everything that must be true before a commit lands.
 #
 # Checks (each runs even if an earlier one fails; one PASS/FAIL summary at the end):
-#   lint         shellcheck warnings and errors in scripts/, contexts/, .githooks/ and automation-factory/patterns/
+#   lint         shellcheck warnings and errors in scripts/, contexts/, .githooks/, hooks/ and automation-factory/patterns/
 #   catalog      SKILLS.md is current           (catalog.sh --check)
 #   lock         grid.lock matches the submodule checkouts (grid lock --check; skipped with a
 #                notice if python3 or scripts/grid is absent, or a locked source is not checked out)
@@ -78,7 +78,8 @@ check() {
 run_shellcheck() {
   command -v shellcheck >/dev/null || { echo "    shellcheck not installed — skipped"; SKIPPED+=(shellcheck); return 0; }
   shellcheck -S warning scripts/*.sh scripts/lib/*.sh scripts/usage/*.sh contexts/*.sh .githooks/pre-commit \
-    automation-factory/patterns/*/*.sh automation-factory/patterns/*/hooks/*.sh
+    automation-factory/patterns/*/*.sh automation-factory/patterns/*/hooks/*.sh \
+    hooks/*.sh hooks/lib/*.sh hooks/scripts/*.sh
 }
 
 run_compose_check() {
