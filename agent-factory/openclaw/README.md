@@ -1,6 +1,6 @@
 # openclaw/ — OpenClaw target for agent-factory
 
-Part of the plan at `../docs/openclaw-paperclip-targets-plan.md` (Session B1).
+Part of the OpenClaw/Paperclip target rollout (Session B1); this README is the reference.
 This directory holds the **template shell** for deploying the 5 grid
 orchestrator roles (`ceo-orchestrator`, `tech-lead`, `finance-manager`,
 `growth-hacker`, `product-manager`) as real OpenClaw agents. It does not (yet)
@@ -76,8 +76,7 @@ needs to print it — none of B1's templates do).
 
 ## File-permission scheme (for B2/B3 — not applied by B1)
 
-Documented in full in `../docs/openclaw-paperclip-targets-plan.md` (Session
-B2). Summary, so it's visible from this directory too:
+Session B2 scheme, summarised here:
 
 | Files | Mode | Who writes | Preserved on regen? |
 |---|---|---|---|

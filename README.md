@@ -207,13 +207,11 @@ never touches its history.
   machines/             ← per-machine skill/project overlays
     <host>.txt          ← committed overlay (adds/subtracts on the baseline)
     <host>.local.txt    ← GITIGNORED overlay — private project gates
-  docs/                 ← reference docs, playbooks, resources
+  docs/                 ← reference docs and resources
     SOURCES.md          ← generated: upstream URL per submodule (never edit)
     model-selection.md  ← which model for which job, with prices + benchmarks
     agent-retro.md      ← review loop that starts from the run record
-    playbook-ai-dev-team.md, openclaw-portfolio-desk-blueprint.md ← design playbooks
     reference-repos.md, reference-resources.md ← curated external references
-  prompts/              ← reusable prompts
   agent-factory/        ← composes AI dev-team agents (role × stack × skills); live
     models.yaml         ← the one tier-to-model map for generated agents
     run_evals.py        ← runs the golden cases in evals/ (opt-in, spend-capped)

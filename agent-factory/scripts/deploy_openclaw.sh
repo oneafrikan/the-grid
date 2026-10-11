@@ -14,7 +14,7 @@
 # Session B3 scope: this script proves the mechanism against a THROWAWAY TEST AGENT.
 # Do not point it at a real orchestrator (ceo-orchestrator, tech-lead, finance-manager,
 # growth-hacker, product-manager) until Session C (security review) has run and Session
-# B4 explicitly authorizes it — see agent-factory/docs/openclaw-paperclip-targets-plan.md.
+# B4 explicitly authorizes it — see agent-factory/openclaw/README.md.
 #
 # Usage:
 #   deploy_openclaw.sh install   <role> <source-dir>          # copy 9-file set into workspace, idempotent
