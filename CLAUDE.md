@@ -184,6 +184,10 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 
 Create a directory at the repo root with a `SKILL.md` inside it. Frontmatter requires `name:` and `description:`. Then run `bash scripts/wire.sh`.
 
+A `SKILL.md` over 4,000 bytes is split: keep the purpose and step skeleton, move reference detail into `sections/<topic>.md` (plain markdown, no frontmatter, <= 6,000 bytes, kebab-case).
+Index each file in a `## Sections` block of `SKILL.md`, one `- sections/<file>: read when ...` line per file; `wire.sh` symlinks the whole skill dir, so `sections/` travels with it.
+`python3 scripts/budget.py --check` (part of the gate) fails on an unindexed or missing section, a section over 6,000 bytes, or a `SKILL.md` over `skill_body_max_bytes`.
+
 ## Regenerating the skill catalogue
 
 ```bash

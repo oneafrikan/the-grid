@@ -33,8 +33,9 @@ Usage (python3 scripts/budget.py ...):
 Environment: GRID_DIR (repo root; default: parent of scripts/), GRID_BASELINE
 (baseline manifest, passed through to wire.sh).
 
-Stdlib only. Not covered here (later groups of the budget-and-usage change):
-the sections/ integrity rule for split SKILL.md bodies.
+Stdlib only. --check also enforces the sections/ integrity rule for split
+SKILL.md bodies (every sections/*.md indexed from SKILL.md, every index line
+resolves, no section over SECTION_MAX_BYTES).
 """
 from __future__ import annotations
 
@@ -53,6 +54,9 @@ from baseline_wired import baseline_wired  # noqa: E402  (path set up just above
 TARGET_REL = os.path.join("docs", "budget-target.json")
 DEFAULT_TRUNCATE = 1536
 ENTRY_OVERHEAD = 4          # "- " before and ": " ... "\n" after, approximate
+SECTION_MAX_BYTES = 6000    # per skills/<name>/sections/*.md (design.md, "Sections")
+# An index line in SKILL.md: "- sections/<file>: read when ..."
+SECTION_REF_RE = re.compile(r"^- sections/([A-Za-z0-9._-]+):", re.M)
 
 # Skeleton used when docs/budget-target.json does not exist yet.
 DEFAULT_TARGET = {
@@ -275,7 +279,31 @@ def current_numbers(summary):
     return nums
 
 
-def run_checks(summary, target):
+def check_sections(grid, rel_skill_md):
+    """Sections integrity for one owned skill; failure strings (each names a path)."""
+    skill_rel = os.path.dirname(rel_skill_md)
+    sdir = os.path.join(grid, skill_rel, "sections")
+    with open(os.path.join(grid, rel_skill_md), encoding="utf-8") as fh:
+        refs = set(SECTION_REF_RE.findall(fh.read()))
+    on_disk = set()
+    if os.path.isdir(sdir):
+        on_disk = {f for f in os.listdir(sdir)
+                   if f.endswith(".md") and os.path.isfile(os.path.join(sdir, f))}
+    fails = []
+    for f in sorted(on_disk - refs):
+        fails.append(f"{skill_rel}/sections/{f}: not listed in SKILL.md "
+                     f"(add a '- sections/{f}: read when ...' line)")
+    for f in sorted(refs - on_disk):
+        fails.append(f"{rel_skill_md}: lists sections/{f} but the file does not exist")
+    for f in sorted(on_disk):
+        size = os.path.getsize(os.path.join(sdir, f))
+        if size > SECTION_MAX_BYTES:
+            fails.append(f"{skill_rel}/sections/{f}: section is {size} bytes "
+                         f"(max {SECTION_MAX_BYTES})")
+    return fails
+
+
+def run_checks(summary, target, grid=None):
     """List of failure strings (each names the offending path or target key)."""
     if target is None:
         return [f"{TARGET_REL}: missing - create it with: "
@@ -306,6 +334,10 @@ def run_checks(summary, target):
         for e in summary["entries"]["skills"]:
             if e["body_bytes"] > body_max:
                 fails.append(f"{e['path']}: SKILL.md is {e['body_bytes']} bytes (max {body_max})")
+    # 4. sections/ integrity for every owned skill
+    if grid is not None:
+        for e in summary["entries"]["skills"]:
+            fails.extend(check_sections(grid, e["path"]))
     return fails
 
 
@@ -385,7 +417,7 @@ def main():
         return code
 
     if args.check:
-        fails = run_checks(summary, target)
+        fails = run_checks(summary, target, grid)
         if args.json:
             print(json.dumps(dict(summary, failures=fails), indent=2, sort_keys=True))
         else:
