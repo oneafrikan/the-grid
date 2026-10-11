@@ -141,6 +141,79 @@ skill_raw() {
   [[ "$output" == *"skills/big/SKILL.md: SKILL.md is "* ]] || false
 }
 
+# --- sections/ integrity (budget-and-usage group 4) ------------------------------
+
+# split_skill <name> <section file...> — a small skill with an index line per section.
+split_skill() {
+  local name="$1"; shift
+  mkdir -p "$MOCK_GRID/skills/$name/sections"
+  { printf -- '---\nname: %s\ndescription: x\n---\nbody\n\n## Sections\nRead a section only when its condition applies.\n' "$name"
+    for f in "$@"; do printf -- '- sections/%s: read when needed\n' "$f"; done
+  } > "$MOCK_GRID/skills/$name/SKILL.md"
+  for f in "$@"; do echo "detail" > "$MOCK_GRID/skills/$name/sections/$f"; done
+}
+
+@test "a split skill whose sections are all indexed passes --check" {
+  split_skill ok a.md b.md
+  write_target 1000 0 0 0 5000 4000
+  budget --check
+  [ "$status" -eq 3 ]
+}
+
+@test "an unreferenced sections/*.md fails --check and names the file" {
+  split_skill s a.md
+  echo "orphan" > "$MOCK_GRID/skills/s/sections/orphan.md"
+  write_target 1000 0 0 0 5000 4000
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/s/sections/orphan.md: not listed in SKILL.md"* ]] || false
+}
+
+@test "a referenced section that does not exist fails --check and names the skill" {
+  split_skill s a.md
+  rm "$MOCK_GRID/skills/s/sections/a.md"
+  write_target 1000 0 0 0 5000 4000
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/s/SKILL.md: lists sections/a.md but the file does not exist"* ]] || false
+}
+
+@test "a section over 6000 bytes fails --check; exactly 6000 passes" {
+  split_skill s a.md
+  write_target 1000 0 0 0 5000 4000
+  head -c 6000 /dev/zero | tr '\0' z > "$MOCK_GRID/skills/s/sections/a.md"
+  budget --check
+  [ "$status" -eq 3 ]
+  printf z >> "$MOCK_GRID/skills/s/sections/a.md"
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/s/sections/a.md: section is 6001 bytes"* ]] || false
+}
+
+@test "a SKILL.md over 4000 bytes fails --check even when its sections are fine" {
+  split_skill s a.md
+  head -c 4000 /dev/zero | tr '\0' y >> "$MOCK_GRID/skills/s/SKILL.md"
+  write_target 1000 0 0 0 5000 4000
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/s/SKILL.md: SKILL.md is "* ]] || false
+}
+
+@test "a skill without sections/ under the limit passes --check" {
+  skill_raw plain "name: plain" "description: x"
+  write_target 1000 0 0 0 5000 4000
+  budget --check
+  [ "$status" -eq 3 ]
+}
+
+@test "wire.sh keeps sections/foo.md readable through the skill symlink" {
+  split_skill s foo.md
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/s" ]
+  [ "$(cat "$MOCK_SKILLS/s/sections/foo.md")" = "detail" ]
+}
+
 # --- (d) --update-target ratchet ----------------------------------------------
 
 @test "--update-target lowers a number, and refuses to raise one without --allow-raise" {

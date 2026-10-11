@@ -1,0 +1,10 @@
+{
+  "name": "grid-agents",
+  "version": "0.1.0",
+  "description": "The composed dev team: CEO, tech-lead and growth-hacker orchestrators plus 21 specialist subagents.",
+  "author": {
+    "name": "the-grid"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/oneafrikan/the-grid"
+}

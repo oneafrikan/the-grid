@@ -49,3 +49,10 @@ agents:
   skills:
   - fx-eng
   workspace: ./fx-eng
+- id: fx-readonly
+  role: fx-readonly
+  model: sonnet
+  stacks: []
+  skills:
+  - fx-readonly
+  workspace: ./fx-readonly
