@@ -42,6 +42,10 @@
 #     STUB_CLAUDE_SLEEP[_N]    seconds a worker call sleeps first; $STUB_STARTED (a path) is touched when it starts
 #     STUB_PLANT_PREPUSH       path: the worker plants a pre-push hook that touches it
 #     STUB_STDIN_DUMP          path: the last `-p` call's stdin is copied there
+#     STUB_CLAUDE_STDIN        path: every `-p` call's drained stdin is copied there (same as STUB_STDIN_DUMP)
+#     An "analyser" call (argv has --system-prompt: scripts/instincts/analyse.py) is neither worker nor
+#     review: it sleeps STUB_CLAUDE_SLEEP seconds first, then prints STUB_CLAUDE_JSON verbatim (default
+#     the success envelope) and exits STUB_CLAUDE_EXIT (default 0).
 #
 #   gh   (each call logs `gh <args> ::GH_TOKEN=<value|<unset>>`)
 #     STUB_PR_NUMBER           number printed by `gh pr view --json number -q .number`
@@ -154,6 +158,7 @@ case "$(basename "$(pwd)")" in issue-[0-9]*) n="${PWD##*issue-}" ;; esac
 cat > "${TMPDIR:-/tmp}/stub-stdin.$$"
 bytes="$(wc -c < "${TMPDIR:-/tmp}/stub-stdin.$$" | tr -d ' ')"
 if [ -n "${STUB_STDIN_DUMP:-}" ]; then cp "${TMPDIR:-/tmp}/stub-stdin.$$" "$STUB_STDIN_DUMP"; fi
+if [ -n "${STUB_CLAUDE_STDIN:-}" ]; then cp "${TMPDIR:-/tmp}/stub-stdin.$$" "$STUB_CLAUDE_STDIN"; fi
 rm -f "${TMPDIR:-/tmp}/stub-stdin.$$"
 printf 'GH_TOKEN=%s GITHUB_TOKEN=%s CLAUDE_CODE_OAUTH_TOKEN=%s stdin_bytes=%s cwd=%s\n' \
   "${GH_TOKEN-<unset>}" "${GITHUB_TOKEN-<unset>}" "${CLAUDE_CODE_OAUTH_TOKEN-<unset>}" "$bytes" "$(pwd)" >> "${STUB_ENV_LOG:-/dev/null}"
@@ -186,11 +191,20 @@ if [ -n "${LOOP_OUTCOME_FILE:-}" ]; then
 fi
 # ---- review (or hook) call ----
 want_json=0
+analyser=0
 prev=""
 for a in "$@"; do
   if [ "$prev" = "--output-format" ] && [ "$a" = "json" ]; then want_json=1; fi
+  if [ "$a" = "--system-prompt" ]; then analyser=1; fi
   prev="$a"
 done
+if [ "$analyser" = 1 ]; then
+  # ---- analyser call (instincts): its own reply and sleep knobs, so review tests are unaffected ----
+  if [ -n "${STUB_CLAUDE_SLEEP:-}" ]; then sleep "$STUB_CLAUDE_SLEEP"; fi
+  default_analyse='{"type":"result","subtype":"success","is_error":false,"result":"[]","total_cost_usd":0.01}'
+  printf '%s\n' "${STUB_CLAUDE_JSON:-$default_analyse}"
+  exit "${STUB_CLAUDE_EXIT:-0}"
+fi
 if [ "$want_json" = 1 ]; then
   default_review='{"type":"result","subtype":"success","is_error":false,"result":"- [nit] stub review\nVERDICT: approve","total_cost_usd":0.02}'
   printf '%s\n' "${STUB_REVIEW_JSON:-$default_review}"
