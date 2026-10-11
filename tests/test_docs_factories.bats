@@ -5,7 +5,7 @@ GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
 @test "public docs do not mention skills-factory" {
   cd "$GRID_ROOT"
-  run grep -n "skills-factory" README.md CLAUDE.md automation-factory/README.md project-factory/README.md
+  run grep -n "skills-factory" README.md CLAUDE.md automation-factory/README.md project-factory/README.md agent-factory/README.md
   # grep exits 1 when nothing matches
   [ "$status" -eq 1 ]
 }

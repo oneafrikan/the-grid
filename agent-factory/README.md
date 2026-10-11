@@ -23,9 +23,8 @@ the team together and lists each agent's skills by name. A role's operating skil
 (its `SKILL.md`) is referenced by name, not copied — OpenClaw wires skills from a
 shared skills dir.
 
-> Sibling `skills-factory/` is a **separate** concern (skills are built there via a
-> Karpathy loop in another repo, then dropped into `skills/`). This factory only
-> *composes* teams from existing parts.
+> Skills are a **separate** concern (authored as `skills/<name>/SKILL.md` or with the
+> wired `skill-creator` skill). This factory only *composes* teams from existing parts.
 
 ## Layout
 
