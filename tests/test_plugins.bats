@@ -8,6 +8,7 @@
 
 load helpers/setup
 
+# shellcheck disable=SC2120  # "$@" is forwarded; callers pass flags only sometimes
 BUILD() { python3 "$REPO_ROOT/scripts/build-plugins.py" "$@"; }
 
 # Write the manifest for the mock grid: two bundles, so "all four versions" is checkable.
@@ -215,7 +216,7 @@ EOF
   [ "$status" -eq 0 ]
 
   tmp="$(mktemp -d)"
-  (cd "$REPO_ROOT" && GRID_PRIVATE_ROLES_DIR= GRID_USER_CONFIG=agent-factory/user.public.yaml \
+  (cd "$REPO_ROOT" && GRID_PRIVATE_ROLES_DIR='' GRID_USER_CONFIG=agent-factory/user.public.yaml \
      agent-factory/.venv/bin/python agent-factory/compose.py agent-factory/examples/grid.yaml \
      --target claude-code --out "$tmp" >/dev/null)
   composed="$(find "$tmp/grid/_claude-code/agents" -name '*.md' | wc -l)"
@@ -226,7 +227,7 @@ EOF
   [ "$shipped" -eq $((composed + extra)) ]
 
   # The machine hostname must not appear. Match it as a whole token that is not part of a
-  # hyphenated name (a skill called "feature-forge" is not a host called "forge").
+  # hyphenated name (so a skill name that merely ends in the hostname is not a hit).
   host="$(hostname -s)"
   run grep -rlP "(?<![\\w-])\\Q${host}\\E(?![\\w-])" "$REPO_ROOT/plugins/"
   [ -z "$output" ]
