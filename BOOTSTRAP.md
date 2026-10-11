@@ -14,7 +14,62 @@ How to get the-grid running on any machine — new or existing.
 
 ---
 
-## New machine (fresh Claude Code install)
+## Install without submodules
+
+For a machine that only needs the curated skill set, not a maintainer checkout.
+`scripts/grid` fetches the commits pinned in `grid.lock` straight into
+`repos/<source>/` (partial clone + sparse checkout, no submodules) and runs
+`wire.sh`. Every skill is scanned by the vetting audit before it is placed.
+
+Prerequisites: `python3` 3.8+, `git` 2.25+. On macOS both come from the Xcode
+Command Line Tools (`xcode-select --install`); `/usr/bin/python3` without them
+opens an installer prompt.
+
+```bash
+# 1. Clone without blobs (the skill repos are fetched separately by grid)
+git clone --filter=blob:none https://github.com/<your-username>/the-grid.git ~/.the-grid
+
+# 2. Look before you place anything: prints the plan, no network access, no writes
+python3 ~/.the-grid/scripts/grid install --dry-run
+
+# 3. Install and wire
+python3 ~/.the-grid/scripts/grid install
+```
+
+Day to day, all as `python3 ~/.the-grid/scripts/grid <command>`:
+
+| Command | Does |
+|---|---|
+| `grid doctor` | read-only check of the manifest, the ledger, the placed directories and the links; exit 1 on any finding |
+| `grid repair` | re-fetch what doctor reports missing, stale or absent, then re-wire (`--dry-run` previews; `--force` replaces an edited directory; `--prune` drops directories the lock no longer selects) |
+| `grid uninstall` | prints what it would remove; `--yes` removes the placed directories, their links and the ledger |
+| `grid audit --wired` | vetting scan of what `wire.sh` would link on this machine |
+| `grid schedule install` | writes the weekly drift-report schedule files for this OS and prints the activation command; it never activates anything (`grid schedule remove` deletes them) |
+
+Notes:
+
+- Skills sit under `repos/<source>/<path>`, the same place the maintainer path
+  puts them. The record of what `grid` placed is `~/.grid/installed.manifest`
+  (`GRID_STATE_DIR` relocates it).
+- `grid install` seeds `baseline-submodules.txt` and `machines/<host>.txt` from
+  the examples (step 3 of the maintainer path). `grid` reads only untyped
+  entries; typed entries (`project:`, `rules:`, `harness:`) are left to `wire.sh`.
+- Composed agents (`project:` entries) are **not** part of `grid install`. They
+  still need the `compose.py` venv (step 6 of the maintainer path).
+- Repos that need a runtime (gstack) are skipped with a notice; use the
+  maintainer path for them.
+- Re-wiring on such a machine is `GRID_NO_CATALOG=1 bash ~/.the-grid/scripts/wire.sh`.
+  The variable skips the `SKILLS.md` refresh, which would otherwise rewrite a
+  tracked file from a partial set.
+- `git submodule update --init` refuses a `repos/<source>` that `grid` populated.
+  To switch to the maintainer path, run
+  `python3 ~/.the-grid/scripts/grid uninstall --yes` first.
+- `grid schedule` needs a clone path (and `HOME`, and the state dir) made only of
+  `A-Z a-z 0-9 _ . / @ + -`. A path with a space is refused and nothing is written.
+
+---
+
+## Maintainer path: new machine (submodules, fresh Claude Code install)
 
 ```bash
 # 1. Clone the-grid
