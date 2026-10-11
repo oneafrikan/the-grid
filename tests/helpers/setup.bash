@@ -17,6 +17,10 @@ common_setup() {
   # even though test lines only set GRID_DIR/SKILLS_DIR inline.
   MOCK_AGENTS=$(mktemp -d)
   export AGENTS_DIR="$MOCK_AGENTS"
+  # Rule packs (rule-packs): wire.sh's rules tier writes under $RULES_DIR/grid, so a
+  # test that forgets an override must land in a temp dir, never the real ~/.claude/rules.
+  MOCK_RULES=$(mktemp -d)
+  export RULES_DIR="$MOCK_RULES"
   # Isolation tripwire: default every target dir to a sandbox so a test that
   # forgets an inline override cannot reach the real ~/.claude, then refuse to
   # run at all if either target still resolves into it.
@@ -52,7 +56,7 @@ assert_sandboxed() {
   real="${REAL_HOME:-$HOME}/.claude"
   # Resolve symlinks on both sides (macOS /var -> /private/var) so spelling can't dodge the guard.
   real="$(cd "$real" 2>/dev/null && pwd -P || echo "$real")"
-  for d in "${SKILLS_DIR:-}" "${AGENTS_DIR:-}"; do
+  for d in "${SKILLS_DIR:-}" "${AGENTS_DIR:-}" "${RULES_DIR:-}"; do
     [ -n "$d" ] || continue
     case "$(cd "$d" 2>/dev/null && pwd -P)" in
       "$real"|"$real"/*) echo "REFUSING: test target $d is inside the real $real" >&2; return 1 ;;
@@ -80,8 +84,8 @@ assert_sandboxed() {
 }
 
 common_teardown() {
-  rm -rf "$MOCK_GRID" "$MOCK_SKILLS" "$OTHER_DIR" "$MOCK_AGENTS" "$MOCK_HOOK_ROOT"
-  unset AGENTS_DIR SKILLS_DIR GRID_PRIVATE_ROLES_DIR CLAUDE_CONFIG_DIR GRID_HOOK_LOG_DIR \
+  rm -rf "$MOCK_GRID" "$MOCK_SKILLS" "$OTHER_DIR" "$MOCK_AGENTS" "$MOCK_HOOK_ROOT" "$MOCK_RULES"
+  unset AGENTS_DIR SKILLS_DIR RULES_DIR GRID_PRIVATE_ROLES_DIR CLAUDE_CONFIG_DIR GRID_HOOK_LOG_DIR \
         GRID_HOOK_STATE_DIR GRID_HANDOFF_FALLBACK_DIR GRID_PRIVATE_DIR GRID_RUN_LOG GRID_CLAUDE
 }
 

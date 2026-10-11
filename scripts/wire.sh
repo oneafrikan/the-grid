@@ -9,6 +9,11 @@
 #   SKILLS_DIR  — Claude skills directory (default: ~/.claude/skills)
 #   AGENTS_DIR  — Claude subagents directory (default: ~/.claude/agents)
 #   GRID_HOST   — machine key for the overlay (default: hostname -s)
+#   RULES_DIR   — Claude rules directory (default: ~/.claude/rules). Only $RULES_DIR/grid/
+#                 is grid-owned: `rules:<pack>` manifest entries symlink each rules/<pack>/*.md
+#                 (never README.md) to $RULES_DIR/grid/<pack>/. When GRID_DRY_HOME is set it
+#                 FORCES RULES_DIR=$GRID_DRY_HOME/.claude/rules, ignoring any inherited
+#                 value (see the dry-home block below), so no dry run can reach the real one.
 #   GRID_BASELINE — baseline manifest file (default: $GRID_DIR/baseline-submodules.txt)
 #   GRID_SKIP_CATALOG=1 — don't regenerate SKILLS.md at the end (used by --check)
 #   GRID_SKIP_AUDIT=1 — skip the pre-wire audit (step 0). Set by audit.sh's own dry run
@@ -63,6 +68,7 @@ fi
 . "$(dirname "$0")/lib/find-skill-mds.sh"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 AGENTS_DIR="${AGENTS_DIR:-$HOME/.claude/agents}"
+RULES_DIR="${RULES_DIR:-$HOME/.claude/rules}"
 GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || uname -n 2>/dev/null | cut -d. -f1 || echo unknown)}"
 
 # --- --check: dry-run drift detector ----------------------------------------
@@ -89,6 +95,18 @@ if [ "${1:-}" = "--check" ]; then
       case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
     done | LC_ALL=C sort
   }
+  # Recursive twin of links() for the rules tree: rules are symlinks nested one level
+  # down ($RULES_DIR/grid/<pack>/<topic>.md), which links() (-maxdepth 1) cannot see.
+  # $1 = rules dir whose grid/ subtree is listed, $2 (optional) = live rules dir for
+  # the same real-file shadow filter. Prints "pack/topic.md -> target".
+  rule_links() {
+    [ -d "$1/grid" ] || return 0
+    find -H "$1/grid" -type l | while IFS= read -r l; do
+      t="$(readlink "$l")"; n="${l#"$1"/grid/}"
+      if [ -n "${2:-}" ] && [ -e "$2/grid/$n" ] && [ ! -L "$2/grid/$n" ]; then continue; fi
+      case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
+    done | LC_ALL=C sort
+  }
   rc=0
   for kind in skills agents; do
     live="$SKILLS_DIR"; fresh="$chk_skills"
@@ -99,6 +117,13 @@ if [ "${1:-}" = "--check" ]; then
       rc=1
     fi
   done
+  # Rule packs: same comparison for $RULES_DIR/grid. The dry-run child wrote under
+  # $tmp/home/.claude/rules because GRID_DRY_HOME forces RULES_DIR there.
+  if ! diff <(rule_links "$tmp/home/.claude/rules" "$RULES_DIR") <(rule_links "$RULES_DIR") >"$tmp/rules.diff"; then
+    echo "wire --check: rules drift in $RULES_DIR/grid ('<' = should exist, '>' = stale):" >&2
+    cat "$tmp/rules.diff" >&2
+    rc=1
+  fi
   # Machine-level hooks: the dry-run child above resolved the manifest and left the
   # list it would wire in $tmp/home/.hooks-wanted (one source of truth for the
   # hook:/-hook: grammar). Compare it with the LIVE settings file; writes nothing.
@@ -132,6 +157,9 @@ fi
 #   -repo  | -repo/skill → SUBTRACT (remove a baseline entry — overlay escape hatch)
 #   project:<name>       → wire that composed agent-factory project's _claude-code output
 #   -project:<name>      → un-gate a project
+#   rules:<pack>         → wire rules/<pack>/*.md into $RULES_DIR/grid/<pack>/ (opt-in:
+#                          no rules: entry anywhere means no rules, there is no wire-all)
+#   -rules:<pack>        → un-gate a pack (overlay escape hatch; a subtraction always wins)
 #   hook:<name> | -hook:<name> → enable / disable a machine-level hook (only
 #                          auto-handoff exists; it is ON unless a file says -hook:...)
 # Legacy fallbacks: if NO manifest file exists at all, every repo is wired; if
@@ -141,6 +169,8 @@ WIRED_SKILLS=()    # repo/skill entries
 DENY_REPOS=()      # -repo subtractions
 DENY_SKILLS=()     # -repo/skill subtractions
 WIRED_PROJECTS=()  # project:<name> entries
+WIRED_RULES=()     # rules:<pack> entries
+DENY_RULES=()      # -rules:<pack> subtractions
 any_project_entry=0
 wire_all_repos=1
 AUTO_HANDOFF=1     # hook:auto-handoff state: on by default, later manifest files win
@@ -161,6 +191,10 @@ load_manifest() {
                   p="${line#-project:}"; tmp=()
                   for x in "${WIRED_PROJECTS[@]:-}"; do [ -n "$x" ] && [ "$x" != "$p" ] && tmp+=("$x"); done
                   WIRED_PROJECTS=("${tmp[@]:-}") ;;
+      # rules: / -rules: hold a ':' before any '/', so like project: they must match
+      # before the generic repo cases below or they would be read as repos.
+      rules:*)    WIRED_RULES+=("${line#rules:}") ;;
+      -rules:*)   DENY_RULES+=("${line#-rules:}") ;;
       # hook: / -hook: hold a ':' before any '/', so they must match before the repo
       # cases below. Only auto-handoff is a known hook; anything else is ignored loudly.
       hook:*)     case "${line#hook:}" in
@@ -224,6 +258,9 @@ project_is_wired() {
   return 1
 }
 
+# Is a rule pack subtracted (-rules:<pack>) in any manifest layer?
+rule_is_denied() { local r; for r in "${DENY_RULES[@]:-}"; do [ "$r" = "$1" ] && return 0; done; return 1; }
+
 mkdir -p "$SKILLS_DIR" "$AGENTS_DIR"
 
 # Audit trail for the manifest written at the end: one row per decision.
@@ -272,6 +309,24 @@ teardown_grid_links() {
 }
 teardown_grid_links "$SKILLS_DIR"
 teardown_grid_links "$AGENTS_DIR"
+
+# Rules: same ownership test, but the tree is nested ($RULES_DIR/grid/<pack>/<topic>.md)
+# so it is walked recursively, and the pack dirs it leaves empty are removed afterwards.
+# Only $RULES_DIR/grid is ever touched. A foreign symlink or a real file keeps its dir
+# non-empty, so it survives; the grid/ root itself is left in place.
+teardown_rule_links() {
+  local root="$RULES_DIR/grid" link target
+  [ -d "$root" ] || return 0
+  while IFS= read -r link; do
+    target=$(readlink "$link")
+    [[ "$target" == "$GRID_DIR"/* ]] || continue   # not ours, leave it alone
+    rm "$link"
+  done < <(find -H "$root" -type l 2>/dev/null)
+  # -empty -delete only removes directories with nothing in them (-delete implies -depth,
+  # so a pack dir emptied by the loop above goes, and so does a parent emptied by that).
+  find "$root" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+}
+teardown_rule_links
 
 # Wire a skill directory to SKILLS_DIR.
 # Skips real directories (not symlinks) — those are not managed by the-grid.
@@ -446,6 +501,51 @@ if [ -d "$GRID_DIR/agents" ]; then
     wire_agent "$agent_file"
   done
 fi
+
+# --- 3c1. Rule packs (rules:<pack>) ---
+# Each wired pack's rules/<pack>/*.md (never README.md; pack.yaml is not .md) is
+# symlinked into $RULES_DIR/grid/<pack>/ as a per-file link inside a REAL directory
+# (not a directory link), so README.md can never load as an always-on rule. Opt-in: with
+# no rules: entry the loop body never runs and RULES_DIR is not even created. A pack that
+# does not exist, or whose name could escape rules/ (anything but lowercase kebab-case),
+# warns on stderr and is recorded as skipped; it never fails the wire. A real file at a
+# target is left alone, as with skills and agents.
+rules_done=" "   # packs already handled this run (a pack named in baseline AND overlay)
+for rule_pack in "${WIRED_RULES[@]:-}"; do
+  [ -n "$rule_pack" ] || { echo "warning: empty rules: entry ignored" >&2; continue; }
+  rule_is_denied "$rule_pack" && continue
+  case "$rules_done" in *" $rule_pack "*) continue ;; esac
+  rules_done="$rules_done$rule_pack "
+  case "$rule_pack" in
+    *[!a-z0-9-]*|-*|*-|*--*) rule_src=""  ;;                  # not lowercase kebab-case
+    *)                       rule_src="$GRID_DIR/rules/$rule_pack" ;;
+  esac
+  if [ -z "$rule_src" ] || [ ! -d "$rule_src" ]; then
+    echo "warning: rules:$rule_pack - no such pack in rules/; skipped" >&2
+    MANIFEST_ROWS+=("rule	$rule_pack	$GRID_DIR/rules/$rule_pack	skipped	no such pack")
+    continue
+  fi
+  rule_dest="$RULES_DIR/grid/$rule_pack"
+  if ! mkdir -p "$rule_dest" 2>/dev/null; then
+    echo "warning: rules:$rule_pack - cannot create $rule_dest; skipped" >&2
+    MANIFEST_ROWS+=("rule	$rule_pack	$rule_src	skipped	cannot create target dir")
+    continue
+  fi
+  for rule_file in "$rule_src"/*.md; do
+    [ -f "$rule_file" ] || continue
+    rule_name="$(basename "$rule_file")"
+    [ "$rule_name" = "README.md" ] && continue
+    rule_target="$rule_dest/$rule_name"
+    if [ -e "$rule_target" ] && [ ! -L "$rule_target" ]; then
+      echo "  skip (real file, not managed): rules/$rule_pack/$rule_name"
+      MANIFEST_ROWS+=("rule	$rule_pack/$rule_name	$rule_file	skipped	real file, not managed")
+      continue
+    fi
+    ln -sfn "$rule_file" "$rule_target"
+    MANIFEST_ROWS+=("rule	$rule_pack/$rule_name	$rule_file	wired	")
+    echo "  wired rule: $rule_pack/$rule_name"
+  done
+done
 
 # --- 3c2. Machine-level hooks (auto-handoff) ---
 # Makes ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json hold exactly the generated

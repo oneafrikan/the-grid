@@ -15,6 +15,11 @@
 #   project:<name>       → wire a composed agent-factory project's CC output
 #   -repo | -repo/skill  → SUBTRACT (overlay escape hatch — remove a baseline entry)
 #   -project:<name>      → un-gate a project
+#   rules:<pack>         → wire a rule pack (rules/<pack>/*.md) into ~/.claude/rules/grid/<pack>/.
+#                          Opt-in: no rules: entry anywhere means no rules are wired. Each
+#                          rule loads only when Claude touches a file matching its paths:,
+#                          so wire the packs for languages you actually use.
+#   -rules:<pack>        → un-gate a pack (overlay escape hatch; a subtraction always wins)
 #   -hook:auto-handoff   → switch OFF the SessionEnd auto-handoff hook (on by default;
 #                          `hook:auto-handoff` re-enables it, a later file wins)
 #
@@ -37,6 +42,11 @@ project:core
 project:grid
 project:finance-desk
 project:learning-desk
+
+# --- rule packs — opt-in, path-scoped coding conventions (list with: python3 scripts/rules.py list) ---
+# Nothing is wired until you add a line. Examples (uncomment the ones you want):
+# rules:sql
+# rules:bash
 
 # --- anthropic — universal comms + meta tools (9 skills) ---
 # Desktop/design tools (canvas-design, frontend-design, etc.) live in machine overlays.

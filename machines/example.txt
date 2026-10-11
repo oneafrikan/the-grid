@@ -9,6 +9,8 @@
 #   project:<name>       → also wire a composed agent-factory project
 #   -repo | -repo/skill  → REMOVE a baseline entry on this machine
 #   -project:<name>      → un-gate a baseline project on this machine
+#   rules:<pack>         → also wire a rule pack (rules/<pack>/*.md -> ~/.claude/rules/grid/)
+#   -rules:<pack>        → un-gate a baseline rule pack on this machine
 #   -hook:auto-handoff   → switch OFF the SessionEnd auto-handoff hook here
 #                          (on by default; `hook:auto-handoff` re-enables it)
 #
@@ -19,3 +21,7 @@
 
 # --- example: drop a desk you don't run on this machine ---
 # -project:finance-desk
+
+# --- example: rule packs on this machine only (opt-in; see python3 scripts/rules.py list) ---
+# rules:sql
+# -rules:wordpress

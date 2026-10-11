@@ -171,6 +171,7 @@ if [ -f "$WIRE_ALLOWLIST_FILE" ]; then
     [ -z "$line" ] && continue
     case "$line" in
       project:*|-project:*) continue ;;
+      *:*) continue ;;   # typed entries (rules:, -rules:, harness:, hook:, ...) are not repos
       -*/*) DENY_SKILLS+=("${line#-}") ;;
       -*)   DENY_REPOS+=("${line#-}") ;;
       */*)  WIRED_SKILLS+=("$line") ;;
