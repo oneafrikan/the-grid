@@ -10,8 +10,9 @@ Group 1 landed the shared helpers, the grid.yaml reader, the typed-entry
 reader, the grid.lock reader with its input validation, and the `audit`
 passthrough. Group 2 added the content-hash helpers, `lock` and `lock --check`.
 Group 3 adds the ledger, the fetch/verify/audit/place routine and `install`.
-The remaining subcommands are registered as stubs that exit 2 until their
-groups land.
+Group 5 adds `drift` (read-only upstream drift report) and `schedule` (render
+the weekly drift schedule; it never activates anything). The remaining
+subcommands are registered as stubs that exit 2 until their groups land.
 
 Python 3.8 floor: no str.removeprefix/removesuffix, no `dict | dict`, no
 `list[str]` annotations evaluated at runtime, no `match`. Checked with
@@ -28,6 +29,7 @@ sys.dont_write_bytecode = True
 
 import argparse
 import contextlib
+import datetime
 import hashlib
 import json
 import os
@@ -53,7 +55,7 @@ GIT_FLOOR = (2, 25)          # sparse-checkout `init --cone` + `set` needs 2.25
 GIT_TIMEOUT = 600            # seconds; a timeout is a failed fetch for that source
 
 # Subcommands whose behaviour lands in a later group of the change.
-STUB_COMMANDS = ("doctor", "repair", "uninstall", "drift", "schedule")
+STUB_COMMANDS = ("doctor", "repair", "uninstall")
 
 
 class GridError(Exception):
@@ -1575,6 +1577,350 @@ def cmd_lock(args):
     return EXIT_OK
 
 
+# --- drift (design.md "Drift report") -------------------------------------------------
+# Read-only: asks each locked source's upstream where its ref points now and
+# classifies every locked skill as unchanged / changed / removed, or its source
+# as unreachable. Never touches grid.lock, the ledger or repos/.
+
+SHORT_SHA = 12                      # characters of a sha shown in the report
+
+
+def short(sha):
+    return sha[:SHORT_SHA]
+
+
+class StagingRun(object):
+    """Lazy `<grid>/.grid-tmp/<pid>/` run dir, removed on exit (also under SIGTERM).
+
+    Created only when something needs staging, so a run where every source is
+    current touches nothing on disk. The parent `.grid-tmp` is removed too when
+    it ends up empty, so a drift run leaves no untracked directory behind.
+    """
+
+    def __init__(self, grid_dir):
+        self.parent = os.path.join(grid_dir, ".grid-tmp")
+        self.path = os.path.join(self.parent, str(os.getpid()))
+        self.made = False
+
+    def dir(self, name):
+        """A fresh sub-directory `name` inside the run dir; returns its path."""
+        full = os.path.join(self.path, name)
+        os.makedirs(full)
+        self.made = True
+        return full
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        if self.made:
+            shutil.rmtree(self.path, ignore_errors=True)
+            try:
+                os.rmdir(self.parent)       # only succeeds when nobody else is staging
+            except OSError:
+                pass
+        return False
+
+
+def remote_head(url, ref):
+    """Where the upstream's `ref` points now: (sha, "") or (None, detail).
+
+    `git ls-remote <url> <ref>` pattern-matches by name TAIL, so `main` also
+    returns `refs/heads/feature/main`; take only a line whose name is EXACTLY
+    one of the candidates below, in this preference order (a peeled annotated
+    tag beats the tag object, which is not a commit). The remote's own stderr
+    is dropped on purpose: it can carry absolute paths and the report must not.
+    """
+    try:
+        out = run_git(["ls-remote", "--", url, ref])
+    except GridError:
+        return None, "cannot reach upstream"
+    names = {}
+    for line in out.splitlines():
+        sha, _, name = line.partition("\t")
+        if HEX40_RE.fullmatch(sha) and name not in names:
+            names[name] = sha
+    if ref == "HEAD":
+        candidates = ["HEAD"]
+    else:
+        candidates = ["refs/heads/" + ref, "refs/tags/" + ref + "^{}", "refs/tags/" + ref]
+    for name in candidates:
+        if name in names:
+            return names[name], ""
+    return None, "ref not found"
+
+
+def fetch_trees(stage, source, url, head):
+    """Fetch only the commit and tree objects of `head` into a bare repo; return its path.
+
+    `--filter=blob:none` skips every file body: drift compares tree ids, which
+    need no content. Raises GridError when the fetch fails.
+    """
+    repo = stage.dir(source + ".git")
+    run_git(["init", "-q", "--bare", repo])
+    # `--` keeps a url that starts with `-` from being read as an option.
+    run_git(["-C", repo, "remote", "add", "--", "origin", url])
+    run_git(["-C", repo, "fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", head])
+    trace = os.environ.get("GRID_TRACE_FETCH")
+    if trace:
+        # Same one-line-per-fetch trace install uses; tests read it to prove a
+        # run with nothing to compare did not fetch.
+        with open(trace, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write("%s %s\n" % (source, head))
+    return repo
+
+
+def compute_drift(grid_dir, cfg, entries):
+    """Classify every locked entry. Returns (results, unreachable).
+
+    results: list of (state, entry, upstream_sha) with state in
+    unchanged | changed | removed. unreachable: list of (source, detail, n_entries).
+    """
+    by_source = {}
+    for entry in entries:
+        by_source.setdefault(entry["source"], []).append(entry)
+    results, unreachable = [], []
+    with StagingRun(grid_dir) as stage:
+        for source in sorted(by_source):
+            group = by_source[source]
+            src = cfg["sources"][source]
+            head, detail = remote_head(src["url"], src["ref"])
+            if head is None:
+                unreachable.append((source, detail, len(group)))
+                continue
+            # An entry already pinned at the upstream head cannot have drifted:
+            # no fetch for it. If every entry is current, nothing is fetched.
+            pending = []
+            for entry in group:
+                if entry["sha"] == head:
+                    results.append(("unchanged", entry, head))
+                else:
+                    pending.append(entry)
+            if not pending:
+                continue
+            try:
+                repo = fetch_trees(stage, source, src["url"], head)
+            except GridError:
+                unreachable.append((source, "cannot fetch upstream", len(pending)))
+                continue
+            for entry in pending:
+                try:
+                    tree = run_git(["-C", repo, "rev-parse", "--verify", "-q",
+                                    "FETCH_HEAD:" + entry["path"]]).strip()
+                except GridError:           # the path no longer exists upstream
+                    results.append(("removed", entry, head))
+                    continue
+                results.append(("unchanged" if tree == entry["tree"] else "changed", entry, head))
+    return results, unreachable
+
+
+def render_drift_report(date, results, unreachable):
+    """The Markdown report body.
+
+    Deliberately contains no absolute path, url or hostname (the report may be
+    shared) and nothing but the UTC date that varies run to run.
+    """
+    counts = {"unchanged": 0, "changed": 0, "removed": 0}
+    for state, _entry, _head in results:
+        counts[state] += 1
+    n_unreachable = sum(n for _s, _d, n in unreachable)
+    lines = ["# grid drift report", "", "Date (UTC): %s" % date, "", "## Summary", "",
+             "- unchanged: %d" % counts["unchanged"],
+             "- changed: %d" % counts["changed"],
+             "- removed: %d" % counts["removed"],
+             "- unreachable: %d (in %d source%s)" % (n_unreachable, len(unreachable),
+                                                     "" if len(unreachable) == 1 else "s"),
+             ""]
+    if not counts["changed"] and not counts["removed"] and not unreachable:
+        lines += ["All %d locked skills are current." % counts["unchanged"], ""]
+    for state, title in (("changed", "Changed"), ("removed", "Removed")):
+        rows = sorted((e["source"], e["name"], e["path"], e["sha"], head)
+                      for s, e, head in results if s == state)
+        if not rows:
+            continue
+        lines += ["## " + title, ""]
+        current = None
+        for source, name, path, sha, head in rows:
+            if source != current:
+                if current is not None:
+                    lines.append("")        # blank line between source groups
+                current = source
+                lines += ["### " + source, ""]
+            lines.append("- `%s` (`%s`): locked %s, upstream %s" % (name, path, short(sha), short(head)))
+        lines.append("")
+    if unreachable:
+        lines += ["## Unreachable", ""]
+        for source, detail, n in sorted(unreachable):
+            lines.append("- `%s`: %s (%d skill%s not checked)" % (source, detail, n, "" if n == 1 else "s"))
+        lines.append("")
+    lines += ["Maintainer response (manual): `git submodule update --remote repos/<name>`, "
+              "`grid lock`, review, PR.", ""]
+    return "\n".join(lines)
+
+
+def cmd_drift(args):
+    """`grid drift [--quiet]`: write a drift report; exit 0 whenever it was written."""
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    cfg = load_grid_yaml(grid_dir)
+    entries = read_grid_lock(grid_dir, cfg["sources"])
+    results, unreachable = compute_drift(grid_dir, cfg, entries)
+    date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    body = render_drift_report(date, results, unreachable)
+    reports = os.path.join(state_dir(), "reports")
+    dated = os.path.join(reports, "drift-%s.md" % date)
+    try:
+        atomic_write(dated, body)
+        atomic_write(os.path.join(reports, "drift-latest.md"), body)
+    except OSError as exc:
+        raise GridError("grid: cannot write the drift report: %s" % exc)
+    if not args.quiet:
+        sys.stdout.write(body)
+        print("grid: report written to %s" % dated)
+    # Expected drift is not an error: a schedule must not alarm on it.
+    return EXIT_OK
+
+
+# --- schedule (design.md "Schedule") --------------------------------------------------
+# Renders the weekly drift schedule through scripts/lib/render-schedule.sh (the
+# one renderer) and writes the text it prints, unchanged. Nothing is activated:
+# the activation command is PRINTED. launchctl, systemctl (bar the read-only
+# probe), crontab and loginctl are never run from here.
+
+SCHEDULE_SPEC = "weekly:Mon:09:00"
+LAUNCHD_LABEL = "io.the-grid.drift"
+SYSTEMD_UNIT = "grid-drift"                    # -> grid-drift.service / grid-drift.timer
+
+
+def schedule_scheduler():
+    """launchd | systemd | cron. GRID_OS overrides `uname -s`; Linux needs a user manager."""
+    os_name = os.environ.get("GRID_OS") or os.uname().sysname
+    if os_name == "Darwin":
+        return "launchd"
+    if os_name == "Linux":
+        # GRID_OS=Linux is an explicit statement: skip the probe (tests rely on that).
+        if os.environ.get("GRID_OS") == "Linux":
+            return "systemd"
+        try:
+            # The one scheduler call allowed: read-only, same probe budget-and-usage uses.
+            rc = subprocess.call(["systemctl", "--user", "show-environment"],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            rc = 1
+        return "systemd" if rc == 0 else "cron"
+    return "cron"
+
+
+def render_schedule_text(grid_dir, fn, *fn_args):
+    """Run `bash <grid>/scripts/lib/render-schedule.sh <fn> <args>`; return its stdout.
+
+    Renderer exit 2 (an argument outside [A-Za-z0-9_./@+-]) is exit 2 here, and
+    callers render everything BEFORE writing, so nothing is left half-written.
+    """
+    script = os.path.join(grid_dir, "scripts", "lib", "render-schedule.sh")
+    if not os.path.isfile(script):
+        raise GridError("grid: %s not found" % script)
+    env = dict(os.environ)
+    env["LC_ALL"] = "C"
+    proc = subprocess.run(["bash", script, fn] + list(fn_args), env=env,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          encoding="utf-8", errors="surrogateescape")
+    if proc.returncode != 0:
+        raise GridError("grid: schedule not written: %s\n"
+                        "grid: the renderer does no escaping; use a clone path, HOME and state dir "
+                        "made only of A-Z a-z 0-9 _ . / @ + - to use `grid schedule`."
+                        % proc.stderr.strip())
+    return proc.stdout
+
+
+def schedule_paths(scheduler):
+    """Files `schedule install` writes (and `remove` deletes) for a scheduler."""
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    if scheduler == "launchd":
+        agents = os.environ.get("LAUNCH_AGENTS_DIR") or os.path.join(home, "Library", "LaunchAgents")
+        return [os.path.join(agents, LAUNCHD_LABEL + ".plist")]
+    if scheduler == "systemd":
+        units = os.environ.get("SYSTEMD_USER_DIR") or os.path.join(home, ".config", "systemd", "user")
+        return [os.path.join(units, SYSTEMD_UNIT + ".service"), os.path.join(units, SYSTEMD_UNIT + ".timer")]
+    return []
+
+
+def schedule_plan(grid_dir, scheduler):
+    """Render everything `schedule install` would write: (files, printed lines).
+
+    files: list of (path, text). Nothing here writes; a renderer refusal raises
+    before the caller has touched the disk.
+    """
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    log_dir = os.path.abspath(os.path.join(state_dir(), "logs"))
+    cmd = ["/usr/bin/env", "python3", os.path.join(grid_dir, "scripts", "grid"), "drift", "--quiet"]
+    paths = schedule_paths(scheduler)
+    files, printed = [], []
+    if scheduler == "launchd":
+        text = render_schedule_text(grid_dir, "render_launchd_plist", LAUNCHD_LABEL, home,
+                                    grid_dir, log_dir, SCHEDULE_SPEC, *cmd)
+        files.append((paths[0], text))
+        printed.append(render_schedule_text(grid_dir, "render_activation_commands",
+                                            "launchd", paths[0]).rstrip("\n"))
+    elif scheduler == "systemd":
+        service = render_schedule_text(grid_dir, "render_systemd_service", "grid drift report",
+                                       grid_dir, "600", *cmd)
+        timer = render_schedule_text(grid_dir, "render_systemd_timer", "Weekly grid drift report",
+                                     SYSTEMD_UNIT + ".service", SCHEDULE_SPEC)
+        files.append((paths[0], service))
+        files.append((paths[1], timer))
+        printed.append(render_schedule_text(grid_dir, "render_activation_commands", "systemd",
+                                            SYSTEMD_UNIT + ".timer").rstrip("\n"))
+        # A user timer does not fire while logged out unless lingering is on.
+        printed.append("# a user timer only runs while you are logged in unless you also run:")
+        printed.append('loginctl enable-linger "$USER"')
+    else:
+        log_file = os.path.join(log_dir, "grid-drift.log")
+        line = render_schedule_text(grid_dir, "render_crontab_line", SCHEDULE_SPEC, log_file,
+                                    grid_dir, *cmd).rstrip("\n")
+        printed.append(line)
+        printed.append(render_schedule_text(grid_dir, "render_activation_commands", "cron", line).rstrip("\n"))
+    return files, printed
+
+
+def cmd_schedule(args):
+    """`grid schedule install|remove`: write or delete the scheduler files; print the rest."""
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    scheduler = schedule_scheduler()
+    if args.action == "install":
+        files, printed = schedule_plan(grid_dir, scheduler)     # renders everything first
+        if scheduler == "launchd":
+            # launchd does not create the log dir the plist points at.
+            os.makedirs(os.path.abspath(os.path.join(state_dir(), "logs")), exist_ok=True)
+        for path, text in files:
+            wrote = atomic_write(path, text)
+            print("grid: %s %s" % ("wrote" if wrote else "unchanged", path))
+        if scheduler == "cron":
+            print("grid: no file written; add this line to your crontab (it is not installed for you):")
+        else:
+            print("grid: nothing is activated; to activate run:")
+        for line in printed:
+            print(line)
+        return EXIT_OK
+
+    # remove: delete exactly the files install writes; print how to deactivate.
+    for path in schedule_paths(scheduler):
+        try:
+            os.unlink(path)
+            print("grid: removed %s" % path)
+        except FileNotFoundError:
+            print("grid: not present %s" % path)
+    if scheduler == "launchd":
+        # $(id -u) is printed literally for the human's shell to expand.
+        deactivate = "launchctl bootout gui/$(id -u)/" + LAUNCHD_LABEL
+    elif scheduler == "systemd":
+        deactivate = "systemctl --user disable --now %s.timer" % SYSTEMD_UNIT
+    else:
+        deactivate = "delete the crontab line containing `scripts/grid drift` (run `crontab -e`)"
+    print("grid: nothing is deactivated for you; to deactivate:")
+    print(deactivate)
+    return EXIT_OK
+
+
 def make_stub(name):
     """A not-yet-implemented subcommand: exit 2 with a clear message."""
     def stub(args):
@@ -1612,6 +1958,14 @@ def build_parser():
     p_install.add_argument("--force", action="store_true",
                            help="replace a directory that differs from the lock (an edit, or one grid did not write)")
     p_install.set_defaults(func=cmd_install)
+    p_drift = sub.add_parser("drift", parents=[shared],
+                             help="report how far each locked source's upstream has moved (read-only)")
+    p_drift.add_argument("--quiet", action="store_true", help="write the report but print nothing")
+    p_drift.set_defaults(func=cmd_drift)
+    p_sched = sub.add_parser("schedule", parents=[shared],
+                             help="render (never activate) the weekly drift schedule, or remove its files")
+    p_sched.add_argument("action", choices=("install", "remove"))
+    p_sched.set_defaults(func=cmd_schedule)
     for name in STUB_COMMANDS:
         p = sub.add_parser(name, parents=[shared], help="not implemented yet")
         p.set_defaults(func=make_stub(name))
