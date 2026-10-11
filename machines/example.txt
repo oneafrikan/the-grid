@@ -9,6 +9,8 @@
 #   project:<name>       → also wire a composed agent-factory project
 #   -repo | -repo/skill  → REMOVE a baseline entry on this machine
 #   -project:<name>      → un-gate a baseline project on this machine
+#   -hook:auto-handoff   → switch OFF the SessionEnd auto-handoff hook here
+#                          (on by default; `hook:auto-handoff` re-enables it)
 #
 # Apply with: bash ~/.the-grid/scripts/wire.sh
 
