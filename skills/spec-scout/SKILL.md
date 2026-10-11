@@ -1,11 +1,6 @@
 ---
 name: spec-scout
-description: >
-  Audit a repo's OpenSpec adoption and report drift between openspec/specs/ and
-  what the code actually does — missing specs, stale in-flight changes, specs
-  that no longer match shipped behaviour. Use when the user says "spec-scout",
-  "audit specs", "are our specs current", "check spec drift", "which repos have
-  specs", or invokes /spec-scout.
+description: Audit a repo's OpenSpec adoption and report drift between openspec/specs/ and the code. Use when the user says "spec-scout", "audit specs", "are our specs current" or "check spec drift".
 ---
 
 # spec-scout

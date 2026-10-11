@@ -1,10 +1,6 @@
 ---
 name: grid-help
-description: >
-  Explain how to use the-grid — which slash command or subagent to reach for,
-  how orchestrators vs specialists work, how the four factories differ. Use
-  when user asks "how do I use the-grid", "what can I do here", "how do I add
-  a skill/agent/automation", or invokes /grid-help.
+description: Explain how to use the-grid (which slash command or subagent to reach for, orchestrators vs specialists, the four factories). Use when the user asks "how do I use the-grid" or "what can I do here".
 ---
 
 # grid-help
