@@ -1044,7 +1044,7 @@ def write_paperclip(name: str, config: dict, out_dir: Path) -> Path:
 
 
 # ── openclaw-native emitter ───────────────────────────────────────────────────
-# A fourth emit target: render the Guide-shaped 9-file workspace set (see
+# A fourth emit target: render the 9-file workspace set (see
 # openclaw/README.md, Session B1) for the curated 5 grid orchestrator roles
 # named in openclaw/roster.json. Pure rendering only — no docker exec, no
 # writes under ~/.openclaw (that's agent-factory/scripts/deploy_openclaw.sh,

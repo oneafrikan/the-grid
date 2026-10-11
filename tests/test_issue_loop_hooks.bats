@@ -22,7 +22,7 @@ setup() {
   REPO="$T/repo"
   git init -q -b next "$REPO"
   git -C "$REPO" config user.name tester
-  git -C "$REPO" config user.email tester@example.invalid
+  git -C "$REPO" config user.email tester@example.com
   mkdir -p "$REPO/loop"
   cp -R "$PAT_DIR/hooks" "$REPO/loop/hooks"
   cp "$PAT_DIR/setup.sh" "$PAT_DIR/loop-prompt.template.md" "$PAT_DIR/.gitignore" "$REPO/loop/"

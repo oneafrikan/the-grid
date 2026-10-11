@@ -37,7 +37,7 @@ populate() { # $1 = repo dir
 gitify() { # $1 = repo dir
   git -C "$1" init -q
   git -C "$1" add -A
-  git -C "$1" -c user.name=t -c user.email=t@example.invalid commit -q -m fixture
+  git -C "$1" -c user.name=t -c user.email=t@example.com commit -q -m fixture
 }
 
 # Print the relative paths find_skill_mds reports for a repo, sorted.

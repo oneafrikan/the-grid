@@ -52,3 +52,13 @@ REMOVED_NAMES=(
     [ -z "$hits" ] || { printf 'dangling reference to %s:\n%s\n' "$n" "$hits"; return 1; }
   done
 }
+
+# Group 6: the whole tracked tree is clean under the GENERIC rules. This is what CI
+# runs (CI has no private denylist; an empty GRID_PRIVATE_DENYLIST disables that half).
+@test "repo-wide personal scan is clean on the generic patterns" {
+  cd "$REAL_ROOT"
+  # -u: the loop runs the gate with GRID_REQUIRE_DENYLIST=1 inherited; this test is
+  # about the generic half only, so it must not trip the "denylist required" failure.
+  run env -u GRID_REQUIRE_DENYLIST GRID_PRIVATE_DENYLIST= bash scripts/check-personal.sh
+  [ "$status" -eq 0 ] || { printf '%s\n' "$output"; return 1; }
+}

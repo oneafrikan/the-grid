@@ -241,7 +241,7 @@ scp ~/Downloads/<app-slug>.*.private-key.pem <box>:~/app.pem
 ssh <box> 'chmod 600 ~/app.pem'
 ```
 
-Success: `head -1 ~/app.pem` on the box prints `-----BEGIN RSA PRIVATE KEY-----` (or `PRIVATE KEY`).
+Success: `head -1 ~/app.pem` on the box prints a `-----BEGIN ... PRIVATE KEY-----` line (or `PRIVATE KEY`).
 
 ### Step 4 `[sudo]` Create the OS user and prove isolation
 
