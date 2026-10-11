@@ -1,0 +1,23 @@
+# grid.yaml - where wired skills come from and which set is wired by default.
+#
+# Read by scripts/grid with scripts/lib/miniyaml.py (a restricted YAML subset).
+# Only repos named by an untyped entry in the tracked baseline are listed:
+# library-tier repos are not installable (docs/SOURCES.md indexes them).
+version: 1
+sources:                      # key = directory name under repos/
+  anthropic:
+    url: https://github.com/anthropics/skills.git
+  gstack:
+    url: https://github.com/garrytan/gstack.git
+  jeffallan:
+    url: https://github.com/jeffallan/claude-skills.git
+  mattpocock:
+    url: https://github.com/mattpocock/skills.git
+  openspec:
+    url: https://github.com/Fission-AI/openspec.git
+  ponytail:
+    url: https://github.com/DietrichGebert/ponytail.git
+  superpowers:
+    url: https://github.com/obra/superpowers.git
+wired:
+  baseline: baseline-submodules.example.txt   # existing grammar, tracked file
