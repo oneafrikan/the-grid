@@ -25,6 +25,8 @@
 #   personal     no personal data in the tracked tree (check-personal.sh); with no private
 #                denylist on this machine (CI, forks) only the generic patterns run and the
 #                skip is listed; skipped if the script is absent
+#   rules        rule packs under rules/ lint clean (rules.py lint; offline; skipped with a
+#                notice if python3 or scripts/rules.py is absent)
 #   bats         the test suite
 #
 # Modes:
@@ -214,6 +216,17 @@ run_personas_check() {
 # when the (slow) suite also fails.
 check personas   run_personas_check
 check personal   run_personal_check
+# Rule-pack lint (change `rule-packs`). Absent tool = skipped loudly and recorded,
+# matching run_compose_check, so an old checkout or a stub grid still gates. An empty
+# rules/ (no packs) lints clean. Offline by design: --check-urls is never passed here.
+run_rules_check() {
+  if ! command -v python3 >/dev/null || [ ! -f scripts/rules.py ]; then
+    echo "    python3 or scripts/rules.py absent — skipped"; SKIPPED+=(rules); return 0
+  fi
+  # GRID_DIR pinned so a stray exported GRID_DIR cannot point the lint at another tree.
+  GRID_DIR="$GRID_DIR" python3 scripts/rules.py lint
+}
+check rules      run_rules_check
 check bats       run_bats
 
 echo

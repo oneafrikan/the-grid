@@ -1,0 +1,20 @@
+# Opinion denylist for rules.py lint (E_OPINION). One case-insensitive Python `re`
+# regex per line, searched against each single line of every rule file (never READMEs).
+# Blank lines and lines starting with # are comments. Patterns are deliberately narrow:
+# they catch house opinions by their specific phrasing and reject hedged bullets.
+# Extend this file, not rules.py.
+\balways create new\b
+^#+ *immutab
+\(CRITICAL\)
+\b[0-9]{2} ?% ?(test )?coverage\b
+\bcoverage (target|threshold|minimum|requirement)s?\b
+\bTDD\b|\btest-driven\b
+includeCoAuthoredBy
+\bECC\b|\becc:
+\bsub-?agents?\b|\bcode-reviewer\b|\btdd-guide\b
+\bContext7\b|\bExa\b|gh search code
+\bsee skill:
+\bwithout asking\b
+\.\./common\b|\bextends \[?common/
+^- *(you|we|it is|it's|consider|try|ideally|maybe|perhaps|should)\b
+\b(might want to|may want to|ideally|perhaps)\b
