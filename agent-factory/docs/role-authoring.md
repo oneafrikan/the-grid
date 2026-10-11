@@ -64,6 +64,7 @@ Kind is read from `role.yaml`. A role can be both an orchestrator and unattended
 - Sections: `Scope`, `What to get right hardest`, `Hard rules`, plus the sections it already has
   (`Roster`, `Delegation & Context`, `Routing`). `Receiving work` is not required.
 - `AGENTS.md` ≤ 5120 bytes (rules stay inline; do not move them to a linked file).
+- The `## Decision briefs` section is appended automatically from `_core/DECISION_BRIEF.md`; do not restate it in `AGENTS.md`. The 5120-byte cap counts the role file only.
 - The shared four, reworded for acceptance:
   1. **Verify before accepting.** Read or re-run the specialist's evidence (the command and its
      output, the paths, the PR) before reporting anything as done. A summary is not evidence.
