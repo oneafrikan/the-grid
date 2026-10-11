@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "truncate_at": 1536,
+  "per_entry_max_chars": 754,
+  "owned": {
+    "skills_max_chars": 3864,
+    "orchestrator_roles_max_chars": 2018,
+    "agent_roles_max_chars": 7140,
+    "skill_body_max_bytes": 6854
+  },
+  "baseline": {
+    "skills_max_chars": 0
+  }
+}
