@@ -1,0 +1,38 @@
+{
+  "parentUuid": "00000000-0000-4000-8000-000000000000",
+  "isSidechain": false,
+  "promptId": "00000000-0000-4000-8000-000000000000",
+  "type": "user",
+  "message": {
+    "role": "user",
+    "content": [
+      {
+        "tool_use_id": "toolu_00000000000000000000000000",
+        "type": "tool_result",
+        "content": "__TEXT__",
+        "is_error": false
+      }
+    ]
+  },
+  "uuid": "00000000-0000-4000-8000-000000000000",
+  "timestamp": "2000-01-01T00:00:00.000Z",
+  "toolUseResult": {
+    "stdout": "__TEXT__",
+    "stderr": "__TEXT__",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  },
+  "sourceToolAssistantUUID": "00000000-0000-4000-8000-000000000000",
+  "permissionDecision": {
+    "decision": "accept",
+    "source": "config",
+    "reasonType": "rule"
+  },
+  "userType": "external",
+  "entrypoint": "sdk-cli",
+  "cwd": "/tmp/project",
+  "sessionId": "00000000-0000-4000-8000-000000000000",
+  "version": "2.1.296",
+  "gitBranch": "main"
+}
