@@ -6,7 +6,6 @@ paths:
 
 ## Layers
 - Use `ref()` for models and `source()` for raw tables; a hard-coded `schema.table` hides dependencies and build order.
-- Call `source()` only in staging models, one staging model per source table.
 - Limit staging models to renaming, casting, basic computation and categorising; joins and aggregations change the grain.
 - Move a CTE duplicated across models, or one that changes grain, into its own intermediate model.
 - Avoid per-department copies of one concept such as `finance_orders` and `marketing_orders`; the dbt guide calls them an anti-pattern.
