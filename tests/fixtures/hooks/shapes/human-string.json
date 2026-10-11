@@ -1,0 +1,25 @@
+{
+  "parentUuid": null,
+  "isSidechain": false,
+  "promptId": "00000000-0000-4000-8000-000000000000",
+  "type": "user",
+  "message": {
+    "role": "user",
+    "content": "__TEXT__"
+  },
+  "uuid": "00000000-0000-4000-8000-000000000000",
+  "timestamp": "2000-01-01T00:00:00.000Z",
+  "permissionMode": "default",
+  "promptSource": "sdk",
+  "turnOrigin": "sdk",
+  "turnPosition": {
+    "promptIndex": 0,
+    "turnIndex": 1
+  },
+  "userType": "external",
+  "entrypoint": "sdk-cli",
+  "cwd": "/tmp/project",
+  "sessionId": "00000000-0000-4000-8000-000000000000",
+  "version": "2.1.296",
+  "gitBranch": "main"
+}
