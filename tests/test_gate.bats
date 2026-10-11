@@ -114,3 +114,68 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" bash scripts/gate.s
   [ "$status" -eq 1 ]
   [[ "$output" == *"gate: FAIL — personal"* ]] || false
 }
+
+# --- lock check (manifest-lock-install#2) ------------------------------------------------
+# `grid lock --check` exit codes: 0 fresh, 1 stale (real failure), 3 a locked source is
+# not checked out here (skip loudly, never fail).
+
+@test "G3: with no scripts/grid and no python3 the lock check is skipped LOUDLY, not failed" {
+  # The throwaway repo has no scripts/grid and the stub PATH has no python3.
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python3 or scripts/grid absent"* ]] || false
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"lock"* ]] || false
+}
+
+@test "G3: python3 present but scripts/grid absent is still a loud skip of the lock check" {
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+  run run_gate
+  [ "$status" -eq 0 ]
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"lock"* ]] || false
+}
+
+@test "G3: scripts/grid present but python3 absent from PATH is a loud skip of the lock check" {
+  printf 'import sys\nsys.exit(1)\n' > "$G/scripts/grid"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python3 or scripts/grid absent"* ]] || false
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"lock"* ]] || false
+}
+
+@test "lock check: exit 3 (a locked source is not checked out) is a loud skip, not a failure" {
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+  printf 'import sys\nsys.exit(3)\n' > "$G/scripts/grid"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"a locked source is not checked out"* ]] || false
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"lock"* ]] || false
+}
+
+@test "lock check: exit 1 (stale lock) FAILS the gate and names lock" {
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+  printf 'import sys\nsys.exit(1)\n' > "$G/scripts/grid"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — "*"lock"* ]] || false
+}
+
+@test "lock check: exit 2 (an error) also FAILS the gate" {
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+  printf 'import sys\nsys.exit(2)\n' > "$G/scripts/grid"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — "*"lock"* ]] || false
+}
+
+@test "lock check: exit 0 passes and lock is not listed as skipped" {
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+  printf 'import sys\nsys.exit(0)\n' > "$G/scripts/grid"
+  run run_gate
+  [ "$status" -eq 0 ]
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" != *"lock"* ]] || false
+}
