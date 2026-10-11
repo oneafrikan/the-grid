@@ -48,9 +48,10 @@ produces new entries.
 7. **Fold only the most durable/actionable approved learnings into
    `CLAUDE.md`** as short rules, each pointing back to its `LEARNINGS.md`
    entry (e.g. `- Never do X — see LEARNINGS.md#short-title.`). Leave
-   lower-value or situational entries living only in `LEARNINGS.md`.
+   situational entries only in `LEARNINGS.md`.
 
    Model-routing learnings: `sections/model-routing.md`.
+   Procedural: tank `evolve` may draft a skill (never auto-wired).
 
 8. **Record rejected candidates' hashes** in `LEARNINGS.md`'s rejected
    ledger so they aren't re-proposed on the next run.
