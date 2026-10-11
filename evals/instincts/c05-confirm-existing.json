@@ -1,0 +1,23 @@
+{
+  "name": "c05-confirm-existing",
+  "why": "id reuse: a habit already on file is confirmed by its exact id, never duplicated as a new one",
+  "obs": [
+    ["s1", "prompt", "", "no, use bats not a plain script test", false],
+    ["s1", "tool", "Edit", "tests/x.bats", false],
+    ["s2", "prompt", "", "no, use bats not a plain script test", false],
+    ["s2", "tool", "Edit", "tests/x.bats", false]
+  ],
+  "known": [
+    {"id": "bats-for-shell-tests", "trigger": "when testing a shell script", "action": "write the test as a bats test, not a plain shell script", "domain": "testing"}
+  ],
+  "expect": {"items": "some", "must_include": [{"kind": "confirm", "id": "bats-for-shell-tests"}], "max_items": 1},
+  "canned": {
+    "good": [
+      {"kind": "confirm", "id": "bats-for-shell-tests", "trigger": "when testing a shell script", "action": "write the test as a bats test, not a plain shell script", "domain": "testing", "evidence": ["P1"]}
+    ],
+    "bad": [
+      {"kind": "confirm", "id": "bats-for-shell-test", "trigger": "when testing a shell script", "action": "write the test as a bats test, not a plain shell script", "domain": "testing", "evidence": ["P1"]}
+    ],
+    "bad_reason": "unknown-id"
+  }
+}
