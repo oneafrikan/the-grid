@@ -20,6 +20,10 @@
 #                          rule loads only when Claude touches a file matching its paths:,
 #                          so wire the packs for languages you actually use.
 #   -rules:<pack>        → un-gate a pack (overlay escape hatch; a subtraction always wins)
+#   harness:<name>       → also wire skills (and composed agents) into another harness:
+#                          codex | opencode | gemini | antigravity | pi | openclaw
+#                          (opt-in; `claude` is always on). See docs/harnesses.md.
+#   -harness:<name>      → un-gate a harness (overlay escape hatch)
 #   -hook:auto-handoff   → switch OFF the SessionEnd auto-handoff hook (on by default;
 #                          `hook:auto-handoff` re-enables it, a later file wins)
 #

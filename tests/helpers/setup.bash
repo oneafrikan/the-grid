@@ -46,6 +46,16 @@ common_setup() {
   # that forgets to stub it fails loudly (exec fails, exit 127) instead of calling a
   # model. Tests that need a stub set GRID_CLAUDE themselves (see helpers/stubs.bash).
   export GRID_CLAUDE=/nonexistent/grid-claude-tripwire
+  # Harness wiring (multi-harness): non-Claude skills/agents/rules dirs resolve under
+  # GRID_HARNESS_HOME, so it is a temp dir. The "home dir" leaf contains a space on
+  # purpose: any unquoted expansion in the wiring code then fails a test. The inherited
+  # GRID_HARNESS / XDG_CONFIG_HOME / GRID_DRY_HOME are dropped (GRID_DRY_HOME would
+  # otherwise override this sandbox base, and XDG would relocate OpenCode's dir).
+  MOCK_HARNESS_ROOT=$(mktemp -d)
+  MOCK_HARNESS_HOME="$MOCK_HARNESS_ROOT/home dir"
+  mkdir -p "$MOCK_HARNESS_HOME"
+  export GRID_HARNESS_HOME="$MOCK_HARNESS_HOME"
+  unset GRID_HARNESS XDG_CONFIG_HOME GRID_DRY_HOME
   assert_sandboxed
 }
 
@@ -76,6 +86,17 @@ assert_sandboxed() {
       esac
     done
   done
+  # GRID_HARNESS_HOME must be set and must stay out of the real home: it is the base of
+  # every non-Claude harness dir (~/.agents/skills, ~/.codex/agents, ...).
+  if [ -z "${GRID_HARNESS_HOME:-}" ]; then
+    echo "REFUSING: GRID_HARNESS_HOME is unset or empty (harness dirs would resolve into the real home)" >&2
+    return 1
+  fi
+  r="$(cd "${REAL_HOME:-$HOME}" 2>/dev/null && pwd -P || echo "${REAL_HOME:-$HOME}")"
+  d="$(cd "$GRID_HARNESS_HOME" 2>/dev/null && pwd -P || echo "$GRID_HARNESS_HOME")"
+  case "$d" in
+    "$r"|"$r"/*) echo "REFUSING: GRID_HARNESS_HOME $d is the real home $r (or inside it)" >&2; return 1 ;;
+  esac
   # GRID_CLAUDE must be set (to the tripwire or a stub), never empty.
   if [ -z "${GRID_CLAUDE:-}" ]; then
     echo "REFUSING: GRID_CLAUDE is unset or empty (the claude tripwire must stay armed)" >&2
@@ -84,9 +105,11 @@ assert_sandboxed() {
 }
 
 common_teardown() {
-  rm -rf "$MOCK_GRID" "$MOCK_SKILLS" "$OTHER_DIR" "$MOCK_AGENTS" "$MOCK_HOOK_ROOT" "$MOCK_RULES"
+  rm -rf "$MOCK_GRID" "$MOCK_SKILLS" "$OTHER_DIR" "$MOCK_AGENTS" "$MOCK_HOOK_ROOT" "$MOCK_RULES" \
+         "${MOCK_HARNESS_ROOT:-}"
   unset AGENTS_DIR SKILLS_DIR RULES_DIR GRID_PRIVATE_ROLES_DIR CLAUDE_CONFIG_DIR GRID_HOOK_LOG_DIR \
-        GRID_HOOK_STATE_DIR GRID_HANDOFF_FALLBACK_DIR GRID_PRIVATE_DIR GRID_RUN_LOG GRID_CLAUDE
+        GRID_HOOK_STATE_DIR GRID_HANDOFF_FALLBACK_DIR GRID_PRIVATE_DIR GRID_RUN_LOG GRID_CLAUDE \
+        GRID_HARNESS_HOME GRID_HARNESS MOCK_HARNESS_ROOT MOCK_HARNESS_HOME
 }
 
 # Write a minimal valid skill dir to a given path
