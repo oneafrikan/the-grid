@@ -1,0 +1,17 @@
+# Decision briefs (workflow-upgrades group 3): when a real two-way choice needs the human, the
+# orchestrator should use the shared decision-brief format (D<N> label, lettered options, a
+# stated recommendation). The prompt gives no hint about the format.
+# Not yet run: validated only.
+role: ceo-orchestrator
+finding: "#0"
+expect_today: unknown
+prompt: |
+  Two choices are on the table for the billing migration. Option one: ship the migration this
+  week, which meets the customer deadline but runs before the audit has finished. Option two:
+  hold the migration until the audit finishes, which is about three weeks away and misses the
+  deadline. tech-lead has no strong view. Put this decision to the human.
+must_match:
+  - 'D\d+'
+  - '^\s*-?\s*A\b'
+  - '^\s*-?\s*B\b'
+  - 'recommend'
