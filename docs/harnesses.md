@@ -141,6 +141,38 @@ What `wire.sh` does for each file in that column:
 - A `rules.py` failure is reported on stderr, the rest of the wire still runs, and `wire.sh` then exits 1.
 - `wire.sh --check` runs the same decisions with `rules.py emit --check` against the live files (read-only): a hand-edited block, a missing block, or a block that should be gone is drift. An absent or symlinked file is not.
 
+## Agent targets
+
+Specialist roles become native subagents on harnesses that have them. Orchestrators are never emitted as agent files: they ship as skills (the `claude-code` skill folders) and reach the shared skills dir through the normal wiring. Every agent target shares one prompt body (`render_subagent_body` in `compose.py`, the same text as the Claude subagent), the same name and description as the Claude subagent, and never writes a `model`. Each target writes only its own `_<target>/` dir under the project, so recomposing one never disturbs another.
+
+### Codex CLI
+
+Compose, then wire (Codex only reads the files once wire.sh has linked them into `~/.codex/agents/`):
+
+```
+agent-factory/.venv/bin/python agent-factory/compose.py agent-factory/examples/grid.yaml --target codex
+GRID_HARNESS=codex bash scripts/wire.sh        # or put harness:codex in machines/<host>.txt
+```
+
+Output: `agent-factory/projects/<project>/_codex/agents/<name>.toml`, one per specialist, where `<name>` is `<slug>-<role>` (`grid-qa-engineer`).
+
+```toml
+name = "grid-qa-engineer"
+description = "QA Engineer. The release gate. ... Use this subagent for qa-engineer work."
+sandbox_mode = "read-only"
+developer_instructions = """
+You are the **QA Engineer**, a specialist agent on a composed dev team. ...
+"""
+```
+
+- Required keys are `name`, `description` and `developer_instructions`. `name` is the agent's identity, not the filename.
+- Key order is fixed: `name`, `description`, `sandbox_mode`, `developer_instructions`.
+- Sandbox mapping: `sandbox_mode = "read-only"` is written only when the role's `role.yaml` has a `tools:` allowlist containing neither `Edit` nor `Write` (today `qa-engineer` and `security-reviewer`). A role with no allowlist, or one that can edit, gets no `sandbox_mode` and inherits Codex's default.
+- A read-only sandbox also blocks writes through Bash. That is stricter than Claude, where an allowlisted Bash can still write, and it errs safe for read-only roles.
+- `model` and the other optional keys (`model_reasoning_effort`, `mcp_servers`, `skills.config`) are never written.
+- Strings are escaped by hand (the stdlib has no TOML writer) and verified by round-tripping through `tomllib`; `tests/lib/validate_harness.py codex-agent FILE...` checks any generated file against the format above.
+- Not verified on a real Codex yet (the real-install smoke test is a later, human step).
+
 ## Paths and environment
 
 - `GRID_HARNESS_HOME` sets the base for every non-Claude dir (default `$HOME`); tests point it at a temp dir.
