@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+"""build-plugins.py - generate the Claude Code plugin marketplace tree.
+
+Input  (hand-authored): plugins/bundles.json
+Output (generated, committed):
+    .claude-plugin/marketplace.json
+    plugins/<bundle>/.claude-plugin/plugin.json
+    plugins/<bundle>/skills/<name>/...      owned skills + composed orchestrator skills
+    plugins/<bundle>/agents/<name>.md       composed specialists + root-owned agents
+
+Never hand-edit the output: re-run this script instead.
+
+Usage:
+    build-plugins.py            write mode: render, then replace the generated tree
+    build-plugins.py --check    render into memory/temp, diff against disk, write nothing
+
+Environment:
+    GRID_DIR   repo root override (default: this script's parent's parent)
+
+Exit codes:
+    0  ok (write mode: tree written; --check: tree matches)
+    1  drift (--check only: a generated file is missing, extra or changed)
+    2  guard or usage error (nothing is written)
+
+Why composed output is built with the PUBLIC identity: compose.py bakes the local
+operator/machine/hostname into each agent's IDENTITY nameplate. Building with
+GRID_USER_CONFIG=agent-factory/user.public.yaml and no private roles makes the output
+depend only on tracked files, so --check gives the same answer on every machine and a
+personal nameplate can never reach the public plugin tree.
+
+Stdlib only; the compose step is the sole consumer of the agent-factory venv.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+# ---- manifest schema -------------------------------------------------------
+# Unknown keys are a hard error (typos must not silently drop content).
+TOP_REQUIRED = {"marketplace", "version", "license", "repository", "bundles"}
+MARKETPLACE_REQUIRED = {"name", "owner", "description"}
+BUNDLE_REQUIRED = {"description", "skills", "compose", "agents"}
+MAX_DESCRIPTION = 200  # marketplace listing budget; enforced, never truncated
+
+# Component names become path segments, so refuse anything that could escape a dir.
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# Files never copied into (or counted from) the generated tree.
+IGNORED = {".DS_Store"}
+
+# A rendered file: (bytes, is_executable). The exec bit is part of the content because
+# skills may ship scripts and git tracks it.
+FileSpec = tuple
+
+
+class GuardError(Exception):
+    """A guard or usage failure: reported, then exit 2 with nothing written."""
+
+
+# ---- manifest --------------------------------------------------------------
+def check_keys(obj, required, where):
+    """Require obj to be a dict with exactly the `required` keys (no more, no fewer)."""
+    if not isinstance(obj, dict):
+        raise GuardError(f"{where}: expected an object")
+    unknown = sorted(set(obj) - required)
+    if unknown:
+        raise GuardError(f"{where}: unknown key(s): {', '.join(unknown)}")
+    missing = sorted(required - set(obj))
+    if missing:
+        raise GuardError(f"{where}: missing key(s): {', '.join(missing)}")
+
+
+def load_manifest(grid):
+    path = grid / "plugins" / "bundles.json"
+    if not path.is_file():
+        raise GuardError(f"manifest not found: {path}")
+    try:
+        m = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise GuardError(f"{path}: invalid JSON: {e}")
+
+    check_keys(m, TOP_REQUIRED, "bundles.json")
+    check_keys(m["marketplace"], MARKETPLACE_REQUIRED, "bundles.json marketplace")
+    for k in ("version", "license", "repository"):
+        if not isinstance(m[k], str) or not m[k]:
+            raise GuardError(f"bundles.json: '{k}' must be a non-empty string")
+    for k in MARKETPLACE_REQUIRED:
+        if not isinstance(m["marketplace"][k], str) or not m["marketplace"][k]:
+            raise GuardError(f"bundles.json marketplace: '{k}' must be a non-empty string")
+    if not isinstance(m["bundles"], dict) or not m["bundles"]:
+        raise GuardError("bundles.json: 'bundles' must be a non-empty object")
+
+    for name, b in m["bundles"].items():
+        where = f"bundle '{name}'"
+        if not NAME_RE.match(name):
+            raise GuardError(f"{where}: invalid bundle name")
+        check_keys(b, BUNDLE_REQUIRED, where)
+        if not isinstance(b["description"], str) or not b["description"]:
+            raise GuardError(f"{where}: 'description' must be a non-empty string")
+        if len(b["description"]) > MAX_DESCRIPTION:
+            raise GuardError(
+                f"{where}: description is {len(b['description'])} chars (max {MAX_DESCRIPTION})")
+        for k in ("skills", "compose", "agents"):
+            v = b[k]
+            if not isinstance(v, list) or not all(isinstance(x, str) and NAME_RE.match(x) for x in v):
+                raise GuardError(f"{where}: '{k}' must be a list of plain names")
+    return m
+
+
+# ---- file collection -------------------------------------------------------
+def collect(root, prefix):
+    """Map every file under `root` to {posix path under `prefix`: (bytes, exec)}."""
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        for fn in sorted(filenames):
+            if fn in IGNORED:
+                continue
+            p = Path(dirpath) / fn
+            rel = p.relative_to(root).as_posix()
+            out[f"{prefix}/{rel}"] = (p.read_bytes(), os.access(p, os.X_OK))
+    return out
+
+
+def repos_skill_names(grid):
+    """Names of every skill dir (a dir holding SKILL.md) under repos/*, at any depth.
+
+    Returns None when no skill is found there (repos/ absent, empty, or its submodules
+    uninitialised: the dirs exist but hold nothing), so the caller can say it skipped.
+    """
+    repos = grid / "repos"
+    if not repos.is_dir():
+        return None
+    names = set()
+    for dirpath, dirnames, filenames in os.walk(repos):
+        dirnames[:] = [d for d in dirnames if d != ".git"]  # never descend into git metadata
+        if "SKILL.md" in filenames and Path(dirpath) != repos:
+            names.add(Path(dirpath).name)
+    return names or None
+
+
+# ---- compose ---------------------------------------------------------------
+def run_compose(grid, project, tmp):
+    """Compose one project with the neutral identity; return its _claude-code dir."""
+    py = grid / "agent-factory" / ".venv" / "bin" / "python"
+    user = grid / "agent-factory" / "user.public.yaml"
+    cfg = grid / "agent-factory" / "examples" / f"{project}.yaml"
+    if not py.is_file():
+        raise GuardError(f"compose needs {py} (create it: cd agent-factory && python3 -m venv .venv "
+                         "&& .venv/bin/pip install -r requirements.txt)")
+    if not user.is_file():
+        # Never fall back to user.yaml: that could carry a personal nameplate.
+        raise GuardError(f"compose needs {user} (neutral identity); refusing to use user.yaml")
+    if not cfg.is_file():
+        raise GuardError(f"compose project '{project}': {cfg} not found")
+
+    env = dict(os.environ)
+    env["GRID_PRIVATE_ROLES_DIR"] = ""            # empty disables private roles entirely
+    env["GRID_USER_CONFIG"] = str(user)           # neutral operator/machine/channels
+    r = subprocess.run(
+        [str(py), "agent-factory/compose.py", f"agent-factory/examples/{project}.yaml",
+         "--target", "claude-code", "--out", str(tmp)],
+        cwd=grid, env=env, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise GuardError(f"compose of '{project}' failed (exit {r.returncode}):\n"
+                         f"{r.stdout[-800:]}{r.stderr[-800:]}")
+    out = tmp / project / "_claude-code"
+    if not out.is_dir():
+        raise GuardError(f"compose of '{project}' produced no {out}")
+    return out
+
+
+# ---- render ----------------------------------------------------------------
+def render_bundle(grid, name, b, manifest, repo_skills, tmp):
+    """Return {repo-relative path: FileSpec} for one bundle, or raise GuardError."""
+    base = f"plugins/{name}"
+    files = {}
+    skills = {}   # skill name -> {path: FileSpec relative to skill dir prefix}
+    agents = {}   # agent name -> FileSpec
+
+    def add_skill(sname, content, origin):
+        if sname in skills:
+            raise GuardError(f"bundle '{name}': skill '{sname}' defined twice ({origin})")
+        skills[sname] = content
+
+    def add_agent(aname, spec, origin):
+        if aname in agents:
+            raise GuardError(f"bundle '{name}': agent '{aname}' defined twice ({origin})")
+        agents[aname] = spec
+
+    # Owned skills from skills/.
+    for s in b["skills"]:
+        d = grid / "skills" / s
+        if not (d / "SKILL.md").is_file():
+            raise GuardError(f"bundle '{name}': listed skill '{s}' has no {d / 'SKILL.md'}")
+        if repo_skills is not None and s in repo_skills:
+            raise GuardError(f"bundle '{name}': skill '{s}' also exists under repos/ "
+                             "(provenance unknown); remove it from the bundle")
+        add_skill(s, collect(d, f"{base}/skills/{s}"), "skills/")
+
+    # Composed output: orchestrator skills + specialist agents.
+    for p in b["compose"]:
+        out = run_compose(grid, p, tmp)
+        sk_root = out / "skills"
+        if sk_root.is_dir():
+            for d in sorted(sk_root.iterdir()):
+                if d.is_dir():
+                    add_skill(d.name, collect(d, f"{base}/skills/{d.name}"), f"compose {p}")
+        ag_root = out / "agents"
+        if ag_root.is_dir():
+            for f in sorted(ag_root.glob("*.md")):
+                add_agent(f.stem, (f.read_bytes(), os.access(f, os.X_OK)), f"compose {p}")
+
+    # Root-owned hand-authored agents from agents/.
+    for a in b["agents"]:
+        f = grid / "agents" / f"{a}.md"
+        if not f.is_file():
+            raise GuardError(f"bundle '{name}': listed agent '{a}' has no {f}")
+        add_agent(a, (f.read_bytes(), os.access(f, os.X_OK)), "agents/")
+
+    if not skills and not agents:
+        raise GuardError(f"bundle '{name}' has no components")
+
+    for content in skills.values():
+        files.update(content)
+    for aname, spec in agents.items():
+        files[f"{base}/agents/{aname}.md"] = spec
+
+    # plugin.json: only the fields the validator needs. No skills/agents/hooks/mcpServers
+    # keys: components are found by directory convention (and an `agents` key is rejected).
+    plugin = {
+        "name": name,
+        "version": manifest["version"],
+        "description": b["description"],
+        "author": {"name": manifest["marketplace"]["owner"]},
+        "license": manifest["license"],
+        "repository": manifest["repository"],
+    }
+    files[f"{base}/.claude-plugin/plugin.json"] = (dump_json(plugin), False)
+    return files
+
+
+def dump_json(obj):
+    """Stable serialisation: fixed key order (dict order), 2-space indent, trailing newline."""
+    return (json.dumps(obj, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def render_marketplace(manifest):
+    mp = manifest["marketplace"]
+    doc = {
+        "name": mp["name"],
+        "owner": {"name": mp["owner"]},
+        "metadata": {"description": mp["description"]},
+        "plugins": [
+            {"name": n, "source": f"./plugins/{n}", "description": b["description"],
+             "version": manifest["version"]}
+            for n, b in manifest["bundles"].items()
+        ],
+    }
+    return {".claude-plugin/marketplace.json": (dump_json(doc), False)}
+
+
+def render(grid, manifest, tmp):
+    """Render every generated file: {path: FileSpec}. Raises GuardError before any write."""
+    repo_skills = repos_skill_names(grid)
+    if repo_skills is None:
+        print("notice: repos/ is empty; skipped the repos/ name-collision check", file=sys.stderr)
+    files = {}
+    for name, b in manifest["bundles"].items():
+        files.update(render_bundle(grid, name, b, manifest, repo_skills, tmp))
+    files.update(render_marketplace(manifest))
+    return files
+
+
+# ---- disk state, check, write ----------------------------------------------
+def disk_files(grid):
+    """Every file the builder owns on disk: all of plugins/<dir>/** plus marketplace.json."""
+    found = {}
+    plugins = grid / "plugins"
+    if plugins.is_dir():
+        for d in sorted(plugins.iterdir()):
+            if d.is_dir():  # plugins/bundles.json (a file) is input, not output
+                found.update(collect(d, f"plugins/{d.name}"))
+    mp = grid / ".claude-plugin" / "marketplace.json"
+    if mp.is_file():
+        found[".claude-plugin/marketplace.json"] = (mp.read_bytes(), os.access(mp, os.X_OK))
+    return found
+
+
+def do_check(grid, files):
+    disk = disk_files(grid)
+    stale = []
+    for p in sorted(set(files) | set(disk)):
+        if p not in disk:
+            stale.append(f"missing: {p}")
+        elif p not in files:
+            stale.append(f"extra:   {p}")
+        elif files[p] != disk[p]:
+            stale.append(f"changed: {p}")
+    for line in stale:
+        print(line)
+    if stale:
+        print(f"plugins: {len(stale)} stale path(s); run: python3 scripts/build-plugins.py",
+              file=sys.stderr)
+        return 1
+    print("plugins: up to date")
+    return 0
+
+
+def do_write(grid, manifest, files):
+    plugins = grid / "plugins"
+    # Replace wholesale: every bundle dir (and any stale dir for a removed bundle) is
+    # deleted first so files dropped from a bundle do not linger.
+    if plugins.is_dir():
+        for d in plugins.iterdir():
+            if d.is_dir():
+                shutil.rmtree(d)
+    for path, (data, is_exec) in sorted(files.items()):
+        if path == ".claude-plugin/marketplace.json":
+            continue  # written last, after the source-dir guard below
+        write_file(grid / path, data, is_exec)
+
+    # Guard: every marketplace entry must point at a directory that now exists.
+    # `claude plugin validate` does NOT catch a dangling source, so we do.
+    for n in manifest["bundles"]:
+        if not (grid / "plugins" / n).is_dir():
+            raise GuardError(f"marketplace entry '{n}': source dir plugins/{n} is missing")
+    data, is_exec = files[".claude-plugin/marketplace.json"]
+    write_file(grid / ".claude-plugin" / "marketplace.json", data, is_exec)
+    print(f"plugins: wrote {len(files)} files")
+
+
+def write_file(path, data, is_exec):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    path.chmod(0o755 if is_exec else 0o644)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Generate the Claude Code plugin marketplace tree.")
+    ap.add_argument("--check", action="store_true",
+                    help="diff the generated tree against disk; exit 1 on drift; write nothing")
+    args = ap.parse_args()  # usage errors exit 2 (argparse default)
+
+    grid = Path(os.environ.get("GRID_DIR") or Path(__file__).resolve().parent.parent)
+    try:
+        manifest = load_manifest(grid)
+        # Compose output lives in a temp dir that is always removed.
+        with tempfile.TemporaryDirectory(prefix="build-plugins-") as t:
+            files = render(grid, manifest, Path(t))
+        if args.check:
+            return do_check(grid, files)
+        do_write(grid, manifest, files)
+        return 0
+    except GuardError as e:
+        print(f"build-plugins: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
