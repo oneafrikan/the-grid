@@ -58,6 +58,7 @@ if [ -f "$BASELINE" ]; then
     [ -z "$line" ] && continue
     case "$line" in
       project:*|-project:*) continue ;;          # composed projects, not submodules
+      *:*)                  continue ;;          # typed entries (rules:, -rules:, harness:, hook:, ...) are not repos
       -*/*)                 continue ;;          # per-skill subtraction — tier is still "wired"
       -*)                   DENY_REPOS+=("${line#-}") ;;
       */*)                  WIRED_SKILLS+=("$line") ;;
