@@ -316,6 +316,15 @@ All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: 
   (trailing slash: a sibling dir like `${GRID_DIR}-private` is never matched) and
   follows a skills/agents dir that is itself a symlink (`find -H`), in both the
   wire and `--check` paths.
+- **Machine hooks:** wire.sh keeps one generated `auto-handoff` SessionEnd entry in
+  `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json` via
+  `agent-factory/deploy_hooks.py --user` (stdlib only; hand-written hooks and keys are
+  never touched). On by default; `-hook:auto-handoff` in the baseline or a machine overlay
+  turns it off and removes the entry (`hook:auto-handoff` re-enables; the last file wins;
+  an unknown `hook:<x>` warns and is ignored). Skipped in every dry run and when the
+  emitter is absent; `python3` missing or an emitter failure is a warning, not a failed
+  wire. `--check` also reports drift in that file (exit 1) and writes nothing. Records a
+  `hook` row in `.wired.manifest`.
 - **Dry home:** `GRID_DRY_HOME=<dir>` forces every home-derived target under it
   (`HOME`, `SKILLS_DIR`, `AGENTS_DIR`, `CLAUDE_CONFIG_DIR`, `RULES_DIR`,
   `GRID_HARNESS_HOME`; inherited values are ignored) and skips the `SKILLS.md` /

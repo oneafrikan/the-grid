@@ -18,6 +18,12 @@
 #   GRID_NO_CATALOG=1 — skip ONLY the SKILLS.md refresh (step 4); .wired.manifest is still
 #                   written. Set by `grid install`: on a machine without submodules most
 #                   library repos are empty, so a refresh would rewrite the tracked SKILLS.md.
+#   CLAUDE_CONFIG_DIR — Claude config dir whose settings.json receives the machine-level
+#                   hooks (default: ~/.claude). Wiring hooks is ON by default for
+#                   auto-handoff: `-hook:auto-handoff` in the manifest (baseline, machine
+#                   overlay or local overlay; the last file to mention it wins) turns it
+#                   off and removes the generated entry; `hook:auto-handoff` turns it
+#                   back on. Only entries the grid generated are touched.
 #   GRID_DRY_HOME — dry-run home: when set, HOME is exported to it and SKILLS_DIR,
 #                   AGENTS_DIR, CLAUDE_CONFIG_DIR, RULES_DIR and GRID_HARNESS_HOME
 #                   are FORCED under it (inherited values ignored), and nothing is
@@ -93,6 +99,18 @@ if [ "${1:-}" = "--check" ]; then
       rc=1
     fi
   done
+  # Machine-level hooks: the dry-run child above resolved the manifest and left the
+  # list it would wire in $tmp/home/.hooks-wanted (one source of truth for the
+  # hook:/-hook: grammar). Compare it with the LIVE settings file; writes nothing.
+  # Same skip rule as the real wire: a mock or older grid without the emitter is skipped.
+  if [ -f "$GRID_DIR/agent-factory/deploy_hooks.py" ]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+      echo "wire --check: python3 not found; hooks not checked" >&2
+    elif ! env GRID_DIR="$GRID_DIR" python3 "$GRID_DIR/agent-factory/deploy_hooks.py" --user \
+           --hooks "$(cat "$tmp/home/.hooks-wanted" 2>/dev/null || true)" --check; then
+      rc=1
+    fi
+  fi
   [ "$rc" = 0 ] && echo "wire --check: live links match a fresh wire."
   exit "$rc"
 fi
@@ -114,6 +132,8 @@ fi
 #   -repo  | -repo/skill → SUBTRACT (remove a baseline entry — overlay escape hatch)
 #   project:<name>       → wire that composed agent-factory project's _claude-code output
 #   -project:<name>      → un-gate a project
+#   hook:<name> | -hook:<name> → enable / disable a machine-level hook (only
+#                          auto-handoff exists; it is ON unless a file says -hook:...)
 # Legacy fallbacks: if NO manifest file exists at all, every repo is wired; if
 # NO project: entry exists anywhere, every composed project is wired.
 WIRED_REPOS=()     # whole-repo entries
@@ -123,6 +143,7 @@ DENY_SKILLS=()     # -repo/skill subtractions
 WIRED_PROJECTS=()  # project:<name> entries
 any_project_entry=0
 wire_all_repos=1
+AUTO_HANDOFF=1     # hook:auto-handoff state: on by default, later manifest files win
 
 # Parse one manifest file into the arrays above. Later files (the overlay) layer
 # on top of earlier ones (the baseline): additions append, subtractions deny.
@@ -140,6 +161,16 @@ load_manifest() {
                   p="${line#-project:}"; tmp=()
                   for x in "${WIRED_PROJECTS[@]:-}"; do [ -n "$x" ] && [ "$x" != "$p" ] && tmp+=("$x"); done
                   WIRED_PROJECTS=("${tmp[@]:-}") ;;
+      # hook: / -hook: hold a ':' before any '/', so they must match before the repo
+      # cases below. Only auto-handoff is a known hook; anything else is ignored loudly.
+      hook:*)     case "${line#hook:}" in
+                    auto-handoff) AUTO_HANDOFF=1 ;;
+                    *) echo "warning: unknown hook ${line#hook:}" >&2 ;;
+                  esac ;;
+      -hook:*)    case "${line#-hook:}" in
+                    auto-handoff) AUTO_HANDOFF=0 ;;
+                    *) echo "warning: unknown hook ${line#-hook:}" >&2 ;;
+                  esac ;;
       -*/*)       DENY_SKILLS+=("${line#-}") ;;
       -*)         DENY_REPOS+=("${line#-}") ;;
       */*)        WIRED_SKILLS+=("$line") ;;
@@ -414,6 +445,36 @@ if [ -d "$GRID_DIR/agents" ]; then
     [ -f "$agent_file" ] || continue
     wire_agent "$agent_file"
   done
+fi
+
+# --- 3c2. Machine-level hooks (auto-handoff) ---
+# Makes ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json hold exactly the generated
+# hook entries the manifest asks for (hook: / -hook:), leaving every hand-written
+# hook and key alone. deploy_hooks.py --user is idempotent (a second run writes
+# nothing) and stdlib-only, so plain python3 is enough. A failure is a warning, never
+# a failed wire: skills and agents are already linked above.
+# Skipped silently (no manifest row) under GRID_SKIP_CATALOG, i.e. every dry run, so a
+# dry run can never reach a real settings file, and for a mock or older grid without
+# the emitter. A dry run only records what it resolved, for `--check` to read.
+HOOKS_WANTED=""
+[ "$AUTO_HANDOFF" = 1 ] && HOOKS_WANTED="auto-handoff"
+HOOKS_EMITTER="$GRID_DIR/agent-factory/deploy_hooks.py"
+if [ -f "$HOOKS_EMITTER" ]; then
+  if [ -n "${GRID_DRY_HOME:-}" ]; then
+    printf '%s\n' "$HOOKS_WANTED" > "$GRID_DRY_HOME/.hooks-wanted"
+  elif [ -z "${GRID_SKIP_CATALOG:-}" ]; then
+    HOOKS_SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+    HOOKS_STATUS=wired; [ -n "$HOOKS_WANTED" ] || HOOKS_STATUS=off
+    HOOKS_REASON=""
+    if ! command -v python3 >/dev/null 2>&1; then
+      echo "warning: python3 not found; auto-handoff not wired" >&2
+      HOOKS_STATUS=skipped; HOOKS_REASON="python3 not found"
+    elif ! env GRID_DIR="$GRID_DIR" python3 "$HOOKS_EMITTER" --user --hooks "$HOOKS_WANTED"; then
+      echo "warning: deploy_hooks.py --user failed; auto-handoff not updated (see above)" >&2
+      HOOKS_STATUS=failed; HOOKS_REASON="deploy_hooks.py --user failed"
+    fi
+    MANIFEST_ROWS+=("hook	auto-handoff	$HOOKS_SETTINGS	$HOOKS_STATUS	$HOOKS_REASON")
+  fi
 fi
 
 # --- 3d. Write the wiring manifest (audit trail) ---
