@@ -7,8 +7,8 @@ launcher, one catalogue.
 > auto-handoff hook with its worker (below), and the project emitter. To opt a project
 > in, set `hooks: {profile: standard}` in its `.grid/project.yaml` and run
 > `agent-factory/.venv/bin/python agent-factory/deploy_hooks.py <project>`
-> (`--list` shows every hook's cost; `--check` reports drift). Not built yet: `wire.sh`
-> wiring of auto-handoff into the user settings (`deploy_hooks.py --user`).
+> (`--list` shows every hook's cost; `--check` reports drift). `scripts/wire.sh` wires
+> auto-handoff into the user settings (`deploy_hooks.py --user`, see below).
 
 **These guards are a mistake-catcher, not a security boundary.** They stop an agent
 from tripping over the common ways of skipping git's safety nets. A determined process
@@ -80,6 +80,12 @@ worth a handoff and, if so, runs the real `/handoff` skill headless (`claude -p`
 compact digest of the transcript, then commits the two handoff files itself. It is a
 machine-level hook, on by default wherever it is wired, and independent of project
 profiles. The hook returns in well under a second; the worker runs in its own session.
+
+**Wiring.** `scripts/wire.sh` adds one generated SessionEnd entry to
+`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json` (`deploy_hooks.py --user`; absolute
+path to this checkout's `hooks/run.sh`), leaving every hand-written hook and key alone.
+Running `wire.sh` again changes nothing; `wire.sh --check` reports a missing entry and
+exits 1. A symlinked settings file or config dir is refused (a warning from `wire.sh`).
 
 **Opting out.** Per machine: put `-hook:auto-handoff` in the machine's manifest overlay
 (re-enable with `hook:auto-handoff`). Per session: start `claude` with
