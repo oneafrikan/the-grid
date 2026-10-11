@@ -37,7 +37,15 @@
 #                   target (~/.grid state) MUST be forced under it in this same block.
 #                   Every dry-run caller sets ONLY this (plus GRID_HOST/GRID_BASELINE).
 #
-# Exit codes: 0 wired | 1 --check found drift | 3 blocked by the audit (nothing changed)
+#   GRID_HARNESS  — comma list of non-Claude harnesses to wire for THIS run (names from
+#                   scripts/lib/harnesses.txt, e.g. codex,opencode). When non-empty it
+#                   REPLACES the manifest's harness:<name> set, so a one-off run
+#                   deactivates (and tears down) every other harness. Unknown name: exit 2.
+#   GRID_HARNESS_HOME — base for every non-Claude harness dir (default: $HOME). Tests point
+#                   it at a temp dir; GRID_DRY_HOME overrides it (see above).
+#
+# Exit codes: 0 wired | 1 --check found drift | 2 bad harness name / python3 missing
+#             for an active harness (nothing changed) | 3 blocked by the audit (nothing changed)
 #
 # Usage:
 #   bash wire.sh           # wire (idempotent)
@@ -66,10 +74,31 @@ fi
 # find_skill_mds: tracked-only SKILL.md discovery, shared with catalog.sh.
 # shellcheck source=lib/find-skill-mds.sh
 . "$(dirname "$0")/lib/find-skill-mds.sh"
+# Harness registry helpers and the portability filter for non-Claude skills dirs.
+# shellcheck source=lib/harness.sh
+. "$(dirname "$0")/lib/harness.sh"
+# shellcheck source=lib/skill-portable.sh
+. "$(dirname "$0")/lib/skill-portable.sh"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 AGENTS_DIR="${AGENTS_DIR:-$HOME/.claude/agents}"
 RULES_DIR="${RULES_DIR:-$HOME/.claude/rules}"
 GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || uname -n 2>/dev/null | cut -d. -f1 || echo unknown)}"
+
+# --- harness registry: the distinct dirs of every NON-claude harness ----------------
+# Raw registry values (the "~/..." form, which is also what the manifest rows show).
+# ALL registry harnesses count, active or not: a harness that was deactivated must
+# have its grid links torn down, and --check must see stale links in its dirs.
+# Claude's own dirs stay on SKILLS_DIR / AGENTS_DIR exactly as before.
+in_list() { local n="$1" x; shift; for x in "$@"; do [ "$x" = "$n" ] && return 0; done; return 1; }
+HARNESS_SKILL_DIRS=()
+HARNESS_AGENT_DIRS=()
+while IFS= read -r h_name; do
+  [ "$h_name" = claude ] && continue
+  h_dir="$(harness_field "$h_name" skills_dir)"
+  if [ "$h_dir" != "-" ] && ! in_list "$h_dir" "${HARNESS_SKILL_DIRS[@]:-}"; then HARNESS_SKILL_DIRS+=("$h_dir"); fi
+  h_dir="$(harness_field "$h_name" agents_dir)"
+  if [ "$h_dir" != "-" ] && ! in_list "$h_dir" "${HARNESS_AGENT_DIRS[@]:-}"; then HARNESS_AGENT_DIRS+=("$h_dir"); fi
+done < <(harness_names)
 
 # --- --check: dry-run drift detector ----------------------------------------
 # Wires into throwaway dirs with the same inputs, then compares the grid-owned
@@ -114,6 +143,33 @@ if [ "${1:-}" = "--check" ]; then
     if ! diff <(links "$fresh" "$live") <(links "$live") >"$tmp/$kind.diff"; then
       echo "wire --check: $kind drift in $live ('<' = should exist, '>' = stale):" >&2
       cat "$tmp/$kind.diff" >&2
+      rc=1
+    fi
+  done
+  # Non-Claude harness dirs (every distinct registry dir, active or not). hlinks is
+  # links() for these dirs: the shadow filter skips a name when the live path exists
+  # (-e or -L) and is NOT a symlink into the grid, because wire_harness_link never
+  # replaces such an entry (real dir/file, foreign or dangling symlink), so it can
+  # never be drift. The fresh side lives under $tmp/home: GRID_DRY_HOME redirects every
+  # registry path there, the live side resolves through harness_path as the real run does.
+  hlinks() { # $1 = dir to list, $2 = live dir for the shadow filter
+    [ -d "$1" ] || return 0
+    find -H "$1" -maxdepth 1 -type l | while IFS= read -r l; do
+      t="$(readlink "$l")"; n="$(basename "$l")"
+      if [ -n "${2:-}" ] && { [ -e "$2/$n" ] || [ -L "$2/$n" ]; }; then
+        lt="$(readlink "$2/$n" 2>/dev/null || true)"
+        case "$lt" in "$GRID_DIR"/*) ;; *) continue ;; esac
+      fi
+      case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
+    done | LC_ALL=C sort
+  }
+  for raw in "${HARNESS_SKILL_DIRS[@]:-}" "${HARNESS_AGENT_DIRS[@]:-}"; do
+    [ -n "$raw" ] || continue
+    if ! live="$(harness_path "$raw")"; then rc=1; continue; fi
+    fresh="$( GRID_DRY_HOME="$tmp/home"; harness_path "$raw" )"
+    if ! diff <(hlinks "$fresh" "$live") <(hlinks "$live") >"$tmp/harness.diff"; then
+      echo "wire --check: harness drift in $live ('<' = should exist, '>' = stale):" >&2
+      cat "$tmp/harness.diff" >&2
       rc=1
     fi
   done
@@ -162,6 +218,9 @@ fi
 #   -rules:<pack>        → un-gate a pack (overlay escape hatch; a subtraction always wins)
 #   hook:<name> | -hook:<name> → enable / disable a machine-level hook (only
 #                          auto-handoff exists; it is ON unless a file says -hook:...)
+#   harness:<name> | -harness:<name> → also wire the skills (and composed agents) into
+#                          that non-Claude harness's dirs (names: scripts/lib/harnesses.txt;
+#                          `claude` is always on). Opt-in: no entry means Claude only.
 # Legacy fallbacks: if NO manifest file exists at all, every repo is wired; if
 # NO project: entry exists anywhere, every composed project is wired.
 WIRED_REPOS=()     # whole-repo entries
@@ -169,6 +228,7 @@ WIRED_SKILLS=()    # repo/skill entries
 DENY_REPOS=()      # -repo subtractions
 DENY_SKILLS=()     # -repo/skill subtractions
 WIRED_PROJECTS=()  # project:<name> entries
+WIRED_HARNESSES=() # harness:<name> entries (-harness:<name> removes one)
 WIRED_RULES=()     # rules:<pack> entries
 DENY_RULES=()      # -rules:<pack> subtractions
 any_project_entry=0
@@ -205,6 +265,14 @@ load_manifest() {
                     auto-handoff) AUTO_HANDOFF=0 ;;
                     *) echo "warning: unknown hook ${line#-hook:}" >&2 ;;
                   esac ;;
+      # harness: / -harness: also hold a ':' before any '/', so they too must match
+      # before the repo cases. Names are validated after all layers load (below).
+      # -harness: removes the name from the set; a later harness:<name> adds it back
+      # (last layer wins, like project:).
+      harness:*)  WIRED_HARNESSES+=("${line#harness:}") ;;
+      -harness:*) p="${line#-harness:}"; tmp=()
+                  for x in "${WIRED_HARNESSES[@]:-}"; do [ -n "$x" ] && [ "$x" != "$p" ] && tmp+=("$x"); done
+                  WIRED_HARNESSES=("${tmp[@]:-}") ;;
       -*/*)       DENY_SKILLS+=("${line#-}") ;;
       -*)         DENY_REPOS+=("${line#-}") ;;
       */*)        WIRED_SKILLS+=("$line") ;;
@@ -219,6 +287,34 @@ load_manifest() {
 load_manifest "${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}"
 load_manifest "$GRID_DIR/machines/$GRID_HOST.txt"
 load_manifest "$GRID_DIR/machines/$GRID_HOST.local.txt"
+
+# --- Active harnesses -----------------------------------------------------------
+# GRID_HARNESS (comma list), when non-empty, REPLACES the manifest's harness: set for
+# this run. `claude` is always active (its dirs are SKILLS_DIR / AGENTS_DIR) and is
+# dropped from the list. Every name is validated against the registry BEFORE anything
+# is touched (no mkdir, no teardown, no audit): an unknown name exits 2 naming the valid
+# ones. Same for python3, which the portability filter needs for an active harness.
+HARNESS_SRC=("${WIRED_HARNESSES[@]:-}")
+if [ -n "${GRID_HARNESS:-}" ]; then
+  IFS=',' read -r -a HARNESS_SRC <<< "$(printf '%s' "$GRID_HARNESS" | tr -d '[:space:]')"
+fi
+ACTIVE_HARNESSES=()
+unknown_harnesses=""
+for h_name in "${HARNESS_SRC[@]:-}"; do
+  [ -n "$h_name" ] || continue
+  if ! harness_valid "$h_name"; then unknown_harnesses="$unknown_harnesses $h_name"; continue; fi
+  [ "$h_name" = claude ] && continue
+  in_list "$h_name" "${ACTIVE_HARNESSES[@]:-}" || ACTIVE_HARNESSES+=("$h_name")
+done
+if [ -n "$unknown_harnesses" ]; then
+  echo "wire: unknown harness:$unknown_harnesses" >&2
+  echo "wire: valid harnesses: $(harness_names | tr '\n' ' ')" >&2
+  exit 2
+fi
+if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ] && ! command -v python3 >/dev/null 2>&1; then
+  echo "wire: python3 is required to wire a non-Claude harness (the skill portability filter reads frontmatter with it); nothing was changed" >&2
+  exit 2
+fi
 
 # --- predicates ---------------------------------------------------------------
 repo_is_denied()  { local n="$1" r; for r in "${DENY_REPOS[@]:-}";   do [ "$r" = "$n" ] && return 0; done; return 1; }
@@ -309,6 +405,16 @@ teardown_grid_links() {
 }
 teardown_grid_links "$SKILLS_DIR"
 teardown_grid_links "$AGENTS_DIR"
+# Every non-Claude registry dir too, active or not: a harness that was just deactivated
+# (-harness:<name>, or a one-off GRID_HARNESS run) loses its grid links here. The
+# function is the same one, so the same ownership test applies: only a symlink into
+# "$GRID_DIR"/ goes; real files, foreign and sibling-prefix links stay. A dir that does
+# not exist is skipped, so nothing is created for a harness nobody uses.
+for h_raw in "${HARNESS_SKILL_DIRS[@]:-}" "${HARNESS_AGENT_DIRS[@]:-}"; do
+  [ -n "$h_raw" ] || continue
+  h_dir="$(harness_path "$h_raw")" || { echo "wire: cannot resolve harness dir $h_raw" >&2; exit 2; }
+  teardown_grid_links "$h_dir"
+done
 
 # Rules: same ownership test, but the tree is nested ($RULES_DIR/grid/<pack>/<topic>.md)
 # so it is walked recursively, and the pack dirs it leaves empty are removed afterwards.
@@ -575,6 +681,98 @@ if [ -f "$HOOKS_EMITTER" ]; then
     fi
     MANIFEST_ROWS+=("hook	auto-handoff	$HOOKS_SETTINGS	$HOOKS_STATUS	$HOOKS_REASON")
   fi
+fi
+
+# --- 3e. Non-Claude harnesses (harness:<name> / GRID_HARNESS) ---
+# Fans the wired set out to every ACTIVE harness, once per distinct dir (codex, opencode,
+# gemini, pi and openclaw all share ~/.agents/skills, so it is written once).
+#   skills  the set is whatever grid-owned links SKILLS_DIR holds now, in sorted order, so
+#           Claude's precedence (root wins) and dedupe apply unchanged. Each is checked
+#           by skill_portable (Agent Skills limits, no hard-coded ~/.claude); a failure
+#           is a manifest row with its reason, not an error. A submodule-root link (the
+#           gstack runtime root) is not a skill at all: reason runtime-root, no stdout line.
+#   agents  agent-factory/projects/<p>/_<compose_target>/agents/* for wired projects. A
+#           compose target that was never run has no dir and simply links nothing.
+# wire_harness_link never replaces anything: ~/.agents/skills is also written by other
+# tools, so ANY entry already at the destination after teardown (real dir or file,
+# foreign or dangling symlink) is theirs and is skipped. Its stdout line deliberately
+# does NOT start `  skip (real dir, not managed)`: reconcile.sh parses that exact
+# prefix and would rm -rf the same-named dir in the Claude skills dir.
+# Manifest rows use kind skill@<~dir> / agent@<~dir> (home-independent), reason last.
+wire_harness_link() { # $1=src $2=dest dir $3=kind (skill|agent) $4=~/-form dir $5=name
+  local src="$1" dest_dir="$2" kind="$3" disp="$4" name="$5"
+  if [ -e "$dest_dir/$name" ] || [ -L "$dest_dir/$name" ]; then
+    echo "  skip ($disp: exists, not managed): $name"
+    MANIFEST_ROWS+=("$kind@$disp	$name	$src	skipped	exists, not managed")
+    return
+  fi
+  # Created only now, when a link is about to be made: a harness with nothing to link
+  # (or a dir that cannot be created) leaves no empty dirs behind.
+  if ! mkdir -p "$dest_dir" 2>/dev/null; then
+    echo "  skip ($disp: cannot create dir): $name"
+    MANIFEST_ROWS+=("$kind@$disp	$name	$src	skipped	cannot create dir")
+    return
+  fi
+  ln -s "$src" "$dest_dir/$name"
+  MANIFEST_ROWS+=("$kind@$disp	$name	$src	wired	")
+  echo "  wired ($disp): $name"
+}
+
+if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ]; then
+  # Portability is decided once per skill, then applied to each distinct dir.
+  HL_NAME=(); HL_SRC=(); HL_REASON=()
+  while IFS= read -r hl_link; do
+    hl_t="$(readlink "$hl_link")"
+    [[ "$hl_t" == "$GRID_DIR"/* ]] || continue          # foreign link: not ours to fan out
+    hl_reason=""
+    hl_rel="${hl_t%/}"
+    case "$hl_rel" in
+      # "$GRID_DIR"/repos/<r> with no further component = a submodule root, not a skill.
+      "$GRID_DIR"/repos/*) case "${hl_rel#"$GRID_DIR"/repos/}" in
+                             */*) ;;
+                             *) hl_reason="runtime-root" ;;
+                           esac ;;
+    esac
+    if [ -z "$hl_reason" ]; then hl_reason="$(skill_portable "$hl_t")" || true; fi
+    HL_NAME+=("$(basename "$hl_link")"); HL_SRC+=("$hl_t"); HL_REASON+=("$hl_reason")
+  done < <(find -H "$SKILLS_DIR" -maxdepth 1 -type l 2>/dev/null | LC_ALL=C sort)
+
+  hl_done=()   # distinct dirs already written this run
+  for h_name in "${ACTIVE_HARNESSES[@]}"; do
+    h_raw="$(harness_field "$h_name" skills_dir)"
+    [ "$h_raw" != "-" ] || continue
+    ! in_list "$h_raw" "${hl_done[@]:-}" || continue
+    hl_done+=("$h_raw")
+    h_dir="$(harness_path "$h_raw")" || { echo "wire: cannot resolve harness dir $h_raw" >&2; exit 2; }
+    i=0
+    while [ "$i" -lt "${#HL_NAME[@]}" ]; do
+      if [ -n "${HL_REASON[$i]}" ]; then
+        MANIFEST_ROWS+=("skill@$h_raw	${HL_NAME[$i]}	${HL_SRC[$i]}	skipped	${HL_REASON[$i]}")
+      else
+        wire_harness_link "${HL_SRC[$i]}" "$h_dir" skill "$h_raw" "${HL_NAME[$i]}"
+      fi
+      i=$((i + 1))
+    done
+  done
+
+  hl_done=()
+  for h_name in "${ACTIVE_HARNESSES[@]}"; do
+    h_raw="$(harness_field "$h_name" agents_dir)"
+    h_target="$(harness_field "$h_name" compose_target)"
+    { [ "$h_raw" != "-" ] && [ "$h_target" != "-" ]; } || continue
+    ! in_list "$h_raw" "${hl_done[@]:-}" || continue
+    hl_done+=("$h_raw")
+    h_dir="$(harness_path "$h_raw")" || { echo "wire: cannot resolve harness dir $h_raw" >&2; exit 2; }
+    for proj_dir in "$CC_OUT"/*/; do
+      [ -d "$proj_dir" ] || continue
+      proj_dir="${proj_dir%/}"
+      project_is_wired "$(basename "$proj_dir")" || continue
+      for agent_file in "$proj_dir/_$h_target/agents"/*; do
+        [ -f "$agent_file" ] || continue
+        wire_harness_link "$agent_file" "$h_dir" agent "$h_raw" "$(basename "$agent_file")"
+      done
+    done
+  done
 fi
 
 # --- 3d. Write the wiring manifest (audit trail) ---
