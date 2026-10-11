@@ -173,6 +173,45 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
 - Strings are escaped by hand (the stdlib has no TOML writer) and verified by round-tripping through `tomllib`; `tests/lib/validate_harness.py codex-agent FILE...` checks any generated file against the format above.
 - Not verified on a real Codex yet (the real-install smoke test is a later, human step).
 
+### OpenCode
+
+| | |
+|---|---|
+| Skills dir | `~/.agents/skills` (shared; OpenCode also reads `~/.config/opencode/skills` and `~/.claude/skills`) |
+| Agents dir | `~/.config/opencode/agents/` (honours `XDG_CONFIG_HOME`, see "Paths and environment") |
+| Compose target | `opencode` |
+| Agent file | `<name>.md`, the filename is the agent id |
+
+Compose, then wire (OpenCode only sees the files once wire.sh has linked them into its agents dir):
+
+```
+agent-factory/.venv/bin/python agent-factory/compose.py agent-factory/examples/grid.yaml --target opencode
+GRID_HARNESS=opencode bash scripts/wire.sh     # or put harness:opencode in machines/<host>.txt
+```
+
+Output: `agent-factory/projects/<project>/_opencode/agents/<name>.md`, one per specialist, where `<name>` is `<slug>-<role>` (`grid-qa-engineer`).
+
+```markdown
+---
+description: QA Engineer. The release gate ... Use to verify work before release.
+mode: subagent
+permission:
+  edit: deny
+  webfetch: deny
+---
+
+You are the **QA Engineer**, a specialist agent on a composed dev team. ...
+```
+
+- Required frontmatter is `description`; `mode` is always `subagent`. The body is the system prompt, identical to the Claude and Codex agents.
+- Key order is fixed: `description`, `mode`, `permission`. Long descriptions are folded over several lines by the YAML writer, which is valid YAML.
+- Permission mapping: `permission` is written only when the role's `role.yaml` has a `tools:` allowlist that denies something. Keys, in this order: `edit: deny` when neither `Edit` nor `Write` is listed, `bash: deny` when `Bash` is absent, `webfetch: deny` when neither `WebFetch` nor `WebSearch` is listed. A key that is not written inherits OpenCode's default. A role with no allowlist gets no `permission` block.
+- Today that gives `qa-engineer` and `security-reviewer` `edit: deny` and `webfetch: deny` (they keep `Bash`, so no `bash` key).
+- `model` is never written (model ids are provider-specific and rot), and neither is the deprecated `tools` key.
+- Skills reach OpenCode through the shared skills dir, not through this target. OpenCode also reads `~/.claude/skills`, so a skill present in both dirs may be listed twice (not verified); set `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` to stop it reading the Claude dir.
+- Checkers: `tests/lib/validate_harness.py opencode-agent FILE...` validates an agent file (`description` present, `mode: subagent`, permission values `ask`/`allow`/`deny`), and `validate_harness.py skill DIR...` validates a skill dir against the OpenCode skill rules (dir name `^[a-z0-9]+(-[a-z0-9]+)*$` and at most 64 chars, frontmatter `name` equal to the dir, description 1 to 1024 chars). The tests run the second over every link `wire.sh` puts in the shared dir.
+- Not verified on a real OpenCode yet (the real-install smoke test is a later, human step): that the `permission` mapping loads, that a symlinked agent file is found, and whether a skill is listed twice.
+
 ## Paths and environment
 
 - `GRID_HARNESS_HOME` sets the base for every non-Claude dir (default `$HOME`); tests point it at a temp dir.
