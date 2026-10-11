@@ -238,7 +238,10 @@ EOF
   unset GRID_DIR
   run bash "$REPO_ROOT/scripts/catalog.sh" "$tmp/SKILLS.md"
   [ "$status" -eq 0 ]
-  run grep -c 'plugins/' "$tmp/SKILLS.md"
+  # Match only this repo's own bundle dirs. A bare 'plugins/' also matches upstream skill
+  # paths under repos/ (for example a library repo's own plugins/ tree) on a machine or CI
+  # runner where the submodules are initialised.
+  run grep -cE 'plugins/grid-(core|agents)' "$tmp/SKILLS.md"
   rm -rf "$tmp"
   [ "$output" = "0" ]
 }
