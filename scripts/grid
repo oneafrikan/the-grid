@@ -10,9 +10,10 @@ Group 1 landed the shared helpers, the grid.yaml reader, the typed-entry
 reader, the grid.lock reader with its input validation, and the `audit`
 passthrough. Group 2 added the content-hash helpers, `lock` and `lock --check`.
 Group 3 adds the ledger, the fetch/verify/audit/place routine and `install`.
+Group 4 adds `doctor`, `repair` and `uninstall`, which read the ledger and reuse
+group 3's classify / fetch / verify / audit / place routine.
 Group 5 adds `drift` (read-only upstream drift report) and `schedule` (render
-the weekly drift schedule; it never activates anything). The remaining
-subcommands are registered as stubs that exit 2 until their groups land.
+the weekly drift schedule; it never activates anything).
 
 Python 3.8 floor: no str.removeprefix/removesuffix, no `dict | dict`, no
 `list[str]` annotations evaluated at runtime, no `match`. Checked with
@@ -53,9 +54,6 @@ EXIT_NOT_CHECKABLE = 3
 
 GIT_FLOOR = (2, 25)          # sparse-checkout `init --cone` + `set` needs 2.25
 GIT_TIMEOUT = 600            # seconds; a timeout is a failed fetch for that source
-
-# Subcommands whose behaviour lands in a later group of the change.
-STUB_COMMANDS = ("doctor", "repair", "uninstall")
 
 
 class GridError(Exception):
@@ -966,18 +964,23 @@ def dir_hash_or_none(path):
         return None
 
 
-def remove_placed_dir(grid_dir, row, force=False):
-    """Delete one placed skill dir with every safety check. Returns (status, detail).
+def placed_dir_status(grid_dir, row, force=False):
+    """Decide what may happen to one placed skill dir, WITHOUT touching it. Returns (status, detail).
 
-    status: "removed", "absent", "modified" (on-disk hash differs from the ledger
-    row's and `force` is off: kept) or "refused" (containment, `.git` or symlink
-    guard: kept). After removing, now-empty parent directories are removed up to
-    but not including repos/<source>. These are the rules `uninstall` uses.
+    status: "ok" (safe to delete), "absent" (already gone), "modified" (on-disk
+    hash differs from the ledger row's and `force` is off: keep it) or "refused"
+    (a containment, `.git` or symlink guard: keep it, even with `force`).
+    Split out of remove_placed_dir so `uninstall` can decide for every row
+    BEFORE it removes any link (links go first, and a link to a kept dir stays).
     """
     source, dest = row["source"], row["dest"]
     target = os.path.join(grid_dir, dest)
     if os.path.lexists(os.path.join(grid_dir, "repos", source, ".git")):
         return "refused", "repos/%s is a submodule checkout" % source
+    # realpath containment below treats a symlinked repos/<source> as its own root,
+    # so refuse that shape outright: it would let a delete land outside the grid.
+    if os.path.islink(os.path.join(grid_dir, "repos", source)):
+        return "refused", "repos/%s is a symlink" % source
     if not is_contained(grid_dir, source, dest):
         return "refused", "%s resolves outside repos/%s" % (dest, source)
     if os.path.islink(target):
@@ -986,8 +989,23 @@ def remove_placed_dir(grid_dir, row, force=False):
         return "absent", dest
     if not force and dir_hash_or_none(target) != row["hash"]:
         return "modified", "%s differs from what grid placed" % dest
+    return "ok", dest
+
+
+def remove_placed_dir(grid_dir, row, force=False):
+    """Delete one placed skill dir with every safety check. Returns (status, detail).
+
+    status: "removed", "absent", "modified" or "refused" (see placed_dir_status;
+    the last two keep the dir). After removing, now-empty parent directories are
+    removed up to but not including repos/<source>. These are the rules
+    `uninstall` uses.
+    """
+    status, detail = placed_dir_status(grid_dir, row, force)
+    if status != "ok":
+        return status, detail
+    target = os.path.join(grid_dir, row["dest"])
     shutil.rmtree(target)
-    root = os.path.join(grid_dir, "repos", source)
+    root = os.path.join(grid_dir, "repos", row["source"])
     parent = os.path.dirname(target)
     while parent != root and parent.startswith(root + os.sep):
         try:
@@ -995,7 +1013,7 @@ def remove_placed_dir(grid_dir, row, force=False):
         except OSError:
             break
         parent = os.path.dirname(parent)
-    return "removed", dest
+    return "removed", row["dest"]
 
 
 # --- install: selection (design.md "Install algorithm" steps 1, 3-5) --------------------
@@ -1454,6 +1472,82 @@ def describe(entry):
     return "%s (%s)" % (entry["name"], entry["dest"])
 
 
+def print_dry_run(plan, remove_rows):
+    """The plan `install --dry-run` and `repair --dry-run` print; nothing is touched."""
+    todo = [entry for status, entry, _old in plan if status in ("fetch", "replace")]
+    for status, entry, _old in plan:
+        if status in ("fetch", "replace"):
+            print("would fetch %s from %s at %s" % (describe(entry), entry["source"], entry["sha"][:12]))
+        elif status == "adopt":
+            print("would adopt %s" % describe(entry))
+    for row in remove_rows:
+        print("would remove %s" % row["dest"])
+    print("grid: dry run: %d to fetch, %d to remove, %d current"
+          % (len(todo), len(remove_rows), sum(1 for p in plan if p[0] == "current")))
+
+
+def apply_plan(grid_dir, cfg, skills_dir, vetted, plan, failed, remove_rows, keep_rows, foreign):
+    """Install steps 7-10, shared by `install` and `repair`. Returns (failed, wired_ok).
+
+    plan         classify_entries output; its fetch/replace entries are fetched and placed (step 7)
+    failed       dest -> reason for entries already known to have failed (protected ones)
+    remove_rows  old ledger rows to delete from disk (step 8, with uninstall's protection)
+    keep_rows    old ledger rows that stay exactly as they are (repair without --prune)
+    foreign      raw ledger lines of an unknown kind, copied through (step 9)
+    """
+    todo = [entry for status, entry, _old in plan if status in ("fetch", "replace")]
+
+    # Step 7: fetch, verify, audit, place.
+    placed = []
+    if todo:
+        placed, fetch_failed = fetch_and_place(grid_dir, cfg, todo, vetted)
+        failed.update(fetch_failed)
+        for entry in placed:
+            print("grid: placed %s" % describe(entry))
+
+    # Step 8: remove directories no longer selected, with uninstall's containment and
+    # modified-directory protection. A directory that is kept stays in the ledger.
+    kept_rows = list(keep_rows)
+    for row in remove_rows:
+        status, detail = remove_placed_dir(grid_dir, row)
+        if status == "removed":
+            print("grid: removed %s" % row["dest"])
+        elif status in ("modified", "refused"):
+            notice("grid: %s: kept (%s)" % (row["dest"], detail))
+            kept_rows.append(row)
+
+    # Step 9: the ledger says what is on disk, even after a partial failure.
+    placed_dests = set(e["dest"] for e in placed)
+    new_rows = list(kept_rows)
+    for status, entry, old in plan:
+        if entry["dest"] in placed_dests or status in ("current", "adopt"):
+            new_rows.append(dict((c, entry[c]) for c in LEDGER_COLS if c in entry))
+        elif old is not None and os.path.lexists(os.path.join(grid_dir, entry["dest"])):
+            new_rows.append(old)                               # the older dir is still there
+    write_ledger(new_rows, foreign)
+
+    # Step 10: wire (links and .wired.manifest; never SKILLS.md).
+    return failed, run_wire(grid_dir, skills_dir)
+
+
+def protected_failures(plan):
+    """dest -> reason for every `protected` entry, with install's notice printed for each."""
+    failed = {}
+    for status, entry, _old in plan:
+        if status == "protected":
+            failed[entry["dest"]] = "differs from what grid placed"
+            notice("grid: %s: %s differs from what grid placed; left alone (grid repair --force replaces it)"
+                   % (entry["name"], entry["dest"]))
+    return failed
+
+
+def report_failed(failed):
+    """Install step 11 tail: one stderr line naming every entry that was not installed."""
+    if failed:
+        notice("grid: %d entr%s not installed: %s" % (
+            len(failed), "y" if len(failed) == 1 else "ies", ", ".join(sorted(failed))))
+
+
 def cmd_install(args):
     """`grid install [--dry-run] [--force]`: place the locked skills without git submodules.
 
@@ -1484,66 +1578,278 @@ def cmd_install(args):
     plan = classify_entries(grid_dir, selected, old_rows, args.force)
     selected_dests = set(e["dest"] for e in selected)
     stale_rows = [r for r in old_rows if r["dest"] not in selected_dests]
-
-    todo = [entry for status, entry, _old in plan if status in ("fetch", "replace")]
-    failed = {}
-    for status, entry, _old in plan:
-        if status == "protected":
-            failed[entry["dest"]] = "differs from what grid placed"
-            notice("grid: %s: %s differs from what grid placed; left alone (grid repair --force replaces it)"
-                   % (entry["name"], entry["dest"]))
+    failed = protected_failures(plan)
 
     if dry:
-        for status, entry, _old in plan:
-            if status in ("fetch", "replace"):
-                print("would fetch %s from %s at %s" % (describe(entry), entry["source"], entry["sha"][:12]))
-            elif status == "adopt":
-                print("would adopt %s" % describe(entry))
-        for row in stale_rows:
-            print("would remove %s" % row["dest"])
-        print("grid: dry run: %d to fetch, %d to remove, %d current"
-              % (len(todo), len(stale_rows), sum(1 for p in plan if p[0] == "current")))
+        print_dry_run(plan, stale_rows)
         return EXIT_OK
 
-    # Step 7: fetch, verify, audit, place.
-    placed = []
-    if todo:
-        placed, fetch_failed = fetch_and_place(grid_dir, cfg, todo, vetted)
-        failed.update(fetch_failed)
-        for entry in placed:
-            print("grid: placed %s" % describe(entry))
-
-    # Step 8: remove directories no longer selected, with uninstall's containment and
-    # modified-directory protection. A directory that is kept stays in the ledger.
-    kept_rows = []
-    for row in stale_rows:
-        status, detail = remove_placed_dir(grid_dir, row)
-        if status == "removed":
-            print("grid: removed %s" % row["dest"])
-        elif status in ("modified", "refused"):
-            notice("grid: %s: kept (%s)" % (row["dest"], detail))
-            kept_rows.append(row)
-
-    # Step 9: the ledger says what is on disk, even after a partial failure.
-    placed_dests = set(e["dest"] for e in placed)
-    new_rows = list(kept_rows)
-    for status, entry, old in plan:
-        if entry["dest"] in placed_dests or status in ("current", "adopt"):
-            new_rows.append(dict((c, entry[c]) for c in LEDGER_COLS if c in entry))
-        elif old is not None and os.path.lexists(os.path.join(grid_dir, entry["dest"])):
-            new_rows.append(old)                               # the older dir is still there
-    write_ledger(new_rows, foreign)
-
-    # Step 10: wire (links and .wired.manifest; never SKILLS.md).
-    wired_ok = run_wire(grid_dir, args.skills_dir)
+    # Steps 7-10.
+    failed, wired_ok = apply_plan(grid_dir, cfg, args.skills_dir, vetted, plan, failed,
+                                  stale_rows, [], foreign)
 
     # Steps 11 and 12: notices, then the exit code.
     for line in overlay_notices(grid_dir, lock, host):
         notice(line)
-    if failed:
-        notice("grid: %d entr%s not installed: %s" % (
-            len(failed), "y" if len(failed) == 1 else "ies", ", ".join(sorted(failed))))
+    report_failed(failed)
     return EXIT_OK if not failed and wired_ok else EXIT_FINDINGS
+
+
+# --- doctor (design.md "doctor / repair / uninstall") ----------------------------------------
+# Four read-only checks, in order: manifest, ledger, disk, links. Every finding is
+# a (check, kind, name, detail) tuple, printed as `<check> <kind> <name> <detail>`.
+
+MAINTAINER_MODE = "no install ledger: maintainer mode"
+
+
+def skills_dir_for(args):
+    """The skills dir wire.sh links into: --skills-dir, else $SKILLS_DIR, else ~/.claude/skills.
+
+    Same default chain wire.sh uses (it ignores CLAUDE_CONFIG_DIR for skills).
+    """
+    return (args.skills_dir or os.environ.get("SKILLS_DIR")
+            or os.path.join(os.environ.get("HOME") or os.path.expanduser("~"), ".claude", "skills"))
+
+
+def ledger_findings(grid_dir, selected, rows):
+    """Doctor check 2: ledger vs grid.lock. `selected` = the lock entries this machine installs.
+
+    missing  selected, but no ledger row (never placed, or the ledger was lost)
+    stale    ledger row's sha or hash differs from the lock (a lock bump not yet installed)
+    extra    ledger row that grid.lock no longer selects (removed upstream, or now denied)
+    """
+    findings = []
+    by_dest = dict((e["dest"], e) for e in selected)
+    have = dict((r["dest"], r) for r in rows)
+    for dest, entry in by_dest.items():
+        row = have.get(dest)
+        if row is None:
+            findings.append(("ledger", "skill", entry["name"], "missing %s" % dest))
+        elif row["sha"] != entry["sha"] or row["hash"] != entry["hash"]:
+            findings.append(("ledger", "skill", entry["name"],
+                             "stale %s: ledger %s, grid.lock %s" % (dest, row["sha"][:12], entry["sha"][:12])))
+    for dest, row in have.items():
+        if dest not in by_dest:
+            findings.append(("ledger", "skill", row["name"], "extra %s: grid.lock no longer selects it" % dest))
+    return findings
+
+
+def disk_findings(grid_dir, rows):
+    """Doctor check 3: every ledger dir is present and still hashes to the ledger's hash.
+
+    A symlink where a dir should be, or an unreadable tree, hashes to None and so
+    counts as modified: grid never wrote it that way.
+    """
+    findings = []
+    for row in rows:
+        target = os.path.join(grid_dir, row["dest"])
+        if not os.path.lexists(target):
+            findings.append(("disk", "skill", row["name"], "absent %s" % row["dest"]))
+        elif dir_hash_or_none(target) != row["hash"]:
+            findings.append(("disk", "skill", row["name"], "modified %s" % row["dest"]))
+    return findings
+
+
+def link_findings(grid_dir, skills_dir):
+    """Doctor check 4: `GRID_SKIP_AUDIT=1 bash wire.sh --check`; each drift line it prints is a finding.
+
+    wire.sh --check wires into a throwaway home and diffs the grid-owned links
+    against the live dirs, printing `< name -> target` (a link that should exist)
+    and `> name -> target` (a stale one) on stderr. Anything else it prints is
+    not a finding, but a non-zero exit with no drift line (wire.sh itself broke)
+    still is one, so a broken check cannot read as healthy.
+    """
+    script = os.path.join(grid_dir, "scripts", "wire.sh")
+    if not os.path.isfile(script):
+        return [("links", "wire", "wire.sh", "scripts/wire.sh not found")]
+    env = dict(os.environ, LC_ALL="C", GRID_DIR=grid_dir, GRID_HOST=host_key(), GRID_SKIP_AUDIT="1")
+    env["SKILLS_DIR"] = skills_dir
+    proc = subprocess.run(["bash", script, "--check"], env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, encoding="utf-8", errors="replace")
+    if proc.returncode == 0:
+        return []
+    findings = []
+    for line in proc.stderr.splitlines():
+        if line[:2] in ("< ", "> "):
+            name, _, target = line[2:].partition(" -> ")
+            findings.append(("links", "link", name, "%s -> %s" % (
+                "missing" if line[0] == "<" else "stale", target)))
+    if not findings:
+        reason = (proc.stderr.strip().splitlines() or ["exit %d" % proc.returncode])[0]
+        findings.append(("links", "wire", "wire.sh", "check failed: %s" % reason))
+    return findings
+
+
+def doctor_findings(grid_dir, skills_dir, host):
+    """Run the four checks; return (findings, maintainer_mode). Exit 2 only on an unreadable lock."""
+    findings = []
+    try:
+        cfg = load_grid_yaml(grid_dir)
+    except GridError as exc:
+        # A manifest that does not parse is a finding, not a crash: doctor's job is to say so.
+        # Without it there is no source list, so the ledger and disk checks cannot run.
+        detail = " ".join(str(exc).split())
+        return [("manifest", "parse", "grid.yaml", detail)] + link_findings(grid_dir, skills_dir), False
+    findings += [("manifest", kind, name, detail) for kind, name, detail in manifest_findings(grid_dir, cfg)]
+    if not os.path.exists(ledger_path()):
+        return findings + link_findings(grid_dir, skills_dir), True
+    lock = read_grid_lock(grid_dir, cfg["sources"])
+    selected, _notices = select_lock_entries(grid_dir, lock, host)
+    rows, _foreign = read_ledger()
+    findings += ledger_findings(grid_dir, selected, rows)
+    findings += disk_findings(grid_dir, rows)
+    findings += link_findings(grid_dir, skills_dir)
+    return findings, False
+
+
+def cmd_doctor(args):
+    """`grid doctor [--json]`: report problems, change nothing. Exit 0 clean, 1 on any finding."""
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    findings, maintainer = doctor_findings(grid_dir, skills_dir_for(args), host_key())
+    findings = sorted(findings)
+    if maintainer:
+        # JSON stdout must stay parseable, so the mode notice goes to stderr there.
+        (sys.stderr if args.json else sys.stdout).write(MAINTAINER_MODE + "\n")
+    if args.json:
+        print(json.dumps([dict(zip(("check", "kind", "name", "detail"), f)) for f in findings],
+                         indent=2, sort_keys=True))
+        return EXIT_FINDINGS if findings else EXIT_OK
+    return report_findings(findings)
+
+
+# --- repair ----------------------------------------------------------------------------------
+
+def cmd_repair(args):
+    """`grid repair [--prune] [--force] [--dry-run]`: fix what doctor reports.
+
+    It is install's step 1 (validation, scanner and --check-url checks) plus
+    steps 3-12 with the same classification (group 3's classify_entries), fetch,
+    verify, audit and place, so it re-fetches only entries that are missing from
+    the ledger or disk, or stale against the lock. An edited directory is
+    replaced only with --force (otherwise it is listed and counts as failed, so
+    a repair never silently discards an edit). Ledger rows grid.lock no longer
+    selects are removed only with --prune. No ledger = maintainer mode: nothing
+    to repair here (use `grid install`).
+    """
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    host = host_key()
+    cfg = load_grid_yaml(grid_dir)
+    lock = read_grid_lock(grid_dir, cfg["sources"])
+    check_source_urls(cfg)
+    if not os.path.exists(ledger_path()):
+        print(MAINTAINER_MODE + "; nothing to repair (grid install places the locked skills)")
+        return EXIT_OK
+    vetted = audit_available(grid_dir)
+    selected, notices = select_lock_entries(grid_dir, lock, host)
+    for line in notices:
+        notice(line)
+    check_source_policy(grid_dir, cfg, set(e["source"] for e in selected), vetted)
+
+    old_rows, foreign = read_ledger()
+    plan = classify_entries(grid_dir, selected, old_rows, args.force)
+    selected_dests = set(e["dest"] for e in selected)
+    extra_rows = [r for r in old_rows if r["dest"] not in selected_dests]
+    # Extras are deleted only with --prune; otherwise they stay on disk AND in the ledger.
+    remove_rows, keep_rows = (extra_rows, []) if args.prune else ([], extra_rows)
+    failed = protected_failures(plan)
+
+    if args.dry_run:
+        print_dry_run(plan, remove_rows)
+        return EXIT_OK
+
+    sweep_stale_staging(grid_dir)
+    failed, wired_ok = apply_plan(grid_dir, cfg, args.skills_dir, vetted, plan, failed,
+                                  remove_rows, keep_rows, foreign)
+    report_failed(failed)
+    return EXIT_OK if not failed and wired_ok else EXIT_FINDINGS
+
+
+# --- uninstall ---------------------------------------------------------------------------------
+
+def owned_links(grid_dir, skills_dir, rows):
+    """Links in skills_dir that point at a ledger dir: [(link path, ledger row)], sorted by link.
+
+    Both sides are resolved with realpath (the link's target relative to the link's own
+    directory), because macOS temp and home paths pass through symlinks such as
+    /var -> /private/var and a string compare of readlink output can silently match
+    nothing. A link to anywhere else, and any real file or dir, is not ours.
+    """
+    wanted = dict((os.path.realpath(os.path.join(grid_dir, row["dest"])), row) for row in rows)
+    found = []
+    if not os.path.isdir(skills_dir):
+        return found
+    for name in sorted(os.listdir(skills_dir)):
+        link = os.path.join(skills_dir, name)
+        if not os.path.islink(link):                           # lstat: never a real dir or file
+            continue
+        real = os.path.realpath(os.path.join(os.path.dirname(link), os.readlink(link)))
+        if real in wanted:
+            found.append((link, wanted[real]))
+    return found
+
+
+def cmd_uninstall(args):
+    """`grid uninstall [--yes] [--force]`: remove what grid placed. A dry run unless --yes.
+
+    Plan: the ledger's dirs, the links in SKILLS_DIR that point at them, and the
+    ledger file. Safety, per dir (placed_dir_status): realpath containment under
+    repos/<source>, `.git` refusal, lstat symlink refusal, and an edited dir is
+    skipped unless --force. Links are removed before directories; a link to a
+    kept dir stays. Never touched: `.git` dirs, baseline-submodules.txt,
+    machines/*, foreign links, real dirs in SKILLS_DIR, repos/<source> itself.
+    A second run finds nothing and says `nothing to remove`.
+    Exit 0, or 1 when --yes had to leave a dir behind (edited or refused).
+    """
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    skills_dir = skills_dir_for(args)
+    rows, foreign = read_ledger()
+    ledger_exists = os.path.exists(ledger_path())
+
+    # Decide every row first (nothing is deleted yet) so link removal can follow the verdicts.
+    verdicts = [(row,) + placed_dir_status(grid_dir, row, args.force) for row in rows]
+    to_delete = [row for row, status, _d in verdicts if status == "ok"]
+    removable = [row for row, status, _d in verdicts if status in ("ok", "absent")]
+    kept = [(row, status, detail) for row, status, detail in verdicts if status in ("modified", "refused")]
+    links = owned_links(grid_dir, skills_dir, removable)
+
+    # The plan. `verb` reads "would" on a dry run so the same lines serve both.
+    verb = "removing" if args.yes else "would remove"
+    for row in to_delete:
+        print("%s dir %s" % (verb, row["dest"]))
+    for link, _row in links:
+        print("%s link %s" % (verb, link))
+    for row, status, detail in kept:
+        print("skip %s (%s%s)" % (row["dest"], detail, "; --force removes it" if status == "modified" else ""))
+
+    # With nothing left to do the ledger is already gone (or holds only kept rows):
+    # say so, which is what makes a second run a clean no-op.
+    ledger_goes = ledger_exists and not kept and not foreign
+    if not (links or removable or ledger_goes):
+        print("nothing to remove")
+        return EXIT_FINDINGS if (kept and args.yes) else EXIT_OK
+    if ledger_goes:
+        print("%s ledger %s" % (verb, ledger_path()))
+    if not args.yes:
+        print("grid: dry run: nothing changed; pass --yes to remove")
+        return EXIT_OK
+
+    # Links first, then directories (a link must never outlive the dir it points at).
+    for link, _row in links:
+        os.unlink(link)
+    for row in removable:
+        remove_placed_dir(grid_dir, row, args.force)
+    # The ledger keeps the rows whose dirs were left behind, and any row of an unknown
+    # kind (a newer grid's); with none left the file goes.
+    if ledger_goes:
+        os.unlink(ledger_path())
+    elif kept or foreign:
+        write_ledger([row for row, _s, _d in kept], foreign)
+    # Refresh .wired.manifest (never SKILLS.md); only when something was removed.
+    wired_ok = run_wire(grid_dir, args.skills_dir) if (links or to_delete) else True
+    if kept:
+        notice("grid: %d dir%s left in place; --force removes an edited one"
+               % (len(kept), "" if len(kept) == 1 else "s"))
+    return EXIT_OK if not kept and wired_ok else EXIT_FINDINGS
 
 
 # --- subcommands ---------------------------------------------------------------------
@@ -1921,13 +2227,6 @@ def cmd_schedule(args):
     return EXIT_OK
 
 
-def make_stub(name):
-    """A not-yet-implemented subcommand: exit 2 with a clear message."""
-    def stub(args):
-        raise GridError("grid: %s: not implemented" % name)
-    return stub
-
-
 def build_parser():
     parser = argparse.ArgumentParser(prog="grid", description="Install, pin and check the wired skill set.")
     parser.add_argument("--grid-dir", help="the grid checkout (default: $GRID_DIR, else the parent of scripts/)")
@@ -1966,9 +2265,25 @@ def build_parser():
                              help="render (never activate) the weekly drift schedule, or remove its files")
     p_sched.add_argument("action", choices=("install", "remove"))
     p_sched.set_defaults(func=cmd_schedule)
-    for name in STUB_COMMANDS:
-        p = sub.add_parser(name, parents=[shared], help="not implemented yet")
-        p.set_defaults(func=make_stub(name))
+    p_doctor = sub.add_parser("doctor", parents=[shared],
+                              help="check the manifest, ledger, placed directories and links (read-only)")
+    p_doctor.add_argument("--json", action="store_true", help="print findings as a JSON array")
+    p_doctor.set_defaults(func=cmd_doctor)
+    p_repair = sub.add_parser("repair", parents=[shared],
+                              help="re-fetch what doctor reports missing, stale or absent, then re-wire")
+    p_repair.add_argument("--prune", action="store_true",
+                          help="also remove ledger directories that grid.lock no longer selects")
+    p_repair.add_argument("--force", action="store_true",
+                          help="also replace a directory that was edited since grid placed it")
+    p_repair.add_argument("--dry-run", action="store_true",
+                          help="print the plan; no network access and no writes")
+    p_repair.set_defaults(func=cmd_repair)
+    p_uninstall = sub.add_parser("uninstall", parents=[shared],
+                                 help="remove what grid placed (dry run unless --yes)")
+    p_uninstall.add_argument("--yes", action="store_true", help="actually delete (default: print the plan only)")
+    p_uninstall.add_argument("--force", action="store_true",
+                             help="also remove a directory that was edited since grid placed it")
+    p_uninstall.set_defaults(func=cmd_uninstall)
     return parser
 
 
