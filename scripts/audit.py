@@ -397,6 +397,9 @@ class Scan:
         self.findings = []
         self.targets = 0
         self.files = 0
+        # Names <n> of every repos/<n> upstream submodule a target resolves under
+        # (feeds the source checks; a library repo with no target never appears).
+        self.repos = set()
 
     # -- reporting helpers ---------------------------------------------------
 
@@ -432,6 +435,10 @@ class Scan:
         real = os.path.realpath(target)
         self.targets += 1
         tier = self._tier(real)
+        rel = self._rel_root(real)
+        parts = rel.split("/") if rel is not None else []
+        if len(parts) >= 2 and parts[0] == "repos":
+            self.repos.add(parts[1])          # target is repos/<name> or below it
         if os.path.isdir(real):
             self._walk(real, real, tier)
         else:
@@ -622,6 +629,138 @@ class Scan:
 
 
 # --------------------------------------------------------------------------
+# Source and curation checks (vetting group 2)
+# --------------------------------------------------------------------------
+
+def baseline_repos(path):
+    """Repo names a wiring manifest (baseline-submodules.txt) names, as a set.
+
+    Same line normalisation as wire.sh `load_manifest`: strip `#...` and ALL
+    whitespace. Then skip blank lines, subtractions (leading `-`) and every typed
+    `<kind>:<name>` entry. A typed entry is detected structurally (a `:` before
+    the first `/`), NOT by a list of known kinds, so a future kind such as
+    `hook:` or `rules:` never turns into a phantom repo. The repo is the text
+    before the first `/` (`anthropic/pdf` -> `anthropic`)."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().split("\n")
+    except OSError as exc:
+        raise UsageError("cannot read baseline %s: %s" % (path, exc))
+    repos = set()
+    for line in lines:
+        line = "".join(line.split("#", 1)[0].split())
+        if not line or line.startswith("-"):
+            continue
+        head = line.split("/", 1)[0]
+        if ":" in head:
+            continue
+        repos.add(head)
+    return repos
+
+
+def normalise_repo_url(url):
+    """(host, 'owner/repo') lowercased for the URL forms used on GitHub, or None
+    when the form is not recognised. Accepted: scp-style `user@host:o/r(.git)`,
+    `ssh://[user@]host/o/r(.git)` and `https://[user@]host/o/r(.git)`, with an
+    optional trailing slash. Plain `http://`, `git://` and `file:` are deliberately
+    not recognised (unencrypted or local), so they can never match the allowlist."""
+    url = url.strip()
+    if "://" in url:
+        m = re.fullmatch(r"(?:https|ssh)://(?:[^@/\s]+@)?([^:/\s@]+)(?::\d+)?/(\S+)", url)
+    else:
+        m = re.fullmatch(r"(?:[^@/\s]+@)?([^:/\s@]+):([^/\s]\S*)", url)
+    if not m:
+        return None
+    host, path = m.group(1), m.group(2).rstrip("/")
+    if path.lower().endswith(".git"):
+        path = path[:-4]
+    parts = path.split("/")
+    if len(parts) != 2 or not all(parts):
+        return None
+    return host.lower(), path.lower()
+
+
+def check_url(policy, url):
+    """(ok, reason) for a source URL against policy `sources` (host AND owner/repo)."""
+    norm = normalise_repo_url(url)
+    if norm is None:
+        return False, "not a recognised https/ssh repository URL: %s" % escape_text(url)
+    host, repo = norm
+    hosts = [str(h).lower() for h in (policy.sources.get("allowed_hosts") or [])]
+    repos = [str(r).lower() for r in (policy.sources.get("allowed_repos") or [])]
+    if host not in hosts:
+        return False, "host %s is not in sources.allowed_hosts" % host
+    if repo not in repos:
+        return False, "repository %s is not in sources.allowed_repos" % repo
+    return True, "%s on %s is allowed" % (repo, host)
+
+
+def parse_gitmodules(path):
+    """{submodule path: (url, line number of its `url` line)} from a modules file.
+    Parsed by `[submodule "x"]` section; a section missing `path` or `url` is
+    ignored (nothing to look up)."""
+    sections = []                      # one dict per section: path, url, url_line
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().split("\n")
+    except OSError as exc:
+        raise UsageError("cannot read %s: %s" % (path, exc))
+    for n, raw in enumerate(lines, 1):
+        text = raw.strip()
+        if not text or text[0] in "#;":
+            continue
+        if text.startswith("["):
+            sections.append({})
+            continue
+        key, sep, value = text.partition("=")
+        if not sep or not sections:
+            continue
+        key, value = key.strip().lower(), value.strip().strip('"')
+        if key == "path":
+            sections[-1]["path"] = value
+        elif key == "url":
+            sections[-1]["url"], sections[-1]["url_line"] = value, n
+    return {s["path"]: (s["url"], s["url_line"])
+            for s in sections if "path" in s and "url" in s}
+
+
+def curated_repos(path):
+    """Names with a `### repos/<name>` heading in CURATION.md (missing file = none)."""
+    if not path or not os.path.isfile(path):
+        return set()
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        return set(re.findall(r"^###[ \t]+repos/(\S+)[ \t]*$", fh.read(), re.M))
+
+
+def source_checks(scan, root, curation_path, baseline):
+    """One `source-not-allowed` / `source-uncurated` finding per upstream repo that
+    a target lives under, reported at `.gitmodules:<line of its url>`. Severity is
+    `high` for a repo named in the baseline, else the policy's (low) default, so an
+    overlay-only repo warns where a baseline repo blocks. No .gitmodules, or a repo
+    with no entry in it, means nothing to check (it is not a submodule)."""
+    modules_file = os.path.join(root, ".gitmodules")
+    if not os.path.isfile(modules_file) or not scan.repos:
+        return
+    modules = parse_gitmodules(modules_file)
+    curated = curated_repos(curation_path)
+    base = {b.lower() for b in baseline or ()}
+    for name in sorted(scan.repos):
+        entry = modules.get("repos/" + name)
+        if entry is None:
+            continue
+        url, line = entry
+        ok, why = check_url(scan.policy, url)
+        for rule, bad, msg in (
+                ("source-not-allowed", not ok, "submodule source not allowed: " + why),
+                ("source-uncurated", name not in curated,
+                 "repos/%s has no `### repos/%s` heading in CURATION.md" % (name, name))):
+            if bad:
+                sev = "high" if name.lower() in base else scan.policy.builtin[rule]
+                scan._add(rule, sev, ".gitmodules", line, "other", "upstream", msg,
+                          excerpt="url = " + url, raw_line="url = " + url)
+
+
+# --------------------------------------------------------------------------
 # Allowlist application, ordering, output
 # --------------------------------------------------------------------------
 
@@ -705,7 +844,7 @@ def default_grid_dir():
 def build_parser():
     p = argparse.ArgumentParser(
         prog="audit.py", description="Static vetting scan of skills, agents, rules and hooks.")
-    p.add_argument("targets", metavar="TARGET", nargs="+",
+    p.add_argument("targets", metavar="TARGET", nargs="*",
                    help="a directory (scanned recursively) or a single file")
     p.add_argument("--root", help="base for reported paths, allowlist globs and owned/upstream "
                                   "tiering (default: $GRID_DIR, else this script's repo)")
@@ -716,6 +855,11 @@ def build_parser():
     p.add_argument("--format", choices=("text", "json"), default="text")
     p.add_argument("--quiet", action="store_true", help="text mode: hide LOW findings")
     p.add_argument("--show-allowed", action="store_true", help="include allowlisted findings")
+    p.add_argument("--baseline", help="wiring manifest; repos it names get source-not-allowed and "
+                                      "source-uncurated at high instead of low")
+    p.add_argument("--check-url", metavar="URL",
+                   help="no scan: exit 0 if URL's host and owner/repo are allowed by policy "
+                        "`sources`, else 1 (prints why)")
     return p
 
 
@@ -725,6 +869,12 @@ def run(args):
     if not os.path.isdir(root):
         raise UsageError("--root %s is not a directory" % root)
     policy = Policy(args.policy or os.path.join(grid_dir, "policy.yaml"))
+    if args.check_url is not None:                 # source-policy query, no scan
+        ok, why = check_url(policy, args.check_url)
+        sys.stdout.write("%s: %s\n" % ("ok" if ok else "not allowed", why))
+        return 0 if ok else 1
+    if not args.targets:
+        raise UsageError("no TARGET given")
     allow_path = args.allow or os.path.join(grid_dir, "CURATION.md")
     entries = load_allowlist(allow_path, policy)
 
@@ -735,6 +885,9 @@ def run(args):
     scan = Scan(policy, root)
     for t in args.targets:
         scan.scan_target(t)
+
+    baseline = baseline_repos(args.baseline) if args.baseline else None
+    source_checks(scan, scan.root, allow_path, baseline)
 
     allow_rel = scan._rel_root(os.path.realpath(allow_path))
     apply_allowlist(scan, entries, allow_rel if allow_rel is not None else "CURATION.md")
