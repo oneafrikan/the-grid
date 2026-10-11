@@ -1,0 +1,536 @@
+#!/usr/bin/env python3
+"""grid - install, pin and check the wired skill set without git submodules.
+
+One Python 3 (3.8+) stdlib file; the only import from the repo is the
+restricted-YAML reader scripts/lib/miniyaml.py. Design: openspec change
+`manifest-lock-install` (design.md "CLI shape", "File formats", "Input
+validation", "Fetch mechanism").
+
+This file is the SKELETON (group 1): the shared helpers, the grid.yaml reader,
+the typed-entry reader, the grid.lock reader with its input validation, and the
+`audit` passthrough. The other subcommands are registered as stubs that exit 2
+until their groups land.
+
+Python 3.8 floor: no str.removeprefix/removesuffix, no `dict | dict`, no
+`list[str]` annotations evaluated at runtime, no `match`. Checked with
+    python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), feature_version=(3, 8))' scripts/grid
+
+Exit codes: 0 ok | 1 findings or failed entries | 2 usage or error |
+            3 (`lock --check` only) not checkable here.
+"""
+import sys
+
+# Running grid must never leave a __pycache__ in the repo (it is not tracked and
+# the vetting scanner would otherwise see it). Set BEFORE importing miniyaml.
+sys.dont_write_bytecode = True
+
+import argparse
+import json
+import os
+import re
+import signal
+import socket
+import subprocess
+import tempfile
+
+# miniyaml lives next to us in scripts/lib, the same way audit.py finds it.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "lib"))
+import miniyaml  # noqa: E402  (must follow the sys.path insert)
+
+EXIT_OK = 0
+EXIT_FINDINGS = 1
+EXIT_ERROR = 2
+EXIT_NOT_CHECKABLE = 3
+
+GIT_FLOOR = (2, 25)          # sparse-checkout `init --cone` + `set` needs 2.25
+GIT_TIMEOUT = 600            # seconds; a timeout is a failed fetch for that source
+
+# Subcommands whose behaviour lands in a later group of the change.
+STUB_COMMANDS = ("lock", "install", "doctor", "repair", "uninstall", "drift", "schedule")
+
+
+class GridError(Exception):
+    """A user-facing failure. `code` is the process exit status; str() is the message."""
+
+    def __init__(self, msg, code=EXIT_ERROR):
+        super().__init__(msg)
+        self.code = code
+
+
+# --- shared helpers (design.md "CLI shape" / "Fetch mechanism") ----------------
+
+def resolve_grid_dir(arg=None):
+    """The grid dir as a realpath: --grid-dir, else GRID_DIR, else the parent of scripts/.
+
+    Resolved once and used everywhere (including as GRID_DIR for child wire.sh
+    runs) so link targets are realpaths and every path comparison is safe on
+    macOS, where temp and home paths pass through symlinks such as /var.
+    """
+    path = arg or os.environ.get("GRID_DIR")
+    if not path:
+        path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    return os.path.realpath(path)
+
+
+def state_dir():
+    """Machine-local state dir: GRID_STATE_DIR, else $HOME/.grid."""
+    env = os.environ.get("GRID_STATE_DIR")
+    if env:
+        return env
+    return os.path.join(os.environ.get("HOME") or os.path.expanduser("~"), ".grid")
+
+
+def host_key():
+    """Machine key for overlay files: GRID_HOST, else the short hostname.
+
+    socket.gethostname().split('.')[0] equals `hostname -s` but needs no external
+    `hostname` binary (a minimal Arch or container install may lack it).
+    """
+    return os.environ.get("GRID_HOST") or socket.gethostname().split(".")[0]
+
+
+def atomic_write(path, content):
+    """Write `content` (str) to `path` via temp file + os.replace; skip if unchanged.
+
+    Returns True when the file was (re)written. Always "\\n" line endings and
+    UTF-8, whatever the platform. Skipping an unchanged write keeps the inode
+    and mtime stable, which callers (and tests) rely on to prove a no-op re-run.
+    """
+    data = content.encode("utf-8")
+    try:
+        with open(path, "rb") as fh:
+            if fh.read() == data:
+                return False
+    except FileNotFoundError:
+        pass
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    # Temp file in the destination dir so os.replace stays on one filesystem.
+    fd, tmp = tempfile.mkstemp(prefix=".grid-write-", dir=parent)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    return True
+
+
+def git_env():
+    """Environment for every git child.
+
+    LC_ALL=C: stable output to parse. GIT_TERMINAL_PROMPT=0: an unreachable or
+    private URL fails instead of waiting on a prompt an unattended job can never
+    answer. The GIT_DIR family is removed so a call made from inside a git hook
+    still addresses the repo named by `-C`.
+    """
+    env = dict(os.environ)
+    env["LC_ALL"] = "C"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"):
+        env.pop(var, None)
+    return env
+
+
+def run_git(args, timeout=GIT_TIMEOUT):
+    """Run `git <args>`; return stdout (str). Raise GridError(2) on non-zero or timeout.
+
+    The failing command line is in the message so an operator can re-run it.
+    """
+    cmd = ["git"] + list(args)
+    shown = " ".join(cmd)
+    try:
+        proc = subprocess.run(
+            cmd, env=git_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=timeout, encoding="utf-8", errors="surrogateescape")
+    except subprocess.TimeoutExpired:
+        raise GridError("grid: git timed out after %ds: %s" % (timeout, shown))
+    except FileNotFoundError:
+        raise GridError("grid: git is required but not on PATH")
+    if proc.returncode != 0:
+        raise GridError("grid: git failed (exit %d): %s\n%s"
+                        % (proc.returncode, shown, proc.stderr.strip()))
+    return proc.stdout
+
+
+def check_git_version():
+    """Exit 2 unless git is at least GIT_FLOOR. Parses `git version 2.39.5 (Apple ...)`."""
+    out = run_git(["--version"]).strip()
+    m = re.match(r"git version (\d+)\.(\d+)(?:\.[\w.]+)?", out)
+    if not m:
+        raise GridError("grid: cannot parse `git --version` output: %s" % out)
+    if (int(m.group(1)), int(m.group(2))) < GIT_FLOOR:
+        found = out[len("git version "):].split(" ")[0]
+        raise GridError("grid: git %d.%d or newer is required (found %s)"
+                        % (GIT_FLOOR[0], GIT_FLOOR[1], found))
+
+
+def notice(msg):
+    """One stderr line, no failure."""
+    sys.stderr.write(msg + "\n")
+
+
+# --- grid.yaml (design.md "File formats") ---------------------------------------
+
+# Top-level keys reserved for later changes: accepted, ignored, one notice each.
+RESERVED_KEYS = ("rules", "harnesses")
+REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
+SOURCE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _yaml_error(msg):
+    return GridError("grid: grid.yaml: %s" % msg)
+
+
+def _check_keys(where, mapping, allowed):
+    """Any key outside `allowed` is exit 2 naming it (typos must fail loudly)."""
+    for key in mapping:
+        if key not in allowed:
+            raise _yaml_error("unknown key '%s'%s" % (key, " in " + where if where else ""))
+
+
+def _require_map(where, value):
+    if not isinstance(value, dict):
+        raise _yaml_error("'%s' must be a map" % where)
+    return value
+
+
+def _require_str(where, value):
+    # miniyaml turns `1` into an int and a block into a list/dict; only a
+    # non-empty string is a usable url/ref/path.
+    if not isinstance(value, str) or not value:
+        raise _yaml_error("'%s' must be a non-empty string" % where)
+    return value
+
+
+def load_grid_yaml(grid_dir):
+    """Read and validate <grid_dir>/grid.yaml; return a normalised dict.
+
+    {"version": 1, "sources": {name: {"url": str, "ref": str}}, "wired": {"baseline": str}}
+    `ref` defaults to HEAD. Reserved top-level keys (rules, harnesses) are
+    ignored with one stderr notice each. Any other unknown key, or a wrong
+    type, is GridError(2) naming the key; a miniyaml.ParseError is exit 2
+    with its line number.
+    """
+    path = os.path.join(grid_dir, "grid.yaml")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        raise GridError("grid: grid.yaml not found in %s" % grid_dir)
+    try:
+        doc = miniyaml.loads(text)
+    except miniyaml.ParseError as exc:
+        raise _yaml_error(str(exc))
+    if not isinstance(doc, dict):
+        raise _yaml_error("top level must be a map")
+
+    for key in RESERVED_KEYS:
+        if key in doc:
+            notice("grid: grid.yaml key '%s' is reserved and ignored by this version" % key)
+    _check_keys("", doc, ("version", "sources", "wired") + RESERVED_KEYS)
+
+    # `version` must be the integer 1. bool is an int subclass in Python, so
+    # test the exact type (miniyaml reads `true` as bool).
+    if "version" not in doc:
+        raise _yaml_error("missing required key 'version'")
+    if type(doc["version"]) is not int or doc["version"] != 1:
+        raise _yaml_error("'version' must be 1 (found %r)" % (doc["version"],))
+
+    if "sources" not in doc:
+        raise _yaml_error("missing required key 'sources'")
+    sources = {}
+    for name, body in _require_map("sources", doc["sources"]).items():
+        where = "sources.%s" % name
+        if not SOURCE_RE.fullmatch(str(name)):
+            raise _yaml_error("source name '%s' is not a valid directory name" % name)
+        _require_map(where, body)
+        _check_keys(where, body, ("url", "ref"))
+        if "url" not in body:
+            raise _yaml_error("'%s' is missing required key 'url'" % where)
+        url = _require_str(where + ".url", body["url"])
+        ref = _require_str(where + ".ref", body["ref"]) if "ref" in body else "HEAD"
+        if not REF_RE.fullmatch(ref):
+            raise _yaml_error("'%s.ref' value %r is not a valid ref" % (where, ref))
+        sources[str(name)] = {"url": url, "ref": ref}
+
+    if "wired" not in doc:
+        raise _yaml_error("missing required key 'wired'")
+    wired = _require_map("wired", doc["wired"])
+    _check_keys("wired", wired, ("baseline",))
+    if "baseline" not in wired:
+        raise _yaml_error("'wired' is missing required key 'baseline'")
+    baseline = _require_str("wired.baseline", wired["baseline"])
+
+    return {"version": 1, "sources": sources, "wired": {"baseline": baseline}}
+
+
+# --- typed entries (design.md "Typed entries") -----------------------------------
+
+def read_wired_entries(paths):
+    """Read wired-set files; return (adds, denies) of UNTYPED entries only.
+
+    Parsing matches wire.sh's load_manifest: strip a trailing `#` comment, drop
+    all whitespace, skip empty lines. An entry whose text before the first `/`
+    contains `:` is typed (`project:x`, `-rules:sql`, `harness:codex`, any kind,
+    known or not): grid ignores every typed entry and leaves it to wire.sh, so a
+    new kind needs no change here. `adds` are `repo` / `repo/skill`; `denies`
+    are the same with the leading `-` removed. Missing files are skipped.
+    """
+    adds, denies = [], []
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+        except FileNotFoundError:
+            continue
+        for line in lines:
+            entry = "".join(line.split("#", 1)[0].split())
+            if not entry:
+                continue
+            if ":" in entry.split("/", 1)[0]:
+                continue                      # typed entry: not ours
+            if entry.startswith("-"):
+                denies.append(entry[1:])
+            else:
+                adds.append(entry)
+    return adds, denies
+
+
+# --- input validation (design.md "Input validation") --------------------------------
+# grid.lock arrives through a PR and `dest` is built from it, so every field is
+# checked against a fixed pattern when the file is read, before any network
+# access or write. Without this a `path` of `../../../.ssh` would make install
+# write (and uninstall delete) outside repos/<source>, and a leading `-` would
+# reach `git sparse-checkout set` as an option.
+
+# One path component: no leading `-`, not `.` or `..`, no spaces/control chars.
+# Dot-directories such as `.claude/skills/x` are allowed.
+PATH_COMPONENT_RE = re.compile(r"(?!-)(?!\.\.?$)[A-Za-z0-9._@+-]+")
+HEX40_RE = re.compile(r"[0-9a-f]{40}")
+HASH_RE = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def validate_source(source, sources):
+    """`source` is a safe directory name AND has an entry under grid.yaml `sources`."""
+    if not isinstance(source, str) or not SOURCE_RE.fullmatch(source):
+        raise ValueError("source %r is not a valid directory name" % (source,))
+    if source not in sources:
+        raise ValueError("source '%s' has no entry under sources in grid.yaml" % source)
+
+
+def validate_path(path):
+    """Repo-relative skill dir: forward slashes, never empty/absolute, safe components."""
+    if not isinstance(path, str) or not path:
+        raise ValueError("path must be a non-empty string")
+    if path.startswith("/") or "\\" in path:
+        raise ValueError("path %r must be relative with forward slashes" % path)
+    for comp in path.split("/"):
+        if not PATH_COMPONENT_RE.fullmatch(comp):
+            raise ValueError("path %r has an unsafe component %r" % (path, comp))
+
+
+def validate_sha(value, field):
+    """`sha` / `tree`: exactly 40 lowercase hex characters."""
+    if not isinstance(value, str) or not HEX40_RE.fullmatch(value):
+        raise ValueError("%s must be 40 lowercase hex characters" % field)
+
+
+def validate_hash(value):
+    """Content hash: `sha256:` plus 64 lowercase hex."""
+    if not isinstance(value, str) or not HASH_RE.fullmatch(value):
+        raise ValueError("hash must be 'sha256:' plus 64 lowercase hex characters")
+
+
+def validate_ref(ref):
+    if not isinstance(ref, str) or not REF_RE.fullmatch(ref):
+        raise ValueError("ref %r is not a valid ref" % (ref,))
+
+
+def validate_label(value, field):
+    """`kind` / `name`: non-empty, no tab or newline (they are TSV columns in the ledger)."""
+    if not isinstance(value, str) or not value or "\t" in value or "\n" in value:
+        raise ValueError("%s must be a non-empty string without tab or newline" % field)
+
+
+def dest_for(source, path):
+    """Grid-relative destination of a placed skill: repos/<source>/<path>."""
+    return "repos/%s/%s" % (source, path)
+
+
+def is_contained(grid_dir, source, dest):
+    """True when realpath(<grid>/<dest>) lies under realpath(<grid>/repos/<source>).
+
+    The one containment test, applied before every write or delete (install and
+    uninstall reuse it). realpath resolves symlinks, so a symlinked parent that
+    points elsewhere is caught as well as a `..` component.
+    """
+    root = os.path.realpath(os.path.join(grid_dir, "repos", source))
+    target = os.path.realpath(os.path.join(grid_dir, dest))
+    try:
+        return os.path.commonpath([root, target]) == root
+    except ValueError:                      # different drives (Windows) etc.
+        return False
+
+
+# --- grid.lock reader --------------------------------------------------------------
+
+LOCK_FIELDS = ("hash", "kind", "name", "path", "sha", "source", "tree")
+
+
+def _entry_label(index, entry):
+    """Name an entry in an error: its kind/name/source when readable, else its index."""
+    if isinstance(entry, dict):
+        return "entry %d (%s %s from %s)" % (
+            index, entry.get("kind"), entry.get("name"), entry.get("source"))
+    return "entry %d" % index
+
+
+def read_grid_lock(grid_dir, sources):
+    """Read, validate and return the `kind: skill` entries of <grid_dir>/grid.lock.
+
+    `sources` is the grid.yaml `sources` map. Every field is validated (exit 2
+    naming the entry); each returned entry is the dict from the file plus
+    `dest`. An entry of another `kind` is skipped with ONE stderr notice per
+    kind and never fails, so a later change can lock other kinds under
+    lockVersion 1. Reads only: nothing is written and nothing is fetched.
+    """
+    path = os.path.join(grid_dir, "grid.lock")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except FileNotFoundError:
+        raise GridError("grid: grid.lock not found in %s" % grid_dir)
+    except ValueError as exc:               # json.JSONDecodeError subclasses ValueError
+        raise GridError("grid: grid.lock is not valid JSON: %s" % exc)
+    if not isinstance(doc, dict) or doc.get("lockVersion") != 1 or not isinstance(doc.get("entries"), list):
+        raise GridError("grid: grid.lock must be an object with lockVersion 1 and an entries list")
+
+    entries, skipped_kinds = [], set()
+    for index, entry in enumerate(doc["entries"]):
+        label = _entry_label(index, entry)
+        if not isinstance(entry, dict):
+            raise GridError("grid: grid.lock %s is not an object" % label)
+        try:
+            validate_label(entry.get("kind"), "kind")
+        except ValueError as exc:
+            raise GridError("grid: grid.lock %s: %s" % (label, exc))
+        if entry["kind"] != "skill":
+            if entry["kind"] not in skipped_kinds:
+                skipped_kinds.add(entry["kind"])
+                notice("grid: grid.lock has entries of kind '%s', which this version does not handle; skipped"
+                       % entry["kind"])
+            continue
+        for field in LOCK_FIELDS:
+            if field not in entry:
+                raise GridError("grid: grid.lock %s: missing field '%s'" % (label, field))
+        try:
+            validate_label(entry["name"], "name")
+            validate_source(entry["source"], sources)
+            validate_path(entry["path"])
+            validate_sha(entry["sha"], "sha")
+            validate_sha(entry["tree"], "tree")
+            validate_hash(entry["hash"])
+        except ValueError as exc:
+            raise GridError("grid: grid.lock %s: %s" % (label, exc))
+        dest = dest_for(entry["source"], entry["path"])
+        if not is_contained(grid_dir, entry["source"], dest):
+            raise GridError("grid: grid.lock %s: %s escapes repos/%s" % (label, dest, entry["source"]))
+        item = dict(entry)
+        item["dest"] = dest
+        entries.append(item)
+    return entries
+
+
+# --- subcommands ---------------------------------------------------------------------
+
+def cmd_audit(args):
+    """`grid audit [args...]`: run `bash <grid>/scripts/audit.sh args...`, return its exit code.
+
+    A pure passthrough (the vetting change owns that interface): same
+    environment, no argument handling, no other logic.
+    """
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    script = os.path.join(grid_dir, "scripts", "audit.sh")
+    if not os.path.isfile(script):
+        raise GridError("grid: %s not found" % script)
+    rc = subprocess.call(["bash", script] + list(args.args))
+    # A signal death is a negative returncode; report it the shell way.
+    return rc if rc >= 0 else 128 - rc
+
+
+def make_stub(name):
+    """A not-yet-implemented subcommand: exit 2 with a clear message."""
+    def stub(args):
+        raise GridError("grid: %s: not implemented" % name)
+    return stub
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="grid", description="Install, pin and check the wired skill set.")
+    parser.add_argument("--grid-dir", help="the grid checkout (default: $GRID_DIR, else the parent of scripts/)")
+    parser.add_argument("--skills-dir", help="skills target (default: $SKILLS_DIR)")
+    sub = parser.add_subparsers(dest="command", metavar="COMMAND")
+    sub.required = True
+
+    # `audit` forwards everything after it untouched, options included. argparse
+    # cannot do that (REMAINDER rejects a leading option such as `--owned`), so
+    # main() splits those arguments off before parsing; this entry exists for
+    # --help and for the dispatch. Shared flags go BEFORE `audit`.
+    p_audit = sub.add_parser("audit", help="run scripts/audit.sh with the given arguments (pass-through)")
+    p_audit.set_defaults(func=cmd_audit, args=[])
+
+    # Shared flags are also accepted after the subcommand; SUPPRESS keeps a
+    # value given before the subcommand from being overwritten by a default.
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument("--grid-dir", default=argparse.SUPPRESS)
+    shared.add_argument("--skills-dir", default=argparse.SUPPRESS)
+    for name in STUB_COMMANDS:
+        p = sub.add_parser(name, parents=[shared], help="not implemented yet")
+        p.set_defaults(func=make_stub(name))
+    return parser
+
+
+def split_audit_argv(argv):
+    """If the subcommand is `audit`, return (argv up to and including it, the rest); else None.
+
+    Skips the shared flags that may precede the subcommand. The rest is handed
+    to audit.sh byte for byte, so `grid audit --owned --format json` works.
+    """
+    i = 0
+    while i < len(argv):
+        if argv[i] in ("--grid-dir", "--skills-dir"):
+            i += 2
+        elif argv[i].startswith(("--grid-dir=", "--skills-dir=")):
+            i += 1
+        else:
+            break
+    if i < len(argv) and argv[i] == "audit":
+        return argv[:i + 1], argv[i + 1:]
+    return None
+
+
+def main(argv=None):
+    # A scheduler kill (SIGTERM) must unwind through `finally` blocks so staging
+    # dirs are removed: turn it into a normal exit.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(143))
+    argv = sys.argv[1:] if argv is None else list(argv)
+    split = split_audit_argv(argv)
+    parser = build_parser()
+    args = parser.parse_args(split[0] if split else argv)
+    if split:
+        args.args = split[1]
+    try:
+        # `audit` is a pure passthrough and needs no git of its own.
+        if args.command != "audit":
+            check_git_version()
+        return args.func(args)
+    except GridError as exc:
+        sys.stderr.write(str(exc) + "\n")
+        return exc.code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
