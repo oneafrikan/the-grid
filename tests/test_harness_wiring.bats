@@ -138,6 +138,66 @@ stub_agent() {
   [ "$(find "$HS" -name dup | wc -l | tr -d ' ')" -eq 1 ]
 }
 
+# ---------------------------------------------------------------- Pi / OpenClaw (group 6)
+# Both are skills-only rows: they read the shared dir and nothing else. Agents are
+# stubbed for EVERY compose target so that a registry row that wrongly gained an
+# agents_dir/compose_target would link something and fail these tests.
+
+stub_all_agents() {
+  stub_agent claude-code a.md
+  stub_agent codex a.toml
+  stub_agent opencode a.md
+  stub_agent gemini-cli a.md
+  stub_agent openclaw-native a.md
+}
+
+# only_shared_dir: the harness home holds exactly .agents/skills, nothing else.
+only_shared_dir() {
+  [ "$(find "$GRID_HARNESS_HOME" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(find "$GRID_HARNESS_HOME/.agents" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "Pi: skills land in the shared dir, no Pi agents dir is created, --check exits 0" {
+  stub_all_agents
+  GRID_HARNESS=pi wire
+  [ "$status" -eq 0 ]
+  [ -L "$HS/skill-alpha" ] && [ -L "$HS/skill-beta" ]
+  # Pi documents no sub-agents: neither its agents dir nor any agent link may appear.
+  [ ! -e "$GRID_HARNESS_HOME/.pi/agent/agents" ]
+  # The ONLY thing under the harness home is the shared skills dir (no .codex, .config, ...).
+  only_shared_dir
+  # Re-running with the same GRID_HARNESS: the wired state has no drift.
+  GRID_HARNESS=pi wire --check
+  [ "$status" -eq 0 ]
+}
+
+@test "OpenClaw: skills land in the shared dir and nothing is created under .openclaw" {
+  stub_all_agents
+  GRID_HARNESS=openclaw wire
+  [ "$status" -eq 0 ]
+  [ -L "$HS/skill-alpha" ] && [ -L "$HS/skill-beta" ]
+  [ ! -e "$GRID_HARNESS_HOME/.openclaw" ]
+  # Agents for OpenClaw come from deploy_openclaw.sh, never from wire.sh.
+  only_shared_dir
+  GRID_HARNESS=openclaw wire --check
+  [ "$status" -eq 0 ]
+}
+
+@test "Pi + OpenClaw together share one link per skill; a root/repo name clash links the root copy once" {
+  # Pi keeps the first skill it discovers on a name clash, so a duplicate must never
+  # be linked: the shared dir must hold exactly one link and it must be the root copy.
+  make_skill "$MOCK_GRID/repos/r/skills/dup" "dup"
+  make_skill "$MOCK_GRID/skills/dup" "dup"
+  printf 'r\n' > "$MOCK_GRID/baseline-submodules.txt"
+  GRID_HARNESS=pi,openclaw wire
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$HS/dup")" = "$MOCK_GRID/skills/dup/" ]
+  [ "$(find "$HS" -name dup | wc -l | tr -d ' ')" -eq 1 ]
+  # Two harnesses, one dir: still just the portable skills, each exactly once.
+  [ "$(find "$HS" -mindepth 1 | wc -l | tr -d ' ')" -eq 3 ]
+  [ "$(grep -c "^skill@~/.agents/skills	dup	" "$MANIFEST")" -eq 1 ]
+}
+
 # ---------------------------------------------------------------- space / XDG
 
 @test "paths with a space: OpenCode agents land under GRID_HARNESS_HOME, XDG_CONFIG_HOME ignored" {

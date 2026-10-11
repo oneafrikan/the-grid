@@ -86,6 +86,19 @@ skill@~/.agents/skills<TAB>claude-skill<TAB><target><TAB>skipped<TAB>claude-spec
 
 Rows are `skill@<~dir>` / `agent@<~dir>` (the dir in `~/` form, so the file is home-independent). Portability skips print no stdout line; the manifest is where to read them: `grep skipped .wired.manifest`.
 
+## Pi and OpenClaw (skills-only rows)
+
+Both rows have `-` for `agents_dir`, `compose_target` and (OpenClaw) `rules_file`, so `wire.sh` links skills into the shared dir and nothing else. Neither harness gets a dir of its own: no `~/.pi/agent/agents`, nothing under `~/.openclaw/`.
+
+| Harness | Agents | Notes |
+|---|---|---|
+| Pi | No subagent emitter: Pi documents no sub-agents. | Pi keeps the first skill it discovers on a name clash, so a duplicate name must never be linked. `wire.sh` already guarantees it: one link per name, and a root skill beats a same-named repo skill. |
+| OpenClaw | Agents are workspaces. Compose them with `compose.py --target openclaw-native` and deploy with `agent-factory/scripts/deploy_openclaw.sh` (both unchanged by this change). `wire.sh` never touches them. | See the symlink rule below. |
+
+**OpenClaw symlink rule** (docs.openclaw.ai/tools/skills, fetched 2026-10-11). `~/.agents/skills` is a personal root. A personal root may hold symlinked skill folders, as the grid links are, provided every `SKILL.md` realpath stays inside its resolved skill directory. A grid skill dir whose `SKILL.md` is itself a symlink out of that dir would be skipped with a once-per-process warning.
+
+`skills.load.allowSymlinkTargets` is an array of trusted target roots in `openclaw.json`, e.g. `allowSymlinkTargets: ["~/path/to/skills"]`. Per the vendor page it applies to workspace, project-agent and extra-dir discovery (a skill root symlinked to somewhere outside the configured root), not to the personal roots. Set it only if you point an OpenClaw workspace `skills/` dir at the grid; the shared-dir wiring does not need it. Not exercised on a real OpenClaw install yet (that is the real-install smoke test).
+
 ## Ownership rules
 
 - Only symlinks whose target is inside the grid dir (`$GRID_DIR/...`) are ever removed. Real files and dirs, foreign symlinks, and links into a sibling such as `<grid>-private` are left alone.
