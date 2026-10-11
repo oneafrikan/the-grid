@@ -11,4 +11,4 @@ Path scope is heuristic. Flask has no distinctive file names, so the globs match
 | structure.md | https://flask.palletsprojects.com/en/stable/patterns/appfactories/ https://flask.palletsprojects.com/en/stable/config/ https://flask.palletsprojects.com/en/stable/blueprints/ |
 | blueprints.md | https://flask.palletsprojects.com/en/stable/blueprints/ https://flask.palletsprojects.com/en/stable/patterns/appfactories/ |
 | config.md | https://flask.palletsprojects.com/en/stable/config/ https://flask.palletsprojects.com/en/stable/web-security/ https://flask.palletsprojects.com/en/stable/quickstart/ |
-| security.md | https://flask.palletsprojects.com/en/stable/web-security/ https://flask.palletsprojects.com/en/stable/quickstart/ https://flask.palletsprojects.com/en/stable/patterns/sqlite3/ |
+| security.md | https://flask.palletsprojects.com/en/stable/web-security/ https://flask.palletsprojects.com/en/stable/quickstart/ |
