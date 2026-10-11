@@ -4,7 +4,7 @@ description: Compact the current conversation into a handoff document for anothe
 argument-hint: "What will the next session be used for?"
 ---
 
-## Session Handoff file (Gareth's SOP)
+## Session handoff file
 
 Write a handoff document summarising the current conversation so a fresh agent can continue the work.
 
@@ -12,7 +12,7 @@ Write a handoff document summarising the current conversation so a fresh agent c
 
 **Filename:** `YYYY-MM-DD-<machine>-<slug>-handoff.md` where:
 - `YYYY-MM-DD` is today's date
-- `<machine>` is the output of `hostname -s` (e.g. `wilderness`, `guide-server`, `forge`, `scout`)
+- `<machine>` is the output of `hostname -s` (e.g. `my-laptop`, `build-box`)
 - `<slug>` is a 2-4 word kebab-case summary of the session topic (e.g. `machine-overlays`, `agent-factory-roster`)
 - `-handoff` is appended to make the file self documenting
 
@@ -25,7 +25,7 @@ Write a handoff document summarising the current conversation so a fresh agent c
 
 ---
 
-## Session context file (Gareth's SOP)
+## Session context file
 
 Also write a context file using today's actual date.
 **Template:** load `context-template.md` from this skill's base directory and fill it in.
@@ -36,15 +36,12 @@ Also write a context file using today's actual date.
 
 ## Document locations reference
 
-Determine save location by matching the current working directory path:
+Default: save to `LOGS/` — ask before creating it if it doesn't exist.
 
-| Project | Location |
-|---------|----------|
-| `guide-build` | `Logs/` |
-| `guide-core` | `Logs/` if it exists, otherwise project root |
-| `guide-engine` | `context/` |
-| Obsidian vault (`Gareth_SovereignOS`) | `LOGS/` |
-| All others | `LOGS/` — ask before creating if it doesn't exist |
+Optional per-project overrides: if `~/.the-grid-private/handoff-locations.md`
+exists, read its table first (rows: `| directory-name-or-glob | location |`);
+the first row matching the current working directory wins. If the file is
+absent or no row matches, use the default above.
 
 **Case handling:** match case-insensitively — if a directory matching the
 table's name already exists on disk in any casing (`logs`, `Logs`, `LOGS`),
