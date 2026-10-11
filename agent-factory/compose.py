@@ -981,6 +981,58 @@ def emit_opencode_agent(agent: dict, slug: str) -> tuple[str, str]:
 AGENT_TARGETS["opencode"] = emit_opencode_agent
 
 
+# ── Gemini CLI agent emitter ──────────────────────────────────────────────────
+# Gemini CLI reads ~/.gemini/agents/<name>.md: YAML frontmatter `name` (lowercase, digits,
+# `-`, `_`), `description`, optional `tools`, then the Markdown body as the system prompt.
+# `tools` is a restriction list in Gemini's own tool names, so a Claude allowlist is mapped
+# name by name. `model` is never written (default `inherit`: the session's model).
+GEMINI_TOOLS: dict[str, list[str]] = {
+    "Read": ["read_file", "read_many_files"],
+    "Grep": ["grep_search"],
+    "Glob": ["glob", "list_directory"],
+    "Bash": ["run_shell_command"],
+    "Edit": ["replace"],
+    "Write": ["write_file"],
+    "WebFetch": ["web_fetch"],
+    "WebSearch": ["google_web_search"],
+}
+
+
+def gemini_tools(role: str, tools: list[str]) -> list[str]:
+    """Map a role's Claude tool allowlist to Gemini tool names, in the role's listed order,
+    first occurrence wins. A tool with no mapping is a hard error (E_TOOL_UNMAPPED): silently
+    dropping it would widen or narrow the role's powers without anyone noticing, and a
+    read-only role (qa, security) must stay read-only on every harness."""
+    mapped: list[str] = []
+    for tool in tools:
+        if tool not in GEMINI_TOOLS:
+            sys.exit(f"E_TOOL_UNMAPPED: {role}: tool {tool!r} has no Gemini CLI mapping "
+                     f"(known: {', '.join(GEMINI_TOOLS)})")
+        mapped += [g for g in GEMINI_TOOLS[tool] if g not in mapped]
+    return mapped
+
+
+def emit_gemini_agent(agent: dict, slug: str) -> tuple[str, str]:
+    """A specialist role → one Gemini CLI subagent `<name>.md`. Returns (filename, contents).
+
+    Frontmatter is name, description, then `tools` only when the role has an allowlist (a
+    role without one inherits every tool, as on Claude). `tools` is a YAML block list; the
+    docs say only "tool names", so a list is the natural form (group 9 confirms on a real
+    install). Runs before write_harness_agents wipes anything, so an unmapped tool exits
+    with the old tree intact.
+    """
+    role = agent["role"]
+    name = slugged(slug, role)
+    fields = {"name": name, "description": subagent_description(role)}
+    tools = role_meta(role).get("tools")
+    if tools:
+        fields["tools"] = gemini_tools(role, tools)
+    return f"{name}.md", _frontmatter(fields) + "\n" + render_subagent_body(agent, slug)
+
+
+AGENT_TARGETS["gemini-cli"] = emit_gemini_agent
+
+
 # ── portable persona writer ──────────────────────────────────────────────────
 # One plain-Markdown file per role (orchestrators included) for pasting into a chat-UI
 # Project. Not a harness agent: no frontmatter, no tools, no permissions, so it does not
