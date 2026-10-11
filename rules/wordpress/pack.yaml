@@ -1,0 +1,3 @@
+# Flat "key: value" lines only. Parsed by rules.py (no YAML library).
+summary: WordPress plugin and theme PHP conventions from the Developer Handbooks: coding standards, data security, plugin structure
+tier: 1
