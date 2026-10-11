@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests for scripts/rules.py (lint, list). Every fixture pack is built in a temp
+# Tests for scripts/rules.py (lint, list, emit). Every fixture pack is built in a temp
 # dir inside the test (nothing is committed under tests/ for them) and linted with
 # --root, so the real rules/ is only touched by the one `real packs lint clean` test.
 # These are the author's own checks; independent verification is qa-engineer's.
@@ -422,6 +422,218 @@ PYEOF
   run python3 "$REPO_ROOT/scripts/rules.py" list --root "$R"
   [ "$status" -eq 0 ]
   [ "$output" = "pack  tier  files  bytes  summary" ]
+}
+
+# --- emit --harness cursor -------------------------------------------------------------------
+# Every emit test passes a temp --out or cd's into a temp dir; none touches the real tree.
+
+emit() { python3 "$REPO_ROOT/scripts/rules.py" emit --root "$R" "$@"; }
+
+# write_rule_titled FILE TITLE GLOB...: a valid rule file with a custom title and glob list.
+write_rule_titled() {
+  local f="$1" title="$2"; shift 2
+  mkdir -p "$(dirname "$f")"
+  { printf -- '---\npaths:\n'
+    for g in "$@"; do printf -- '  - "%s"\n' "$g"; done
+    printf -- '---\n# %s\n\n- Name columns.\n- Filter the partition.\n' "$title"; } > "$f"
+}
+
+@test "emit cursor: default --out lands in ./.cursor/rules" {
+  make_pack sql
+  W=$(mktemp -d)
+  cd "$W"
+  run emit --harness cursor --packs sql
+  [ "$status" -eq 0 ]
+  [ "$output" = "wrote .cursor/rules/grid-sql-style.mdc" ]
+  [ -f "$W/.cursor/rules/grid-sql-style.mdc" ]
+  rm -rf "$W"
+}
+
+@test "emit cursor: explicit --out DIR lands there and creates parents" {
+  make_pack sql
+  run emit --harness cursor --packs sql --out "$R/deep/er/rules"
+  [ "$status" -eq 0 ]
+  [ "$output" = "wrote $R/deep/er/rules/grid-sql-style.mdc" ]
+  [ -f "$R/deep/er/rules/grid-sql-style.mdc" ]
+}
+
+@test "emit: unknown --harness exits 2 and writes nothing" {
+  make_pack sql
+  run emit --harness vim --packs sql --out "$R/out"
+  [ "$status" -eq 2 ]
+  [ ! -e "$R/out" ]
+}
+
+@test "emit cursor: unknown pack exits 2 and writes nothing (even for the known pack)" {
+  make_pack sql
+  run emit --harness cursor --packs sql,nope --out "$R/out"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unknown pack"* ]]
+  [ ! -e "$R/out" ]
+}
+
+@test "emit: a pack name that tries to escape rules/ is an unknown pack" {
+  make_pack sql
+  run emit --harness cursor --packs ../rules/sql --out "$R/out"
+  [ "$status" -eq 2 ]
+  [ ! -e "$R/out" ]
+}
+
+@test "emit agents-md and gemini exit 2 not implemented and write nothing" {
+  make_pack sql
+  for h in agents-md gemini; do
+    run emit --harness "$h" --packs sql --out "$R/out-$h"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"not implemented"* ]]
+    [ ! -e "$R/out-$h" ]
+  done
+}
+
+@test "emit: --packs is required" {
+  run emit --harness cursor --out "$R/out"
+  [ "$status" -eq 2 ]
+}
+
+@test "emit cursor: exact .mdc text for a fixture rule" {
+  mkdir -p "$R/rules/sql"
+  write_rule_titled "$R/rules/sql/bigquery.md" "BigQuery" "**/*.sql"
+  run emit --harness cursor --packs sql --out "$R/out"
+  [ "$status" -eq 0 ]
+  expected="$(printf -- '---\ndescription: BigQuery\nglobs: ["**/*.sql"]\nalwaysApply: false\n---\n<!-- the-grid:rules generated from rules/sql/bigquery.md; do not edit -->\n# BigQuery\n\n- Name columns.\n- Filter the partition.\nEND')"
+  [ "$(cat "$R/out/grid-sql-bigquery.mdc"; printf END)" = "$expected" ]
+}
+
+@test "emit cursor: a title that is unsafe as a bare YAML scalar is quoted" {
+  mkdir -p "$R/rules/sql"
+  write_rule_titled "$R/rules/sql/style.md" "Style: naming" "**/*.sql"
+  run emit --harness cursor --packs sql --out "$R/out"
+  [ "$status" -eq 0 ]
+  grep -qxF 'description: "Style: naming"' "$R/out/grid-sql-style.mdc"
+}
+
+@test "emit cursor: brace expansion, one group" {
+  mkdir -p "$R/rules/web"
+  write_rule_titled "$R/rules/web/style.md" "Style" '**/*.{ts,tsx}'
+  run emit --harness cursor --packs web --out "$R/out"
+  [ "$status" -eq 0 ]
+  grep -qxF 'globs: ["**/*.ts", "**/*.tsx"]' "$R/out/grid-web-style.mdc"
+}
+
+@test "emit cursor: brace expansion, two groups in source order" {
+  mkdir -p "$R/rules/web"
+  write_rule_titled "$R/rules/web/testing.md" "Testing" '**/*.{test,spec}.{tsx,jsx}'
+  run emit --harness cursor --packs web --out "$R/out"
+  [ "$status" -eq 0 ]
+  grep -qxF 'globs: ["**/*.test.tsx", "**/*.test.jsx", "**/*.spec.tsx", "**/*.spec.jsx"]' "$R/out/grid-web-testing.mdc"
+}
+
+@test "emit cursor: multiple globs keep order and drop duplicates" {
+  mkdir -p "$R/rules/web"
+  write_rule_titled "$R/rules/web/style.md" "Style" '**/*.{ts,tsx}' '**/*.tsx' '**/*.js'
+  run emit --harness cursor --packs web --out "$R/out"
+  [ "$status" -eq 0 ]
+  grep -qxF 'globs: ["**/*.ts", "**/*.tsx", "**/*.js"]' "$R/out/grid-web-style.mdc"
+}
+
+@test "emit cursor: second emit is byte-identical, prints nothing, --check exits 0" {
+  make_pack sql
+  make_pack bash
+  emit --harness cursor --packs sql,bash --out "$R/out" >/dev/null
+  before="$(cat "$R"/out/*.mdc | cksum)"
+  run emit --harness cursor --packs bash,sql --out "$R/out"   # order of --packs is irrelevant
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ "$(cat "$R"/out/*.mdc | cksum)" = "$before" ]
+  run emit --harness cursor --packs sql,bash --out "$R/out" --check
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "emit cursor: dropping a pack deletes only its marked files" {
+  make_pack sql
+  make_pack bash
+  emit --harness cursor --packs sql,bash --out "$R/out" >/dev/null
+  run emit --harness cursor --packs sql --out "$R/out"
+  [ "$status" -eq 0 ]
+  [ "$output" = "removed $R/out/grid-bash-style.mdc" ]
+  [ -f "$R/out/grid-sql-style.mdc" ]
+  [ ! -e "$R/out/grid-bash-style.mdc" ]
+}
+
+@test "emit cursor: an empty --packs removes all marked files" {
+  make_pack sql
+  emit --harness cursor --packs sql --out "$R/out" >/dev/null
+  run emit --harness cursor --packs "" --out "$R/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$R/out/grid-sql-style.mdc" ]
+}
+
+@test "emit cursor: a hand-written grid-keep.mdc without the marker survives" {
+  make_pack sql
+  mkdir -p "$R/out"
+  printf -- '---\ndescription: mine\n---\nhand written\n' > "$R/out/grid-keep.mdc"
+  printf 'other\n' > "$R/out/notes.mdc"
+  before="$(cat "$R/out/grid-keep.mdc" "$R/out/notes.mdc" | cksum)"
+  emit --harness cursor --packs sql --out "$R/out" >/dev/null
+  emit --harness cursor --packs "" --out "$R/out" >/dev/null
+  [ "$(cat "$R/out/grid-keep.mdc" "$R/out/notes.mdc" | cksum)" = "$before" ]
+}
+
+@test "emit cursor: refuses to overwrite an unmarked file at a target path" {
+  make_pack sql
+  mkdir -p "$R/out"
+  printf 'hand written\n' > "$R/out/grid-sql-style.mdc"
+  run emit --harness cursor --packs sql --out "$R/out"
+  [ "$status" -eq 2 ]
+  [ "$(cat "$R/out/grid-sql-style.mdc")" = "hand written" ]
+}
+
+@test "emit cursor: --out that is an existing file exits 2" {
+  make_pack sql
+  printf 'x\n' > "$R/afile"
+  run emit --harness cursor --packs sql --out "$R/afile"
+  [ "$status" -eq 2 ]
+  [ "$(cat "$R/afile")" = "x" ]
+}
+
+@test "emit cursor: --check exits 1 and writes nothing when output is missing" {
+  make_pack sql
+  run emit --harness cursor --packs sql --out "$R/out" --check
+  [ "$status" -eq 1 ]
+  [ "$output" = "wrote $R/out/grid-sql-style.mdc" ]
+  [ ! -e "$R/out" ]
+}
+
+@test "emit cursor: --check exits 1 when a generated file is edited, and does not fix it" {
+  make_pack sql
+  emit --harness cursor --packs sql --out "$R/out" >/dev/null
+  printf 'tampered\n' >> "$R/out/grid-sql-style.mdc"
+  before="$(cksum < "$R/out/grid-sql-style.mdc")"
+  run emit --harness cursor --packs sql --out "$R/out" --check
+  [ "$status" -eq 1 ]
+  [ "$(cksum < "$R/out/grid-sql-style.mdc")" = "$before" ]
+  # A real emit then repairs it.
+  run emit --harness cursor --packs sql --out "$R/out"
+  [ "$status" -eq 0 ]
+  run emit --harness cursor --packs sql --out "$R/out" --check
+  [ "$status" -eq 0 ]
+}
+
+@test "emit cursor: --check exits 1 for a stale marked file and keeps it" {
+  make_pack sql
+  make_pack bash
+  emit --harness cursor --packs sql,bash --out "$R/out" >/dev/null
+  run emit --harness cursor --packs sql --out "$R/out" --check
+  [ "$status" -eq 1 ]
+  [ -f "$R/out/grid-bash-style.mdc" ]
+}
+
+@test "emit cursor: a malformed rule file exits 2 and writes nothing" {
+  make_pack sql
+  printf -- '---\npaths:\n  - "**/*.sql"\n' > "$R/rules/sql/broken.md"   # frontmatter never closed
+  run emit --harness cursor --packs sql --out "$R/out"
+  [ "$status" -eq 2 ]
+  [ ! -e "$R/out" ]
 }
 
 # --- the real tree --------------------------------------------------------------------------

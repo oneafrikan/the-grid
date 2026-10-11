@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""rules.py - lint and list the-grid's rule packs (rules/<pack>/).
+"""rules.py - lint, list and emit the-grid's rule packs (rules/<pack>/).
 
 A rule pack is a directory of short, path-scoped directive files that Claude Code
 loads only when a matching file is read or edited. This script enforces the pack
@@ -17,6 +17,14 @@ Usage (python3 scripts/rules.py ...):
         Print `pack  tier  files  bytes  summary` for every pack, sorted by pack
         name in C locale (code point order), so the output is stable across runs.
 
+  emit --harness cursor|agents-md|gemini --packs a,b [--out PATH] [--check] [--root DIR]
+        Render packs for another harness (the interface other changes call; see
+        design.md "Emitters"). `cursor` writes one `<out>/grid-<pack>-<topic>.mdc`
+        per rule (default --out .cursor/rules). Prints `wrote <path>` / `removed
+        <path>` per change. --check writes nothing and exits 1 on any difference.
+        Exit 0 done/no drift, 1 drift (--check), 2 usage or refusal (nothing
+        written). `agents-md` and `gemini` are not implemented yet (exit 2).
+
 Finding codes (stable): E_FRONTMATTER E_PATHS E_TITLE E_STYLE E_FILE_SIZE
 E_PACK_SIZE E_OPINION E_PACK_META E_SOURCES E_ATTRIBUTION E_NAME E_URL.
 
@@ -29,6 +37,8 @@ formats are tiny, so both are read by strict hand-written parsers.
 from __future__ import annotations
 
 import argparse
+import itertools
+import json
 import os
 import re
 import sys
@@ -458,6 +468,151 @@ def cmd_list(root):
     return 0
 
 
+# --- emit --------------------------------------------------------------------------
+# Marker carried by every generated Cursor file. Its presence is the ONLY thing that
+# lets emit delete or overwrite a file: unmarked (hand-written) files are never touched.
+MDC_MARKER_PREFIX = "<!-- the-grid:rules generated from "
+MDC_MARKER_FMT = MDC_MARKER_PREFIX + "%s; do not edit -->"
+CURSOR_DEFAULT_OUT = os.path.join(".cursor", "rules")
+HARNESSES = ("cursor", "agents-md", "gemini")
+
+
+class Refusal(Exception):
+    """A usage error or refusal: reported on stderr, exit 2, nothing written."""
+
+
+def expand_braces(glob):
+    """Expand `{a,b}` groups left to right as a cartesian product, in source order.
+
+    Lint guarantees no nesting, no empty alternative and at most MAX_BRACE_GROUPS
+    groups, so a plain split is a total definition here:
+    `*.{test,spec}.{tsx,jsx}` -> test.tsx, test.jsx, spec.tsx, spec.jsx.
+    """
+    parts = re.split(r"(\{[^{}]*\})", glob)
+    choices = []
+    for part in parts:
+        if part.startswith("{") and part.endswith("}"):
+            choices.append(part[1:-1].split(","))
+        else:
+            choices.append([part])
+    return ["".join(combo) for combo in itertools.product(*choices)]
+
+
+def yaml_scalar(text):
+    """Render a one-line frontmatter value: bare when plainly safe, else JSON-quoted.
+
+    A title such as `Style: naming` or `Use # sparingly` would break an unquoted
+    YAML scalar, so quote (JSON strings are valid YAML) whenever it could.
+    """
+    if re.search(r"(^[^A-Za-z0-9])|(: )|( #)|(:$)", text):
+        return json.dumps(text)
+    return text
+
+
+def render_mdc(rel, path):
+    """Return the exact .mdc text for one rule file (rel = rules/<pack>/<topic>.md)."""
+    lines = read_lines(path)
+    globs, body, problem = parse_frontmatter(lines)
+    if problem or not globs:
+        raise Refusal("%s: %s (run `rules.py lint`)" % (rel, problem or "paths: list is empty"))
+    # Body = everything after the frontmatter, leading blank lines dropped; the first
+    # remaining line is the `# Title`, which doubles as the Cursor description.
+    rest = lines[body:]
+    while rest and not rest[0].strip():
+        rest.pop(0)
+    if not rest or not TITLE_RE.match(rest[0]):
+        raise Refusal("%s: first line after the frontmatter must be `# <Title>` (run `rules.py lint`)" % rel)
+    title = rest[0][2:].strip()
+    out_globs = []
+    for g in globs:
+        for e in expand_braces(g):
+            if e not in out_globs:        # duplicates dropped, first occurrence wins
+                out_globs.append(e)
+    text = "\n".join(rest)
+    if not text.endswith("\n"):
+        text += "\n"
+    return "---\ndescription: %s\nglobs: %s\nalwaysApply: false\n---\n%s\n%s" % (
+        yaml_scalar(title), json.dumps(out_globs), MDC_MARKER_FMT % rel, text)
+
+
+def is_generated(path):
+    """True when `path` is a regular file carrying the generated-file marker."""
+    if not os.path.isfile(path):
+        return False
+    return any(ln.startswith(MDC_MARKER_PREFIX) for ln in read_lines(path))
+
+
+def plan_cursor(root, packs, out):
+    """Work out what an emit would do without touching disk.
+
+    Returns (writes, removals): `writes` is a sorted list of (path, bytes) that
+    differ from disk (new or changed); `removals` is a sorted list of stale
+    marker-carrying grid-*.mdc paths. Raises Refusal on any problem, before any write.
+    """
+    if os.path.exists(out) and not os.path.isdir(out):
+        raise Refusal("--out %s exists and is not a directory (cursor writes a directory)" % out)
+
+    # Desired set: grid-<pack>-<topic>.mdc for every rule file of every selected pack.
+    wanted = {}
+    for pack in packs:
+        if not NAME_RE.match(pack) or not os.path.isdir(os.path.join(rules_dir(root), pack)):
+            raise Refusal("unknown pack %r" % pack)
+        pdir = os.path.join(rules_dir(root), pack)
+        for name in pack_rule_files(pdir):
+            target = os.path.join(out, "grid-%s-%s.mdc" % (pack, name[:-3]))
+            if target in wanted:
+                raise Refusal("packs collide on output file %s" % target)
+            rel = "rules/%s/%s" % (pack, name)
+            wanted[target] = render_mdc(rel, os.path.join(pdir, name)).encode("utf-8")
+
+    writes = []
+    for target in sorted(wanted):
+        if os.path.lexists(target):
+            # Never overwrite a file we did not generate; refuse rather than clobber.
+            if not is_generated(target):
+                raise Refusal("%s exists and is not generated by rules.py (no marker); move it or choose another --out" % target)
+            with open(target, "rb") as fh:
+                if fh.read() == wanted[target]:
+                    continue                # already up to date
+        writes.append((target, wanted[target]))
+
+    # Stale: marker-carrying grid-*.mdc in --out that are not in the desired set.
+    removals = []
+    if os.path.isdir(out):
+        for name in sorted(os.listdir(out)):
+            full = os.path.join(out, name)
+            if name.startswith("grid-") and name.endswith(".mdc") and full not in wanted and is_generated(full):
+                removals.append(full)
+    return writes, removals
+
+
+def cmd_emit(root, harness, packs_arg, out, check):
+    """Run `emit`. Returns the process exit code (0 done, 1 drift, 2 refusal)."""
+    try:
+        if harness != "cursor":
+            raise Refusal("--harness %s: not implemented yet" % harness)
+        # Sorted, de-duplicated, empty entries dropped: `""` is the empty selection.
+        packs = sorted(set(p.strip() for p in packs_arg.split(",") if p.strip()))
+        out = out or CURSOR_DEFAULT_OUT
+        writes, removals = plan_cursor(root, packs, out)
+    except Refusal as exc:
+        sys.stderr.write("rules.py emit: %s\n" % exc)
+        return 2
+
+    # Validation is complete; from here on we either report (--check) or apply.
+    for path, data in writes:
+        if not check:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, "wb") as fh:
+                fh.write(data)
+        print("wrote %s" % path)
+    for path in removals:
+        if not check:
+            os.remove(path)
+        print("removed %s" % path)
+    return 1 if (check and (writes or removals)) else 0
+
+
 # --- main --------------------------------------------------------------------------
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Lint and list the-grid rule packs.")
@@ -469,11 +624,19 @@ def main(argv=None):
         if name == "lint":
             sp.add_argument("--check-urls", action="store_true",
                             help="HEAD every Sources URL (network; never used by the gate or tests)")
+    sp = sub.add_parser("emit", help="render packs for another harness")
+    sp.add_argument("--root", help="repo root holding rules/ (default: $GRID_DIR, else the parent of scripts/)")
+    sp.add_argument("--harness", required=True, choices=HARNESSES)
+    sp.add_argument("--packs", required=True, help='comma list of packs; "" = empty selection (removes previous output)')
+    sp.add_argument("--out", help="output dir (cursor, default .cursor/rules)")
+    sp.add_argument("--check", action="store_true", help="write nothing; exit 1 if a run would change anything")
     args = ap.parse_args(argv)
     root = os.path.realpath(args.root or os.environ.get("GRID_DIR") or os.path.join(HERE, ".."))
 
     if args.cmd == "list":
         return cmd_list(root)
+    if args.cmd == "emit":
+        return cmd_emit(root, args.harness, args.packs, args.out, args.check)
     f = lint(root, check_urls=args.check_urls)
     for line in f.lines():
         print(line)
