@@ -448,6 +448,8 @@ def render_agent(agent: dict, slug: str | None = None) -> dict[str, str]:
     # AGENTS.md: inject the generated roster (orchestrators) then any stack overlay.
     agents_md = _layer(role, "AGENTS.md", CORE_DIR / "AGENTS_base.md")
     agents_md = inject_roster(agents_md, agent, slug=slug)
+    if is_orchestrator(role):   # orchestrators only; specialists are unchanged
+        agents_md = agents_md.rstrip() + "\n\n" + render_decision_brief() + "\n"
     overlay = render_stack_overlay(agent.get("stacks", []) or [])
     rendered["AGENTS.md"] = agents_md.rstrip() + "\n" + overlay if overlay else agents_md
     return rendered
@@ -570,6 +572,12 @@ def render_roster_table(delegates: list[str], slug: str | None = None) -> str:
     return "\n".join(rows)
 
 
+def render_decision_brief() -> str:
+    """The shared decision-brief section (_core/DECISION_BRIEF.md), comment-stripped.
+    Appended to orchestrators only: the format is how they put a choice to the human."""
+    return strip_html_comments(_read(CORE_DIR / "DECISION_BRIEF.md")).strip()
+
+
 def inject_roster(agents_md: str, agent: dict, slug: str | None = None) -> str:
     """Replace the {{ROSTER_TABLE}} token (if present) with the generated roster.
     load_config has already validated token/delegates_to symmetry, so here we
@@ -598,6 +606,8 @@ def _flattened_identity(agent: dict, slug: str | None = None) -> str:
 #         rules, "What the X is NOT"            — the role's judgement and lane
 #   keep  AGENTS.md (role layer only): every section — scope, receiving work,
 #         routing, and any hard rules / ranked priorities the role defines
+#   add   _core/DECISION_BRIEF.md, orchestrators only, after the AGENTS sections
+#         (the one shared fragment lean keeps; it is the format for asking the human)
 #   keep  SKILL.md — the operating procedure (the actual job)
 #   keep  project context, if the deploy supplies one
 #   drop  _core base scaffolding, IDENTITY nameplate, USER, MEMORY seed, boot
@@ -656,6 +666,8 @@ def render_lean_body(agent: dict, slug: str, project_context: str = "", referenc
         agents_md = inject_roster(strip_html_comments(_read(agents_path)), agent, slug=slug)
         _, agent_secs = split_sections(agents_md)
         parts += [f"{h}\n{b.strip()}" for h, b in agent_secs]
+    if is_orchestrator(role):   # after the role's AGENTS sections, before the stack overlay
+        parts.append(render_decision_brief())
     overlay = render_stack_overlay(agent.get("stacks", []) or []).strip()
     if overlay:
         parts.append(overlay)
@@ -1157,6 +1169,19 @@ def lint_role(role: str) -> list[str]:
     return out
 
 
+def lint_decision_brief(path: Path = CORE_DIR / "DECISION_BRIEF.md") -> list[str]:
+    """Problems with the shared decision-brief fragment: missing, over 1500 bytes, or
+    without the `D<N>` label that the format (and the evals) key on."""
+    if not path.is_file():
+        return [f"E_DECISION_BRIEF: {path.name}: missing"]
+    data = path.read_bytes()
+    if len(data) > 1500:
+        return [f"E_DECISION_BRIEF: {path.name}: {len(data)} bytes, over the 1500 cap"]
+    if "D<N>" not in data.decode("utf-8", errors="replace"):
+        return [f"E_DECISION_BRIEF: {path.name}: lacks the D<N> label"]
+    return []
+
+
 def lint_models() -> list[str]:
     """Problems with models.yaml: unknown tier names or non-string values, in either section."""
     if not MODELS_FILE.is_file():
@@ -1328,6 +1353,7 @@ def main() -> None:
         problems = [p for r in all_roles() for p in lint_role(r)]
         problems += [p for r in sorted(authored_roles() & set(all_roles())) for p in lint_authoring(r)]
         problems += lint_models()
+        problems += lint_decision_brief()
         for p in problems:
             print(p, file=sys.stderr)
         print(f"lint-roles: {len(all_roles())} roles, {len(problems)} problem(s)")
