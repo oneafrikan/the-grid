@@ -1,0 +1,59 @@
+# personal-patterns.txt - the PUBLIC half of the personal-data scan.
+# Read by scripts/check-personal.sh. Generic rules only: no real hostname,
+# account, employer or family name ever goes in this file. Concrete private
+# terms live in the private denylist (see personal-denylist.example.txt).
+#
+# One rule per line, exactly four TAB-separated columns (spaces will NOT do):
+#
+#   kind <TAB> scope <TAB> label <TAB> regex
+#
+#   kind   deny    case-sensitive extended regex; a match on a line is a finding.
+#          deny-i  the same, case-insensitive.
+#          allow   extended regex; a deny hit on a line is SUPPRESSED when that
+#                  same line matches any allow rule whose scope covers the path.
+#                  Allow is line-level, not match-level: a real address that
+#                  shares a line with an allowed one is NOT caught here (that is
+#                  the private denylist's job).
+#   scope  `*` for every file, or a path glob matched against the repo-relative
+#          path with bash `case` (so `skills/*` also covers nested dirs).
+#   label  short name printed in findings as [label]. The `token` label is
+#          special: its findings never print the matched text.
+#   regex  extended regex (grep -E) - the LAST column, so it may contain tabs.
+#
+# Blank lines and lines starting with `#` are ignored.
+
+# --- email addresses (placeholders, git remotes, URL userinfo and noreply are fine)
+deny	*	email	[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}
+allow	*	email-ok	(git@|@example\.(com|org|net)|noreply|https?://[^[:space:]]*@)
+
+# --- home directories (a real user name in a path; obvious placeholders are fine).
+# The name must start with a letter, digit or _ so a dot-dir such as /home/.claude/
+# (a path under a fake HOME) is not mistaken for a user name.
+deny	*	home-mac	/Users/[A-Za-z0-9_][A-Za-z0-9._-]*/
+allow	*	home-placeholder	/Users/(you|name|username|alice|bob|<)
+deny	*	home-linux	/home/[A-Za-z0-9_][A-Za-z0-9._-]*/
+allow	*	home-placeholder-lx	/home/(you|user|name|username|alice|bob|<)
+
+# --- secrets: token-shaped strings. Findings print only `path:line: [token]`.
+# `\bsk-` needs the word boundary or "desk-finance-risk-officer" false-positives.
+deny	*	token	(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|\bsk-[A-Za-z0-9_-]{20,}|xox[abp]-[0-9A-Za-z-]{10,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY)
+allow	*	token-example	EXAMPLE
+
+# --- network addresses: RFC1918 private ranges, CGNAT 100.64.0.0/10, tailnet hosts
+deny	*	private-ip	\b(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)\b
+deny	*	cgnat-ip	\b100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]+\.[0-9]+\b
+deny	*	tailnet	[A-Za-z0-9-]+\.ts\.net\b
+
+# --- author voice: prose docs may say the author's name; text that is rendered
+# into other people's agents, skills, hooks or rules must say "the operator".
+# A scope that matches no files is a no-op, so paths later changes add are listed now.
+deny	agent-factory/openclaw/templates/*	author-name-in-rendered-text	Gareth
+deny	agent-factory/_core/*	author-name-in-rendered-text	Gareth
+deny	agent-factory/roles/*	author-name-in-rendered-text	Gareth
+deny	project-factory/templates/*	author-name-in-rendered-text	Gareth
+deny	skills/*	author-name-in-rendered-text	Gareth
+deny	agents/*	author-name-in-rendered-text	Gareth
+deny	hooks/*	author-name-in-rendered-text	Gareth
+deny	rules/*	author-name-in-rendered-text	Gareth
+deny	automation-factory/patterns/*	author-name-in-rendered-text	Gareth
+deny	plugins/*	author-name-in-rendered-text	Gareth
