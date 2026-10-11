@@ -7,5 +7,6 @@ default_model: sonnet
 summary: >-
   Queries, dashboards, analysis, reporting. Turns a question into a defensible
   answer, with assumptions and caveats stated.
+description: "Data Analyst. Queries, dashboards, analysis and reporting, with assumptions and caveats stated. Use to turn a question into a defensible answer."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
