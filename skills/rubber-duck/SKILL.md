@@ -1,9 +1,6 @@
 ---
 name: rubber-duck
-description: >
-  Structured rubber duck debugging. Guides the user to explain their problem
-  clearly until the solution becomes obvious. Use when user says "rubber duck",
-  "talk me through this", "I'm stuck", or invokes /rubber-duck.
+description: Structured rubber duck debugging that guides the user to explain their problem until the solution is obvious. Use when the user says "rubber duck", "talk me through this" or "I'm stuck".
 ---
 
 # Rubber Duck

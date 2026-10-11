@@ -1,10 +1,6 @@
 ---
 name: skill-scout
-description: >
-  Scout public agent-skill directories (ranked by installs) and propose new
-  skills to add to the-grid, deduped against what's already wired. Use when
-  the user says "skill-scout", "find new skills", "what skills should I add",
-  "propose skills", or invokes /skill-scout.
+description: Scout public agent-skill directories (ranked by installs) and propose new skills for the-grid, deduped against what is wired. Use when the user says "skill-scout", "find new skills" or "what skills should I add".
 ---
 
 # skill-scout

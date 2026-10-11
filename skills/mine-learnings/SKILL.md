@@ -1,17 +1,6 @@
 ---
 name: mine-learnings
-description: >
-  Mine project history — commits, docs, and logs — for durable technical
-  learnings (recurring bugs, gotchas, decisions, workarounds) and write them
-  into LEARNINGS.md, folding the highest-value ones as short rules into
-  CLAUDE.md. Idempotent: every run rescans full history but dedupes against
-  already-recorded (and already-rejected) learnings by content hash, so
-  nothing is ever proposed or written twice. Use when the user asks to
-  "extract learnings", "mine learnings from history", "update CLAUDE.md from
-  project history", "bake learnings into CLAUDE.md", or invokes
-  /mine-learnings. Works in any git repo — discovers whatever docs/logs
-  conventions that repo actually uses (LOGS/, docs/, CHANGELOG.md, README.md,
-  etc.) rather than assuming a fixed layout.
+description: Mine project history (commits, docs, logs) for durable learnings and write them to LEARNINGS.md and CLAUDE.md, idempotently. Use when the user asks to "extract learnings", "mine learnings from history" or "update CLAUDE.md from project history".
 ---
 
 # mine-learnings
