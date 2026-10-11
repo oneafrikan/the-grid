@@ -177,9 +177,10 @@ STUB
   run catalogue_problems "$REPO_ROOT"
   [ "$status" -eq 0 ]
   [ -z "$output" ] || { echo "$output" >&2; false; }
-  # the two guard entries carry the fields design.md requires
-  run jq -e '.version == 1 and (.hooks | length) == 3
-    and all(.hooks[] | select(.scope == "project"); .event == "PreToolUse" and .matcher == "Bash"
+  # the two guard entries carry the fields design.md requires (the four opt-in instincts
+  # entries are checked in tests/test_instincts_register.bats, so they are excluded here)
+  run jq -e '.version == 1 and (.hooks | length) == 7
+    and all(.hooks[] | select(.scope == "project" and (has("opt_in") | not)); .event == "PreToolUse" and .matcher == "Bash"
       and .fail == "closed" and .timeout == 5 and .model_cost == false and (.cost | length) > 0)' \
     "$REPO_ROOT/hooks/catalogue.json"
   [ "$status" -eq 0 ]
