@@ -1,11 +1,6 @@
 ---
 name: openspec-help
-description: >
-  Quick-reference card for OpenSpec in the-grid — the 12 wired skills, when to
-  reach for each, the spec format, the CLI, and how the convention reaches new
-  and existing projects. Use when the user asks "how do I use openspec", "what
-  are the openspec commands", "which openspec skill do I want", "how do I add
-  specs to this repo", or invokes /openspec-help.
+description: Quick-reference card for OpenSpec in the-grid (the 12 wired skills, spec format, CLI). Use when the user asks "how do I use openspec", "what are the openspec commands" or "which openspec skill do I want".
 ---
 
 # openspec-help

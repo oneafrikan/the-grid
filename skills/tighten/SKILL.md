@@ -1,11 +1,6 @@
 ---
 name: tighten
-description: >
-  Condense verbose prose across one or more project files into a tighter,
-  less-wordy form — cutting filler, hedging, and restated ideas without
-  dropping facts or restructuring content. Docs only, never emails/messages.
-  Use when the user says "tighten this doc", "condense these files", "make
-  this less wordy", or invokes /tighten.
+description: Condense verbose prose in project docs without dropping facts or restructuring; docs only, never emails or messages. Use when the user says "tighten this doc", "condense these files" or "make this less wordy".
 ---
 
 # tighten

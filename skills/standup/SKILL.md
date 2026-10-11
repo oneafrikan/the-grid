@@ -1,9 +1,6 @@
 ---
 name: standup
-description: >
-  Generate a concise standup summary from recent git activity across repos.
-  Use when user says "standup", "what did I do yesterday", "daily summary",
-  or invokes /standup.
+description: Generate a concise standup summary from recent git activity across repos. Use when the user says "standup", "what did I do yesterday" or "daily summary".
 ---
 
 # Standup
