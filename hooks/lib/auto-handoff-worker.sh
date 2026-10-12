@@ -300,23 +300,77 @@ if [ -n "$TARGET" ]; then add_rule "$TARGET"; add_rule "$TARGET_REAL"; fi
 add_rule "$FALLBACK"; add_rule "$FALLBACK_REAL"
 
 # ---- 6: snapshot .git, stamp, run the child ----------------------------------------
-# A changed .git/config or .git/hooks means the write-only boundary failed. Copy both
-# now (never into a directory the child can see); compare after.
+# A changed git config, hook, info/ file or HEAD means the write-only boundary failed, and
+# the commit below runs in the TARGET repo, not only the cwd repo: a hook planted there
+# would execute as the operator (R07.sec.F2). So every repo we will read or commit in is
+# watched: the cwd repo, the target repo and the fallback repo. State = path + type +
+# checksum (or link target), written outside any directory the child can see.
 GITDIRS=()
-g="$(git -C "$CWD" rev-parse --absolute-git-dir 2>/dev/null)"
-if [ -n "$g" ]; then
-  GITDIRS+=("$g")
-  # In a linked worktree config and hooks live in the common dir: watch it too.
-  common="$(cd "$CWD" && c="$(git rev-parse --git-common-dir 2>/dev/null)" && cd "$c" 2>/dev/null && pwd -P)"
-  [ -n "$common" ] && [ "$common" != "$g" ] && GITDIRS+=("$common")
-fi
+# add_gitdir <dir>: remember the git dir (and the common dir of a linked worktree, where
+# config and hooks live) of the repo containing <dir>, once.
+add_gitdir() {
+  local g c x
+  [ -d "$1" ] || return 0
+  g="$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null)" || return 0
+  [ -n "$g" ] || return 0
+  c="$(cd "$1" && cc="$(git rev-parse --git-common-dir 2>/dev/null)" && cd "$cc" 2>/dev/null && pwd -P)"
+  for x in "$g" "$c"; do
+    [ -n "$x" ] && { have_gitdir "$x" || GITDIRS+=("$x"); }
+  done
+  return 0
+}
+have_gitdir() { local x; for x in "${GITDIRS[@]}"; do [ "$x" = "$1" ] && return 0; done; return 1; }
+# state_lines: stdin = paths; prints "<path>\t<F|L>\t<cksum|target>" for every file or
+# symlink at or below them (a directory contributes its files). Missing paths print nothing.
+state_lines() {
+  local p f
+  while IFS= read -r p; do
+    { [ -e "$p" ] || [ -L "$p" ]; } || continue
+    find -P "$p" \( -type f -o -type l \) -print 2>/dev/null
+  done | sort -u | while IFS= read -r f; do
+    if [ -L "$f" ]; then printf '%s\tL\t%s\n' "$f" "$(readlink "$f")"
+    else printf '%s\tF\t%s\n' "$f" "$(cksum < "$f" 2>/dev/null | tr ' ' ':')"; fi
+  done
+}
+# git_watch <gitdir>: the paths whose change means a git hook, alias or ref could now run
+# or point somewhere else: config, HEAD, info/, hooks/, a submodule's config and hooks, a
+# linked worktree's config/hooks/info, and any core.hooksPath directory.
+git_watch() {
+  local d="$1" p hp
+  for p in "$d/config" "$d/HEAD" "$d/info" "$d/hooks" "$d"/modules/*/config "$d"/modules/*/hooks \
+           "$d"/worktrees/*/config.worktree "$d"/worktrees/*/hooks "$d"/worktrees/*/info; do
+    printf '%s\n' "$p"
+  done
+  hp="$(git --git-dir="$d" config --get core.hooksPath 2>/dev/null)"
+  if [ -n "$hp" ]; then
+    case "$hp" in \~|\~/*) hp="$HOME${hp#\~}" ;; esac
+    case "$hp" in /*) ;; *) hp="$(dirname "$d")/$hp" ;; esac
+    printf '%s\n' "$hp"
+  fi
+}
+git_state() { git_watch "$1" | state_lines; }
+
+add_gitdir "$CWD"
+[ -n "$TARGET_REAL" ] && add_gitdir "$TARGET_REAL"
+add_gitdir "$FALLBACK_REAL"
 i=0
 for d in "${GITDIRS[@]}"; do
-  mkdir -p "$SNAP_DIR/git$i/hooks"
-  [ -f "$d/config" ] && cp "$d/config" "$SNAP_DIR/git$i/config"
-  [ -d "$d/hooks" ] && cp -R "$d/hooks/." "$SNAP_DIR/git$i/hooks/" 2>/dev/null
+  git_state "$d" > "$SNAP_DIR/git$i.state"
   i=$((i + 1))
 done
+
+# Files the child must never touch, outside every repo: shell startup files, ssh login
+# config, the global git config, Claude's own settings and the user systemd units (each of
+# these runs code or grants access later). Same state snapshot, same compare.
+home_watch() {
+  local f
+  for f in .bashrc .bash_profile .bash_login .profile .bash_logout .zshrc .zshenv .zprofile \
+           .zlogin .zlogout .gitconfig .ssh/authorized_keys .ssh/config .ssh/rc .config/git/config; do
+    printf '%s\n' "$HOME/$f"
+  done
+  printf '%s\n' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/settings*.json "$HOME/.config/systemd/user"
+}
+home_watch | state_lines > "$SNAP_DIR/home.state"
 
 # Stamp file, backdated 2 s: a coarse-granularity filesystem must not make a file
 # written in the same second as the stamp look older than it.
@@ -355,59 +409,63 @@ case "$rc" in
 esac
 
 # ---- 7: verify what the child wrote -------------------------------------------------
-# 7a. .git first: any difference in config or hooks fails closed. Nothing under .git/
-#     is ever moved or deleted, the operator may be using the repo right now.
+# 7a. .git first, then the files outside every repo: any difference in the watched state
+#     fails closed. Nothing is ever moved or deleted: the operator may be using the repo
+#     right now. The snapshot is compared by content (checksum / link target), so a file
+#     rewritten with identical bytes is not a change.
 CHANGED=()
+# state_diff <before-file> <after-text-from-stdin>: the paths whose state line differs.
+state_diff() {
+  diff "$1" - 2>/dev/null | awk -F'\t' '/^[<>] /{sub(/^[<>] /, "", $1); print $1}' | sort -u
+}
 i=0
 for d in "${GITDIRS[@]}"; do
-  s="$SNAP_DIR/git$i"
-  if [ -f "$s/config" ]; then
-    cmp -s "$s/config" "$d/config" 2>/dev/null || CHANGED+=("$d/config")
-  elif [ -e "$d/config" ]; then
-    CHANGED+=("$d/config")
-  fi
-  if [ -d "$d/hooks" ]; then
-    # diff -rq lines: "Only in <dir>: <name>" / "Files <a> and <b> differ"
-    while IFS= read -r l; do
-      case "$l" in
-        "Only in "*) rest="${l#Only in }"; p="${rest%%: *}/${rest#*: }" ;;
-        "Files "*" differ") rest="${l#Files * and }"; p="${rest% differ}" ;;
-        *) p="$l" ;;
-      esac
-      # report snapshot-side paths (a removed file) at their live location
-      CHANGED+=("${p/#$s/$d}")
-    done < <(diff -rq "$s/hooks" "$d/hooks" 2>/dev/null)
-  elif [ -n "$(ls -A "$s/hooks" 2>/dev/null)" ]; then
-    CHANGED+=("$d/hooks")
-  fi
+  while IFS= read -r p; do [ -n "$p" ] && CHANGED+=("$p"); done < <(git_state "$d" | state_diff "$SNAP_DIR/git$i.state")
   i=$((i + 1))
 done
+while IFS= read -r p; do [ -n "$p" ] && CHANGED+=("$p"); done < <(home_watch | state_lines | state_diff "$SNAP_DIR/home.state")
 if [ "${#CHANGED[@]}" -gt 0 ]; then
   DISP=(); for p in "${CHANGED[@]}"; do DISP+=("$(disp "$p")"); done
   finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")"
 fi
 
-# 7b. every NEW regular file under cwd, the fallback dir and (when it lies outside cwd)
-#     the target dir. No -maxdepth: a depth cap lets a deep write go unseen. .git/ is
-#     pruned whole; our own temp dirs are pruned in case TMPDIR sits under cwd.
-ROOTS=("$CWD" "$FALLBACK")
+# 7b. every NEW regular file or symlink under cwd, the fallback dir, the target dir and the
+#     work trees of the repos we commit in (a write elsewhere in the private repo would
+#     otherwise go unseen). find -P: a symlink is looked at, never followed, so a link
+#     cannot hide or redirect a write. No -maxdepth: a depth cap lets a deep write go
+#     unseen. .git/ is pruned whole (7a watches the parts of it that matter); our own temp
+#     dirs are pruned in case TMPDIR sits under cwd. A symlink named like a handoff file is
+#     reported whatever its age: a pre-planted one would make the child write through it.
+ROOTS=("$CWD_REAL" "$FALLBACK_REAL")
 if [ -n "$TARGET_REAL" ]; then
   case "$TARGET_REAL/" in
     "$CWD_REAL"/*) ;;
     *) ROOTS+=("$TARGET_REAL") ;;
   esac
 fi
+for d in "$TARGET_REAL" "$FALLBACK_REAL"; do
+  [ -n "$d" ] && [ -d "$d" ] || continue
+  t="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$t" ] && ROOTS+=("$(rp "$t")")
+done
+DIGEST_REAL="$(rp "$DIGEST_DIR")"; SNAP_REAL="$(rp "$SNAP_DIR")"   # roots are real paths: prune by real path too
 NEW=()      # real paths, de-duplicated (the same file can be reached by two roots)
 NEW_DISP=()
+SYMS=()     # new symlinks, and handoff-named ones of any age
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   r="$(rp "$f")" || continue
   dup=0
-  for x in "${NEW[@]}"; do [ "$x" = "$r" ] && dup=1; done
+  for x in "${NEW[@]}" "${SYMS[@]}"; do [ "$x" = "$r" ] && dup=1; done
   [ "$dup" = 1 ] && continue
-  NEW+=("$r"); NEW_DISP+=("$(disp "$f")")
-done < <(find -L "${ROOTS[@]}" \( -name .git -o -path "$DIGEST_DIR" -o -path "$SNAP_DIR" \) -prune \
-              -o -type f -newer "$STAMP" -print 2>/dev/null)
+  if [ -L "$f" ]; then SYMS+=("$r")
+  else NEW+=("$r"); NEW_DISP+=("$(disp "$f")"); fi
+done < <(find -P "${ROOTS[@]}" \( -name .git -o -path "$DIGEST_DIR" -o -path "$SNAP_DIR" -o -path "$DIGEST_REAL" -o -path "$SNAP_REAL" \) -prune \
+              -o \( \( \( -type f -o -type l \) -newer "$STAMP" \) \
+                    -o \( -type l \( -name '*-handoff.md' -o -name '*-context.md' \) \) \) -print 2>/dev/null)
+if [ "${#SYMS[@]}" -gt 0 ]; then
+  DISP=(); for p in "${SYMS[@]}"; do DISP+=("$(disp "$p")"); done
+  finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")"
+fi
 
 HANDOFFS=()   # indexes into NEW
 n=0
