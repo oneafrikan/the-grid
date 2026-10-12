@@ -15,11 +15,14 @@
 #                 FORCES RULES_DIR=$GRID_DRY_HOME/.claude/rules, ignoring any inherited
 #                 value (see the dry-home block below), so no dry run can reach the real one.
 #   GRID_BASELINE — baseline manifest file (default: $GRID_DIR/baseline-submodules.txt)
-#   GRID_SKIP_CATALOG=1 — don't regenerate SKILLS.md at the end (used by --check)
-#   GRID_SKIP_AUDIT=1 — skip the pre-wire audit (step 0). Set by audit.sh's own dry run
-#                   so the audit does not recurse into itself; not for everyday use.
-#   GRID_AUDIT=warn — a high-severity audit finding prints a warning and wiring continues
-#                   (default: it blocks, exit 3, before any link is touched)
+#   GRID_SKIP_CATALOG=1 — don't regenerate SKILLS.md or write .wired.manifest (used by
+#                   --check). It does NOT skip the audit any more.
+#   GRID_SKIP_AUDIT=1 — the ONLY bypass of the pre-wire audit (step 0) besides a dry run
+#                   (GRID_DRY_HOME, which never audits). Prints a notice on stderr; set by
+#                   audit.sh's own dry run so it does not recurse; not for everyday use.
+#   GRID_AUDIT=warn — a high-severity finding, a missing policy.yaml or a missing python3
+#                   prints a warning and wiring continues (default: it blocks, exit 3,
+#                   before any link is touched)
 #   GRID_NO_CATALOG=1 — skip ONLY the SKILLS.md refresh (step 4); .wired.manifest is still
 #                   written. Set by `grid install`: on a machine without submodules most
 #                   library repos are empty, so a refresh would rewrite the tracked SKILLS.md.
@@ -518,12 +521,17 @@ mkdir -p "$SKILLS_DIR" "$AGENTS_DIR"
 MANIFEST_ROWS=()
 
 # --- 0. Vet before touching any link -------------------------------------------
-# Skipped in --check's throwaway run (GRID_SKIP_CATALOG) and in audit.sh's own
-# dry run (GRID_SKIP_AUDIT, prevents recursion). Skipped LOUDLY when the tool or
-# policy is absent, so mock grids in tests and bare machines still wire.
+# Skipped in exactly two cases: every dry run (GRID_DRY_HOME set: --check's child,
+# audit.sh --wired, baseline_wired.py, grid lock; silent, a dry run changes nothing), and
+# GRID_SKIP_AUDIT, the one explicit bypass (it prints a notice on stderr). GRID_SKIP_CATALOG
+# only suppresses the SKILLS.md / manifest writes and no longer skips the audit. A missing
+# policy.yaml or python3 blocks like a finding does (exit 3), not a silent skip.
 # Runs BEFORE teardown: a blocked wire changes nothing, so a bad upstream bump
 # can never leave a machine half-wired. audit.sh exit 2 (broken policy) blocks too.
-if [ -z "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_SKIP_CATALOG:-}" ]; then
+if [ -n "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_DRY_HOME:-}" ]; then
+  echo "wire: GRID_SKIP_AUDIT is set: the audit is SKIPPED, wired content is not vetted" >&2
+fi
+if [ -z "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_DRY_HOME:-}" ]; then
   if [ ! -f "$GRID_DIR/policy.yaml" ]; then
     # No policy means nothing to audit against: same block as a finding (fail closed).
     # Mock grids that deliberately have none set GRID_SKIP_AUDIT=1 (tests do, via common_setup).
