@@ -332,6 +332,25 @@ _KNOWN_BINARY_MAGICS = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF8
                         b"wOFF", b"wOF2")
 
 
+def _plausible_utf16(data):
+    """True when `data` really is UTF-16 text: a BOM (FF FE is not the UTF-32 LE BOM),
+    an even length, a strict decode, no NUL character in the result and mostly ASCII
+    (so a byte sequence merely STARTING with FF FE, which bash runs as a script, is not
+    mistaken for UTF-16 and decoded into harmless-looking garbage). Real UTF-16 in a
+    non-Latin script is therefore reported as unscannable, which fails closed."""
+    if not data.startswith((b"\xff\xfe", b"\xfe\xff")) or data.startswith(b"\xff\xfe\x00\x00"):
+        return False
+    if len(data) % 2:
+        return False
+    try:
+        text = data.decode("utf-16")
+    except UnicodeDecodeError:
+        return False
+    if "\x00" in text or not text:
+        return False
+    return sum(1 for c in text if ord(c) < 0x80) >= 0.9 * len(text)
+
+
 def _is_known_binary(head):
     """A file that starts with the magic number of a common non-text format."""
     return head.startswith(_KNOWN_BINARY_MAGICS)
@@ -682,10 +701,15 @@ class Scan:
         agent or read as configuration must not pass quietly, so script/hook/config
         class, SKILL.md and agent .md are high; prose and assets stay at the policy
         default (low), which `--quiet` still prints (ALWAYS_PRINT_LOW)."""
-        if (fclass in ("script", "hook", "config") or name == "SKILL.md"
-                or _is_agent_md(rel_target, rel_root, name)):
+        if self._exec_class(fclass, name, rel_target, rel_root):
             return "high"
         return self.policy.builtin[rule]
+
+    @staticmethod
+    def _exec_class(fclass, name, rel_target, rel_root):
+        """Content that is executed, loaded as an agent or read as configuration."""
+        return (fclass in ("script", "hook", "config") or name == "SKILL.md"
+                or _is_agent_md(rel_target, rel_root, name))
 
     def _scan_file(self, full, rel_target, tier):
         pol = self.policy
@@ -723,10 +747,9 @@ class Scan:
 
         text = None
         if b"\x00" in head:
-            if head.startswith((b"\xff\xfe", b"\xfe\xff")) and not head.startswith(b"\xff\xfe\x00\x00"):
-                # UTF-16 with a BOM (a UTF-32 LE BOM also starts FF FE, so it is excluded):
-                # decode it and scan the text rather than skip it.
-                text = data.decode("utf-16", errors="replace")
+            if _plausible_utf16(data):
+                # Genuine UTF-16 with a BOM: decode it and scan the text.
+                text = data.decode("utf-16")
             elif _is_known_binary(head):
                 return                        # an image/archive/font: nothing to scan
             else:
@@ -734,7 +757,11 @@ class Scan:
                           self._not_scanned_severity("unscannable-file", fclass, name, rel_target, rel_root),
                           display, 0, fclass, tier, BUILTIN_MESSAGES["unscannable-file"],
                           sha256=sha256_bytes(data))
-                return
+                if not self._exec_class(fclass, name, rel_target, rel_root):
+                    return
+                # Content that will be executed or loaded: ALSO scan the bytes as bash would
+                # see them (NULs dropped), so the finding above is not the only signal.
+                text = data.replace(b"\x00", b"").decode("utf-8", errors="replace")
 
         file_sha = sha256_bytes(data)
         # Lines split on \n ONLY, so U+2028/U+2029 never end a line.

