@@ -485,17 +485,52 @@ def check_user_no_symlinks(settings: Path) -> None:
 
 def read_settings(path: Path) -> tuple[dict, str | None]:
     """(parsed settings, raw text) of a settings file; ({}, None) when it is absent.
-    Dies on invalid JSON or a non-object, before anything has been written."""
-    if not path.is_file():
+    Dies, before anything has been written, on anything the rewrite could corrupt or
+    cannot write: a non-regular path (directory, FIFO), an empty file, invalid JSON, a
+    non-object, duplicate keys or non-finite numbers (the rewrite would drop or re-emit
+    them), and any I/O or encoding failure (a one-line error, never a traceback)."""
+    if not os.path.lexists(path):
         return {}, None
+    if not path.is_file():  # a directory or FIFO; symlinks were refused by the callers
+        die(f"{path}: not a regular file; nothing was written")
     try:
         text = path.read_text(encoding="utf-8")
-        data = json.loads(text)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        die(f"{path}: not valid JSON ({exc}); fix or remove it, nothing was written")
+        if not text.strip():
+            # Unverified whether Claude Code accepts an empty file (OPERATOR-TASKS), so keep
+            # refusing it rather than guess; the message says how to get unblocked.
+            die(f"{path}: is empty; delete it or write {{}} to it; nothing was written")
+        data = json.loads(text, object_pairs_hook=_no_duplicate_keys,
+                          parse_constant=_reject_constant, parse_float=_finite_float)
+    except (ValueError, OSError, RecursionError) as exc:  # JSONDecodeError/UnicodeError are ValueErrors
+        die(f"{path}: not valid JSON or not readable ({exc}); fix or remove it, nothing was written")
     if not isinstance(data, dict):
         die(f"{path}: must be a JSON object, nothing was written")
     return data, text
+
+
+def _no_duplicate_keys(pairs):
+    """json object_pairs_hook: json.loads keeps the last of two equal keys, so a rewrite
+    would silently drop one. Refuse instead."""
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate key {key!r}")
+        obj[key] = value
+    return obj
+
+
+def _reject_constant(name):
+    """json parse_constant: NaN, Infinity and -Infinity are not JSON; Python accepts them
+    and would re-emit them."""
+    raise ValueError(f"non-finite number {name}")
+
+
+def _finite_float(text):
+    """json parse_float: 1e999 parses to infinity, which a rewrite would re-emit."""
+    value = float(text)
+    if value in (float("inf"), float("-inf")):
+        raise ValueError(f"non-finite number {text}")
+    return value
 
 
 def render(settings: dict) -> str:
@@ -517,6 +552,32 @@ def atomic_write(path: Path, text: str) -> None:
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
+
+
+def write_files(items: list[tuple[Path, str]]) -> None:
+    """Write every (path, text) atomically, after checking ALL of them up front.
+
+    The checks that can be done without writing happen first, so an input that cannot be
+    written aborts the run before the first file changes: the text must encode as UTF-8
+    (a lone surrogate would not), and an existing file must have its owner write bit
+    (st_mode, not os.access: root passes os.access on a 0444 file; a read-only file is a
+    deliberate choice the emitter must not replace). I/O failures during the writes are
+    one-line errors that say which files, if any, were already written."""
+    for path, text in items:
+        try:
+            text.encode("utf-8")
+        except UnicodeError as exc:
+            die(f"{path}: cannot encode the new content as UTF-8 ({exc}); nothing was written")
+        if path.exists() and not path.stat().st_mode & 0o200:
+            die(f"{path}: is read-only (no owner write bit); make it writable or remove it; nothing was written")
+    done: list[Path] = []
+    for path, text in items:
+        try:
+            atomic_write(path, text)
+        except (OSError, UnicodeError) as exc:
+            where = f"already written: {', '.join(map(str, done))}" if done else "nothing was written"
+            die(f"{path}: cannot write ({exc}); {where}")
+        done.append(path)
 
 
 def hook_id(command: str) -> str:
@@ -586,7 +647,7 @@ def run_user(args, catalogue: list[dict]) -> None:
     if merged != original:
         new_text = render(merged)
         if new_text != text:  # same bytes: leave the file (and its mtime) alone
-            atomic_write(settings, new_text)
+            write_files([(settings, new_text)])
             written = 1
     print(f"deploy_hooks: {settings}  user hooks: {names}  {written} written.")
 
@@ -672,15 +733,16 @@ def main() -> None:
         return
 
     # --- apply -------------------------------------------------------------------
-    changed = 0
+    todo = []
     for rel, original, text, merged, _want in plan:
         if merged == original:
             continue  # nothing to do; also covers "do not create a file just to leave it empty"
         new_text = render(merged)
         if new_text == text:
             continue  # same bytes: leave the file (and its mtime) alone
-        atomic_write(project / rel, new_text)
-        changed += 1
+        todo.append((project / rel, new_text))
+    write_files(todo)  # checks every file before the first write
+    changed = len(todo)
     print(f"deploy_hooks: {project}  profile={profile}  target={target}  {len(desired)} hook(s), {changed} written.")
     # Marker work only on a real apply (skipped under --check and --dry-run above).
     sync_learning_marker(project, emitting_learning)
