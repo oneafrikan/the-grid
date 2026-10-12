@@ -844,7 +844,7 @@ class Scan:
                     text = lines[i].rstrip("\r")
                     if text in ("---", "..."):
                         break                 # end of frontmatter
-                    if re.match(r"hooks\s*:", text):
+                    if re.match(r"""["']?hooks["']?\s*:""", text):
                         in_hooks = True
                         classes[i] = "hook"
                     elif in_hooks and (text == "" or text[0] in " \t-"):

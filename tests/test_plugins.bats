@@ -589,8 +589,12 @@ plugin_tree_problems() {
   find "$d" -type f \( -name '.mcp.json' -o -name '.mcp-*.json' \) | sed 's/^/mcp config: /'
   find "$d" -type f -name '*.md' | while IFS= read -r f; do
     # frontmatter only: from a first-line `---` to the next `---`
-    awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } /^hooks[[:space:]]*:/ { found = 1 } END { exit !found }' "$f" \
+    awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } /^["'"'"']?hooks["'"'"']?[[:space:]]*:/ { found = 1 } END { exit !found }' "$f" \
       && printf 'hooks frontmatter: %s\n' "$f"
+  done
+  # a `"hooks": {` object in any json manifest (plugin.json declares hooks inline)
+  find "$d" -type f -name '*.json' | while IFS= read -r f; do
+    grep -Eq '"hooks"[[:space:]]*:[[:space:]]*[{[]' "$f" && printf 'hooks in json: %s\n' "$f"
   done
   return 0
 }
@@ -621,4 +625,18 @@ plugin_tree_problems() {
   [[ "$output" == *"mcp config: "* ]]
   [[ "$output" == *"executable: "*"run.sh"* ]]
   [[ "$output" == *"symlink: "*"link.md"* ]]
+}
+
+@test "R14.sec.F1: the plugin-tree check also reports a quoted hooks key and a hooks key in a json manifest" {
+  local copy="$BATS_TEST_TMPDIR/plugins-copy2"
+  cp -R "$REPO_ROOT/plugins" "$copy"
+  local skill
+  skill="$(find "$copy" -name SKILL.md | sort | head -n 1)"
+  awk 'NR == 1 { print; print "\"hooks\":"; print "  PreToolUse: []"; next } { print }' "$skill" > "$skill.new"
+  mv "$skill.new" "$skill"
+  printf '{"name": "x", "hooks": {"PreToolUse": []}}\n' > "$copy/inline.json"
+  run plugin_tree_problems "$copy"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hooks frontmatter: $skill"* ]]
+  [[ "$output" == *"hooks in json: "*"inline.json"* ]]
 }

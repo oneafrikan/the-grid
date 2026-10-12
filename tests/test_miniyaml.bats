@@ -99,7 +99,7 @@ sys.exit(0 if got == want else "got %r" % got)
 }
 
 # (d) Pin the shape of the real policy without needing PyYAML.
-@test "policy.yaml has exactly the 25 expected rule ids in order, negation (?i), first class hook" {
+@test "policy.yaml has exactly the 26 expected rule ids in order, negation (?i), first class hook" {
   run python3 -c '
 import sys
 sys.path.insert(0, sys.argv[1])
@@ -110,7 +110,7 @@ print(d["negation"].startswith("(?i)"))
 print(d["classes"][0]["name"])
 ' "$LIB" "$POLICY"
   [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "curl-pipe-shell npx-unpinned latest-tag uvx-unpinned secret-shape home-path ssh-write shell-rc-write prompt-injection hook-network credential-read decode-and-exec download-then-run eval-cat exec-urlopen powershell-iex pip-git-install runner-unpinned exfil-pipe destructive-system claude-config-write hook-declared mcp-declared lifecycle-script allowed-tools-bash" ]
+  [ "${lines[0]}" = "curl-pipe-shell npx-unpinned latest-tag uvx-unpinned secret-shape home-path ssh-write shell-rc-write prompt-injection hook-network credential-read decode-and-exec download-then-run eval-cat exec-urlopen powershell-iex pip-git-install runner-unpinned exfil-pipe destructive-system claude-config-write hook-declared mcp-declared lifecycle-script allowed-tools-bash plugin-hooks-declared" ]
   [ "${lines[1]}" = "True" ]
   [ "${lines[2]}" = "hook" ]    # WP-036: hook is listed before test
 }
