@@ -95,9 +95,15 @@ python3 scripts/rules.py emit --harness cursor|agents-md|gemini --packs sql,bash
 | `--check` | write nothing; exit 1 if a run would change anything |
 | `--root` | the-grid checkout whose `rules/` is read (default: `GRID_DIR`, else the repo containing the script) |
 
-- Exit codes: 0 done or no drift; 1 drift under `--check`; 2 usage or refusal (unknown
-  harness or pack, unbalanced markers, block over cap, `--out` of the wrong type such as an
-  existing file for `cursor`). On exit 2 nothing is written.
+- Exit codes: 0 done or no drift; 1 drift under `--check`; 2 usage, refusal or I/O error
+  (unknown harness or pack, unbalanced markers, `--out` of the wrong type such as an
+  existing file for `cursor`, a symlinked target); 3 the block would be over the 12288-byte
+  cap. On exit 3 nothing is written and an existing block is left as it was, so `wire.sh`
+  warns, records `skipped over-cap` and stays green.
+- Exit 2 also means one or more selected packs failed re-lint: `emit` lints every selected
+  pack first, excludes a failing pack (named on stderr) and still delivers the clean ones.
+  If every selected pack fails, nothing is written and an existing block is untouched.
+  Otherwise, on exit 2 nothing is written.
 - Stdout: one line per change, `wrote <path>` or `removed <path>`; nothing when up to
   date. Errors go to stderr.
 - Output is deterministic and idempotent: packs and files sorted in C locale, no timestamps.
@@ -109,8 +115,9 @@ python3 scripts/rules.py emit --harness cursor|agents-md|gemini --packs sql,bash
   `<!-- BEGIN the-grid rules ... -->` and `<!-- END the-grid rules -->`, each rule under
   `### <pack> / <topic> (applies to: ...)`. Text outside the markers is preserved
   byte-for-byte; the file is created if missing. Exactly one marker pair or the command
-  exits 2. An empty selection removes the block, and deletes the file if nothing else
-  remains. The two harnesses produce the same block.
+  exits 2. An empty selection removes the block; if nothing else remains, the file is
+  truncated to 0 bytes and kept, never deleted (it is the operator's opt-in file). The two
+  harnesses produce the same block.
 
 Whether Cursor, Gemini CLI and Codex load these outputs as expected has not been checked
 in the real tools yet (task 13 of the rule-packs change).

@@ -5,7 +5,7 @@ Rust conventions: API Guidelines naming and types, `Result` over panics, `unsafe
 ## Scope
 
 - `style.md`, `patterns.md` and `security.md` load on `**/*.rs`; every bullet applies to any Rust source file.
-- `testing.md` loads on files under a `tests/` directory only (Cargo's integration-test location). Unit tests inside `src/` are not matched, because their `#[cfg(test)]` modules live in ordinary source files that these globs cannot tell apart. `benches/` is not covered.
+- `testing.md` loads on files under any `tests/` directory: Cargo's integration-test location, but also `src/tests/` unit-test modules. The glob cannot anchor to a package root without losing workspace crates such as `crates/foo/tests`. Other unit tests inside `src/` are not matched, because their `#[cfg(test)]` modules live in ordinary source files that these globs cannot tell apart. `benches/` is not covered.
 - `manifest.md` loads on `Cargo.toml` only. `Cargo.lock` is not matched.
 - The `sqlx` bullet in `security.md` is conditional on the project using that crate; other database crates are not covered.
 - Async, concurrency and web-framework rules are not covered.

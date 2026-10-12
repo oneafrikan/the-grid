@@ -203,7 +203,9 @@ fidelity: fetches every cited URL and quotes support for each bullet) and
   final newline gains one). A file whose newlines are all CRLF gets a CRLF block.
 - **Exact markers:** the managed block is the complete BEGIN line through the complete END
   line, matched whole-line (a CR before the newline is allowed). A user note that merely
-  starts like a marker, or quotes one marker, is user text. Residual: a user fence that
+  starts like a marker, or quotes one marker, is user text. Markers are exact-line matches,
+  so a hand-edited BEGIN line is treated as user text and the next emit appends a fresh
+  block (decision D20). Residual: a user fence that
   quotes our complete BEGIN and END lines is still treated as our block.
 - **Re-validated delivery:** `emit` lints the rule files of every selected pack first
   (frontmatter, paths, title, style, size, denylist and marker text). A failing pack is

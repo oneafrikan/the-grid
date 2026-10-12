@@ -104,7 +104,7 @@ Depends on: 1, rule-packs#2 (`rules:<pack>` tier, wired-pack array), rule-packs#
 
 - [ ] 7.1 Edit `scripts/wire.sh`: add step 3f per design.md "Rules delivery".
   - For each active harness with a `rules_file` that is a regular file (`-f` and not `-L`) and at least one wired pack, call `python3 "$GRID_DIR/scripts/rules.py" emit --harness <rules_harness> --packs <csv> --out <file>`.
-  - For every other harness (inactive, or active with no wired packs) whose existing regular file contains the literal `BEGIN the-grid rules` (`grep -qF`), make the same call with `--packs ''`. Make no call when the literal is absent.
+  - For every other harness (inactive, or active with no wired packs) whose existing regular file contains the exact `BEGIN the-grid rules` marker line, make the same call with `--packs ''`. Make no call when that line is absent.
   - When an active harness's file is absent, add a manifest row `rules@<~file>	<harness>	-	skipped	rules-file-absent`. When it is a symlink, the same row with reason `rules-file-symlink` and no call.
   - Collect `rules.py` failures, finish the remaining steps, then exit 1.
   - In the `--check` block, make the same calls with `--check`.
@@ -117,7 +117,7 @@ Depends on: 1, rule-packs#2 (`rules:<pack>` tier, wired-pack array), rule-packs#
   - `GRID_HARNESS=antigravity` never touches `.gemini/GEMINI.md`.
   - A symlinked `.codex/AGENTS.md` (to a temp file) is not modified, and the manifest row says `rules-file-symlink`.
   - An empty `.codex/AGENTS.md` with the harness inactive (or no pack wired) still exists after a run.
-- [ ] 7.3 Add the instruction-file column, the "create the file to opt in" rule (a regular file, not a symlink), the token-cost note (always-loaded block, capped by `rules.py`), the note that `rules.py` deletes a file that removal leaves empty (so the opt-in must be recreated), and that Codex prefers `AGENTS.override.md` over `AGENTS.md` when it exists, to `docs/harnesses.md`.
+- [ ] 7.3 Add the instruction-file column, the "create the file to opt in" rule (a regular file, not a symlink), the token-cost note (always-loaded block, capped by `rules.py`), the note that `rules.py` truncates a file that removal leaves empty to 0 bytes and keeps it (the opt-in survives), and that Codex prefers `AGENTS.override.md` over `AGENTS.md` when it exists, to `docs/harnesses.md`.
 - Verify: `bash scripts/gate.sh`.
 
 ## 8. Portable personas (#36)

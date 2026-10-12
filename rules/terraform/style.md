@@ -6,7 +6,8 @@ paths:
 
 ## Layout
 - Format with `terraform fmt` and check with `terraform validate`.
-- Keep resource and data blocks in `main.tf`, `variable` blocks in `variables.tf`, `output` blocks in `outputs.tf`, and `provider` blocks in `providers.tf`.
+- In a root module, keep resource and data blocks in `main.tf` until the codebase grows, then split them by logical group (`network.tf`, `storage.tf`).
+- In a root module, put `variable`, `output` and `provider` blocks in `variables.tf`, `outputs.tf` and `providers.tf`.
 - Keep a single `terraform` block in `terraform.tf` holding `required_version` and `required_providers`.
 - Order `variable` and `output` blocks alphabetically.
 

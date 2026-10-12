@@ -4,9 +4,10 @@ TypeScript and JavaScript conventions: strict compiler options, types at runtime
 
 ## Scope
 
+- Bullets name a minimum version where the cited page gives one.
 - `style.md` loads on `.ts`, `.tsx`, `.mts` and `.cts` files only (its bullets are about types).
 - `patterns.md` loads on those and on `.js`, `.jsx`, `.mjs` and `.cjs` files.
-- `tsconfig.md` loads on `tsconfig*.json`; it is a separate file because its bullets do not apply to source files.
+- `tsconfig.md` loads on `tsconfig*.json`; it is a separate file because its bullets do not apply to source files. `jsconfig.json` is not matched, and solution-style or base tsconfigs match too, so the `strict` bullet is scoped to the file that holds `compilerOptions`.
 - `testing.md` loads on `*.test.*` and `*.spec.*` files with a JavaScript or TypeScript extension. The one bullet is Jest behaviour (`expect.assertions`) and sits under a "When tests run on Jest" heading; other runners are not covered. The "await every promise" test advice is not repeated here because `patterns.md` already covers it on the same files.
 - React and web rules belong to the `react` and `web` packs, not here.
 

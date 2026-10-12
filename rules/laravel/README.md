@@ -4,6 +4,8 @@ Laravel conventions from the official documentation (12.x): configuration, Eloqu
 
 Path scope is by Laravel directory (`app/`, `routes/`, `app/Models/`, `database/migrations/`, `app/Jobs/`, `app/Http/`), one topic per file. These files also load alongside the `php` pack. Files outside those directories (for example `config/`, `database/factories/`, Blade views and `bootstrap/app.php`) match no rule file here; a `config/` or `bootstrap/` edit gets only the `php` pack.
 
+These globs can also match non-Laravel trees with an `app/` directory (CodeIgniter 4, Bedrock `web/app/plugins`, Sage themes); the bullets then do not apply. A glob cannot require `artisan`, so this is documented rather than fixed.
+
 ## Sources
 
 | Rule file | Source |
