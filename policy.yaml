@@ -27,17 +27,23 @@ classes:
   - name: hook
     globs: ['hooks/**', '**/hooks/**', '**/hooks.json', '**/*-hook', '**/*-hook.*']
   - name: script
-    globs: ['**/*.sh', '**/*.bash', '**/*.zsh', '**/*.py', '**/*.js', '**/*.mjs', '**/*.cjs', '**/*.ts', '**/*.rb', '**/*.ps1', '**/bin/**']
+    globs: ['**/*.sh', '**/*.bash', '**/*.zsh', '**/*.py', '**/*.js', '**/*.mjs', '**/*.cjs', '**/*.ts', '**/*.rb', '**/*.ps1', '**/bin/**', '**/*.bat', '**/*.cmd', '**/*.php', '**/*.pl', '**/*.lua', '**/*.fish', '**/*.awk', '**/*.tcl', '**/Makefile', '**/Dockerfile']
   - name: config
-    globs: ['**/*.json', '**/*.toml', '**/*.yaml', '**/*.yml', '**/.mcp.json']
+    globs: ['**/*.json', '**/*.toml', '**/*.yaml', '**/*.yml', '**/.mcp.json', '**/*.html', '**/*.svg', '**/*.ipynb', '**/*.xml', '**/*.cfg', '**/*.ini']
   - name: doc
     globs: ['**/*.md', '**/*.mdx', '**/*.txt', '**/*.tmpl']
+  # Second `script` entry, deliberately AFTER doc: anything else under scripts/ runs
+  # as code (extensionless helpers, .conf, data a script sources), while
+  # scripts/README.md still matches doc first.
+  - name: script
+    globs: ['scripts/**', '**/scripts/**']
 
 builtin:
   hidden-unicode: high
   symlink-escape: high
-  binary-exec: low
+  binary-exec: low             # high for script/hook/config class, SKILL.md and agent .md (as oversize-file)
   oversize-file: low           # high for script/hook/config class, SKILL.md and agent .md (rule 7)
+  unscannable-file: low        # NUL-bearing file that is not a known image/archive/font; same class-based raise
   vendored-deps: high          # a node_modules/ directory inside a target; not descended into
   source-not-allowed: low      # raised to high for repos named in the baseline (see --baseline)
   source-uncurated: low        # raised to high for repos named in the baseline (see --baseline)

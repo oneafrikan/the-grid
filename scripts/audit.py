@@ -45,6 +45,7 @@ DEFAULT_BUILTIN = {
     "symlink-escape": "high",
     "binary-exec": "low",
     "oversize-file": "low",
+    "unscannable-file": "low",
     "vendored-deps": "high",
     "source-not-allowed": "low",
     "source-uncurated": "low",
@@ -52,20 +53,24 @@ DEFAULT_BUILTIN = {
     "allow-stale": "low",
 }
 
-# Rules whose LOW findings `--quiet` still prints (the wire-time warning for a
-# repo that only a machine overlay wires). Emitted by the source checks.
-ALWAYS_PRINT_LOW = {"source-not-allowed", "source-uncurated"}
+# Rules whose LOW findings `--quiet` still prints: the wire-time warning for a
+# repo that only a machine overlay wires (the source checks), and the files the
+# scanner could not read as text (oversize, executable binary, NUL-bearing). A
+# LOW "not scanned" must not be invisible to the operator that runs `--quiet`.
+ALWAYS_PRINT_LOW = {"source-not-allowed", "source-uncurated",
+                    "oversize-file", "binary-exec", "unscannable-file"}
 
 # Findings that describe a whole file/symlink/directory (no line number) and
 # therefore carry a `sha256` that an allowlist entry can pin.
 FILE_LEVEL_BUILTINS = {"hidden-unicode", "symlink-escape", "binary-exec",
-                       "oversize-file", "vendored-deps"}
+                       "oversize-file", "unscannable-file", "vendored-deps"}
 
 BUILTIN_MESSAGES = {
     "hidden-unicode": "invisible or bidirectional-control Unicode character",
     "symlink-escape": "symlink resolves outside the scanned tree (not followed)",
     "binary-exec": "executable binary (ELF/Mach-O/PE); not scanned",
     "oversize-file": "file larger than limits.max_file_bytes; not scanned",
+    "unscannable-file": "binary content (NUL byte) that is not a known non-text format; not scanned",
     "vendored-deps": "vendored node_modules directory; not scanned",
     "allow-unused": "allowlist entry matched nothing in this run",
     "allow-stale": "hash-pinned allowlist entry no longer matches the file; entry inactive",
@@ -128,20 +133,36 @@ def is_hidden_char(c):
             or 0xFE00 <= o <= 0xFE0F or 0xE0100 <= o <= 0xE01EF  # variation selectors
             or o == 0x00AD                                       # soft hyphen
             or o in (0x2028, 0x2029)                             # line/para separators
-            or o == 0x180E)                                      # Mongolian vowel sep.
+            or o == 0x180E                                       # Mongolian vowel sep.
+            or o == 0x061C                                       # Arabic letter mark (bidi)
+            or 0x206A <= o <= 0x206F or o == 0x2065              # deprecated formatting controls
+            or o in (0x3164, 0x115F, 0x1160, 0xFFA0)             # Hangul fillers (blank glyphs)
+            or o == 0x034F                                       # combining grapheme joiner
+            or 0x2000 <= o <= 0x200A                             # en/em/thin/hair... spaces
+            or 0xFFF9 <= o <= 0xFFFB                             # interlinear annotation
+            or 0x1D173 <= o <= 0x1D17A)                          # musical formatting controls
 
 
-def _exempt(c, prev, at_file_start):
-    """Legitimate uses of otherwise-flagged characters (see design rule 7)."""
+def _exempt(c, prev, nxt, at_file_start):
+    """Legitimate uses of otherwise-flagged characters (see design rule 7).
+
+    A joiner or selector is exempt only when it stands ALONE: a run of them
+    (ZWJ ZWJ ZWNJ ..., FE0F FE0F ...) is a binary side channel, so a neighbour of
+    the same family on either side withdraws the exemption. An emoji sequence
+    like heart + FE0F + ZWJ + fire mixes the two families and stays clean."""
     o = ord(c)
     if o == 0xFEFF and at_file_start:
         return True                      # a byte-order mark as the very first char
     if o in (0x200C, 0x200D) and prev is not None:
+        if prev in "\u200c\u200d" or (nxt is not None and nxt in "\u200c\u200d"):
+            return False
         p = ord(prev)
         # Joiners after Arabic/Indic/emoji-range characters, but not after
         # general punctuation/format characters (U+2000-U+206F).
         return p >= 0x0600 and not (0x2000 <= p <= 0x206F)
     if o == 0xFE0F and prev is not None:
+        if prev == "\ufe0f" or nxt == "\ufe0f":
+            return False
         return ord(prev) >= 0x2190       # emoji presentation selector after a symbol
     return False
 
@@ -198,6 +219,19 @@ def _is_exec_binary(head):
         off = int.from_bytes(head[0x3C:0x40], "little")
         return head[off:off + 4] == b"PE\x00\x00"
     return False
+
+
+# Leading bytes of common non-text formats that legitimately carry NUL bytes
+# (images, documents, archives, web fonts). Only these may skip the text scan
+# silently; any other NUL-bearing file is an `unscannable-file` finding.
+_KNOWN_BINARY_MAGICS = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a",
+                        b"%PDF-", b"PK\x03\x04", b"PK\x05\x06", b"\x1f\x8b",
+                        b"wOFF", b"wOF2")
+
+
+def _is_known_binary(head):
+    """A file that starts with the magic number of a common non-text format."""
+    return head.startswith(_KNOWN_BINARY_MAGICS)
 
 
 # --------------------------------------------------------------------------
@@ -464,7 +498,10 @@ class Scan:
                     self._symlink_escape(full, rel_target, tier)
                 continue                      # never followed, escaping or not
             if e.is_dir(follow_symlinks=False):
-                if e.name in self.policy.skip_dirs:
+                # skip_dirs names the scan target's OWN bookkeeping (its repo
+                # metadata directory); a same-named directory deeper down is
+                # content like any other and is scanned.
+                if e.name in self.policy.skip_dirs and directory == top:
                     continue
                 if e.name == "node_modules":
                     self._vendored(full, rel_target, tier)
@@ -487,6 +524,17 @@ class Scan:
 
     # -- one file ------------------------------------------------------------
 
+    def _not_scanned_severity(self, rule, fclass, name, rel_target, rel_root):
+        """Severity of a finding that says "this file was NOT scanned" (oversize,
+        executable binary, NUL-bearing). Content that gets executed, loaded as an
+        agent or read as configuration must not pass quietly, so script/hook/config
+        class, SKILL.md and agent .md are high; prose and assets stay at the policy
+        default (low), which `--quiet` still prints (ALWAYS_PRINT_LOW)."""
+        if (fclass in ("script", "hook", "config") or name == "SKILL.md"
+                or _is_agent_md(rel_target, rel_root, name)):
+            return "high"
+        return self.policy.builtin[rule]
+
     def _scan_file(self, full, rel_target, tier):
         pol = self.policy
         self.files += 1
@@ -495,31 +543,51 @@ class Scan:
         name = os.path.basename(full)
         fclass = pol.file_class(rel_target, rel_root)
 
-        size = os.lstat(full).st_size
-        if size > pol.max_file_bytes:
-            # An unscannable file that gets executed or loaded as an agent must
-            # not pass silently, so those classes are high; prose stays low.
-            sev = pol.builtin["oversize-file"]
-            if (fclass in ("script", "hook", "config") or name == "SKILL.md"
-                    or _is_agent_md(rel_target, rel_root, name)):
-                sev = "high"
-            self._add("oversize-file", sev, display, 0, fclass, tier,
-                      BUILTIN_MESSAGES["oversize-file"], sha256=sha256_file(full))
+        st = os.lstat(full)
+        size = st.st_size
+        oversize = size > pol.max_file_bytes
+        with open(full, "rb") as fh:
+            head = fh.read(BINARY_SNIFF)
+            data = None if oversize else head + fh.read()
+        # A file the extension globs call `other` but that is executable or starts
+        # with a shebang is run as a script whatever its name.
+        if fclass == "other" and (head.startswith(b"#!") or st.st_mode & 0o111):
+            fclass = "script"
+
+        if oversize:
+            self._add("oversize-file",
+                      self._not_scanned_severity("oversize-file", fclass, name, rel_target, rel_root),
+                      display, 0, fclass, tier, BUILTIN_MESSAGES["oversize-file"],
+                      sha256=sha256_file(full))
             return
 
-        with open(full, "rb") as fh:
-            data = fh.read()
-        head = data[:BINARY_SNIFF]
         if _is_exec_binary(head):
-            self._add("binary-exec", pol.builtin["binary-exec"], display, 0, fclass, tier,
-                      BUILTIN_MESSAGES["binary-exec"], sha256=sha256_bytes(data))
+            self._add("binary-exec",
+                      self._not_scanned_severity("binary-exec", fclass, name, rel_target, rel_root),
+                      display, 0, fclass, tier, BUILTIN_MESSAGES["binary-exec"],
+                      sha256=sha256_bytes(data))
             return
+
+        text = None
         if b"\x00" in head:
-            return                            # other binary content: skipped silently
+            if head.startswith((b"\xff\xfe", b"\xfe\xff")) and not head.startswith(b"\xff\xfe\x00\x00"):
+                # UTF-16 with a BOM (a UTF-32 LE BOM also starts FF FE, so it is excluded):
+                # decode it and scan the text rather than skip it.
+                text = data.decode("utf-16", errors="replace")
+            elif _is_known_binary(head):
+                return                        # an image/archive/font: nothing to scan
+            else:
+                self._add("unscannable-file",
+                          self._not_scanned_severity("unscannable-file", fclass, name, rel_target, rel_root),
+                          display, 0, fclass, tier, BUILTIN_MESSAGES["unscannable-file"],
+                          sha256=sha256_bytes(data))
+                return
 
         file_sha = sha256_bytes(data)
         # Lines split on \n ONLY, so U+2028/U+2029 never end a line.
-        lines = data.decode("utf-8", errors="replace").split("\n")
+        if text is None:
+            text = data.decode("utf-8", errors="replace")
+        lines = text.split("\n")
         classes = self._line_classes(lines, fclass, name, rel_target, rel_root)
         for idx, raw in enumerate(lines):
             line = raw.rstrip("\r")
@@ -586,7 +654,8 @@ class Scan:
             if not is_hidden_char(ch):
                 continue
             prev = line[pos - 1] if pos > 0 else None
-            if _exempt(ch, prev, at_file_start=(lineno == 1 and pos == 0)):
+            nxt = line[pos + 1] if pos + 1 < len(line) else None
+            if _exempt(ch, prev, nxt, at_file_start=(lineno == 1 and pos == 0)):
                 continue
             sev, down = pol.builtin["hidden-unicode"], None
             if cls == "test" and sev == "high":
@@ -976,6 +1045,12 @@ def main(argv=None):
         return run(args)
     except UsageError as exc:
         sys.stderr.write("audit: error: %s\n" % exc)
+        return 2
+    except Exception as exc:                     # noqa: BLE001 - deliberate catch-all
+        # An unexpected crash (unreadable file, pathological input) must not look
+        # like exit 1 ("a high finding"): that is the code a caller treats as a
+        # verdict. 2 is "the scan did not complete".
+        sys.stderr.write("audit: internal error: %s: %s\n" % (type(exc).__name__, exc))
         return 2
 
 

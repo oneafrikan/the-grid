@@ -172,3 +172,11 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"line 2"* ]]
 }
+
+@test "3000-level nesting is a ParseError, not a RecursionError traceback" {
+  python3 -c "print('a: ' + '[' * 3000 + ']' * 3000)" > "$W/t.yaml"
+  run mini_json "$W/t.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"ParseError: line"* ]]
+  [[ "$output" != *"Traceback"* ]]
+}

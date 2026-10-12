@@ -88,6 +88,21 @@ mk_skill() {
   [ "$status" -eq 0 ]
 }
 
+@test "--gate --quiet still shows a file the scanner did not read (oversize prose: LOW, oversize script: HIGH)" {
+  # shrink the size cap in the mock grid's own policy copy so small fixtures are oversize
+  sed -i.bak 's/max_file_bytes: 1048576/max_file_bytes: 100/' "$T/policy.yaml"
+  mk_skill "$T/skills" x
+  { printf 'prose\n'; head -c 200 /dev/zero | tr '\0' ' '; } > "$T/skills/x/notes.md"
+  printf 'baseline-none\n' > "$T/baseline-submodules.example.txt"
+  run bash "$AUDIT" --gate --quiet
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"LOW"*"oversize-file"*"skills/x/notes.md"* ]]
+  { printf '#!/bin/sh\n'; head -c 200 /dev/zero | tr '\0' ' '; } > "$T/skills/x/run.sh"
+  run bash "$AUDIT" --gate --quiet
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"HIGH"*"oversize-file"*"skills/x/run.sh"* ]]
+}
+
 @test "--owned with nothing to scan is a usage error, not a pass" {
   run bash "$AUDIT" --owned
   [ "$status" -eq 2 ]
