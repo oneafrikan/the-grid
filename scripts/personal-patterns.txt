@@ -32,9 +32,9 @@ allow	*	email-ok	(^|[^A-Za-z0-9._%+-])git@|@example\.(com|org|net)($|[^A-Za-z0-9
 # The name must start with a letter, digit or _ so a dot-dir such as /home/.claude/
 # (a path under a fake HOME) is not mistaken for a user name.
 deny	*	home-mac	/Users/[A-Za-z0-9_][A-Za-z0-9._-]*/
-allow	*	home-placeholder	/Users/((you|user|name|username|alice|bob)|<[^>]+>)/
+allow	*	home-placeholder	/Users/((you|user|name|username|alice|bob|runner)|<[^>]+>)/
 deny	*	home-linux	/home/[A-Za-z0-9_][A-Za-z0-9._-]*/
-allow	*	home-placeholder-lx	/home/((you|user|name|username|alice|bob)|<[^>]+>)/
+allow	*	home-placeholder-lx	/home/((you|user|name|username|alice|bob|runner)|<[^>]+>)/
 # Windows home directories (C:\Users\<name>\); the same placeholders are fine.
 deny	*	home-win	[A-Za-z]:\\Users\\[A-Za-z0-9_][A-Za-z0-9._-]*\\
 allow	*	home-placeholder-win	[A-Za-z]:\\Users\\((you|user|name|username|alice|bob|Public|Default)|<[^>]+>)\\
