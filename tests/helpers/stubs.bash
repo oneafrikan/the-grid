@@ -187,6 +187,11 @@ case "${STUB_CLAUDE_MODE:-}" in
     # STUB_CLAUDE_GRANDCHILD=1: leave a long-lived grandchild behind (its pid in grandchild.pid), as a
     # real child's tool process would; the worker's timeout must kill it too (WP-017).
     if [ "${STUB_CLAUDE_GRANDCHILD:-0}" = 1 ]; then sleep 300 > /dev/null 2>&1 3>&- & echo $! > "$STUB_DIR/grandchild.pid"; fi
+    # STUB_CLAUDE_IGNORE_TERM=1: ignore TERM and never exit on its own (only KILL ends it): pins the
+    # worker's TERM-then-KILL of the child's process group.
+    if [ "${STUB_CLAUDE_IGNORE_TERM:-0}" = 1 ]; then trap '' TERM; while :; do sleep 1; done; fi
+    # STUB_SIDE_FILE: another process writes this file while the child runs (simulates a sibling session).
+    if [ -n "${STUB_SIDE_FILE:-}" ]; then mkdir -p "$(dirname "$STUB_SIDE_FILE")"; echo "from another agent" > "$STUB_SIDE_FILE"; fi
     if [ -n "${STUB_CLAUDE_SLEEP:-}" ]; then sleep "$STUB_CLAUDE_SLEEP"; fi
     # STUB_HANDOFF_PREFIX makes the pair's names distinct, so two sessions in one cwd (WP-017) can be told apart.
     hf="${STUB_HANDOFF_PREFIX:-}2026-01-01-testhost-stub-handoff.md"
@@ -227,6 +232,17 @@ case "${STUB_CLAUDE_MODE:-}" in
         printf '#!/bin/sh\n' > "$g/hooks/post-commit"
         echo '# planted' >> "$g/info/exclude"
         : > "$g/HEAD.evil" ;;
+      # WP-016/018 review follow-ups
+      handoff-nested-git)  # the pair into $STUB_HANDOFF_DIR plus a NEW .git there whose config would run $STUB_CANARY_CMD
+        write_pair "$STUB_HANDOFF_DIR"
+        mkdir -p "$STUB_HANDOFF_DIR/.git/objects" "$STUB_HANDOFF_DIR/.git/refs"
+        printf 'ref: refs/heads/main\n' > "$STUB_HANDOFF_DIR/.git/HEAD"
+        printf '[core]\n\trepositoryformatversion = 0\n\tfsmonitor = %s\n' "$STUB_CANARY_CMD" > "$STUB_HANDOFF_DIR/.git/config" ;;
+      handoff-leak)  # NO pair; a secret-bearing stray file instead
+        mkdir -p "$PWD/LOGS"; printf '%s\n' "$body" > "$PWD/leak.txt" ;;
+      handoff-symlink-dir)  # the pair, plus a new symlink to a DIRECTORY
+        write_pair "$PWD/LOGS"
+        ln -s /etc "$PWD/LOGS/etc-link" ;;
       handoff-secret-third)  # the pair (give it a secret body), plus an innocent third file (WP-018)
         write_pair "$PWD/LOGS"
         echo plain > "$PWD/LOGS/third.md" ;;

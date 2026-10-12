@@ -65,7 +65,8 @@ Safety (project and user mode):
     nothing; re-running with unchanged inputs is a byte-for-byte no-op
   - the FIRST write to a settings file reformats the whole file: it is parsed and
     re-serialised as 2-space-indented JSON (key order and values are kept; the original
-    indent style, \\uXXXX escapes and number spellings such as 1e5 are not). Later runs
+    indent style, \\uXXXX escapes and number spellings such as 1e5 are not; a number
+    with more than 17 significant digits loses precision through the float). Later runs
     leave it byte-identical. A file the rewrite could not reproduce faithfully (duplicate
     keys, NaN/Infinity/1e999, empty, read-only, not a regular file) is refused instead.
     A new file gets mode 0666 & ~umask; an existing file keeps its mode. If the file

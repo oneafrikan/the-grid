@@ -144,7 +144,10 @@ A settings file it cannot rewrite faithfully (duplicate keys, `NaN`/`Infinity`, 
 read-only, not a regular file) is refused with a warning and left untouched; delete an
 empty file or write `{}` to it.
 Running `wire.sh` again changes nothing; `wire.sh --check` reports a missing entry and
-exits 1. A symlinked settings file or config dir is refused (a warning from `wire.sh`).
+exits 1. A symlinked settings file or config dir is refused (a warning from `wire.sh`),
+and `wire.sh --check` skips it with a notice instead of reporting drift forever.
+Numbers with more than 17 significant digits lose precision in the reformat (they pass
+through a float).
 
 **Opting out.** Per machine: put `-hook:auto-handoff` in the machine's manifest overlay
 (re-enable with `hook:auto-handoff`). Per session: start `claude` with
@@ -195,9 +198,14 @@ proven live (operator check B1), so the rules are not the only barrier:
 
 - The resolved target must lie under the session's directory or the private repo. A
   `LOGS` symlink that points elsewhere is refused (only the fallback directory is
-  granted; the spawn log line says `target-refused=<why>`). A table row naming another
-  repo is accepted only if it is absolute, has no `..`, is inside a git work tree and is
-  not `$HOME`, `/`, or under `~/.ssh`, `.claude`, `.config`, `.gnupg` or `.aws`.
+  granted; the spawn log line says `target-refused=<why>`). A table row written as a
+  RELATIVE path must resolve inside the session's directory or the private repo too
+  (`outside-cwd` otherwise: a tracked symlink at that path cannot redirect the grant).
+  Only a row written as an ABSOLUTE path may name another repo, and then only if it has
+  no `..`, is inside a git work tree whose root is not `$HOME`, and is not `$HOME`, `/`
+  or under `~/.ssh`, `.claude`, `.config`, `.gnupg`, `.aws`, `.local/bin` or `.bashrc.d`.
+  The private repo's own root is never a target (`private-root`): the child could
+  rewrite `handoff-locations.md`, which decides future grants.
 - A path with a glob metacharacter (`* ? [ ] { } ( ) !`) or a newline, or with a `..`
   component, gets no rule; the fallback directory name is sanitised the same way.
 - The child runs with `--permission-mode default`, `--setting-sources user` and
@@ -209,6 +217,12 @@ proven live (operator check B1), so the rules are not the only barrier:
   variables named in `GRID_AUTOHANDOFF_KEEP_ENV` (comma list of names or `PREFIX*`).
   `GH_TOKEN`, `ANTHROPIC_API_KEY`, cloud credentials and `SSH_AUTH_SOCK` are not passed;
   if `claude` authenticates through an API key variable, list it there.
+- The worker's own git calls after the child run with `core.fsmonitor=false`,
+  `core.hooksPath=/dev/null`, no remote-shell command from configuration and the `ext::`
+  transport off, and only in a git dir that existed before the run, so a configuration
+  the child managed to plant cannot execute anything. The repository's own hooks
+  therefore do not run for the handoff commit (the worker's strict secret scan runs
+  first); a git dir the child creates is `unexpected-git-dir`.
 - Afterwards the worker detects (it never reverts) changes it could not stop; see the
   next list. It cannot see a write to an arbitrary path outside the directories and
   files listed there.
@@ -219,12 +233,18 @@ proven live (operator check B1), so the rules are not the only barrier:
    `hooks/`, a submodule's config and hooks, a linked worktree's config, hooks and
    info, or a `core.hooksPath` directory, in the session's repo, the target repo or the
    fallback repo; or to shell startup files, `~/.ssh/{authorized_keys,config,rc}`,
-   `~/.gitconfig`, Claude's `settings*.json` or `~/.config/systemd/user`, is
-   `unexpected-file`: no commit, changed paths logged, nothing moved.
+   `~/{.gitconfig,.npmrc,.xprofile,.pam_environment,.local/bin,.bashrc.d}`,
+   `~/.config/{autostart,systemd/user,git/attributes}`, Claude's
+   `settings*.json`, `.credentials.json`, `CLAUDE.md`, `hooks/` and `commands/`, is
+   `unexpected-file`: no commit, changed paths logged, nothing moved. (Not watched:
+   a repo's `refs`, `packed-refs` and `index`, which change legitimately while you
+   work.) A `.git` entry that did not exist before the run, anywhere under the scanned
+   directories, is `unexpected-git-dir`.
 2. Every file or symlink (symlinks are not followed) that is new or changed during the run,
-   under the session's directory
-   (any depth, `.git/` excluded), the fallback directory, the target directory and the
-   work trees of the repos the commit lands in is collected, and a symlink named
+   under the session's directory (any depth, `.git/` excluded), the fallback directory
+   and the target directory is collected (NOT the rest of the repo the commit lands in:
+   other agents write there while the run is going, and a sibling session's files must
+   not fail this one; two workers that share a write directory or a repo take turns), and a symlink named
    `*-handoff.md` or `*-context.md` is reported whatever its age. Exactly one
    `<p>-handoff.md` and at most one `<p>-context.md` with the same prefix, in the target
    or fallback directory, are expected. Anything else is `unexpected-file` (no commit,
@@ -301,7 +321,7 @@ ts=<UTC time> session=<id> action=<skip|spawn|done|error> reason=<token> [turns=
   short sha.
 - `action=error`: `terminated` (the worker got TERM, HUP or the hook's outer alarm; a
   half-made commit was unstaged), `timeout`, `claude-exit-<n>` (127 means the binary could not be run),
-  `no-handoff-file`, `unexpected-file` (see `paths=`), `secret`, `commit-failed`,
+  `no-handoff-file`, `unexpected-file` and `unexpected-git-dir` (see `paths=`), `repo-busy`, `secret`, `commit-failed`,
   `digest-failed`.
 - `push=`: `yes`; `no-not-private` (not the private repo); `no-upstream`;
   `no-other-commits` (an earlier unpushed commit exists, so nothing was sent); `failed`
