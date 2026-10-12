@@ -10,6 +10,8 @@ setup() {
 }
 
 teardown() {
+  # A test may leave a dir read-only; rm -rf in common_teardown needs it writable again.
+  chmod -R u+w "$MOCK_AGENTS" "$MOCK_SKILLS" 2>/dev/null || true
   common_teardown
 }
 
@@ -332,4 +334,253 @@ make_fake_real_home() {
   [ "$status" -eq 0 ]
   [ -L "$MOCK_SKILLS/sk-one" ]
   [ ! -e "$MOCK_SKILLS/sk-two" ]
+}
+
+# --- WP-006: never replace a foreign link or a real file that shares a grid name ---
+
+@test "a foreign symlink at a grid skill name survives wire" {
+  mkdir -p "$OTHER_DIR/mine"
+  ln -s "$OTHER_DIR/mine" "$MOCK_SKILLS/skill-alpha"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$MOCK_SKILLS/skill-alpha")" = "$OTHER_DIR/mine" ]   # not re-pointed
+  [[ "$output" == *"skip (not managed): skill-alpha"* ]]
+  grep -q "^skill	skill-alpha	.*	skipped	not managed$" "$MOCK_GRID/.wired.manifest"
+  [ -L "$MOCK_SKILLS/skill-beta" ]                                   # the rest still wires
+}
+
+@test "a regular file at a grid skill name survives wire" {
+  printf 'keep me\n' > "$MOCK_SKILLS/skill-alpha"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ ! -L "$MOCK_SKILLS/skill-alpha" ]
+  [ "$(cat "$MOCK_SKILLS/skill-alpha")" = "keep me" ]
+  [[ "$output" == *"skip (not managed): skill-alpha"* ]]
+  # A file must not be reported with the real-dir wording reconcile.sh parses.
+  [[ "$output" != *"skip (real dir, not managed): skill-alpha"* ]]
+  grep -q "^skill	skill-alpha	.*	skipped	not managed$" "$MOCK_GRID/.wired.manifest"
+}
+
+@test "a dangling foreign symlink at a grid skill name survives wire" {
+  ln -s "$OTHER_DIR/does-not-exist" "$MOCK_SKILLS/skill-alpha"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$MOCK_SKILLS/skill-alpha")" = "$OTHER_DIR/does-not-exist" ]
+  [[ "$output" == *"skip (not managed): skill-alpha"* ]]
+}
+
+@test "a foreign symlink at a grid agent name survives wire" {
+  mkdir -p "$MOCK_GRID/agents"
+  printf -- '---\nname: zz-a\n---\n' > "$MOCK_GRID/agents/zz-a.md"
+  printf 'mine\n' > "$OTHER_DIR/zz-a.md"
+  ln -s "$OTHER_DIR/zz-a.md" "$MOCK_AGENTS/zz-a.md"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$MOCK_AGENTS/zz-a.md")" = "$OTHER_DIR/zz-a.md" ]
+  [[ "$output" == *"skip (not managed): zz-a.md"* ]]
+  grep -q "^agent	zz-a.md	.*	skipped	not managed$" "$MOCK_GRID/.wired.manifest"
+}
+
+@test "wire --check exits 0 when a foreign link shadows a grid skill name" {
+  mkdir -p "$OTHER_DIR/mine"
+  ln -s "$OTHER_DIR/mine" "$MOCK_SKILLS/skill-alpha"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scripts/wire.sh"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 0 ]
+}
+
+@test "a symlink into the grid at a skill name is still replaced (override precedence)" {
+  # A repo skill and a root skill share a name: the root copy is wired second and must
+  # replace the repo link wire just made (a link into the grid is ours).
+  make_skill "$MOCK_GRID/repos/r1/skill-alpha" "skill-alpha"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$MOCK_SKILLS/skill-alpha")" = "$MOCK_GRID/skills/skill-alpha/" ]
+}
+
+# --- WP-007: ownership is decided by the resolved path, not a string prefix ----
+
+@test "wire via a symlinked clone path then the real path removes a stale link and --check exits 0" {
+  ln -s "$MOCK_GRID" "$BATS_TEST_TMPDIR/clone"
+  # A stale grid link left in the OTHER spelling of the clone path (an older wire).
+  ln -s "$BATS_TEST_TMPDIR/clone/repos/gone" "$MOCK_SKILLS/gone-skill"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ ! -L "$MOCK_SKILLS/gone-skill" ]
+  # Wired through the symlinked spelling, checked through the real one: no false drift.
+  GRID_DIR="$BATS_TEST_TMPDIR/clone" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 0 ]
+}
+
+@test "a link to GRID_DIR/../elsewhere/x survives teardown" {
+  # Textually under "$GRID_DIR/", physically outside it: not ours.
+  ln -s "$MOCK_GRID/../elsewhere/x" "$MOCK_SKILLS/dotdot"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/dotdot" ]
+}
+
+@test "a newline-named foreign symlink does not abort wire and links are fully rebuilt" {
+  # The name is split by a line-based read: readlink of the first half failed under set -e
+  # and silently aborted teardown on every run.
+  local nl=$'\n'
+  ln -s "$OTHER_DIR/x" "$MOCK_SKILLS/bad${nl}name"
+  ln -s "$MOCK_GRID/repos/gone" "$MOCK_SKILLS/stale${nl}grid"   # an owned one, same oddity
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/bad${nl}name" ]          # foreign: untouched
+  [ ! -L "$MOCK_SKILLS/stale${nl}grid" ]      # ours: torn down
+  [ -L "$MOCK_SKILLS/skill-alpha" ]
+  [ -L "$MOCK_SKILLS/skill-beta" ]
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 0 ]
+}
+
+@test "composed-project link targets contain no //" {
+  local cc="$MOCK_GRID/agent-factory/projects/zz/_claude-code"
+  make_skill "$cc/skills/zz-orch" "zz-orch"
+  mkdir -p "$cc/agents"
+  printf -- '---\nname: zz-agent\n---\n' > "$cc/agents/zz-agent.md"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/zz-orch" ]
+  [ -L "$MOCK_AGENTS/zz-agent.md" ]
+  [[ "$(readlink "$MOCK_SKILLS/zz-orch")" != *//* ]]
+  [[ "$(readlink "$MOCK_AGENTS/zz-agent.md")" != *//* ]]
+}
+
+# links_of DIR: "name -> target" for every symlink in DIR, C-sorted (NUL-safe enough for tests).
+links_of() {
+  find "$1" -maxdepth 1 -type l | LC_ALL=C sort | while IFS= read -r l; do
+    printf '%s -> %s\n' "$l" "$(readlink "$l")"
+  done
+}
+
+@test "read-only agents dir: wire exits 2 and the skill links are unchanged" {
+  [ "$(id -u)" -ne 0 ] || skip "root ignores directory permissions"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scripts/wire.sh"
+  local before; before="$(links_of "$MOCK_SKILLS")"
+  [ -n "$before" ]
+  chmod a-w "$MOCK_AGENTS"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"nothing was changed"* ]]
+  [ "$(links_of "$MOCK_SKILLS")" = "$before" ]
+}
+
+@test "an ln shim that fails on its 3rd call leaves the previous links restored and exits non-zero" {
+  make_skill "$MOCK_GRID/skills/skill-gamma" "skill-gamma"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scripts/wire.sh"
+  local before; before="$(links_of "$MOCK_SKILLS")"
+  [ "$(printf '%s\n' "$before" | wc -l | tr -d ' ')" -eq 3 ]
+  # The shim fails exactly once (3rd call), so the restore step's own ln works.
+  local real_ln; real_ln="$(command -v ln)"
+  mkdir -p "$BATS_TEST_TMPDIR/shim"
+  printf '#!/usr/bin/env bash\nc=$(cat "%s/count" 2>/dev/null || echo 0); c=$((c+1)); echo $c > "%s/count"\n[ "$c" -ne 3 ] || exit 1\nexec "%s" "$@"\n' \
+    "$BATS_TEST_TMPDIR/shim" "$BATS_TEST_TMPDIR/shim" "$real_ln" > "$BATS_TEST_TMPDIR/shim/ln"
+  chmod +x "$BATS_TEST_TMPDIR/shim/ln"
+  PATH="$BATS_TEST_TMPDIR/shim:$PATH" GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -ne 0 ]
+  [ "$(links_of "$MOCK_SKILLS")" = "$before" ]     # all three back, none lost
+}
+
+# --- WP-011: CLI and manifest hygiene -----------------------------------------------
+
+@test "unknown arguments exit 2, print usage and change nothing" {
+  local before_s before_a before_g a
+  before_s="$(snapshot "$MOCK_SKILLS")"; before_a="$(snapshot "$MOCK_AGENTS")"
+  before_g="$(snapshot "$MOCK_GRID")"
+  for a in "--dry-run" "--help" "--chek" "--check extra" "extra"; do
+    # $a is split on purpose: "--check extra" is two arguments.
+    # shellcheck disable=SC2086
+    GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh" $a
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"usage: wire.sh [--check]"* ]]
+  done
+  [ "$(snapshot "$MOCK_SKILLS")" = "$before_s" ]
+  [ "$(snapshot "$MOCK_AGENTS")" = "$before_a" ]
+  [ "$(snapshot "$MOCK_GRID")" = "$before_g" ]
+  [ ! -e "$MOCK_SKILLS/skill-alpha" ]
+}
+
+@test "a skill dir with TAB or newline in its name is skipped and every manifest row keeps its column count" {
+  local tab=$'\t' nl=$'\n'
+  make_skill "$MOCK_GRID/skills/bad${tab}name" "bad-tab"
+  make_skill "$MOCK_GRID/skills/bad${nl}row" "bad-nl"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skip (invalid name)"* ]]
+  [ -L "$MOCK_SKILLS/skill-alpha" ]
+  [ "$(find "$MOCK_SKILLS" -type l | wc -l | tr -d ' ')" -eq 2 ]    # only the two good ones
+  # Five tab-separated columns on EVERY row; none forged by the odd names.
+  [ "$(awk -F'\t' 'NF != 5' "$MOCK_GRID/.wired.manifest" | wc -l | tr -d ' ')" -eq 0 ]
+  grep -q "^skill	bad?name	.*	skipped	invalid name$" "$MOCK_GRID/.wired.manifest"
+  grep -q "^skill	bad?row	.*	skipped	invalid name$" "$MOCK_GRID/.wired.manifest"
+}
+
+@test "-repo beats a per-skill repo/skill entry for the same repo" {
+  make_skill "$MOCK_GRID/repos/anthropic/docx" "docx"
+  printf 'anthropic/docx\n' > "$MOCK_GRID/baseline-submodules.txt"
+  mkdir -p "$MOCK_GRID/machines"
+  printf -- '-anthropic\n' > "$MOCK_GRID/machines/testbox.txt"
+  GRID_HOST=testbox GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$MOCK_SKILLS/docx" ] && [ ! -L "$MOCK_SKILLS/docx" ]
+}
+
+# --- WP-009: a hostile tracked path must not link anything outside the repo ----
+
+@test "a tracked newline path creates no link outside GRID_DIR and wire.sh exits 0" {
+  # The second half of the path (after the line break) is an absolute path into OTHER_DIR:
+  # a line-split listing used to hand wire.sh that directory as a skill dir.
+  local nl=$'\n' evil="$MOCK_GRID/repos/evil"
+  make_skill "$evil/skills/real" "real"
+  mkdir -p "$OTHER_DIR/payload"
+  make_skill "$evil/skills/x${nl}$OTHER_DIR/payload" "payload"
+  git -C "$evil" init -q
+  git -C "$evil" add -A
+  printf 'evil\n' > "$MOCK_GRID/baseline-submodules.txt"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/real" ]
+  # Exactly the expected links: the two root skills and the one real repo skill. A line-split
+  # listing used to add the repo's whole skills/ dir and the outside dir as "skills".
+  [ "$(ls "$MOCK_SKILLS" | LC_ALL=C sort | paste -sd, -)" = "real,skill-alpha,skill-beta" ]
+  [ ! -e "$MOCK_SKILLS/payload" ] && [ ! -L "$MOCK_SKILLS/payload" ]
+}
+
+# --- WP-008: a missing or mistyped manifest is announced, not silently "wire everything" ---
+
+@test "a missing GRID_BASELINE warns and writes a manifest row" {
+  GRID_BASELINE="$BATS_TEST_TMPDIR/nonexistent.txt" GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" \
+    run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"baseline manifest not found: $BATS_TEST_TMPDIR/nonexistent.txt"* ]]
+  grep -q "^manifest	$BATS_TEST_TMPDIR/nonexistent.txt	-	missing	" "$MOCK_GRID/.wired.manifest"
+}
+
+@test "an unknown repo entry warns and writes a manifest row" {
+  make_skill "$MOCK_GRID/repos/realrepo/skill-r" "skill-r"
+  printf 'realrepo\nnosuchrepo\nnosuchrepo2/skill-x\n-nosuchrepo3\n-nosuchrepo4/skill-y\n' \
+    > "$MOCK_GRID/baseline-submodules.txt"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/skill-r" ]
+  local e
+  for e in nosuchrepo nosuchrepo2/skill-x -nosuchrepo3 -nosuchrepo4/skill-y; do
+    [[ "$output" == *"manifest entry '$e' names no repo under repos/"* ]]
+    grep -q "^manifest	$e	-	unknown	" "$MOCK_GRID/.wired.manifest"
+  done
+  [[ "$output" != *"entry 'realrepo'"* ]]
+}
+
+@test "an unknown host with a baseline present does not warn" {
+  make_skill "$MOCK_GRID/repos/baserepo/skill-base" "skill-base"
+  printf 'baserepo\n' > "$MOCK_GRID/baseline-submodules.txt"
+  GRID_HOST=nosuchbox GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"manifest"* ]]
+  ! grep -q '^manifest	' "$MOCK_GRID/.wired.manifest"
 }

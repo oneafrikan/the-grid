@@ -15,11 +15,14 @@
 #                 FORCES RULES_DIR=$GRID_DRY_HOME/.claude/rules, ignoring any inherited
 #                 value (see the dry-home block below), so no dry run can reach the real one.
 #   GRID_BASELINE — baseline manifest file (default: $GRID_DIR/baseline-submodules.txt)
-#   GRID_SKIP_CATALOG=1 — don't regenerate SKILLS.md at the end (used by --check)
-#   GRID_SKIP_AUDIT=1 — skip the pre-wire audit (step 0). Set by audit.sh's own dry run
-#                   so the audit does not recurse into itself; not for everyday use.
-#   GRID_AUDIT=warn — a high-severity audit finding prints a warning and wiring continues
-#                   (default: it blocks, exit 3, before any link is touched)
+#   GRID_SKIP_CATALOG=1 — don't regenerate SKILLS.md or write .wired.manifest (used by
+#                   --check). It does NOT skip the audit any more.
+#   GRID_SKIP_AUDIT=1 — the ONLY bypass of the pre-wire audit (step 0) besides a dry run
+#                   (GRID_DRY_HOME, which never audits). Prints a notice on stderr; set by
+#                   audit.sh's own dry run so it does not recurse; not for everyday use.
+#   GRID_AUDIT=warn — a high-severity finding, a missing policy.yaml or a missing python3
+#                   prints a warning and wiring continues (default: it blocks, exit 3,
+#                   before any link is touched)
 #   GRID_NO_CATALOG=1 — skip ONLY the SKILLS.md refresh (step 4); .wired.manifest is still
 #                   written. Set by `grid install`: on a machine without submodules most
 #                   library repos are empty, so a refresh would rewrite the tracked SKILLS.md.
@@ -44,16 +47,34 @@
 #   GRID_HARNESS_HOME — base for every non-Claude harness dir (default: $HOME). Tests point
 #                   it at a temp dir; GRID_DRY_HOME overrides it (see above).
 #
-# Exit codes: 0 wired | 1 --check found drift | 2 bad harness name / python3 missing
-#             for an active harness (nothing changed) | 3 blocked by the audit (nothing changed)
+# Exit codes: 0 wired | 1 --check found drift | 2 unknown argument / bad harness name / python3 missing for an
+#             active harness / a dir that must be written is unwritable or an active
+#             harness dir cannot be resolved (HOME unset); nothing changed in every case |
+#             3 blocked by the audit (nothing changed)
+# Safety: GRID_DIR is canonicalised (pwd -P); link ownership is by resolved path; removed
+#         links are restored by an exit trap if a run fails or is interrupted before it
+#         completes. No lock: run one wire at a time.
 #
 # Usage:
 #   bash wire.sh           # wire (idempotent)
 #   bash wire.sh --check   # change nothing; exit 1 if live links differ from
 #                          # what a fresh wire would create
+#   Any other argument: usage message on stderr, exit 2, nothing changed.
 set -euo pipefail
 
+# Arguments are checked before anything is touched or forced: the only accepted argument is
+# --check. Anything else (--dry-run, --help, a typo) used to fall through to a REAL wire.
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--check" ]; }; then
+  echo "usage: wire.sh [--check]" >&2
+  exit 2
+fi
+
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+# Canonical spelling: physical path, no trailing slash. Every link wire creates carries
+# this spelling, and ownership (target_is_ours) is decided on resolved paths, so a clone
+# reached through a symlink, a trailing slash or a ".." no longer splits the grid's links
+# across two spellings that neither teardown nor --check could match.
+GRID_DIR="$(cd "$GRID_DIR" 2>/dev/null && pwd -P)" || { echo "wire: GRID_DIR is not a directory" >&2; exit 2; }
 
 # GRID_DRY_HOME: redirect EVERY home-derived target into a throwaway home.
 # Values are forced, not defaulted, so an inherited SKILLS_DIR or
@@ -77,8 +98,9 @@ fi
 # Harness registry helpers and the portability filter for non-Claude skills dirs.
 # shellcheck source=lib/harness.sh
 . "$(dirname "$0")/lib/harness.sh"
-# Two harnesses sharing one rules_file is a registry error, refused before anything is wired.
-harness_registry_check || { echo "wire: the harness registry is invalid (see above)" >&2; exit 2; }
+# A registry error is refused before anything is wired (nothing is touched): a malformed row or
+# a path that could steer a link (rows_check), or two harnesses sharing one rules_file.
+harness_registry_rows_check && harness_registry_check || { echo "wire: the harness registry is invalid (see above); nothing was changed" >&2; exit 2; }
 # shellcheck source=lib/skill-portable.sh
 . "$(dirname "$0")/lib/skill-portable.sh"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
@@ -102,6 +124,101 @@ while IFS= read -r h_name; do
   if [ "$h_dir" != "-" ] && ! in_list "$h_dir" "${HARNESS_AGENT_DIRS[@]:-}"; then HARNESS_AGENT_DIRS+=("$h_dir"); fi
 done < <(harness_names)
 
+# raw_is_active <raw> <active harness names...>: <raw> is the skills or agents dir of one
+# of the named harnesses.
+raw_is_active() {
+  local raw="$1" n; shift
+  for n in "$@"; do
+    [ -n "$n" ] || continue
+    if [ "$(harness_field "$n" skills_dir)" = "$raw" ] || [ "$(harness_field "$n" agents_dir)" = "$raw" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# resolve_harness_dirs <label> <active harness names...>
+# Resolves every registry skills/agents dir ONCE, before the audit and before any link is
+# touched (the old code resolved them inside the teardown loop, after the Claude links were
+# already gone, so an unset HOME left the machine skill-less with exit 2). Fills the parallel
+# arrays HD_RAW (registry spelling) and HD_DIR (resolved path) with the dirs that resolve.
+#   unresolvable dir of an ACTIVE harness -> exit 2, nothing changed (the contract)
+#   unresolvable dir of an inactive one   -> skipped, ONE warning on stderr for the lot
+# (inactive dirs are only ever touched to tear down stale links, which cannot be done
+# without a home; the Claude dirs do not depend on it.)
+resolve_harness_dirs() {
+  local label="$1" raw dir warned=0 kind; shift
+  HD_RAW=(); HD_DIR=(); HD_KIND=()
+  for raw in "${HARNESS_SKILL_DIRS[@]:-}" "${HARNESS_AGENT_DIRS[@]:-}"; do
+    [ -n "$raw" ] || continue
+    # skill / agent: the manifest row kind is skill@<raw> / agent@<raw> (see wire_harness_link).
+    kind=agent; in_list "$raw" "${HARNESS_SKILL_DIRS[@]:-}" && kind=skill
+    if dir="$(harness_path "$raw" 2>/dev/null)"; then
+      HD_RAW+=("$raw"); HD_DIR+=("$dir"); HD_KIND+=("$kind"); continue
+    fi
+    if raw_is_active "$raw" "$@"; then
+      echo "$label: cannot resolve harness dir $raw (is HOME set?); nothing was changed" >&2
+      exit 2
+    fi
+    if [ "$warned" = 0 ]; then
+      echo "$label: warning: HOME is unset, so non-Claude harness dirs cannot be resolved; their stale links were not checked" >&2
+      warned=1
+    fi
+  done
+}
+
+# --- ownership: is a link target inside the grid? ---------------------------------
+# lex_norm <abs path>: collapse "//", "." and ".." lexically into NORM (no forks).
+lex_norm() {
+  local part res="" parts
+  IFS=/ read -r -d '' -a parts < <(printf '%s' "$1") || true
+  for part in "${parts[@]:-}"; do
+    case "$part" in
+      ''|.) ;;
+      ..)   res="${res%/*}" ;;
+      *)    res="$res/$part" ;;
+    esac
+  done
+  NORM="${res:-/}"
+}
+
+# target_is_ours <link target>: true when the target RESOLVES to a path under GRID_DIR.
+# Resolution, not a string prefix: the target's parent is resolved physically (cd -P, so
+# symlinks and ".." in it are followed) and the last component is appended unresolved
+# (a link's own target is what is compared, not where that finally ends up). When the
+# parent does not exist (a dangling grid link) the path is normalised lexically instead.
+# Only absolute targets can be ours: wire writes nothing else, so a relative one is
+# foreign. "$GRID_DIR/../x" is textually under the grid and physically outside it: not ours.
+target_is_ours() {
+  local t="$1" dir base phys res=""
+  case "$t" in /*) ;; *) return 1 ;; esac
+  while [ "${t%/}" != "$t" ] && [ -n "${t%/}" ]; do t="${t%/}"; done   # trailing slashes
+  base="${t##*/}"
+  case "$base" in
+    .|..)                       # the target IS a directory spelled "." / "..": resolve it whole
+      if phys="$(cd -P "$t" 2>/dev/null && pwd -P)"; then res="$phys"; fi ;;
+    *)
+      dir="${t%/*}"; [ -n "$dir" ] || dir=/
+      if phys="$(cd -P "$dir" 2>/dev/null && pwd -P)"; then
+        [ "$phys" = / ] && phys=""
+        res="$phys/$base"
+      fi ;;
+  esac
+  if [ -z "$res" ]; then lex_norm "$t"; res="$NORM"; fi   # parent missing: lexical
+  case "$res" in "$GRID_DIR"/*) return 0 ;; esac
+  return 1
+}
+
+# link_is_ours <path>: true when <path> is a symlink whose target is ours. Used by the link
+# steps (wire_skill / wire_agent) and the --check shadow filter, so a foreign link, a dangling
+# one or a real file at a grid name is never replaced.
+link_is_ours() {
+  [ -L "$1" ] || return 1
+  local t
+  t="$(readlink "$1")" || return 1
+  target_is_ours "$t"
+}
+
 # --- --check: dry-run drift detector ----------------------------------------
 # Wires into throwaway dirs with the same inputs, then compares the grid-owned
 # symlinks (name -> target) against the live SKILLS_DIR / AGENTS_DIR. Foreign
@@ -113,17 +230,26 @@ if [ "${1:-}" = "--check" ]; then
   GRID_DRY_HOME="$tmp/home" GRID_DIR="$GRID_DIR" GRID_HOST="$GRID_HOST" \
     bash "$0" >/dev/null
   chk_skills="$tmp/home/.claude/skills"; chk_agents="$tmp/home/.claude/agents"
+  # The child resolved which harnesses are active (manifest + GRID_HARNESS) and left the
+  # names in $tmp/home/.harness-active; resolve the LIVE dirs against that set up front, so
+  # an unresolvable dir of an active harness is exit 2 here, not a drift report.
+  chk_active=()
+  if [ -s "$tmp/home/.harness-active" ]; then
+    while IFS= read -r h_name; do [ -n "$h_name" ] && chk_active+=("$h_name"); done < "$tmp/home/.harness-active"
+  fi
+  resolve_harness_dirs "wire --check" "${chk_active[@]:-}"
   # "name -> target" lines for grid-owned links only, sorted (C locale: stable).
-  # $2 (optional) = live dir: names shadowed there by a REAL dir/file are skipped,
-  # because a real wire skips them too ("not managed") — they can never be drift.
+  # $2 (optional) = live dir: names shadowed there by a real dir/file, or by a link that
+  # is not into the grid (foreign or dangling), are skipped, because a real wire skips
+  # them too ("not managed") — they can never be drift.
   links() { # $1 = dir to list, $2 = live dir for the shadow filter
     [ -d "$1" ] || return 0
     # -H: follow the command-line dir if it is itself a symlink (a symlinked
     # skills dir), otherwise find lists nothing and drift is never reported.
-    find -H "$1" -maxdepth 1 -type l | while IFS= read -r l; do
-      t="$(readlink "$l")"; n="$(basename "$l")"
-      if [ -n "${2:-}" ] && [ -e "$2/$n" ] && [ ! -L "$2/$n" ]; then continue; fi
-      case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
+    find -H "$1" -maxdepth 1 -type l -print0 | while IFS= read -r -d '' l; do
+      t="$(readlink "$l")" || continue; n="${l##*/}"
+      if [ -n "${2:-}" ] && { [ -e "$2/$n" ] || [ -L "$2/$n" ]; } && ! link_is_ours "$2/$n"; then continue; fi
+      if target_is_ours "$t"; then printf '%s -> %s\n' "$n" "$t"; fi
     done | LC_ALL=C sort
   }
   # Recursive twin of links() for the rules tree: rules are symlinks nested one level
@@ -132,10 +258,10 @@ if [ "${1:-}" = "--check" ]; then
   # the same real-file shadow filter. Prints "pack/topic.md -> target".
   rule_links() {
     [ -d "$1/grid" ] || return 0
-    find -H "$1/grid" -type l | while IFS= read -r l; do
-      t="$(readlink "$l")"; n="${l#"$1"/grid/}"
+    find -H "$1/grid" -type l -print0 | while IFS= read -r -d '' l; do
+      t="$(readlink "$l")" || continue; n="${l#"$1"/grid/}"
       if [ -n "${2:-}" ] && [ -e "$2/grid/$n" ] && [ ! -L "$2/grid/$n" ]; then continue; fi
-      case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
+      if target_is_ours "$t"; then printf '%s -> %s\n' "$n" "$t"; fi
     done | LC_ALL=C sort
   }
   rc=0
@@ -156,18 +282,18 @@ if [ "${1:-}" = "--check" ]; then
   # registry path there, the live side resolves through harness_path as the real run does.
   hlinks() { # $1 = dir to list, $2 = live dir for the shadow filter
     [ -d "$1" ] || return 0
-    find -H "$1" -maxdepth 1 -type l | while IFS= read -r l; do
-      t="$(readlink "$l")"; n="$(basename "$l")"
+    find -H "$1" -maxdepth 1 -type l -print0 | while IFS= read -r -d '' l; do
+      t="$(readlink "$l")" || continue; n="${l##*/}"
       if [ -n "${2:-}" ] && { [ -e "$2/$n" ] || [ -L "$2/$n" ]; }; then
         lt="$(readlink "$2/$n" 2>/dev/null || true)"
-        case "$lt" in "$GRID_DIR"/*) ;; *) continue ;; esac
+        target_is_ours "$lt" || continue
       fi
-      case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
+      if target_is_ours "$t"; then printf '%s -> %s\n' "$n" "$t"; fi
     done | LC_ALL=C sort
   }
-  for raw in "${HARNESS_SKILL_DIRS[@]:-}" "${HARNESS_AGENT_DIRS[@]:-}"; do
-    [ -n "$raw" ] || continue
-    if ! live="$(harness_path "$raw")"; then rc=1; continue; fi
+  hd_i=0
+  while [ "$hd_i" -lt "${#HD_RAW[@]}" ]; do
+    raw="${HD_RAW[$hd_i]}"; live="${HD_DIR[$hd_i]}"; hd_i=$((hd_i + 1))
     fresh="$( GRID_DRY_HOME="$tmp/home"; harness_path "$raw" )"
     if ! diff <(hlinks "$fresh" "$live") <(hlinks "$live") >"$tmp/harness.diff"; then
       echo "wire --check: harness drift in $live ('<' = should exist, '>' = stale):" >&2
@@ -190,7 +316,9 @@ if [ "${1:-}" = "--check" ]; then
   if [ -s "$tmp/home/.rules-wanted" ]; then
     while IFS=$'\t' read -r rw_name rw_active rw_csv; do
       rw_raw="$(harness_field "$rw_name" rules_file)"
-      if ! rw_file="$(harness_path "$rw_raw")"; then rc=1; continue; fi
+      # An unresolvable file of an inactive harness is not drift (the HOME warning above
+      # already said it was not checked); of an active one it is.
+      if ! rw_file="$(harness_path "$rw_raw" 2>/dev/null)"; then [ "$rw_active" = 1 ] && rc=1; continue; fi
       rw_action="$(harness_rules_action "$rw_file" "$rw_active" "$rw_csv" "$rw_raw")"
       case "$rw_action" in
         emit|remove)
@@ -245,7 +373,9 @@ fi
 # Entry grammar (identical in both files):
 #   repo                 → wire ALL skills in that submodule
 #   repo/skill           → wire ONLY that skill
-#   -repo  | -repo/skill → SUBTRACT (remove a baseline entry — overlay escape hatch)
+#   -repo  | -repo/skill → SUBTRACT (remove a baseline entry — overlay escape hatch).
+#                          A subtraction always wins: -repo removes every skill of that
+#                          repo, even one a repo/skill entry names.
 #   project:<name>       → wire that composed agent-factory project's _claude-code output
 #   -project:<name>      → un-gate a project
 #   rules:<pack>         → wire rules/<pack>/*.md into $RULES_DIR/grid/<pack>/ (opt-in:
@@ -265,6 +395,9 @@ DENY_SKILLS=()     # -repo/skill subtractions
 WIRED_PROJECTS=()  # project:<name> entries
 WIRED_HARNESSES=() # harness:<name> entries (-harness:<name> removes one)
 WIRED_RULES=()     # rules:<pack> entries
+# Audit trail for the manifest written at the end: one row per decision. Declared here, not
+# after the audit, because the manifest LOAD itself records rows (missing / unknown entries).
+MANIFEST_ROWS=()
 DENY_RULES=()      # -rules:<pack> subtractions
 any_project_entry=0
 wire_all_repos=1
@@ -272,9 +405,23 @@ AUTO_HANDOFF=1     # hook:auto-handoff state: on by default, later manifest file
 
 # Parse one manifest file into the arrays above. Later files (the overlay) layer
 # on top of earlier ones (the baseline): additions append, subtractions deny.
+# manifest_note <entry or path> <missing|unknown> <message>: a manifest problem is announced on
+# stderr (once per run: silent under a dry run, whose child output is thrown away) and recorded
+# as a row `manifest TAB <entry> TAB - TAB <status> TAB <reason>` in .wired.manifest. It never
+# fails the wire: a typo should be visible, not fatal (D05 default; no opt-in flag).
+manifest_note() {
+  [ -n "${GRID_DRY_HOME:-}" ] || echo "wire: warning: $3" >&2
+  MANIFEST_ROWS+=("manifest	$1	-	$2	$3")
+}
+
+# $2 = "baseline" marks the first layer: it is expected to exist, so its absence is announced.
+# An absent per-host overlay is normal (no overlay means the baseline as-is) and stays silent.
 load_manifest() {
   local file="$1" line p tmp x
-  [ -f "$file" ] || return 0
+  if [ ! -f "$file" ]; then
+    [ "${2:-}" != baseline ] || manifest_note "$file" missing "baseline manifest not found: $file"
+    return 0
+  fi
   wire_all_repos=0                           # a manifest exists → no legacy wire-all
   while IFS= read -r line; do
     line="${line%%#*}"                       # strip trailing comment
@@ -319,9 +466,25 @@ load_manifest() {
 # GRID_BASELINE lets tests (and CI, which has no personal baseline) point the
 # first layer at another file, e.g. baseline-submodules.example.txt. Overlays
 # below still load from $GRID_DIR/machines/.
-load_manifest "${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}"
+load_manifest "${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}" baseline
 load_manifest "$GRID_DIR/machines/$GRID_HOST.txt"
 load_manifest "$GRID_DIR/machines/$GRID_HOST.local.txt"
+
+# A repo, repo/skill, -repo or -repo/skill entry that names no dir under repos/ is a typo (or a
+# submodule that was never added); it silently wired nothing. Announce each once. (Only the repo
+# part is checked: a per-skill name is matched against what discovery finds, later.)
+manifest_seen=" "
+check_manifest_entry() { # $1 = entry as written (deny entries keep their "-"), $2 = its repo part
+  case "$manifest_seen" in *" $1 "*) return 0 ;; esac
+  manifest_seen="$manifest_seen$1 "
+  [ -d "$GRID_DIR/repos/$2" ] || manifest_note "$1" unknown "manifest entry '$1' names no repo under repos/"
+}
+for me_entry in "${WIRED_REPOS[@]:-}" "${WIRED_SKILLS[@]:-}"; do
+  [ -z "$me_entry" ] || check_manifest_entry "$me_entry" "${me_entry%%/*}"
+done
+for me_entry in "${DENY_REPOS[@]:-}" "${DENY_SKILLS[@]:-}"; do
+  [ -z "$me_entry" ] || check_manifest_entry "-$me_entry" "${me_entry%%/*}"
+done
 
 # --- Active harnesses -----------------------------------------------------------
 # GRID_HARNESS (comma list), when non-empty, REPLACES the manifest's harness: set for
@@ -332,12 +495,29 @@ load_manifest "$GRID_DIR/machines/$GRID_HOST.local.txt"
 HARNESS_SRC=("${WIRED_HARNESSES[@]:-}")
 if [ -n "${GRID_HARNESS:-}" ]; then
   IFS=',' read -r -a HARNESS_SRC <<< "$(printf '%s' "$GRID_HARNESS" | tr -d '[:space:]')"
+  # A value such as "," holds no name at all: silently treating it as "no harness" would tear
+  # every other harness down. Refuse it before anything is touched (D15).
+  gh_named=0
+  for h_name in "${HARNESS_SRC[@]:-}"; do [ -z "$h_name" ] || gh_named=1; done
+  if [ "$gh_named" = 0 ]; then
+    echo "wire: GRID_HARNESS='$GRID_HARNESS' names no harness; nothing was changed" >&2
+    exit 2
+  fi
 fi
 ACTIVE_HARNESSES=()
 unknown_harnesses=""
+# Names in the manifest are validated even when GRID_HARNESS replaces them for this run, so a
+# typo is reported on every run rather than only on the next one without the override.
+for h_name in "${WIRED_HARNESSES[@]:-}"; do
+  [ -n "$h_name" ] || continue
+  if ! harness_valid "$h_name"; then unknown_harnesses="$unknown_harnesses $h_name"; fi
+done
 for h_name in "${HARNESS_SRC[@]:-}"; do
   [ -n "$h_name" ] || continue
-  if ! harness_valid "$h_name"; then unknown_harnesses="$unknown_harnesses $h_name"; continue; fi
+  if ! harness_valid "$h_name"; then
+    in_list "$h_name" ${unknown_harnesses} || unknown_harnesses="$unknown_harnesses $h_name"
+    continue
+  fi
   [ "$h_name" = claude ] && continue
   in_list "$h_name" "${ACTIVE_HARNESSES[@]:-}" || ACTIVE_HARNESSES+=("$h_name")
 done
@@ -350,6 +530,16 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ] && ! command -v python3 >/dev/null 2>&1; 
   echo "wire: python3 is required to wire a non-Claude harness (the skill portability filter reads frontmatter with it); nothing was changed" >&2
   exit 2
 fi
+# python3 on PATH is not python3 that runs: a broken one made every skill "no-frontmatter" with
+# exit 0 and an empty shared dir. Prove it can run before anything is written.
+if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ] && ! python3 -I -c 'pass' >/dev/null 2>&1; then
+  echo "wire: python3 is present but cannot run (the skill portability filter needs it); nothing was changed" >&2
+  exit 2
+fi
+# Hand --check the active set the manifest + GRID_HARNESS resolved to (dry run only).
+[ -z "${GRID_DRY_HOME:-}" ] || printf '%s\n' "${ACTIVE_HARNESSES[@]:-}" > "$GRID_DRY_HOME/.harness-active"
+# Resolve every registry dir now, before the audit or any teardown (see resolve_harness_dirs).
+resolve_harness_dirs wire "${ACTIVE_HARNESSES[@]:-}"
 
 # --- predicates ---------------------------------------------------------------
 repo_is_denied()  { local n="$1" r; for r in "${DENY_REPOS[@]:-}";   do [ "$r" = "$n" ] && return 0; done; return 1; }
@@ -366,6 +556,7 @@ repo_is_wired() {
 
 # Is a specific skill (repo, skill-name) wired by a per-skill entry (not denied)?
 skill_is_wired() {
+  repo_is_denied "$1" && return 1          # -repo removes every skill of that repo (D04)
   skill_is_denied "$1" "$2" && return 1
   local entry="$1/$2" s
   for s in "${WIRED_SKILLS[@]:-}"; do [ "$s" = "$entry" ] && return 0; done
@@ -375,6 +566,7 @@ skill_is_wired() {
 # Does this repo have any per-skill entries in WIRED_SKILLS?
 repo_has_skill_entries() {
   local repo="$1" s
+  repo_is_denied "$repo" && return 1       # -repo beats a repo/skill entry (D04)
   for s in "${WIRED_SKILLS[@]:-}"; do
     [[ "$s" == "$repo/"* ]] && return 0
   done
@@ -392,31 +584,127 @@ project_is_wired() {
 # Is a rule pack subtracted (-rules:<pack>) in any manifest layer?
 rule_is_denied() { local r; for r in "${DENY_RULES[@]:-}"; do [ "$r" = "$1" ] && return 0; done; return 1; }
 
-mkdir -p "$SKILLS_DIR" "$AGENTS_DIR"
-
-# Audit trail for the manifest written at the end: one row per decision.
-MANIFEST_ROWS=()
-
 # --- 0. Vet before touching any link -------------------------------------------
-# Skipped in --check's throwaway run (GRID_SKIP_CATALOG) and in audit.sh's own
-# dry run (GRID_SKIP_AUDIT, prevents recursion). Skipped LOUDLY when the tool or
-# policy is absent, so mock grids in tests and bare machines still wire.
+# Skipped in exactly two cases: every dry run (GRID_DRY_HOME set: --check's child,
+# audit.sh --wired, baseline_wired.py, grid lock; silent, a dry run changes nothing), and
+# GRID_SKIP_AUDIT, the one explicit bypass (it prints a notice on stderr). GRID_SKIP_CATALOG
+# only suppresses the SKILLS.md / manifest writes and no longer skips the audit. A missing
+# policy.yaml or python3 blocks like a finding does (exit 3), not a silent skip.
 # Runs BEFORE teardown: a blocked wire changes nothing, so a bad upstream bump
 # can never leave a machine half-wired. audit.sh exit 2 (broken policy) blocks too.
-if [ -z "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_SKIP_CATALOG:-}" ]; then
+# Known limits (accepted, D08): the audit is point-in-time (it runs here and in the gate, not
+# between them; --check does not re-audit) and scans skill and agent link targets only, so
+# helper dirs behind a runtime-root link (gstack bin/) are not covered. See CURATION.md.
+# With no manifest file at all, every repos/ skill is selected (legacy wire-all): say so in a block.
+legacy_note=""
+[ "$wire_all_repos" -eq 0 ] || legacy_note=" No manifest file was found, so EVERY repos/ skill was selected: check GRID_BASELINE / baseline-submodules.txt."
+if [ -n "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_DRY_HOME:-}" ]; then
+  echo "wire: GRID_SKIP_AUDIT is set: the audit is SKIPPED, wired content is not vetted" >&2
+fi
+if [ -z "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_DRY_HOME:-}" ]; then
   if [ ! -f "$GRID_DIR/policy.yaml" ]; then
-    echo "wire: no policy.yaml - audit skipped"
+    # No policy means nothing to audit against: same block as a finding (fail closed).
+    # Mock grids that deliberately have none set GRID_SKIP_AUDIT=1 (tests do, via common_setup).
+    if [ "${GRID_AUDIT:-}" = warn ]; then
+      echo "wire: no policy.yaml to audit against; GRID_AUDIT=warn so wiring continues UNAUDITED" >&2
+    else
+      echo "wire: BLOCKED by audit (nothing was changed): no policy.yaml to audit against. Restore it, or set GRID_SKIP_AUDIT=1 for a grid that has none.$legacy_note" >&2
+      exit 3
+    fi
   elif ! command -v python3 >/dev/null 2>&1; then
-    echo "wire: python3 missing - audit SKIPPED, skills wired unaudited" >&2
+    # Fails closed like a finding does: without python3 the audit cannot run, and wiring
+    # unaudited by accident is exactly what the audit exists to prevent.
+    if [ "${GRID_AUDIT:-}" = warn ]; then
+      echo "wire: python3 not found, so the audit cannot run; GRID_AUDIT=warn so wiring continues UNAUDITED" >&2
+    else
+      echo "wire: BLOCKED by audit (nothing was changed): python3 not found, so the audit cannot run. Install python3, or set GRID_AUDIT=warn once.$legacy_note" >&2
+      exit 3
+    fi
   elif ! bash "$(dirname "$0")/audit.sh" --wired --quiet; then
     if [ "${GRID_AUDIT:-}" = warn ]; then
       echo "wire: audit found high-severity issues; GRID_AUDIT=warn so wiring continues" >&2
     else
-      echo "wire: BLOCKED by audit (nothing was changed). Fix, allowlist in CURATION.md with a reason, or set GRID_AUDIT=warn once." >&2
+      echo "wire: BLOCKED by audit (nothing was changed). Fix, allowlist in CURATION.md with a reason, or set GRID_AUDIT=warn once.$legacy_note" >&2
       exit 3
     fi
   fi
 fi
+
+# Created only now, after the audit: a blocked first run must not leave empty dirs behind
+# ("nothing was changed" is literally true). Before the preflight, which needs them to exist.
+mkdir -p "$SKILLS_DIR" "$AGENTS_DIR"
+
+# --- 0b. Preflight and rollback: a failed or interrupted wire never leaves zero links ---
+# Teardown (step 1) removes every grid link before the wired set is rebuilt, so a failure in
+# between used to leave the machine skill-less until the next run. Two guards, no lock (D07:
+# a single writer is assumed, see CLAUDE.md):
+#   preflight  every dir that will be written is checked writable BEFORE any rm; else exit 2
+#   rollback   each removed link is logged ("link NUL target NUL") and an EXIT/INT/TERM/HUP
+#              trap re-creates every logged link that is absent again, unless the run
+#              reached WIRE_COMPLETE=1 (just before the manifest is written). SIGKILL cannot
+#              be trapped: re-running wire recovers fully.
+# The restore only puts back what THIS run removed; if the failure came mid-link the result is
+# old and new links mixed, never zero.
+#
+# owned_links <dir> [find args]: NUL-separated paths of the symlinks under <dir> whose target
+# is ours. find -H follows <dir> itself when it is a symlink to the real dir (without it find
+# lists nothing and stale grid links silently survive). -print0 / read -d '': a link name with
+# a newline must not be split into two bogus paths.
+owned_links() {
+  local dir="$1" link target; shift
+  [ -d "$dir" ] || return 0
+  while IFS= read -r -d '' link; do
+    target=$(readlink "$link") || continue
+    # target_is_ours compares resolved paths against "$GRID_DIR"/ (with the slash):
+    # a bare prefix would also match a sibling dir such as ${GRID_DIR}-private and
+    # delete a foreign link into it.
+    target_is_ours "$target" || continue   # not ours, leave it alone
+    printf '%s\0' "$link"
+  done < <(find -H "$dir" "$@" -type l -print0 2>/dev/null)
+}
+has_owned_links() { local _x; IFS= read -r -d '' _x < <(owned_links "$@"); }
+
+# Dirs that must be writable: the Claude dirs always (they are relinked), the others only when
+# they hold grid links that teardown has to remove.
+preflight_bad=""
+for pf_dir in "$SKILLS_DIR" "$AGENTS_DIR"; do
+  if [ ! -d "$pf_dir" ] || [ ! -w "$pf_dir" ] || [ ! -x "$pf_dir" ]; then preflight_bad="$preflight_bad $pf_dir"; fi
+done
+for pf_dir in "${HD_DIR[@]:-}"; do
+  [ -n "$pf_dir" ] && [ -d "$pf_dir" ] && [ ! -w "$pf_dir" ] || continue
+  ! has_owned_links "$pf_dir" -maxdepth 1 || preflight_bad="$preflight_bad $pf_dir"
+done
+if [ -d "$RULES_DIR/grid" ] && [ ! -w "$RULES_DIR/grid" ] && has_owned_links "$RULES_DIR/grid"; then
+  preflight_bad="$preflight_bad $RULES_DIR/grid"
+fi
+if [ -n "$preflight_bad" ]; then
+  echo "wire: not writable:$preflight_bad" >&2
+  echo "wire: nothing was changed" >&2
+  exit 2
+fi
+
+UNDO_FILE="$(mktemp "${TMPDIR:-/tmp}/wire-undo.XXXXXX")"
+WIRE_COMPLETE=0
+TEARDOWN_FAILED=0
+wire_exit() {
+  local rc="$1" link target
+  trap - EXIT INT TERM HUP          # the restore below must not re-enter the trap
+  if [ "$WIRE_COMPLETE" != 1 ] && [ -s "$UNDO_FILE" ]; then
+    while IFS= read -r -d '' link && IFS= read -r -d '' target; do
+      if [ ! -e "$link" ] && [ ! -L "$link" ]; then
+        mkdir -p "$(dirname "$link")" 2>/dev/null || true   # a rules pack dir teardown emptied
+        ln -s "$target" "$link" 2>/dev/null || true
+      fi
+    done < "$UNDO_FILE"
+    echo "wire: failed or interrupted; the links it had removed were restored" >&2
+  fi
+  rm -f "$UNDO_FILE"
+  exit "$rc"
+}
+trap 'wire_exit $?' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 # --- 1. Tear down ALL grid-owned symlinks (rebuilt below) ---
 # A symlink is grid-owned if its target is under GRID_DIR. We remove every one
@@ -424,19 +712,28 @@ fi
 # drops its links — not just broken/stale ones (their targets still exist).
 # Foreign symlinks (target outside GRID_DIR) are never touched. Applied to both
 # the skills dir and the agents dir (composed subagents land in the latter).
+# A failed rm is reported and counted, not fatal (the run ends non-zero after relinking).
+# With a manifest <kind> (skill@<~dir> / agent@<~dir>, harness dirs only), a removed link whose
+# (kind, name) is not a row of the PREVIOUS .wired.manifest is reported on stderr: it is the
+# operator's own link into the grid (D16: report, removal itself is unchanged). An absent
+# manifest counts as empty; a dry run (GRID_DRY_HOME) reports nothing.
+PREV_MANIFEST="$GRID_DIR/.wired.manifest"
+in_prev_manifest() { # $1 = kind, $2 = name
+  [ -f "$PREV_MANIFEST" ] || return 1
+  awk -F'\t' -v k="$1" -v n="$2" '$1 == k && $2 == n { f = 1; exit } END { exit !f }' "$PREV_MANIFEST"
+}
 teardown_grid_links() {
-  local dir="$1" link target
-  [ -d "$dir" ] || return 0
-  while IFS= read -r link; do
-    target=$(readlink "$link")
-    # "$GRID_DIR"/* (with the slash), not "$GRID_DIR"*: the bare prefix also
-    # matches a sibling dir such as ${GRID_DIR}-private and would delete a
-    # foreign link into it.
-    [[ "$target" == "$GRID_DIR"/* ]] || continue   # not ours, leave it alone
-    rm "$link"
-  # find -H: follow $dir itself when it is a symlink to the real skills dir
-  # (without it find lists nothing and stale grid links silently survive).
-  done < <(find -H "$dir" -maxdepth 1 -type l 2>/dev/null)
+  local dir="$1" kind="${2:-}" link target
+  while IFS= read -r -d '' link; do
+    target=$(readlink "$link") || continue
+    printf '%s\0%s\0' "$link" "$target" >> "$UNDO_FILE"
+    if ! rm "$link"; then
+      echo "wire: cannot remove $link" >&2
+      TEARDOWN_FAILED=$((TEARDOWN_FAILED + 1))
+    elif [ -n "$kind" ] && [ -z "${GRID_DRY_HOME:-}" ] && ! in_prev_manifest "$kind" "${link##*/}"; then
+      echo "wire: removed link not in the previous manifest: $link" >&2
+    fi
+  done < <(owned_links "$dir" -maxdepth 1)
 }
 teardown_grid_links "$SKILLS_DIR"
 teardown_grid_links "$AGENTS_DIR"
@@ -445,10 +742,10 @@ teardown_grid_links "$AGENTS_DIR"
 # function is the same one, so the same ownership test applies: only a symlink into
 # "$GRID_DIR"/ goes; real files, foreign and sibling-prefix links stay. A dir that does
 # not exist is skipped, so nothing is created for a harness nobody uses.
-for h_raw in "${HARNESS_SKILL_DIRS[@]:-}" "${HARNESS_AGENT_DIRS[@]:-}"; do
-  [ -n "$h_raw" ] || continue
-  h_dir="$(harness_path "$h_raw")" || { echo "wire: cannot resolve harness dir $h_raw" >&2; exit 2; }
-  teardown_grid_links "$h_dir"
+hd_i=0
+while [ "$hd_i" -lt "${#HD_DIR[@]}" ]; do
+  teardown_grid_links "${HD_DIR[$hd_i]}" "${HD_KIND[$hd_i]}@${HD_RAW[$hd_i]}"
+  hd_i=$((hd_i + 1))
 done
 
 # Rules: same ownership test, but the tree is nested ($RULES_DIR/grid/<pack>/<topic>.md)
@@ -458,28 +755,67 @@ done
 teardown_rule_links() {
   local root="$RULES_DIR/grid" link target
   [ -d "$root" ] || return 0
-  while IFS= read -r link; do
-    target=$(readlink "$link")
-    [[ "$target" == "$GRID_DIR"/* ]] || continue   # not ours, leave it alone
-    rm "$link"
-  done < <(find -H "$root" -type l 2>/dev/null)
+  while IFS= read -r -d '' link; do
+    target=$(readlink "$link") || continue
+    printf '%s\0%s\0' "$link" "$target" >> "$UNDO_FILE"
+    if ! rm "$link"; then
+      echo "wire: cannot remove $link" >&2
+      TEARDOWN_FAILED=$((TEARDOWN_FAILED + 1))
+    fi
+  done < <(owned_links "$root")
   # -empty -delete only removes directories with nothing in them (-delete implies -depth,
   # so a pack dir emptied by the loop above goes, and so does a parent emptied by that).
   find "$root" -mindepth 1 -type d -empty -delete 2>/dev/null || true
 }
 teardown_rule_links
 
+# valid_link_name <name>: a skill dir / agent file name safe to link and to record. The
+# manifest is tab-separated with one row per line, so a TAB or newline in a name would add
+# columns or fake a row. Wider than skill_portable's lower-case grammar on purpose: Claude-side
+# wiring has always accepted upstream names with capitals and underscores, and a strict rule
+# would silently unwire them. C collation so [A-Za-z] cannot match other letters.
+valid_link_name() {
+  local LC_COLLATE=C
+  case "$1" in
+    ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  return 0
+}
+# skip_invalid_name <kind> <name> <path>: report on stderr and record a fixed-column row with
+# control characters in the name and path replaced by "?".
+skip_invalid_name() {
+  local san_name san_path
+  san_name="$(printf '%s' "$2" | LC_ALL=C tr '[:cntrl:]' '?')"
+  san_path="$(printf '%s' "$3" | LC_ALL=C tr '[:cntrl:]' '?')"
+  echo "  skip (invalid name): $san_name" >&2
+  MANIFEST_ROWS+=("$1	$san_name	$san_path	skipped	invalid name")
+}
+
 # Wire a skill directory to SKILLS_DIR.
-# Skips real directories (not symlinks) — those are not managed by the-grid.
+# Replaces only what the grid owns: a free name, or a link into the grid (a root skill
+# overriding a repo skill wired a moment ago). A real dir, a regular file, a dangling
+# link or a link to somewhere else is the user's: skipped, never replaced. The real-dir
+# wording is parsed by reconcile.sh and must stay exactly as it is, for real dirs only.
 wire_skill() {
   local skill_dir="$1"
   local name
-  name=$(basename "$skill_dir")
+  # Parameter expansion, not basename: $(basename) strips a trailing newline from the name.
+  name="${skill_dir%/}"; name="${name##*/}"
   local target="$SKILLS_DIR/$name"
+
+  if ! valid_link_name "$name"; then
+    skip_invalid_name skill "$name" "$skill_dir"
+    return
+  fi
 
   if [ -d "$target" ] && [ ! -L "$target" ]; then
     echo "  skip (real dir, not managed): $name"
     MANIFEST_ROWS+=("skill	$name	$skill_dir	skipped	real dir, not managed")
+    return
+  fi
+  if { [ -e "$target" ] || [ -L "$target" ]; } && ! link_is_ours "$target"; then
+    echo "  skip (not managed): $name"
+    MANIFEST_ROWS+=("skill	$name	$skill_dir	skipped	not managed")
     return
   fi
 
@@ -494,12 +830,23 @@ wire_skill() {
 wire_agent() {
   local agent_file="$1"
   local name
-  name=$(basename "$agent_file")
+  name="${agent_file##*/}"
   local target="$AGENTS_DIR/$name"
+
+  if ! valid_link_name "$name"; then
+    skip_invalid_name agent "$name" "$agent_file"
+    return
+  fi
 
   if [ -e "$target" ] && [ ! -L "$target" ]; then
     echo "  skip (real file, not managed): $name"
     MANIFEST_ROWS+=("agent	$name	$agent_file	skipped	real file, not managed")
+    return
+  fi
+  # A foreign or dangling symlink is the user's too; only a link into the grid is replaced.
+  if [ -L "$target" ] && ! link_is_ours "$target"; then
+    echo "  skip (not managed): $name"
+    MANIFEST_ROWS+=("agent	$name	$agent_file	skipped	not managed")
     return
   fi
 
@@ -526,6 +873,7 @@ if [ -d "$GRID_DIR/repos" ]; then
       while IFS= read -r skill_md; do
         skill_dir=$(dirname "$skill_md")
         [ "$skill_dir" = "$repo_dir" ] && continue
+        case "$skill_dir" in "$repo_dir"/*) ;; *) continue ;; esac   # never link outside the repo
         skill_is_denied "$repo_name" "$(basename "$skill_dir")" && continue
         wire_skill "$skill_dir"
       done < <(find_skill_mds "$repo_dir")
@@ -534,6 +882,7 @@ if [ -d "$GRID_DIR/repos" ]; then
       while IFS= read -r skill_md; do
         skill_dir=$(dirname "$skill_md")
         [ "$skill_dir" = "$repo_dir" ] && continue
+        case "$skill_dir" in "$repo_dir"/*) ;; *) continue ;; esac   # never link outside the repo
         skill_is_wired "$repo_name" "$(basename "$skill_dir")" || continue
         wire_skill "$skill_dir"
       done < <(find_skill_mds "$repo_dir")
@@ -577,7 +926,7 @@ if [ -f "$RUNTIMES_FILE" ]; then
       # grid (a skill that happens to share the name) is ours: the runtime
       # link wins the clash.
       if { [ -e "$rt_target" ] || [ -L "$rt_target" ]; } &&
-         { [ ! -L "$rt_target" ] || [[ "$(readlink "$rt_target")" != "$GRID_DIR"/* ]]; }; then
+         { [ ! -L "$rt_target" ] || ! link_is_ours "$rt_target"; }; then
         echo "  skip (runtime root occupied, not managed): $rt_link"
         MANIFEST_ROWS+=("runtime-link	$rt_link	$rt_root	skipped	runtime root occupied, not managed")
       else
@@ -619,7 +968,8 @@ CC_OUT="$GRID_DIR/agent-factory/projects"
 if [ -d "$CC_OUT" ]; then
   for proj_dir in "$CC_OUT"/*/; do
     [ -d "$proj_dir" ] || continue
-    proj_name="$(basename "${proj_dir%/}")"
+    proj_dir="${proj_dir%/}"   # the glob's trailing slash would put "//" in every link target
+    proj_name="$(basename "$proj_dir")"
     project_is_wired "$proj_name" || continue
     while IFS= read -r skill_md; do
       wire_skill "$(dirname "$skill_md")"
@@ -653,7 +1003,9 @@ fi
 # target is left alone, as with skills and agents.
 rules_done=" "   # packs already handled this run (a pack named in baseline AND overlay)
 RULES_EFFECTIVE=()   # the wired packs that exist (input to step 3f, rules delivery)
-for rule_pack in "${WIRED_RULES[@]:-}"; do
+# ${arr[@]+"${arr[@]}"}: no iterations for an empty array (the ":-" form expands it to ONE
+# empty word and warned on every run); a bare `rules:` line is a real "" element and still warns.
+for rule_pack in ${WIRED_RULES[@]+"${WIRED_RULES[@]}"}; do
   [ -n "$rule_pack" ] || { echo "warning: empty rules: entry ignored" >&2; continue; }
   rule_is_denied "$rule_pack" && continue
   case "$rules_done" in *" $rule_pack "*) continue ;; esac
@@ -737,9 +1089,25 @@ fi
 # does NOT start `  skip (real dir, not managed)`: reconcile.sh parses that exact
 # prefix and would rm -rf the same-named dir in the Claude skills dir.
 # Manifest rows use kind skill@<~dir> / agent@<~dir> (home-independent), reason last.
-wire_harness_link() { # $1=src $2=dest dir $3=kind (skill|agent) $4=~/-form dir $5=name
-  local src="$1" dest_dir="$2" kind="$3" disp="$4" name="$5"
+# $6 (optional) = the composed project the file comes from: a destination this run already
+# linked for ANOTHER project is a name clash between projects, not a foreign entry.
+HL_DEST=(); HL_PROJ=()   # destinations linked this run, and the project that owns each
+hl_owner() { # $1 = dest path; prints the owning project, exit 1 if not linked this run
+  local i=0
+  while [ "$i" -lt "${#HL_DEST[@]}" ]; do
+    if [ "${HL_DEST[$i]}" = "$1" ]; then printf '%s' "${HL_PROJ[$i]}"; return 0; fi
+    i=$((i + 1))
+  done
+  return 1
+}
+wire_harness_link() { # $1=src $2=dest dir $3=kind (skill|agent) $4=~/-form dir $5=name [$6=project]
+  local src="$1" dest_dir="$2" kind="$3" disp="$4" name="$5" project="${6:-}" owner
   if [ -e "$dest_dir/$name" ] || [ -L "$dest_dir/$name" ]; then
+    if owner="$(hl_owner "$dest_dir/$name")" && [ -n "$owner" ] && [ "$owner" != "$project" ]; then
+      echo "  skip ($disp: name clash with $owner): $name"
+      MANIFEST_ROWS+=("$kind@$disp	$name	$src	skipped	name clash with $owner")
+      return
+    fi
     echo "  skip ($disp: exists, not managed): $name"
     MANIFEST_ROWS+=("$kind@$disp	$name	$src	skipped	exists, not managed")
     return
@@ -751,7 +1119,11 @@ wire_harness_link() { # $1=src $2=dest dir $3=kind (skill|agent) $4=~/-form dir 
     MANIFEST_ROWS+=("$kind@$disp	$name	$src	skipped	cannot create dir")
     return
   fi
-  ln -s "$src" "$dest_dir/$name"
+  # -n: never follow a directory symlink that appeared at the destination since the check above
+  # (BSD and GNU safe; -T is GNU only). It then fails with "File exists" instead of writing
+  # the link inside whatever that symlink points at.
+  ln -sn -- "$src" "$dest_dir/$name"
+  HL_DEST+=("$dest_dir/$name"); HL_PROJ+=("$project")
   MANIFEST_ROWS+=("$kind@$disp	$name	$src	wired	")
   echo "  wired ($disp): $name"
 }
@@ -761,7 +1133,7 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ]; then
   HL_NAME=(); HL_SRC=(); HL_REASON=()
   while IFS= read -r hl_link; do
     hl_t="$(readlink "$hl_link")"
-    [[ "$hl_t" == "$GRID_DIR"/* ]] || continue          # foreign link: not ours to fan out
+    target_is_ours "$hl_t" || continue                  # foreign link: not ours to fan out
     hl_reason=""
     hl_rel="${hl_t%/}"
     case "$hl_rel" in
@@ -786,6 +1158,11 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ]; then
     while [ "$i" -lt "${#HL_NAME[@]}" ]; do
       if [ -n "${HL_REASON[$i]}" ]; then
         MANIFEST_ROWS+=("skill@$h_raw	${HL_NAME[$i]}	${HL_SRC[$i]}	skipped	${HL_REASON[$i]}")
+        # The one reason that is announced: a guard the operator set is being withheld, and
+        # silence would look like a bug. (Not the reconcile.sh "real dir" prefix.)
+        if [ "${HL_REASON[$i]}" = claude-only-guard ]; then
+          echo "  skip ($h_raw: claude-only-guard): ${HL_NAME[$i]}"
+        fi
       else
         wire_harness_link "${HL_SRC[$i]}" "$h_dir" skill "$h_raw" "${HL_NAME[$i]}"
       fi
@@ -807,7 +1184,7 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ]; then
       project_is_wired "$(basename "$proj_dir")" || continue
       for agent_file in "$proj_dir/_$h_target/agents"/*; do
         [ -f "$agent_file" ] || continue
-        wire_harness_link "$agent_file" "$h_dir" agent "$h_raw" "$(basename "$agent_file")"
+        wire_harness_link "$agent_file" "$h_dir" agent "$h_raw" "$(basename "$agent_file")" "$(basename "$proj_dir")"
       done
     done
   done
@@ -845,7 +1222,10 @@ while IFS= read -r h_name; do
     printf '%s\t%s\t%s\n' "$h_name" "$rl_active" "$rules_csv" >> "$GRID_DRY_HOME/.rules-wanted"
     continue
   fi
-  if ! rl_file="$(harness_path "$rl_raw")"; then
+  if ! rl_file="$(harness_path "$rl_raw" 2>/dev/null)"; then
+    # Inactive harness with no home to resolve against: skipped (the single HOME warning
+    # printed up front covers it); an active one cannot reach here (exit 2 before any write).
+    [ "$rl_active" = 1 ] || continue
     echo "wire: rules delivery failed for $rl_raw: cannot resolve the path" >&2; rules_failed=1; continue
   fi
   rl_action="$(harness_rules_action "$rl_file" "$rl_active" "$rules_csv" "$rl_raw")"
@@ -885,6 +1265,9 @@ while IFS= read -r h_name; do
   esac
 done < <(harness_names)
 
+# Every link is in place: from here a failure must not roll the new links back.
+WIRE_COMPLETE=1
+
 # --- 3d. Write the wiring manifest (audit trail) ---
 # One row per decision (kind, name, target, status, reason), sorted, no
 # timestamp — so an unchanged wiring leaves the file byte-identical and it is
@@ -916,6 +1299,11 @@ if [ -f "$SCRIPT_DIR/catalog.sh" ] && [ -z "${GRID_SKIP_CATALOG:-}" ] && [ -z "$
   GRID_DIR="$GRID_DIR" GRID_BASELINE="$catalog_baseline" bash "$SCRIPT_DIR/catalog.sh" "$GRID_DIR/SKILLS.md"
 fi
 
+# Stale links that could not be removed fail the run, after everything else has run.
+if [ "$TEARDOWN_FAILED" != 0 ]; then
+  echo "wire: done, but $TEARDOWN_FAILED stale link(s) could not be removed (see above)" >&2
+  exit 1
+fi
 # Rules delivery (3f) finishes every other step first, then fails the run.
 if [ "$rules_failed" != 0 ]; then
   echo "wire: done, but rules delivery failed (see above)" >&2
