@@ -45,6 +45,9 @@ def _needs_tomllib() -> str | None:
     return None
 
 
+CODEX_SANDBOX_MODES = {"read-only", "workspace-write", "danger-full-access"}
+
+
 @command("codex-agent", requires=_needs_tomllib)
 def check_codex_agent(path: Path) -> list[str]:
     """A Codex subagent file: valid TOML whose `name`, `description` and
@@ -60,6 +63,10 @@ def check_codex_agent(path: Path) -> list[str]:
         value = data.get(key)
         if not isinstance(value, str) or not value.strip():
             problems.append(f"missing or non-string required key: {key}")
+    # The three values Codex documents; anything else (a typo, "yolo") is not a sandbox.
+    if "sandbox_mode" in data and data["sandbox_mode"] not in CODEX_SANDBOX_MODES:
+        problems.append(f"sandbox_mode {data['sandbox_mode']!r} must be one of "
+                        f"{', '.join(sorted(CODEX_SANDBOX_MODES))}")
     return problems
 
 
@@ -78,12 +85,17 @@ def _frontmatter_reader():
 
 # The values OpenCode accepts for a permission key (opencode.ai/docs/agents).
 OPENCODE_PERMISSION_VALUES = {"ask", "allow", "deny"}
+# The permission keys this repo's emitter can write (docs/harnesses.md). Extend with the emitter.
+OPENCODE_PERMISSION_KEYS = {"edit", "bash", "webfetch"}
+# Frontmatter keys an OpenCode agent file may carry (docs/harnesses.md vendor table).
+OPENCODE_AGENT_KEYS = {"description", "mode", "model", "temperature", "permission"}
 
 
 @command("opencode-agent")
 def check_opencode_agent(path: Path) -> list[str]:
     """An OpenCode subagent file: a leading frontmatter block with a non-empty `description`
-    and `mode: subagent`; a `permission:` map, when present, holds only ask/allow/deny values."""
+    and `mode: subagent`; only known top-level keys; a `permission:` block map (not flow
+    style), when present, holds only known keys with ask/allow/deny values."""
     fm_mod = _frontmatter_reader()
     lines = fm_mod.frontmatter_lines(str(path))
     if lines is None:
@@ -94,10 +106,18 @@ def check_opencode_agent(path: Path) -> list[str]:
     mode = fm_mod.scalar(lines, "mode")
     if mode != "subagent":
         problems.append(f"mode must be 'subagent', got {mode!r}")
+    for line in lines:   # top-level keys are the unindented `key:` lines
+        m = re.match(r"([^\s:#][^:]*):", line)
+        if m and m.group(1) not in OPENCODE_AGENT_KEYS:
+            problems.append(f"unknown frontmatter key {m.group(1)!r}")
     # The permission block is the indented lines after a top-level `permission:`.
     in_perm = False
     for line in lines:
         if line.startswith("permission:"):
+            if line.split(":", 1)[1].strip():
+                # `permission: {edit: yolo}` and friends: this repo writes block maps only, and a
+                # flow map would slip past the per-key checks below.
+                problems.append("permission must be a block map, not an inline value")
             in_perm = True
             continue
         if in_perm:
@@ -105,6 +125,8 @@ def check_opencode_agent(path: Path) -> list[str]:
                 break   # next top-level key
             if line.strip():
                 key, _, value = line.strip().partition(":")
+                if key not in OPENCODE_PERMISSION_KEYS:
+                    problems.append(f"unknown permission key {key!r}")
                 if value.strip() not in OPENCODE_PERMISSION_VALUES:
                     problems.append(f"permission {key!r} has invalid value {value.strip()!r}")
     return problems
@@ -145,6 +167,12 @@ def check_skill(path: Path) -> list[str]:
 
 # ── gemini-agent ─────────────────────────────────────────────────────────────
 # (group 5) Reuses the frontmatter reader above.
+# The Gemini tool names agent-factory/compose.py GEMINI_TOOLS maps to (stdlib only here, so it
+# cannot import compose). tests/test_harness_formats.bats fails if the two lists drift apart.
+GEMINI_TOOL_NAMES = {"read_file", "read_many_files", "grep_search", "glob", "list_directory",
+                     "run_shell_command", "replace", "write_file", "web_fetch", "google_web_search"}
+
+
 @command("gemini-agent")
 def check_gemini_agent(path: Path) -> list[str]:
     """A Gemini CLI subagent file: a `---` frontmatter block whose `name` matches
@@ -176,6 +204,13 @@ def check_gemini_agent(path: Path) -> list[str]:
             # the block list this repo writes.
             if ln.split(":", 1)[1].strip() or not items:
                 problems.append("tools must be a non-empty YAML block list")
+            for item in items:
+                if item not in GEMINI_TOOL_NAMES:
+                    problems.append(f"tool {item!r} is not a Gemini CLI tool name this repo maps")
+    # The Markdown body is the system prompt: a file with nothing after the frontmatter has none.
+    m = re.match(r"---[ \t]*\n.*?\n---[ \t]*\n(.*)\Z", path.read_text(encoding="utf-8"), re.S)
+    if m is None or not m.group(1).strip():
+        problems.append("no body after the frontmatter (the body is the system prompt)")
     return problems
 
 
@@ -192,7 +227,12 @@ def main(argv: list[str]) -> int:
     failed = False
     for name in argv[2:]:
         path = Path(name)
-        problems = checker(path) if path.exists() else ["no such file"]
+        if not path.exists():
+            problems = ["no such file"]
+        elif path.is_dir() and argv[1] != "skill":   # `skill` takes dirs; the agent checkers take files
+            problems = ["is a directory, expected a file"]
+        else:
+            problems = checker(path)
         for problem in problems:
             print(f"{name}: {problem}", file=sys.stderr)
             failed = True

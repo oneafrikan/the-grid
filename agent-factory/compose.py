@@ -779,7 +779,8 @@ def render_subagent_body(agent: dict, slug: str, project_context: str = "") -> s
 
 
 def subagent_description(role: str) -> str:
-    """The description of a specialist subagent, identical on every harness.
+    """The description of a specialist subagent, identical on every harness except that Codex
+    strips control characters (TOML forbids them; role lint rejects them at the source).
 
     A role.yaml `description:` (one line, budget-and-usage) replaces the legacy formula
     verbatim; roles without it keep the old text byte-for-byte.
@@ -805,7 +806,7 @@ def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
         "description": subagent_description(role),
         "model": model_id(resolve_model(agent)),
     }
-    tools = role_meta(role).get("tools")
+    tools = role_tools(role)
     if tools:   # a role.yaml `tools:` allowlist narrows the subagent; absent = inherits every tool
         fields = {**{k: v for k, v in fields.items() if k != "model"}, "tools": ", ".join(tools), "model": fields["model"]}
     if profile == "lean":
@@ -1077,15 +1078,24 @@ def emit_codex_agent(agent: dict, slug: str) -> tuple[str, str]:
 
     Key order is name, description, sandbox_mode (only when the role has a `tools:` allowlist
     with neither Edit nor Write), developer_instructions. `model` is never written, so Codex
-    uses the session's model. A read-only sandbox also blocks writes through Bash: stricter
-    than Claude's Bash-can-write, which errs safe for read-only roles (qa, security).
+    uses the session's model.
+
+    `sandbox_mode = "read-only"` is a best-effort default, NOT an enforced least-privilege
+    control: a Codex subagent inherits the parent session's sandbox, and `--yolo` or
+    `/permissions` override the agent file. Codex also cannot express "no Bash" (see the
+    warning below). While a read-only sandbox does apply it blocks writes through Bash too,
+    which Claude's allowlist does not.
     """
     role = agent["role"]
     name = slugged(slug, role)
     lines = [f"name = {toml_basic(name)}", f"description = {toml_basic(subagent_description(role))}"]
-    tools = role_meta(role).get("tools")
+    tools = role_tools(role)
     if tools and not {"Edit", "Write"} & set(tools):
         lines.append('sandbox_mode = "read-only"')
+    elif tools and "Bash" not in tools:
+        # Edit or Write but no Bash: Claude gives this role no shell, Codex cannot say so.
+        print(f"warning: role {role} gets a shell on Codex (its allowlist has no Bash, "
+              "but Codex cannot express that)", file=sys.stderr)
     lines.append(f"developer_instructions = {toml_multiline(render_subagent_body(agent, slug))}")
     return f"{name}.toml", "\n".join(lines) + "\n"
 
@@ -1107,14 +1117,16 @@ def emit_opencode_agent(agent: dict, slug: str) -> tuple[str, str]:
       edit: deny     if neither Edit nor Write is listed
       bash: deny     if Bash is absent
       webfetch: deny if neither WebFetch nor WebSearch is listed
-    Absent keys inherit OpenCode's default. `model` is never written (model ids are
+    Absent keys inherit OpenCode's default, so an allowlist becomes a PARTIAL denylist of
+    edit, bash and webfetch only: every other tool (task, MCP servers, ...) keeps the default
+    and the role is not read-only. `model` is never written (model ids are
     provider-specific; inheriting the session model is always valid) and neither is the
     deprecated `tools` key.
     """
     role = agent["role"]
     name = slugged(slug, role)
     fields: dict = {"description": subagent_description(role), "mode": "subagent"}
-    tools = role_meta(role).get("tools")
+    tools = role_tools(role)
     if tools:
         allowed = set(tools)
         permission = {}
@@ -1150,11 +1162,41 @@ GEMINI_TOOLS: dict[str, list[str]] = {
 }
 
 
+# The tool names a role.yaml `tools:` allowlist may use: exactly the ones GEMINI_TOOLS maps, so
+# every harness can express (or knowingly narrow) each of them. Case-sensitive.
+KNOWN_TOOLS = frozenset(GEMINI_TOOLS)
+
+
+def check_tools(role: str, tools) -> None:
+    """Exit E_TOOL_UNMAPPED unless `tools` is a non-empty list of KNOWN_TOOLS names.
+
+    Called by every emit_*_agent. An unknown name used to be ignored on Codex and OpenCode and
+    abort the whole Gemini project; an empty or malformed list used to fail OPEN (no allowlist,
+    every tool inherited). load_config's lint catches these first on a normal compose
+    (E_TOOL_UNKNOWN / E_FIELD_TYPE); this guards callers that reach an emitter directly."""
+    if not isinstance(tools, list) or not tools:
+        sys.exit(f"E_TOOL_UNMAPPED: {role}: 'tools' must be a non-empty list of tool names, got {tools!r}")
+    for tool in tools:
+        if not (isinstance(tool, str) and tool in KNOWN_TOOLS):
+            sys.exit(f"E_TOOL_UNMAPPED: {role}: tool {tool!r} is not a known tool "
+                     f"(known: {', '.join(sorted(KNOWN_TOOLS))})")
+
+
+def role_tools(role: str):
+    """The role's validated `tools:` allowlist, or None when it has none (inherits every tool)."""
+    meta = role_meta(role)
+    if "tools" not in meta:
+        return None
+    check_tools(role, meta["tools"])
+    return meta["tools"]
+
+
 def gemini_tools(role: str, tools: list[str]) -> list[str]:
     """Map a role's Claude tool allowlist to Gemini tool names, in the role's listed order,
     first occurrence wins. A tool with no mapping is a hard error (E_TOOL_UNMAPPED): silently
-    dropping it would widen or narrow the role's powers without anyone noticing, and a
-    read-only role (qa, security) must stay read-only on every harness."""
+    dropping it would widen or narrow the role's powers without anyone noticing. Gemini's
+    `tools` narrows what a subagent may call; a role that lists Bash keeps run_shell_command,
+    so the list is not a read-only guarantee."""
     mapped: list[str] = []
     for tool in tools:
         if tool not in GEMINI_TOOLS:
@@ -1176,7 +1218,7 @@ def emit_gemini_agent(agent: dict, slug: str) -> tuple[str, str]:
     role = agent["role"]
     name = slugged(slug, role)
     fields = {"name": name, "description": subagent_description(role)}
-    tools = role_meta(role).get("tools")
+    tools = role_tools(role)
     if tools:
         fields["tools"] = gemini_tools(role, tools)
     return f"{name}.md", _frontmatter(fields) + "\n" + render_subagent_body(agent, slug)
@@ -1521,10 +1563,23 @@ def lint_role(role: str) -> list[str]:
                     f"default_model {meta.get('default_model')!r} differs from the {DEFAULT_MODEL!r} default: say why in 'model_rationale'")
             if not isinstance(meta.get("unattended", False), bool):
                 bad("E_FIELD_TYPE", "role.yaml", "'unattended' must be true/false")
+            # Text that reaches generated files: a control character other than tab/newline is
+            # invalid in TOML (Codex strips it, so output would differ per harness) and has no
+            # place in a one-line description.
+            for key in ("description", "title", "summary"):
+                if isinstance(meta.get(key), str) and any(
+                        (c < " " and c not in "\t\n") or c == "\x7f" for c in meta[key]):
+                    bad("E_TEXT_CONTROL", "role.yaml",
+                        f"'{key}' contains a control character (only tab and newline are allowed)")
             if "tools" in meta:
                 tools = meta["tools"]
                 if not (isinstance(tools, list) and tools and all(isinstance(t, str) and t.strip() and "," not in t for t in tools)):
                     bad("E_FIELD_TYPE", "role.yaml", "'tools' must be a non-empty list of tool names (no commas)")
+                else:
+                    for t in tools:
+                        if t not in KNOWN_TOOLS:
+                            bad("E_TOOL_UNKNOWN", "role.yaml",
+                                f"tool {t!r} is not one of: {', '.join(sorted(KNOWN_TOOLS))} (case-sensitive)")
                 if meta.get("orchestrator", False):
                     bad("E_TOOLS_ON_ORCHESTRATOR", "role.yaml",
                         "'tools' only narrows subagents; orchestrators deploy as skills and would silently ignore it")
@@ -1535,6 +1590,23 @@ def lint_role(role: str) -> list[str]:
             if not (f.name == "AGENTS.md" and tok == "{{ROSTER_TABLE}}"):
                 bad("E_TOKEN_UNRESOLVED", f.name, f"unresolved placeholder {tok}")
     return out
+
+
+DESCRIPTION_WARN_CHARS = 250   # per_entry_max_chars in docs/budget-target.json
+
+
+def lint_warnings(role: str) -> list[str]:
+    """Non-fatal findings for one role: printed by --lint-roles, never counted as problems."""
+    if not valid_role_name(role) or not role_dir(role).is_dir():
+        return []
+    try:
+        desc = subagent_description(role)
+    except Exception:   # a malformed role.yaml is reported by lint_role, not here
+        return []
+    if len(desc) > DESCRIPTION_WARN_CHARS:
+        return [f"W_DESCRIPTION_LONG: {role}/role.yaml: description is {len(desc)} chars "
+                f"(over {DESCRIPTION_WARN_CHARS}, the per-entry budget cap)"]
+    return []
 
 
 def lint_decision_brief(path: Path = CORE_DIR / "DECISION_BRIEF.md") -> list[str]:
@@ -1758,6 +1830,9 @@ def main() -> None:
         problems += [p for r in sorted(authored_roles() & set(all_roles())) for p in lint_authoring(r)]
         problems += lint_models()
         problems += lint_decision_brief()
+        for r in all_roles():
+            for w in lint_warnings(r):
+                print(w, file=sys.stderr)
         for p in problems:
             print(p, file=sys.stderr)
         print(f"lint-roles: {len(all_roles())} roles, {len(problems)} problem(s)")

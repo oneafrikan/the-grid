@@ -149,6 +149,22 @@ What `wire.sh` does for each file in that column:
 
 Specialist roles become native subagents on harnesses that have them. Orchestrators are never emitted as agent files: they ship as skills (the `claude-code` skill folders) and reach the shared skills dir through the normal wiring. Every agent target shares one prompt body (`render_subagent_body` in `compose.py`, the same text as the Claude subagent), the same name and description as the Claude subagent, and never writes a `model`. Each target writes only its own `_<target>/` dir under the project, so recomposing one never disturbs another.
 
+### What each harness enforces
+
+A role's `tools:` allowlist is translated, not enforced identically. What a harness does with it
+(vendor docs read, not exercised on a live install):
+
+| Harness | What the allowlist becomes | What it does not give you |
+|---|---|---|
+| Claude Code | `tools:` on the subagent | A role that lists `Bash` can still write through the shell |
+| Codex CLI | `sandbox_mode = "read-only"` only when neither `Edit` nor `Write` is listed | A best-effort default: a subagent inherits the parent session's sandbox, and `--yolo` or `/permissions` override the agent file. Codex cannot express "no Bash" |
+| OpenCode | `permission` keys `edit`, `bash`, `webfetch` set to `deny` where the allowlist lacks the tool | A partial denylist: every other tool (`task`, MCP servers) keeps OpenCode's default |
+| Gemini CLI | `tools:` in Gemini's own tool names | A role that lists `Bash` keeps `run_shell_command` |
+
+No harness target makes a role read-only on its own. Treat `qa-engineer` and `security-reviewer`
+as "should not edit" by instruction and by the Claude Code allowlist; add real enforcement only
+after a decision to (for OpenCode that means `task: deny`, an MCP deny and a `bash` pattern map).
+
 ### Codex CLI
 
 Compose, then wire (Codex only reads the files once wire.sh has linked them into `~/.codex/agents/`):
@@ -172,7 +188,8 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
 - Required keys are `name`, `description` and `developer_instructions`. `name` is the agent's identity, not the filename.
 - Key order is fixed: `name`, `description`, `sandbox_mode`, `developer_instructions`.
 - Sandbox mapping: `sandbox_mode = "read-only"` is written only when the role's `role.yaml` has a `tools:` allowlist containing neither `Edit` nor `Write` (today `qa-engineer` and `security-reviewer`). A role with no allowlist, or one that can edit, gets no `sandbox_mode` and inherits Codex's default.
-- A read-only sandbox also blocks writes through Bash. That is stricter than Claude, where an allowlisted Bash can still write, and it errs safe for read-only roles.
+- `sandbox_mode = "read-only"` is a best-effort default, not an enforced control (see "What each harness enforces"). While it applies it also blocks writes through Bash, which is stricter than Claude, where an allowlisted Bash can still write.
+- A role whose allowlist has `Edit` or `Write` but no `Bash` gets no `sandbox_mode`, so it runs with a shell on Codex; compose prints one `warning: role <name> gets a shell on Codex` line to stderr for each (the files are unchanged).
 - `model` and the other optional keys (`model_reasoning_effort`, `mcp_servers`, `skills.config`) are never written.
 - Strings are escaped by hand (the stdlib has no TOML writer) and verified by round-tripping through `tomllib`; `tests/lib/validate_harness.py codex-agent FILE...` checks any generated file against the format above.
 - Not verified on a real Codex yet (the real-install smoke test is a later, human step).
@@ -209,7 +226,7 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
 
 - Required frontmatter is `description`; `mode` is always `subagent`. The body is the system prompt, identical to the Claude and Codex agents.
 - Key order is fixed: `description`, `mode`, `permission`. Long descriptions are folded over several lines by the YAML writer, which is valid YAML.
-- Permission mapping: `permission` is written only when the role's `role.yaml` has a `tools:` allowlist that denies something. Keys, in this order: `edit: deny` when neither `Edit` nor `Write` is listed, `bash: deny` when `Bash` is absent, `webfetch: deny` when neither `WebFetch` nor `WebSearch` is listed. A key that is not written inherits OpenCode's default. A role with no allowlist gets no `permission` block.
+- Permission mapping: `permission` is written only when the role's `role.yaml` has a `tools:` allowlist that denies something. Keys, in this order: `edit: deny` when neither `Edit` nor `Write` is listed, `bash: deny` when `Bash` is absent, `webfetch: deny` when neither `WebFetch` nor `WebSearch` is listed. A key that is not written inherits OpenCode's default. A role with no allowlist gets no `permission` block. This is a partial denylist of those three keys only; every other tool (`task`, MCP servers) keeps OpenCode's default, so the role is not read-only.
 - Today that gives `qa-engineer` and `security-reviewer` `edit: deny` and `webfetch: deny` (they keep `Bash`, so no `bash` key).
 - `model` is never written (model ids are provider-specific and rot), and neither is the deprecated `tools` key.
 - Skills reach OpenCode through the shared skills dir, not through this target. OpenCode also reads `~/.claude/skills`, so a skill present in both dirs may be listed twice (not verified); set `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` to stop it reading the Claude dir.
@@ -279,7 +296,7 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
   | `WebFetch` | `web_fetch` |
   | `WebSearch` | `google_web_search` |
 
-- A tool with no mapping is a hard error: `E_TOOL_UNMAPPED: <role>: tool '<tool>' has no Gemini CLI mapping`, exit 1. The check runs before the `_gemini-cli` dir is wiped, so a failed compose leaves the previous output (and any other target) untouched. Dropping the tool silently would change what a read-only role can do.
+- An unknown tool name is rejected on every harness, not just Gemini: role lint reports `E_TOOL_UNKNOWN` (the known names are the eight keys in the table above, case-sensitive), and each agent emitter exits `E_TOOL_UNMAPPED: <role>: tool '<tool>' is not a known tool` (also for an empty or malformed `tools:`), exit 1. The check runs before the `_gemini-cli` dir is replaced, so a failed compose leaves the previous output (and any other target) untouched. Dropping the tool silently would change what a role can do.
 - The docs say only "tool names" for `tools`, with no syntax shown, so the list is a YAML block list (the natural form). Not verified on a real Gemini CLI yet (the real-install smoke test is a later, optional, human step).
 - `tests/lib/validate_harness.py gemini-agent FILE...` checks a generated file: `name` matches `^[a-z0-9_-]+$`, `description` is non-empty, `tools` (if present) is a block list, and there is no `model`.
 - Subagents cannot call subagents on Gemini CLI, so a role that delegates (an orchestrator) is never emitted as an agent file; it reaches Gemini as a skill.
