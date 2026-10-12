@@ -90,3 +90,17 @@ repo_copy() {
   [ "$status" -eq 1 ]
   grep -rqF '<private-dir>/' "$REPO_ROOT/dist/personas"
 }
+
+@test "build-personas.sh pins GRID_USER_CONFIG to the public config, and a poisoned value changes nothing" {
+  # the pin exists in the script ...
+  grep -q '^export GRID_USER_CONFIG=agent-factory/user.public.yaml$' "$REPO_ROOT/scripts/build-personas.sh"
+  # ... and an operator-specific config in the environment cannot reach the output
+  repo_copy "$TMP/r"
+  printf 'operator: SENTINEL-OPERATOR-NAME\nmachine: sentinel-machine\nchannels: sentinel-channel\n' > "$TMP/poison.yaml"
+  GRID_USER_CONFIG="$TMP/poison.yaml" run bash "$TMP/r/scripts/build-personas.sh"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  diff -r "$REPO_ROOT/dist/personas" "$TMP/r/dist/personas"
+  run grep -rl "SENTINEL-OPERATOR-NAME\|sentinel-machine" "$TMP/r/dist/personas"
+  [ -z "$output" ]
+}

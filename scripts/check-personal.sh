@@ -15,7 +15,11 @@
 # Rule file format is documented at the top of personal-patterns.txt.
 #
 # Besides line rules, it blocks (in code, because they act on files, not lines):
-# tracked archive/binary/key file types, a tracked .env, and oversized files.
+# tracked archive/binary/key file types and file names (private keys, .env.*, .netrc,
+# credentials*.json ...), oversized files, and any tracked file the line rules cannot
+# read (NUL bytes or UTF-16 text), which is reported as [unscannable-binary] until it
+# is listed in personal-allow-paths.txt with a reason. File NAMES are also checked
+# against the email and home-path rules ([path-name:<label>]).
 #
 # Environment:
 #   GRID_DIR               repo to scan (default: the repo this script lives in)
@@ -32,6 +36,8 @@
 #   path:line: [token]                                 token rule: text NEVER printed
 #   path:line: [private:N]                             denylist rule N: text NEVER printed
 #   path: [blocked-type:ext] / [blocked-type:.env] / [too-large] ...   file blocks
+#   path: [unscannable-binary]                         file the line rules cannot read
+#   path: [path-name:label]                            the file NAME trips a rule
 #   personal: N finding(s)                             always the last line
 # Exit: 0 clean, 1 findings (or required denylist missing), 2 usage/config error.
 #
@@ -208,8 +214,8 @@ done < <(git ls-files -s -z)
 FINDINGS=0
 report() { printf '%s\n' "$1"; FINDINGS=$((FINDINGS + 1)); }
 
-# line_allowed PATH TEXT: does an `allow` rule scoped to PATH match this line?
-line_allowed() {
+# word_allowed PATH WORD: does an `allow` rule scoped to PATH match this word?
+word_allowed() {
   local i=0 n="${#R_KIND[@]}"
   while [ "$i" -lt "$n" ]; do
     if [ "${R_KIND[$i]}" = allow ] && scope_match "${R_SCOPE[$i]}" "$1" \
@@ -219,6 +225,22 @@ line_allowed() {
     i=$((i + 1))
   done
   return 1
+}
+
+# hit_allowed PATH RE ICASE TEXT: is this deny hit suppressed? Allow rules are
+# MATCH-level: take every whitespace-delimited word of TEXT that contains a match of
+# the deny regex RE, and suppress the hit only when EVERY such word satisfies an allow
+# rule scoped to PATH. An allowed token elsewhere on the line (`git@host` next to a real
+# address, the word EXAMPLE next to a real token) therefore masks nothing.
+hit_allowed() {
+  local path="$1" re="$2" icase="$3" text="$4" w any=0 gf=(-o -E)
+  [ "$icase" = 1 ] && gf+=(-i)
+  while IFS= read -r w; do
+    [ -n "$w" ] || continue
+    any=1
+    word_allowed "$path" "$w" || return 1
+  done < <(grep "${gf[@]}" -e "[^[:space:]]*($re)[^[:space:]]*" <<< "$text")
+  [ "$any" -eq 1 ]
 }
 
 # redact_if_token TEXT: echo TEXT, or a placeholder if the line also looks like a
@@ -260,8 +282,9 @@ if [ "${#FILES[@]}" -gt 0 ]; then
         while IFS= read -r -d '' hit_path && IFS= read -r rest; do
           hit_line="${rest%%:*}"
           hit_text="${rest#*:}"
-          # An allow rule on the same line suppresses the hit.
-          line_allowed "$hit_path" "$hit_text" && continue
+          # An allow rule that covers every matching word suppresses the hit.
+          icase=0; [ "$kind" = deny-i ] && icase=1
+          hit_allowed "$hit_path" "$re" "$icase" "$hit_text" && continue
           case "$label" in
             token|private:*)
               # Secrets and denylist terms: location only, never the text.
@@ -275,21 +298,63 @@ if [ "${#FILES[@]}" -gt 0 ]; then
     i=$((i + 1))
   done
 
-  # 2) File blocks: types that should never be tracked, and oversized files.
+  # 2) File blocks: types and names that should never be tracked, oversized files, and
+  # files the line rules cannot read.
   for f in "${FILES[@]}"; do
     base="${f##*/}"
-    [ "$base" = .env ] && report "$f: [blocked-type:.env] tracked .env file"
+    blocked_here=0
     case "$base" in
       *.*) ext="$(printf '%s' "${base##*.}" | tr '[:upper:]' '[:lower:]')" ;;
       *) ext="" ;;
     esac
-    for blocked in zip pdf tar tgz gz sqlite db pem key; do
-      [ "$ext" = "$blocked" ] && report "$f: [blocked-type:$blocked] tracked .$blocked file"
+    [ "$base" = .env ] && { report "$f: [blocked-type:.env] tracked .env file"; blocked_here=1; }
+    # By NAME: private keys, env variants (.env.example is the documented template), dotfiles
+    # that hold credentials, credential json, known_hosts.
+    case "$base" in
+      id_rsa*|id_ed25519*|id_ecdsa*|.netrc|.npmrc|known_hosts|credentials*.json)
+        report "$f: [blocked-type:$base] tracked credential or key file name"; blocked_here=1 ;;
+      .env.example) ;;
+      .env.*)
+        report "$f: [blocked-type:.env.*] tracked .env variant"; blocked_here=1 ;;
+    esac
+    for blocked in zip pdf tar tgz gz sqlite db pem key p12 pfx jks kdbx sqlite3 7z rar docx xlsx; do
+      if [ "$ext" = "$blocked" ]; then
+        report "$f: [blocked-type:$blocked] tracked .$blocked file"; blocked_here=1
+      fi
     done
     size="$(wc -c < "$f" | tr -d ' ')"
     if [ "$size" -gt "$MAX_BYTES" ]; then
       report "$f: [too-large] $size bytes (limit $MAX_BYTES)"
     fi
+    # A non-empty file `grep -I` treats as binary (NUL byte, UTF-16) was skipped by every
+    # line rule above, including the private denylist. Say so instead of passing silently;
+    # a genuine binary asset is listed in personal-allow-paths.txt with a reason.
+    if [ "$blocked_here" -eq 0 ] && [ "$size" -gt 0 ] && ! grep -Iq . "$f" 2>/dev/null; then
+      report "$f: [unscannable-binary] not text: the line rules did not read it (add it to scripts/personal-allow-paths.txt with a reason if it is a genuine binary asset)"
+    fi
+  done
+
+  # 3) File NAMES: an address or home path used as a file name is as personal as one in the text.
+  i=0
+  while [ "$i" -lt "${#R_KIND[@]}" ]; do
+    case "${R_LABEL[$i]}" in
+      email|home-*)
+        if [ "${R_KIND[$i]}" != allow ]; then
+          for f in "${FILES[@]}"; do
+            # A home-path rule needs the path to START like a home dir: `docs/home/x` is just
+            # a directory called home.
+            case "${R_LABEL[$i]}:$f" in
+              home-*:home/*|home-*:Users/*) cand="/$f" ;;
+              home-*:*) continue ;;
+              *) cand="$f" ;;
+            esac
+            if grep -qE -e "${R_RE[$i]}" <<< "$cand"; then
+              hit_allowed "$f" "${R_RE[$i]}" 0 "$cand" || report "$f: [path-name:${R_LABEL[$i]}]"
+            fi
+          done
+        fi ;;
+    esac
+    i=$((i + 1))
   done
 fi
 
