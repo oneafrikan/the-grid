@@ -143,9 +143,15 @@ if [ -n "$top" ] && [ "$top" = "$phys" ]; then
     # Re-check first: a failed pull must never leave a conflicted state we push from.
     if reason="$(bash "$GUARD" precheck "$PRIVATE")"; then
       msg="$(bash "$GUARD" push-ok "$PRIVATE" "$file")"; grc=$?
-      if [ "$grc" -eq 0 ]; then
-        out="$(pgit push 2>&1)"; rc=$?
+      if [ "$grc" -eq 0 ] && pargs="$(bash "$GUARD" push-args "$PRIVATE")"; then
+        # Push EXACTLY the remote and branch the checks above validated. A bare `git push`
+        # follows push.default, branch.<b>.pushRemote and remote.pushDefault, which could
+        # send other branches, or the same branch to a different remote.
+        # shellcheck disable=SC2086  # "<remote> HEAD:refs/heads/<branch>": refnames hold no spaces
+        out="$(pgit -c push.default=nothing push $pargs 2>&1)"; rc=$?
         logcmd "git push" "$rc" "$out"
+      elif [ "$grc" -eq 0 ]; then
+        log "git push skipped: upstream remote/branch not resolvable"
       else
         log "git push skipped: $msg"
         printf 'usage-weekly: push skipped: %s\n' "$msg" >&2
