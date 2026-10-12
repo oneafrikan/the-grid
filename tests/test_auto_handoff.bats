@@ -1164,6 +1164,32 @@ quarantine_has() { [ -f "$GRID_STATE_DIR/handoff-quarantine/$SID/$1" ]; }
   done
 }
 
+# NF-054 (hardening, refs private NF-054): shapes the strict scan once let through, and the
+# two human overrides. Each must quarantine the pair; none may be committed.
+@test "strict output scan: letters-only value, templated URL password, pragma and placeholder lines are quarantined" {
+  local tok bodies n=0 body
+  tok="$(fake_token)"
+  bodies=("api_key = abcdefghijklmnopqrstuvwxyz" \
+          "token = abc(1234567890123456)" \
+          "client_secret=abcdefghijklmnop # example" \
+          "$(printf 'https://user:$ecretPw9%shost/x' @)" \
+          "$(printf 'https://user:pa:ss12345%shost/x' @)" \
+          "key = \"$tok\" # grid:allow-secret" \
+          "$(printf 'key = "gh%s_example%s"' p "$(printf 'a%.0s' $(seq 30))")")
+  export STUB_CLAUDE_MODE=handoff-logs
+  for body in "${bodies[@]}"; do
+    n=$((n + 1))
+    mk_tx 6
+    SID="11111111-1111-4111-8111-55555555555$n"
+    export STUB_HANDOFF_BODY="$body"
+    clear_run
+    run_worker
+    log_has "action=error reason=secret" || { echo "row $n not quarantined: $body" >&2; cat "$LOG" >&2; return 1; }
+    quarantine_has 2026-01-01-testhost-stub-handoff.md
+    [ ! -e "$P/LOGS/2026-01-01-testhost-stub-handoff.md" ]
+  done
+}
+
 @test "a clean handoff is still committed under the strict scan" {
   mk_tx 6
   export STUB_CLAUDE_MODE=handoff-logs STUB_HANDOFF_BODY="Decisions: use the cache. Next: wire the endpoint."
@@ -1565,6 +1591,17 @@ mkrepo() {
   export STUB_CLAUDE_MODE=handoff-logs
   run_worker
   log_has "action=done"
+}
+
+# NF-054 (hardening, refs private NF-054): ssh reads the files an `Include` points at as
+# configuration; the conventional include directory is ~/.ssh/config.d.
+@test "a new file in ~/.ssh/config.d is detected like ~/.ssh/config itself" {
+  mkdir -p "$HOME/.ssh/config.d"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$HOME/.ssh/config.d/evil.conf"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF ".ssh/config.d/evil.conf"
 }
 
 @test "the handoff commit runs with repository hooks off (the repo's own pre-commit does not run)" {
