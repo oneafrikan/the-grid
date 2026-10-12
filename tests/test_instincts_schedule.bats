@@ -359,6 +359,16 @@ sync_as() {
   [ "$(git -C "$REMOTE" rev-parse main)" = "$(git -C "$PA" rev-parse main)" ]
 }
 
+@test "sync: a non-ASCII file name under the path does not make the guard reject the job's own commit" {
+  mk_remote_and_clones
+  write_instinct "$PA" host-a
+  printf '{"id":"umlaut-habit","host":"host-a"}\n' > "$PA/learning/instincts/aaaaaaaaaaaa/h$(printf '\303\266')st.jsonl"
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pushed"* ]]
+  [ "$(git -C "$REMOTE" rev-parse main)" = "$(git -C "$PA" rev-parse main)" ]
+}
+
 @test "sync: a private dir that is not a git repo is skipped with a notice, exit 0" {
   mkdir -p "$BATS_TEST_TMPDIR/plain"
   write_instinct "$BATS_TEST_TMPDIR/plain" host-a
