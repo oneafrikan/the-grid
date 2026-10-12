@@ -194,7 +194,11 @@ make_skill() {
 # cached dir is shared by every test in the file, so callers must only READ it (use it as
 # PATH), never add to or remove from it.
 path_without() {
-  local dir d f base g skip key="" hit
+  local dir d f base g skip key="" hit pyfam=0
+  # A caller that names a python glob wants "no python at all": hide the whole family too, or
+  # python2.7 / pydoc3 stay on PATH and the "no python" test proves nothing (R16.qa.F11).
+  # Callers that name no python glob keep the plain model.
+  for g in "$@"; do case "$g" in python*) pyfam=1 ;; esac; done
   if [ -n "${BATS_FILE_TMPDIR:-}" ] && command -v cksum >/dev/null; then
     key="$(printf '%s|%s' "$PATH" "$*" | cksum)"; key="${key%% *}"
     # a finished cache dir carries a .complete marker (a half-built one is never reused)
@@ -217,6 +221,7 @@ path_without() {
         # shellcheck disable=SC2254
         case "$base" in $g) skip=1; break ;; esac
       done
+      if [ "$pyfam" = 1 ]; then case "$base" in python*|pydoc*) skip=1 ;; esac; fi
       [ "$skip" = 0 ] || continue
       [ -e "$dir/$base" ] || [ -L "$dir/$base" ] || ln -s "$f" "$dir/$base"
     done

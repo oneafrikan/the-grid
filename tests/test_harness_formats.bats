@@ -30,6 +30,9 @@ golden_files() {
   find "$GOLDENS/$1" -path '*/agents/*' -name "*.$2" -type f | LC_ALL=C sort
 }
 
+# Arrays below are filled with `while read` loops, not the bash 4 builtin: macOS bash 3.2 has
+# no such builtin (R16.qa.F13; the portability test at the end of this file enforces it).
+
 # lacks <ERE> FILE... — succeeds only if NO file has a matching line. A bare `! grep` in a
 # test body never fails the test (bash exempts negated commands from errexit), so the
 # negation lives in a function whose exit status is the last command's.
@@ -46,7 +49,7 @@ need_tomllib() {
 
 @test "codex: the validator accepts every golden .toml" {
   need_tomllib
-  mapfile -t files < <(golden_files codex toml)
+  files=(); while IFS= read -r _l; do files+=("$_l"); done < <(golden_files codex toml)
   # Guard against a vacuous pass: the fixture has three specialists.
   [ "${#files[@]}" -eq 3 ]
   run python3 -I "$VALIDATE" codex-agent "${files[@]}"
@@ -164,7 +167,7 @@ PYEOF
 # reads the shared skills dir. Author's own checks, not independent verification.
 
 @test "opencode: the validator accepts every golden .md" {
-  mapfile -t files < <(golden_files opencode md)
+  files=(); while IFS= read -r _l; do files+=("$_l"); done < <(golden_files opencode md)
   # Guard against a vacuous pass: the fixture has three specialists.
   [ "${#files[@]}" -eq 3 ]
   run python3 -I "$VALIDATE" opencode-agent "${files[@]}"
@@ -347,7 +350,7 @@ mkskill() {
   echo "$output"
   [ "$status" -eq 0 ]
   local shared="$GRID_HARNESS_HOME/.agents/skills"
-  mapfile -t entries < <(find "$shared" -mindepth 1 -maxdepth 1 | LC_ALL=C sort)
+  entries=(); while IFS= read -r _l; do entries+=("$_l"); done < <(find "$shared" -mindepth 1 -maxdepth 1 | LC_ALL=C sort)
   [ "${#entries[@]}" -eq 2 ]
   run python3 -I "$VALIDATE" skill "${entries[@]}"
   echo "$output"
@@ -386,7 +389,7 @@ gemini_roles() {
 }
 
 @test "gemini: the validator accepts every golden .md" {
-  mapfile -t files < <(golden_files gemini-cli md)
+  files=(); while IFS= read -r _l; do files+=("$_l"); done < <(golden_files gemini-cli md)
   # Guard against a vacuous pass: the fixture has three specialists.
   [ "${#files[@]}" -eq 3 ]
   run python3 -I "$VALIDATE" gemini-agent "${files[@]}"
@@ -513,9 +516,9 @@ gemini_roles() {
     echo "$output"
     [ "$status" -eq 0 ]
   done
-  mapfile -t codex < <(find "$TMP/core/_codex/agents" -name '*.toml' -type f | LC_ALL=C sort)
-  mapfile -t opencode < <(find "$TMP/core/_opencode/agents" -name '*.md' -type f | LC_ALL=C sort)
-  mapfile -t gemini < <(find "$TMP/core/_gemini-cli/agents" -name '*.md' -type f | LC_ALL=C sort)
+  codex=(); while IFS= read -r _l; do codex+=("$_l"); done < <(find "$TMP/core/_codex/agents" -name '*.toml' -type f | LC_ALL=C sort)
+  opencode=(); while IFS= read -r _l; do opencode+=("$_l"); done < <(find "$TMP/core/_opencode/agents" -name '*.md' -type f | LC_ALL=C sort)
+  gemini=(); while IFS= read -r _l; do gemini+=("$_l"); done < <(find "$TMP/core/_gemini-cli/agents" -name '*.md' -type f | LC_ALL=C sort)
   # Guard against a vacuous pass: core has four specialists on every target.
   [ "${#codex[@]}" -eq 4 ]
   [ "${#opencode[@]}" -eq 4 ]
@@ -887,4 +890,27 @@ assert set(compose.KNOWN_TOOLS) == set(compose.GEMINI_TOOLS)
 PYEOF
   echo "$output"
   [ "$status" -eq 0 ]
+}
+
+# macOS runs bash 3.2, which has no map[f]ile or read[a]rray builtin (R16.qa.F13). The
+# patterns use a bracket so this test's own text does not match itself.
+@test "portability: this file uses no bash 4 array builtins (macOS bash 3.2)" {
+  run grep -nE 'map[f]ile|read[a]rray' "$BATS_TEST_FILENAME"
+  echo "$output"
+  [ "$status" -eq 1 ]
+}
+
+# A missing requirement must not look like a pass (R16.qa.F13): the validator exits 3, so a
+# caller that forgot its own tomllib skip sees a distinct code instead of a silent 0.
+# `sys.modules["tomllib"] = None` makes `import tomllib` raise ImportError, as on Python < 3.11.
+@test "validator: a missing tomllib exits 3, not 0" {
+  printf 'name = "x"\ndescription = "d"\ndeveloper_instructions = "b"\n' > "$TMP/ok.toml"
+  run python3 -I -c '
+import runpy, sys
+sys.modules["tomllib"] = None
+sys.argv = sys.argv[1:]            # now: validate_harness.py codex-agent FILE
+runpy.run_path(sys.argv[0], run_name="__main__")
+' "$VALIDATE" codex-agent "$TMP/ok.toml"
+  echo "$output"
+  [ "$status" -eq 3 ]
 }
