@@ -79,15 +79,23 @@ skill@~/.agents/skills<TAB>claude-skill<TAB><target><TAB>skipped<TAB>claude-spec
 | Reason | Meaning |
 |---|---|
 | `no-frontmatter` | `SKILL.md` has no leading `---` block |
-| `name-mismatch` | frontmatter `name` differs from the dir name |
-| `name-invalid` | dir name fails `^[a-z0-9]+(-[a-z0-9]+)*$` or is over 64 chars |
+| `python-failed` | python3 ran but died while reading the skill (wire.sh normally stops earlier: an active harness needs a python3 that runs, else exit 2) |
+| `name-mismatch` | frontmatter `name` differs from the dir name (an unquoted trailing ` # comment` is not part of the name) |
+| `name-invalid` | dir name fails `^[a-z0-9]+(-[a-z0-9]+)*$`, is over 64 chars, or holds a control character such as a trailing newline |
+| `description-missing` | the description is empty or absent |
 | `description-long` | description over 1024 chars after YAML folding |
-| `claude-specific` | a file in the skill mentions `~/.claude`, `$HOME/.claude`, `.claude/` or `CLAUDE_` |
+| `claude-only-guard` | the frontmatter carries a Claude-only guard key: `disable-model-invocation`, `allowed-tools`, `hooks` or `context` (top-level keys only) |
+| `claude-specific` | a file in the skill mentions `.claude` (not `.claude-foo`), `.the-grid`, `.grid/`, `CLAUDE_` or `CLAUDE.md` (`.git` and `node_modules` are not read, binary files are skipped) |
+| `symlink-escape` | a symlink inside the skill dir resolves outside it |
 | `runtime-root` | the link targets a submodule root (the `gstack` runtime-root link), which is not a skill |
 | `exists, not managed` | something is already at the destination (see below) |
 | `name clash with <project>` | two composed projects ship an agent of the same name; the first project (alphabetical) is linked, the second is skipped |
 
-Rows are `skill@<~dir>` / `agent@<~dir>` (the dir in `~/` form, so the file is home-independent). Portability skips print no stdout line; the manifest is where to read them: `grep skipped .wired.manifest`.
+Rows are `skill@<~dir>` / `agent@<~dir>` (the dir in `~/` form, so the file is home-independent). Portability skips print no stdout line, except `claude-only-guard`, which prints `  skip (<~dir>: claude-only-guard): <name>` because the operator set that guard on purpose; the manifest is where to read the rest: `grep skipped .wired.manifest`.
+
+**`claude-only-guard` withholds the skill from every non-Claude harness** (it is still linked for Claude). The default is the safe one: Codex and Gemini handling of these keys is unverified (see the vendor table), and a skill Claude never auto-triggers (`disable-model-invocation`) must not be auto-invoked elsewhere under a different approval policy. If you decide to share such skills anyway, that is a one-line change in `scripts/lib/skill-portable.sh` (drop the `claude-only-guard` return) plus keeping the printed notice.
+
+The portability filter is a compatibility check, not a security control: its `claude-specific` pattern is easy to slip past on purpose. What protects the shared dir is the audit (`wire.sh` step 0: home paths, symlink escapes), not this filter.
 
 ## Pi and OpenClaw (skills-only rows)
 

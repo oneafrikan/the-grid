@@ -559,8 +559,13 @@ only_shared_dir() {
 
 # fm_skill DIR 'frontmatter body lines' [body]: write DIR/SKILL.md.
 fm_skill() {
+  local fm="$2"
   mkdir -p "$1"
-  printf -- '---\n%s\n---\n%s\n' "$2" "${3:-body}" > "$1/SKILL.md"
+  # A description is required (reason description-missing), so a neutral one is added unless
+  # the caller wrote a description line of its own (an empty one included).
+  case "$fm" in *description:*) ;; *) fm="$fm
+description: test skill" ;; esac
+  printf -- '---\n%s\n---\n%s\n' "$fm" "${3:-body}" > "$1/SKILL.md"
 }
 
 # portable_fails DIR REASON: skill_portable must exit 1 AND print exactly REASON. The old
@@ -572,7 +577,7 @@ portable_fails() {
   [ "$output" = "$2" ]
 }
 
-@test "skill_portable: the five reasons, in order" {
+@test "skill_portable: the reasons, in order" {
   . "$REPO_ROOT/scripts/lib/skill-portable.sh"
   local d="$BATS_TEST_TMPDIR/sk"
   mkdir -p "$d/nofm" && printf 'no frontmatter\n' > "$d/nofm/SKILL.md"
@@ -585,10 +590,17 @@ portable_fails() {
   portable_fails "$d/Bad_Name" name-invalid
   fm_skill "$d/trail--dash" 'name: trail--dash'
   portable_fails "$d/trail--dash" name-invalid
+  fm_skill "$d/nodesc" 'name: nodesc
+description:'
+  portable_fails "$d/nodesc" description-missing
   fm_skill "$d/ok" 'name: ok'
   run skill_portable "$d/ok"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+  # A Claude-only guard key: kept for Claude, withheld from every other harness.
+  fm_skill "$d/guard" 'name: guard
+allowed-tools: Read'
+  portable_fails "$d/guard" claude-only-guard
   # Each claude-specific marker, including one in a nested file; -I skips a binary.
   fm_skill "$d/c1" 'name: c1' 'see ~/.claude/x'
   fm_skill "$d/c2" 'name: c2' 'see $HOME/.claude'
@@ -952,4 +964,93 @@ write_registry() { # $@ = row lines
   grep -qF 'Two harnesses whose agents dirs are aliased' "$REPO_ROOT/docs/harnesses.md"
   grep -qF 'only after `-harness:<name>` has been wired once' "$REPO_ROOT/docs/harnesses.md"
   grep -qF 'lags the Claude dir' "$REPO_ROOT/docs/harnesses.md"
+}
+
+# ---------------------------------------------------------------- WP-013: portability filter
+
+@test "skill_portable: each Claude-only guard key gives claude-only-guard; the skill is withheld from the shared dir and kept for Claude" {
+  . "$REPO_ROOT/scripts/lib/skill-portable.sh"
+  local d="$BATS_TEST_TMPDIR/g" k
+  fm_skill "$d/g1" 'name: g1
+disable-model-invocation: true'
+  fm_skill "$d/g2" 'name: g2
+allowed-tools: Read, Grep'
+  fm_skill "$d/g3" 'name: g3
+hooks:
+  PreToolUse: x'
+  fm_skill "$d/g4" 'name: g4
+context: fork'
+  for k in g1 g2 g3 g4; do portable_fails "$d/$k" claude-only-guard; done
+  # Only a TOP-LEVEL frontmatter key counts: nested under another key, or in the body, it does not.
+  fm_skill "$d/nested" 'name: nested
+metadata:
+  context: x' 'allowed-tools: only in the body'
+  run skill_portable "$d/nested"
+  [ "$status" -eq 0 ]
+  # Through wire.sh: skipped with a printed line and a manifest reason, still linked for Claude.
+  fm_skill "$MOCK_GRID/skills/guarded" 'name: guarded
+disable-model-invocation: true'
+  GRID_HARNESS=codex wire
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/guarded" ]
+  [ ! -e "$HS/guarded" ] && [ ! -L "$HS/guarded" ]
+  [[ "$output" == *"skip (~/.agents/skills: claude-only-guard): guarded"* ]]
+  [[ "$output" != *"skip (real dir, not managed)"* ]]
+  grep -qF "skill@~/.agents/skills	guarded	$MOCK_GRID/skills/guarded/	skipped	claude-only-guard" "$MANIFEST"
+}
+
+@test "a python3 stub that exits 1 with an active harness: wire exits 2 and writes nothing" {
+  # A python3 that exists but cannot run made every skill look like "no-frontmatter" with exit 0.
+  local stubs="$BATS_TEST_TMPDIR/pystub"
+  mkdir -p "$stubs"
+  printf '#!/bin/sh\nexit 1\n' > "$stubs/python3"
+  chmod +x "$stubs/python3"
+  PATH="$stubs:$PATH" GRID_HARNESS=codex wire
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"python3 is present but cannot run"* ]]
+  [[ "$stderr" == *"nothing was changed"* ]]
+  [ -z "$(tree "$MOCK_SKILLS")" ]
+  [ -z "$(tree "$GRID_HARNESS_HOME")" ]
+}
+
+@test "skill_portable: edge gaps (comment in name, bare .claude, CLAUDE.md, ~/.the-grid, symlink escape, newline dir name)" {
+  . "$REPO_ROOT/scripts/lib/skill-portable.sh"
+  local d="$BATS_TEST_TMPDIR/edge" nl=$'\n' s
+  fm_skill "$d/foo" 'name: foo # a trailing comment'
+  run skill_portable "$d/foo"
+  [ "$status" -eq 0 ]
+  fm_skill "$d/m1" 'name: m1' 'see .claude config'
+  fm_skill "$d/m2" 'name: m2' 'read CLAUDE.md first'
+  fm_skill "$d/m3" 'name: m3' 'in ~/.the-grid/x'
+  fm_skill "$d/m4" 'name: m4' 'state in ~/.grid/y'
+  for s in m1 m2 m3 m4; do portable_fails "$d/$s" claude-specific; done
+  # Not flagged: a name that merely starts with .claude, and anything inside a .git dir.
+  fm_skill "$d/ok2" 'name: ok2' 'a .claude-plugin dir'
+  run skill_portable "$d/ok2"
+  [ "$status" -eq 0 ]
+  fm_skill "$d/gitdir" 'name: gitdir'
+  mkdir -p "$d/gitdir/.git"
+  printf '~/.claude\n' > "$d/gitdir/.git/config"
+  run skill_portable "$d/gitdir"
+  [ "$status" -eq 0 ]
+  # A symlink that resolves outside the skill dir; one that stays inside is fine.
+  fm_skill "$d/esc" 'name: esc'
+  ln -s "$BATS_TEST_TMPDIR" "$d/esc/out"
+  portable_fails "$d/esc" symlink-escape
+  fm_skill "$d/inl" 'name: inl'
+  mkdir -p "$d/inl/sub"
+  ln -s sub "$d/inl/link"
+  run skill_portable "$d/inl"
+  [ "$status" -eq 0 ]
+  # $(basename) used to strip this newline and pass the name check.
+  fm_skill "$d/trail$nl" 'name: trail'
+  portable_fails "$d/trail$nl" name-invalid
+}
+
+@test "docs/harnesses.md lists the new skip reasons and says the filter is not a security control" {
+  local r
+  for r in claude-only-guard description-missing symlink-escape; do
+    grep -qF "\`$r\`" "$REPO_ROOT/docs/harnesses.md"
+  done
+  grep -qF 'compatibility check, not a security control' "$REPO_ROOT/docs/harnesses.md"
 }
