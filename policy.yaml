@@ -194,7 +194,7 @@ rules:
     severity: high
     owned_severity: low
     message: declares an MCP server
-    regex: '"mcpServers"\s*:'
+    regex: '"mcpServers"\s*:|"type"\s*:\s*"(?:http|sse)"'
     applies: [config, hook]
     downgrade: []
   - id: lifecycle-script
