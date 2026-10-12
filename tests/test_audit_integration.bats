@@ -294,6 +294,32 @@ gitmodules_entry() {
   [ -L "$MOCK_SKILLS/s" ]
 }
 
+@test "GRID_SKIP_CATALOG=1 alone does not skip the audit" {
+  add_wired evil "$BAD"
+  GRID_SKIP_CATALOG=1 run_wire
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"BLOCKED by audit"* ]]
+  [ ! -e "$MOCK_SKILLS/e" ]
+}
+
+@test "GRID_SKIP_AUDIT=1 wires and prints a notice on stderr" {
+  add_wired evil "$BAD"
+  GRID_SKIP_AUDIT=1 run --separate-stderr bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"GRID_SKIP_AUDIT is set"* ]]
+  [ -L "$MOCK_SKILLS/s" ]
+}
+
+@test "a dry run (GRID_DRY_HOME) never audits and prints no skip notice" {
+  add_wired evil "$BAD"
+  GRID_SKIP_AUDIT=1 GRID_DRY_HOME="$BATS_TEST_TMPDIR/dry" run --separate-stderr bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"SKIPPED"* ]]
+  # ... and without GRID_SKIP_AUDIT at all, a dry run still wires the bad skill unaudited.
+  GRID_DRY_HOME="$BATS_TEST_TMPDIR/dry2" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+}
+
 @test "wire (d): no policy.yaml blocks (exit 3, message on stderr); GRID_SKIP_AUDIT=1 wires" {
   add_wired evil "$BAD"                       # would be blocked if the audit ran
   rm "$T/policy.yaml"

@@ -315,10 +315,12 @@ Agents and sessions must not leave stale worktrees or local branches behind.
 - **Machine key:** `GRID_HOST` env var overrides the overlay host (default `hostname -s`).
 - **Audit before wiring (step 0):** before any teardown `wire.sh` runs `audit.sh --wired --quiet`.
   A high-severity finding (or a broken policy) blocks with **exit 3** and changes nothing,
-  so existing links survive a bad upstream bump. `GRID_AUDIT=warn` prints a warning and
-  wires anyway. `GRID_SKIP_AUDIT=1` skips it (audit.sh's own dry run sets it to avoid
-  recursion). It is also skipped, with a printed notice, when `policy.yaml` or `python3`
-  is absent, and under `--check` / `GRID_SKIP_CATALOG`.
+  so existing links survive a bad upstream bump. A missing `policy.yaml` or `python3` blocks
+  the same way (fail closed). `GRID_AUDIT=warn` prints a warning and wires anyway.
+  `GRID_SKIP_AUDIT=1` is the only bypass (it prints a stderr notice; audit.sh's own dry run
+  sets it to avoid recursion), plus every dry run (`GRID_DRY_HOME`, so `--check`'s child
+  never audits). `GRID_SKIP_CATALOG` alone no longer skips the audit. A mock grid without a
+  `policy.yaml` must set `GRID_SKIP_AUDIT=1` (the bats `common_setup` does).
 - **Runtime map:** `scripts/lib/runtimes.txt` (`repo | link | marker | needs | setup`)
   lists wired repos whose skills need more than files on disk (gstack: its browse
   daemon). wire.sh keeps the runtime-root link `$SKILLS_DIR/<link> -> $GRID_DIR/repos/<repo>`
