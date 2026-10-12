@@ -61,14 +61,13 @@ PRIVATE="${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}"
 FALLBACK_ROOT="${GRID_HANDOFF_FALLBACK_DIR:-$PRIVATE/handoffs}"
 
 # Temp state, all removed by the EXIT trap (the digest is a copy of the conversation).
-DIGEST_DIR=""; SNAP_DIR=""; STAMP=""
+DIGEST_DIR=""; SNAP_DIR=""
 # Lock directories this process holds (see take_lock); released here on every exit path.
 LOCKS=()
 cleanup() {
   local l
   [ -n "$DIGEST_DIR" ] && rm -rf "$DIGEST_DIR"
   [ -n "$SNAP_DIR" ] && rm -rf "$SNAP_DIR"
-  [ -n "$STAMP" ] && rm -f "$STAMP"
   for l in "${LOCKS[@]}"; do rmdir "$l" 2>/dev/null; done
   return 0
 }
@@ -142,6 +141,11 @@ case "$SID" in ''|*[!A-Za-z0-9_-]*) SID="unknown"; finish_skip bad-payload ;; es
 [ "${#SID}" -le 64 ] || { SID="unknown"; finish_skip bad-payload; }
 if [ -z "$TRANSCRIPT" ] || [ -z "$CWD" ] || [ ! -d "$CWD" ]; then finish_skip bad-payload; fi
 CWD_REAL="$(rp "$CWD")" || finish_skip bad-payload
+# A session started in HOME (or / or a parent of HOME) would have the whole home tree as
+# its scan root: the worker's own log is "new" there, so such a run could never succeed.
+HOME_REAL="$(rp "$HOME" 2>/dev/null)" || HOME_REAL="$HOME"
+[ "$CWD_REAL" = "/" ] && finish_skip cwd-too-broad
+case "$HOME_REAL/" in "$CWD_REAL"/*) finish_skip cwd-too-broad ;; esac
 if [ ! -f "$TRANSCRIPT" ] || [ ! -r "$TRANSCRIPT" ]; then finish_skip no-transcript; fi
 
 # ---- per-session lock ------------------------------------------------------------------
@@ -199,6 +203,20 @@ if [ "$FORCE" != 1 ]; then
     fi
   fi
 fi
+
+# ---- per-cwd lock ------------------------------------------------------------------
+# Handoff pairs carry no session id in their names, so one session's pair cannot be told
+# apart on disk from another's. Two sessions in the same directory therefore take turns:
+# the second waits up to GRID_AUTOHANDOFF_WAIT seconds (default 120), then skips as
+# cwd-busy WITHOUT a marker (it may be retried later). A build or editor writing into the
+# directory during the run is still reported as unexpected-file.
+WAIT="$(num "${GRID_AUTOHANDOFF_WAIT:-}" 120)"
+CWD_KEY="$(printf '%s' "$CWD_REAL" | cksum | cut -d' ' -f1)"
+waited=0
+until take_lock "$STATE/cwd-$CWD_KEY.lock"; do
+  [ "$waited" -ge "$WAIT" ] && finish_skip cwd-busy
+  sleep 1; waited=$((waited + 1))
+done
 
 # ---- 5: digest, fallback dir, target dir -------------------------------------------
 DIGEST_DIR="$(mktemp -d)" || finish_error digest-failed
@@ -271,7 +289,6 @@ resolve_target
 # else is refused: TARGET stays empty, only the fallback dir is granted, and the spawn log
 # line says why (target-refused=<why>).
 PRIVATE_REAL="$(rp "$PRIVATE" 2>/dev/null)" || PRIVATE_REAL="$PRIVATE"
-HOME_REAL="$(rp "$HOME" 2>/dev/null)" || HOME_REAL="$HOME"
 TARGET_REAL=""; TARGET_WHY=""
 accept_target() {
   [ -n "$TARGET" ] || return 0
@@ -398,10 +415,40 @@ home_watch() {
 }
 home_watch | state_lines > "$SNAP_DIR/home.state"
 
-# Stamp file, backdated 2 s: a coarse-granularity filesystem must not make a file
-# written in the same second as the stamp look older than it.
-STAMP="$(mktemp)"
-perl -e 'my $t = time - 2; utime $t, $t, $ARGV[0]' "$STAMP"
+# Roots the verification scans: the cwd, the fallback dir, the target dir and the work
+# trees of the repos the commit lands in (a write elsewhere in the private repo would
+# otherwise go unseen). All real paths: find -P never follows a link out of a root.
+ROOTS=("$CWD_REAL" "$FALLBACK_REAL")
+if [ -n "$TARGET_REAL" ]; then
+  case "$TARGET_REAL/" in
+    "$CWD_REAL"/*) ;;
+    *) ROOTS+=("$TARGET_REAL") ;;
+  esac
+fi
+for d in "$TARGET_REAL" "$FALLBACK_REAL"; do
+  [ -n "$d" ] && [ -d "$d" ] || continue
+  t="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$t" ] && ROOTS+=("$(rp "$t")")
+done
+DIGEST_REAL="$(rp "$DIGEST_DIR")"; SNAP_REAL="$(rp "$SNAP_DIR")"   # roots are real paths: prune by real path too
+LOG_DIR="$(dirname "$LOG")"; LOG_DIR_REAL="$(rp "$LOG_DIR" 2>/dev/null)" || LOG_DIR_REAL="$LOG_DIR"
+
+# fs_snapshot: "<path> TAB <F|L> TAB <mtime> TAB <size>" for every regular file and symlink
+# under ROOTS, sorted. This replaces the old clock stamp (`-newer` a time 2 s before the
+# start): a file edited moments before the run, a sibling session's pair or the worker's
+# own log under cwd all looked "new" to the stamp. A before/after diff only reports what
+# changed DURING the child run. Stat is done in perl with sub-second mtimes (no GNU `find
+# -printf`; whole seconds would miss a same-second rewrite). .git is
+# pruned (7a watches the parts that matter); so are our temp dirs, Claude's config dir
+# and the hook log dir, in case a root happens to contain them.
+fs_snapshot() {
+  find -P "${ROOTS[@]}" \( -name .git -o -path "$DIGEST_DIR" -o -path "$SNAP_DIR" -o -path "$DIGEST_REAL" \
+         -o -path "$SNAP_REAL" -o -path "$HOME/.claude" -o -path "$HOME_REAL/.claude" \
+         -o -path "$LOG_DIR" -o -path "$LOG_DIR_REAL" \) -prune \
+       -o \( -type f -o -type l \) -print0 2>/dev/null |
+    perl -MTime::HiRes=lstat -0ne 'chomp; my @s = lstat($_) or next; print join("\t", $_, (-l _ ? "L" : "F"), $s[9], $s[7]), "\n"' |
+    sort -u
+}
+fs_snapshot > "$SNAP_DIR/fs.before"
 
 TARGET_TEXT="${TARGET:-none (use the fallback directory)}"
 PROMPT="/handoff Source conversation is the digest file $DIGEST, not this session. Target directory: $TARGET_TEXT. Fallback directory: $FALLBACK."
@@ -508,39 +555,25 @@ if [ "${#CHANGED[@]}" -gt 0 ]; then
   finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")"
 fi
 
-# 7b. every NEW regular file or symlink under cwd, the fallback dir, the target dir and the
-#     work trees of the repos we commit in (a write elsewhere in the private repo would
-#     otherwise go unseen). find -P: a symlink is looked at, never followed, so a link
-#     cannot hide or redirect a write. No -maxdepth: a depth cap lets a deep write go
-#     unseen. .git/ is pruned whole (7a watches the parts of it that matter); our own temp
-#     dirs are pruned in case TMPDIR sits under cwd. A symlink named like a handoff file is
-#     reported whatever its age: a pre-planted one would make the child write through it.
-ROOTS=("$CWD_REAL" "$FALLBACK_REAL")
-if [ -n "$TARGET_REAL" ]; then
-  case "$TARGET_REAL/" in
-    "$CWD_REAL"/*) ;;
-    *) ROOTS+=("$TARGET_REAL") ;;
-  esac
-fi
-for d in "$TARGET_REAL" "$FALLBACK_REAL"; do
-  [ -n "$d" ] && [ -d "$d" ] || continue
-  t="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$t" ] && ROOTS+=("$(rp "$t")")
-done
-DIGEST_REAL="$(rp "$DIGEST_DIR")"; SNAP_REAL="$(rp "$SNAP_DIR")"   # roots are real paths: prune by real path too
+# 7b. what changed under the roots DURING the child run: entries in the after-snapshot that
+#     are not in the before-snapshot (new, or a different mtime or size). Symlinks are
+#     looked at, never followed (find -P), so a link cannot hide or redirect a write; a
+#     symlink named like a handoff file is reported whatever its age, because a
+#     pre-planted one would make the child write through it. No -maxdepth: a depth cap
+#     lets a deep write go unseen.
 NEW=()      # real paths, de-duplicated (the same file can be reached by two roots)
 NEW_DISP=()
-SYMS=()     # new symlinks, and handoff-named ones of any age
-while IFS= read -r f; do
+SYMS=()     # changed or new symlinks, and handoff-named ones of any age
+while IFS=$'\t' read -r f ty _mt _sz; do
   [ -n "$f" ] || continue
   r="$(rp "$f")" || continue
   dup=0
   for x in "${NEW[@]}" "${SYMS[@]}"; do [ "$x" = "$r" ] && dup=1; done
   [ "$dup" = 1 ] && continue
-  if [ -L "$f" ]; then SYMS+=("$r")
+  if [ "$ty" = L ]; then SYMS+=("$r")
   else NEW+=("$r"); NEW_DISP+=("$(disp "$f")"); fi
-done < <(find -P "${ROOTS[@]}" \( -name .git -o -path "$DIGEST_DIR" -o -path "$SNAP_DIR" -o -path "$DIGEST_REAL" -o -path "$SNAP_REAL" \) -prune \
-              -o \( \( \( -type f -o -type l \) -newer "$STAMP" \) \
-                    -o \( -type l \( -name '*-handoff.md' -o -name '*-context.md' \) \) \) -print 2>/dev/null)
+done < <({ fs_snapshot > "$SNAP_DIR/fs.after"; comm -13 "$SNAP_DIR/fs.before" "$SNAP_DIR/fs.after"
+           awk -F'\t' '$2 == "L" && ($1 ~ /-handoff\.md$/ || $1 ~ /-context\.md$/)' "$SNAP_DIR/fs.after"; })
 if [ "${#SYMS[@]}" -gt 0 ]; then
   DISP=(); for p in "${SYMS[@]}"; do DISP+=("$(disp "$p")"); done
   finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")"

@@ -182,8 +182,9 @@ case "${STUB_CLAUDE_MODE:-}" in
     digest="$(printf '%s' "$*" | sed -n 's/.*digest file \([^ ]*\), not this session.*/\1/p')"
     if [ -n "$digest" ] && [ -f "$digest" ] && [ -n "${STUB_DIR:-}" ]; then cp "$digest" "$STUB_DIR/claude.digest"; fi
     if [ -n "${STUB_CLAUDE_SLEEP:-}" ]; then sleep "$STUB_CLAUDE_SLEEP"; fi
-    hf=2026-01-01-testhost-stub-handoff.md
-    cf=2026-01-01-testhost-stub-context.md
+    # STUB_HANDOFF_PREFIX makes the pair's names distinct, so two sessions in one cwd (WP-017) can be told apart.
+    hf="${STUB_HANDOFF_PREFIX:-}2026-01-01-testhost-stub-handoff.md"
+    cf="${STUB_HANDOFF_PREFIX:-}2026-01-01-testhost-stub-context.md"
     body="${STUB_HANDOFF_BODY:-stub}"
     # write_pair <dir>: both handoff files into <dir>
     write_pair() { mkdir -p "$1"; printf '%s\n' "$body" > "$1/$hf"; printf '%s\n' "$body" > "$1/$cf"; }
@@ -207,6 +208,9 @@ case "${STUB_CLAUDE_MODE:-}" in
       handoff-home-dotfile)  # the pair, plus a line appended to the shell rc file
         write_pair "$PWD/LOGS"
         echo 'echo planted' >> "$HOME/.bashrc" ;;
+      handoff-modify)  # the pair, plus an edit to a tracked file
+        write_pair "$PWD/LOGS"
+        echo more >> "$PWD/base.txt" ;;
       handoff-symlink)  # the pair, plus a new symlink beside it
         write_pair "$PWD/LOGS"
         ln -s /etc/hostname "$PWD/LOGS/evil-link" ;;
