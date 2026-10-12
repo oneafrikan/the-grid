@@ -527,7 +527,14 @@ if [ -z "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_SKIP_CATALOG:-}" ]; then
   if [ ! -f "$GRID_DIR/policy.yaml" ]; then
     echo "wire: no policy.yaml - audit skipped"
   elif ! command -v python3 >/dev/null 2>&1; then
-    echo "wire: python3 missing - audit SKIPPED, skills wired unaudited" >&2
+    # Fails closed like a finding does: without python3 the audit cannot run, and wiring
+    # unaudited by accident is exactly what the audit exists to prevent.
+    if [ "${GRID_AUDIT:-}" = warn ]; then
+      echo "wire: python3 not found, so the audit cannot run; GRID_AUDIT=warn so wiring continues UNAUDITED" >&2
+    else
+      echo "wire: BLOCKED by audit (nothing was changed): python3 not found, so the audit cannot run. Install python3, or set GRID_AUDIT=warn once." >&2
+      exit 3
+    fi
   elif ! bash "$(dirname "$0")/audit.sh" --wired --quiet; then
     if [ "${GRID_AUDIT:-}" = warn ]; then
       echo "wire: audit found high-severity issues; GRID_AUDIT=warn so wiring continues" >&2
