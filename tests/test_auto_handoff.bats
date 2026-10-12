@@ -703,3 +703,36 @@ clear_run() { : > "$STUB_LOG"; : > "$LOG"; }
   lacks "$(allowed_rules)" "$P/other"
   log_has "action=done"
 }
+
+# Glob metacharacters in a directory name would be placed unescaped into a permission rule
+# (where `*` may widen it). Such a path gets no rule; the fallback dir (whose name is
+# sanitised the same way) is used instead.
+@test "cwd names with glob metacharacters get no rule and use the fallback" {
+  export STUB_CLAUDE_MODE=handoff-target
+  local name san n=0
+  for name in 'st*r' 'a[b]' 'p(re)n' $'a\nb'; do
+    n=$((n + 1))
+    mkproj "$name"
+    mk_tx 6
+    san="$(printf '%s' "${name//$'\n'/_}" | sed 's/[][*?{}()!]/_/g')"
+    STUB_HANDOFF_DIR="$GRID_HANDOFF_FALLBACK_DIR/$san"
+    export STUB_HANDOFF_DIR
+    SID="11111111-1111-4111-8111-22222222222$n"
+    clear_run
+    run_worker
+    log_has "action=done"
+    # No Edit rule outside the (sanitised) fallback dir: the path with the metacharacter is not granted.
+    [ "$(allowed_rules | grep -o 'Edit(/[^ ]*' | grep -vc "/fallback/$san/")" -eq 0 ]
+    [ -f "$STUB_HANDOFF_DIR/2026-01-01-testhost-stub-handoff.md" ]
+  done
+}
+
+@test "a cwd spelled with .. gets only the resolved rule, never one containing .." {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs
+  run bash "$WORKER" "$SID" "$TXN" "$P/../proj" other
+  [ "$status" -eq 0 ]
+  log_has "action=done"
+  lacks "$(allowed_rules)" ".."
+  contains "$(allowed_rules)" "$(edit_rule "$(cd "$P" && pwd -P)/LOGS")"
+}

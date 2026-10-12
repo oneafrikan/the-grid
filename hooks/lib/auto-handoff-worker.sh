@@ -182,7 +182,11 @@ bash "$HERE/transcript-digest.sh" "$TRANSCRIPT" "$DIGEST" "$MAX_BYTES" 2>/dev/nu
 
 # The child writes into <fallback>/<basename of cwd>; the worker creates it (the child
 # has no mkdir). A failure to create it is not fatal: the child may still use <target>.
-FALLBACK="$FALLBACK_ROOT/$(basename "$CWD")"
+# The directory name goes into a permission rule, so glob metacharacters and newlines in
+# the cwd's name become `_` here (see add_rule); the prompt names this exact path.
+FALLBACK_NAME="$(basename "$CWD")"; FALLBACK_NAME="${FALLBACK_NAME//$'\n'/_}"
+FALLBACK_NAME="$(printf '%s' "$FALLBACK_NAME" | sed 's/[][*?{}()!]/_/g')"
+FALLBACK="$FALLBACK_ROOT/$FALLBACK_NAME"
 mkdir -p "$FALLBACK" 2>/dev/null
 FALLBACK_REAL="$(rp "$FALLBACK" 2>/dev/null)" || FALLBACK_REAL="$FALLBACK"
 
@@ -281,6 +285,13 @@ accept_target
 # filesystem root, so it is "/" in front of the absolute path. Never a bare Edit/Write.
 RULES=()
 add_rule() {
+  # A path with a glob metacharacter (or a newline) would widen or break the rule, and a
+  # `..` component is not a normalised path: grant nothing for it. The fallback dir (whose
+  # name is sanitised below) then remains the child's place to write.
+  case "$1" in
+    *[\*\?\[\]\{\}\(\)\!]*|*$'\n'*) return 0 ;;
+    */../*|*/..) return 0 ;;
+  esac
   local r="Edit(/${1}/**)" x
   for x in "${RULES[@]}"; do [ "$x" = "$r" ] && return 0; done
   RULES+=("$r")
