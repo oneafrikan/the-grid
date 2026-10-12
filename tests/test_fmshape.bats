@@ -120,6 +120,7 @@ control, invisible or tab|---\nname: x\nd: a​b\n---\nb
 control, invisible or tab|---\nname: x\nd: a﻿b\n---\nb
 `---` inside|---\nname: x\nd: a --- b\n---\nb
 `---` inside|---\nname: x\nd: |\n  ---\n---\nb
+`---` inside|---\x85\nname: x\nd: a --- b\n---\nb
 no closing|---\nname: x\nd: y\n
 `: ` or ` #`|---\nname: x\n  stray: y\n---\nb
 does not follow a bare|---\nname: x\nd: v\n- item\n---\nb
@@ -285,10 +286,13 @@ PY
 # --- the whole-word backstop ---------------------------------------------------------------------------------
 
 @test "backstop: the word hooks in a KEY position that no hooks block covers is HIGH hook-declared" {
-  fm 'name: x\nmy-hooks: a'
+  # (spellings with no `hooks:` token, so only the whole-word backstop can see them)
+  fm 'name: x\nhooks-x: a'
   [ "$status" -eq 1 ]
   [ "$(rules_high)" = "['hook-declared']" ]
-  fm 'name: x\nmetadata:\n  x.hooks: a'
+  fm 'name: x\nmetadata:\n  x.hooks-y: a'
+  [ "$status" -eq 1 ]
+  fm 'name: x\nmy-hooks: a'
   [ "$status" -eq 1 ]
 }
 
