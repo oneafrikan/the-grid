@@ -489,6 +489,21 @@ print(m["only-pending"]["status"], m["both"]["status"], m["both"]["confidence"],
   [[ "$output" != *weak-habit* ]]
 }
 
+@test "inject: a non-finite INSTINCTS_MIN_CONF cannot lift the 0.5 floor" {
+  # max(nan, 0.5) is nan and `conf < nan` is never true, so a NaN knob used to let every
+  # instinct through. A non-finite value is read as unset (the default 0.5).
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  fx "$PID" host-a good-habit 0.7 2026-W40
+  fx "$PID" host-a "weak-habit" 0.3 2026-W40
+  cd "$BATS_TEST_TMPDIR/repo"
+  for v in nan NaN -nan inf -inf infinity; do
+    INSTINCTS_MIN_CONF=$v run "$SH" inject
+    [ "$status" -eq 0 ]
+    [[ "$output" != *weak-habit* ]] || { echo "lifted by $v"; return 1; }
+    [[ "$output" == *good-habit* ]] || { echo "default floor lost with $v"; return 1; }
+  done
+}
+
 @test "inject: a token-shaped value in the stored TRIGGER is redacted at inject time" {
   mkrepo "$BATS_TEST_TMPDIR/repo"
   secret="ghp_$(printf 'B%.0s' {1..36})"

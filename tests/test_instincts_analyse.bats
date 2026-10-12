@@ -200,6 +200,29 @@ PY
   contains "$(cat "$STUB_LOG")" "--max-budget-usd 0.02"
 }
 
+@test "call shape: a non-finite or malformed budget or timeout falls back to the default" {
+  seed_bats
+  reply "[]"
+  for v in nan inf -inf garbage; do
+    INSTINCTS_BUDGET_USD=$v INSTINCTS_TIMEOUT_S=$v analyse_run --force
+    [ "$status" -eq 0 ]
+    contains "$(cat "$STUB_LOG")" "--max-budget-usd 0.05" || { echo "budget $v reached the CLI"; return 1; }
+    lacks "$(cat "$STUB_LOG")" "--max-budget-usd $v" || { echo "$v reached the CLI"; return 1; }
+  done
+  # the numeric helpers themselves
+  run python3 -B -c '
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import analyse
+for v in ("nan", "inf", "-inf", "x"):
+    os.environ["K"] = v
+    assert analyse._env_float("K", 7.0) == 7.0, v
+os.environ["K"] = "2.5"
+assert analyse._env_float("K", 7.0) == 2.5
+print("ok")' "$BATS_TEST_DIRNAME/../scripts/instincts"
+  [ "$output" = "ok" ]
+}
+
 # --- caps and idempotency --------------------------------------------------------
 
 @test "caps: a call that outlives INSTINCTS_TIMEOUT_S is an error and leaves the store unchanged" {

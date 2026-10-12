@@ -19,6 +19,7 @@ Design rules (design.md: Injection):
     re-scrubbed here before it is printed. Invalid lines are skipped.
   * Nothing qualifies -> nothing printed, not even the header.
 """
+import math
 import os
 import sys
 
@@ -42,11 +43,17 @@ PROJECT_BONUS = 0.25   # a project-scoped hint outranks a global one of equal co
 
 
 def _env_num(name: str, default, cast):
-    """Numeric env override; a missing or malformed value falls back to the default."""
+    """Numeric env override; a missing, malformed or non-finite value falls back to the default.
+
+    nan must not get through: `max(nan, 0.5)` is nan and `conf < nan` is never true, so a NaN
+    floor would let every instinct in.
+    """
     try:
-        return cast(os.environ[name])
+        v = cast(os.environ[name])
     except (KeyError, ValueError):
         return default
+    # (ints are always finite; math.isfinite on a huge int would overflow, so test floats only)
+    return default if isinstance(v, float) and not math.isfinite(v) else v
 
 
 END_MARKER = "[end of hints]"
