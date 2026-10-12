@@ -151,6 +151,25 @@ common_teardown() {
         GRID_STATE_DIR XDG_RUNTIME_DIR REAL_XDG_RUNTIME_DIR
 }
 
+# systemd_verify_private <unit file>... — `run` `systemd-analyze --user verify` against a
+# PRIVATE runtime dir (R16.qa.F2, R06.qa.F12). verify talks to a user manager through
+# $XDG_RUNTIME_DIR/systemd/private: with the real runtime dir set it can unlink the live
+# manager's socket, with it unset it fails outright. So the runtime dir (and config dir)
+# are temp dirs under $BATS_TEST_TMPDIR, and the test SKIPS, not fails, when a probe of a
+# known-good unit cannot succeed there (no user-mode systemd, or the AF_UNIX socket path
+# is too long for a deep TMPDIR). Sets $status/$output via `run`.
+systemd_verify_private() {
+  local rt="$BATS_TEST_TMPDIR/xdg-rt"
+  mkdir -p "$rt/config"
+  chmod 700 "$rt"
+  printf '[Unit]\nDescription=probe\n[Service]\nType=oneshot\nExecStart=/bin/true\n' > "$rt/probe.service"
+  if ! env XDG_RUNTIME_DIR="$rt" XDG_CONFIG_HOME="$rt/config" \
+       systemd-analyze --user verify "$rt/probe.service" >/dev/null 2>&1; then
+    skip "systemd-analyze --user cannot run in a private runtime dir here"
+  fi
+  run env XDG_RUNTIME_DIR="$rt" XDG_CONFIG_HOME="$rt/config" systemd-analyze --user verify "$@"
+}
+
 # Write a minimal valid skill dir to a given path
 make_skill() {
   local dir="$1" name="$2"
