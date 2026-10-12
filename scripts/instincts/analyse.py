@@ -218,7 +218,7 @@ def project_dirs() -> list[str]:
     base = lib.instincts_state_dir()
     if not base.is_dir():
         return []
-    return sorted(p.name for p in base.iterdir() if p.is_dir() and PROJECT_DIR_RE.match(p.name))
+    return sorted(p.name for p in base.iterdir() if p.is_dir() and PROJECT_DIR_RE.fullmatch(p.name))
 
 
 def enabled_state(pid: str) -> str:
@@ -364,10 +364,11 @@ def safe(text: str) -> str:
 def strip_delims(text: str) -> str:
     """Remove the digest delimiters from item text so it cannot imitate a real line.
 
-    `<<<`, `>>>` and the word DIGEST go; what is left is plain text. Whitespace
-    is re-collapsed afterwards.
+    Every `<`, `>` and the word digest (any case) becomes a space, in ONE pass, and whitespace
+    is re-collapsed. One substitution cannot rebuild a delimiter out of its own leftovers (the old
+    three sequential removals turned `DIGDIGESTEST>>DIGEST>` back into `DIGEST>>>`).
     """
-    t = text.replace("<<<", "").replace(">>>", "").replace("DIGEST", "")
+    t = re.sub(r"[<>]|digest", " ", text, flags=re.I)
     return re.sub(r"\s+", " ", t).strip()
 
 
@@ -398,10 +399,12 @@ def prompt_stems(text: str) -> str:
 
 def norm_cmd(text: str, max_len: int = 120) -> str:
     """Command normalisation: first segment only, digits to N, long tokens to <long>."""
-    seg = _SEGMENT_SPLIT.split(safe(text), maxsplit=1)[0]
+    seg = strip_delims(_SEGMENT_SPLIT.split(safe(text), maxsplit=1)[0])
     seg = _DIGITS.sub("N", seg)
+    # The `<long>` marker is added AFTER the delimiter strip (which blanks every `<` and `>`);
+    # it is always its own space-separated token, so it can never join a delimiter.
     seg = " ".join("<long>" if len(tok) > 40 else tok for tok in seg.split())
-    return strip_delims(seg[:max_len])
+    return seg[:max_len]
 
 
 def norm_path(text: str) -> str:
@@ -735,7 +738,7 @@ def parse_reply(result: str) -> list:
 
 def check_field_shapes(item: dict) -> bool:
     """bad-field: types, id regex, length caps and enums, before the unsafe-text check."""
-    if item["kind"] not in lib.KINDS or not isinstance(item["id"], str) or not lib.ID_RE.match(item["id"]):
+    if item["kind"] not in lib.KINDS or not isinstance(item["id"], str) or not lib.ID_RE.fullmatch(item["id"]):
         return False
     t, a = item["trigger"], item["action"]
     if not (isinstance(t, str) and isinstance(a, str)):
@@ -848,8 +851,10 @@ def apply_items(pid: str, valid: list[dict], week: str):
     changed = False
 
     def mine(iid: str):
-        for i, e in enumerate(entries):
-            if isinstance(e, dict) and e["id"] == iid:
+        # The LAST line of this host for the id: an approval or a retirement appends a line, and the
+        # newest one is the state to carry forward.
+        for i in range(len(entries) - 1, -1, -1):
+            if isinstance(entries[i], dict) and entries[i]["id"] == iid:
                 return i
         return None
 
@@ -866,9 +871,10 @@ def apply_items(pid: str, valid: list[dict], week: str):
         iid = v["id"]
         touched.add(iid)
         if v["kind"] == "new":
+            # `pending`: not injected into any session until the operator runs `instincts.sh approve ID`.
             put({"id": iid, "trigger": v["trigger"], "action": v["action"], "domain": v["domain"],
                  "scope": "project", "project": pid, "confidence": CONF_NEW, "weeks_seen": 1,
-                 "first_seen": week, "last_seen": week, "misses": 0, "status": "active", "host": host})
+                 "first_seen": week, "last_seen": week, "misses": 0, "status": "pending", "host": host})
             stats["new"] += 1
             stats["kept"] += 1
             continue

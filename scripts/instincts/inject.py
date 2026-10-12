@@ -49,15 +49,25 @@ def _env_num(name: str, default, cast):
         return default
 
 
+END_MARKER = "[end of hints]"
+
+
 def _item_line(m: dict) -> str:
-    """`- <trigger>: <action> (conf 0.60)`, fields re-scrubbed and kept to one plain line."""
-    trigger = lib.sanitize(lib.scrub(m["trigger"]))
-    action = lib.sanitize(lib.scrub(m["action"]))
-    return f"- {trigger}: {action} (conf {m['confidence']:.2f})"
+    """`- hint: "<trigger>: <action>" (conf 0.60)`, fields re-scrubbed and kept to one plain line.
+
+    The text sits inside quotes (a double quote inside it becomes a single quote) and the block
+    ends with END_MARKER, so the model can see where the machine-generated text stops.
+    """
+    trigger = lib.sanitize(lib.scrub(m["trigger"])).replace('"', "'")
+    action = lib.sanitize(lib.scrub(m["action"])).replace('"', "'")
+    return '- hint: "%s: %s" (conf %.2f)' % (trigger, action, m["confidence"])
 
 
-def build(project_id: str) -> str:
-    """The text to print for this project ('' when nothing qualifies)."""
+def build(project_id: str, shown: list | None = None) -> str:
+    """The text to print for this project ('' when nothing qualifies).
+
+    `shown`, when given, receives one `id:conf` string per hint that made it into the text.
+    """
     min_conf = _env_num("INSTINCTS_MIN_CONF", 0.5, float)
     max_items = _env_num("INSTINCTS_MAX_ITEMS", 6, int)
     max_chars = _env_num("INSTINCTS_MAX_CHARS", 1500, int)
@@ -76,12 +86,29 @@ def build(project_id: str) -> str:
     lines = [_item_line(m) for _, m in ranked]
 
     def render(ls: list[str]) -> str:
-        return HEADER + "\n" + "\n".join(ls) + "\n"
+        return HEADER + "\n" + "\n".join(ls) + "\n" + END_MARKER + "\n"
 
     # Drop whole lowest-ranked items until header + items fit the cap.
     while lines and len(render(lines)) > max_chars:
         lines.pop()
+    if shown is not None:
+        shown.extend("%s:%.2f" % (m["id"], m["confidence"]) for _, m in ranked[:len(lines)])
     return render(lines) if lines else ""
+
+
+def record_injection(pid: str, shown: list[str]) -> None:
+    """One run-log line with the injected ids and confidences (which hints reached the session).
+
+    Best effort: a missing script, an unwritable log or a slow disk never breaks the hook.
+    """
+    import subprocess
+    try:
+        subprocess.run(["bash", str(lib.REPO_ROOT / "scripts" / "run-record.sh"), "--role", "instincts",
+                        "--action", "inject", "--outcome", "ok", "--target", pid,
+                        "--note", "ids=" + ",".join(shown)],
+                       capture_output=True, timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def main() -> int:
@@ -94,9 +121,12 @@ def main() -> int:
         pid = lib.git_project_id(root)
         if not pid:
             return 0
-        out = build(pid)
+        shown: list[str] = []
+        out = build(pid, shown)
         if out:
             sys.stdout.write(out)
+            sys.stdout.flush()          # the hints must be out before the (slower) run-log write
+            record_injection(pid, shown)
     except Exception:  # noqa: BLE001 - a SessionStart hook must never fail the session
         pass
     return 0
