@@ -492,3 +492,41 @@ gemini_roles() {
   [ "$(awk 'f{print} /^---$/{n++; if(n==2) f=1}' "$g")" = "$(awk 'f{print} /^---$/{n++; if(n==2) f=1}' "$c")" ]
   [ "$(grep -A1 '^description:' "$g")" = "$(grep -A1 '^description:' "$c")" ]
 }
+
+# ---------------------------------------------------------------- real roles, every target
+
+# The goldens above use the fixture roles. These compose the REAL core roles for each
+# non-Claude target and run the format validators over the output, so a real role that
+# breaks a harness format (an unmapped tool, bad TOML escaping, a missing description) is
+# caught here. A test, not a gate step: CI has no composed output to `--check`. The
+# identity is the neutral public one and private roles are disabled, so the result does not
+# depend on the machine.
+@test "real core roles compose for codex, opencode and gemini-cli and pass the validators" {
+  need_tomllib
+  export GRID_PRIVATE_ROLES_DIR=""
+  export GRID_USER_CONFIG="$REPO_ROOT/agent-factory/user.public.yaml"
+  export GRID_MODELS_FILE="$REPO_ROOT/agent-factory/models.yaml"
+  local t
+  for t in codex opencode gemini-cli; do
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/agent-factory/examples/core.yaml" \
+      --target "$t" --out "$TMP"
+    echo "$output"
+    [ "$status" -eq 0 ]
+  done
+  mapfile -t codex < <(find "$TMP/core/_codex/agents" -name '*.toml' -type f | LC_ALL=C sort)
+  mapfile -t opencode < <(find "$TMP/core/_opencode/agents" -name '*.md' -type f | LC_ALL=C sort)
+  mapfile -t gemini < <(find "$TMP/core/_gemini-cli/agents" -name '*.md' -type f | LC_ALL=C sort)
+  # Guard against a vacuous pass: core has four specialists on every target.
+  [ "${#codex[@]}" -eq 4 ]
+  [ "${#opencode[@]}" -eq 4 ]
+  [ "${#gemini[@]}" -eq 4 ]
+  run python3 -I "$VALIDATE" codex-agent "${codex[@]}"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  run python3 -I "$VALIDATE" opencode-agent "${opencode[@]}"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  run python3 -I "$VALIDATE" gemini-agent "${gemini[@]}"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}

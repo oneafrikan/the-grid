@@ -41,5 +41,14 @@ jobs:
       - name: Require shellcheck
         run: shellcheck --version
 
+      # --strict: a skipped check that is not listed here fails the job, so a removed venv
+      # step or check script cannot silently drop a check. Each name is a check the CI runner
+      # cannot run: catalog + budget-baseline (need the personal baseline file), plugins-validate
+      # (needs the claude CLI), personal-denylist (private denylist), and the four composed
+      # projects (composed output is gitignored; CI runs only compose.py --lint-roles).
       - name: Gate
-        run: bash scripts/gate.sh
+        env:
+          GRID_GATE_EXPECT_SKIPPED: >-
+            catalog budget-baseline plugins-validate personal-denylist
+            compose-core compose-grid compose-finance-desk compose-learning-desk
+        run: bash scripts/gate.sh --strict
