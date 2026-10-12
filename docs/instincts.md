@@ -16,6 +16,7 @@ injected back at session start. Nothing here is on until you switch it on for a 
 - Everything is private and outside the public repo: raw observations in `${GRID_STATE_DIR:-~/.grid}/instincts/` (local to the machine), instincts in `~/.the-grid-private/learning/instincts/`.
 - Raw observations are deleted 28 days after a successful analysis.
 - The project id is a 12-character hash of the git remote URL, not the URL.
+- `instincts.sh sync` (run at the end of every analysis) commits and pushes only `learning/instincts` in the private repo, and never touches your own work there: it is skipped while a rebase/merge is in progress, on a detached HEAD or with no upstream; the pull is skipped (no autostash) while tracked files outside the store are modified; files over 1 MiB are not committed; the push needs `<private>/.grid-private-remote` (first line = the push URL of the upstream remote, see `docs/usage.md`) and only own unpushed commits. A refused push because of a foreign unpushed commit makes `sync` exit 4; a missing or mismatched marker is a warning and exit 0.
 - The weekly analysis sends a digest of the scrubbed observations to a model (default `haiku`, `$0.05` cap per project). Do not enable it on a project whose prompts you would not send to a model.
 
 ## How to enable

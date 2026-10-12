@@ -1136,11 +1136,41 @@ def _store_pathspec(priv: Path) -> str:
         return "learning/instincts"
 
 
-def run_sync() -> int:
-    """pull --rebase --autostash, stage the instincts path, commit if staged, push.
+def _unstage_large(priv: Path, pathspec: str) -> None:
+    """Unstage any file under the pathspec bigger than MAX_SYNC_FILE_BYTES, with a warning
+    (a 60 MB junk file once went into a private repo through a bare `git add`)."""
+    r = _private_git(priv, "diff", "--cached", "--name-only", "-z", "--", pathspec)
+    for name in filter(None, r.stdout.split("\0")):
+        try:
+            size = (priv / name).stat().st_size
+        except OSError:
+            continue   # staged deletion: nothing on disk to measure
+        if size > MAX_SYNC_FILE_BYTES:
+            _private_git(priv, "reset", "-q", "HEAD", "--", name)
+            _sync_warn(f"not committing {name}: {size} bytes is over the {MAX_SYNC_FILE_BYTES} byte limit")
 
-    Each host writes only its own <host>.jsonl files, so the rebase is conflict-free.
-    Always returns 0: any git, network or filesystem failure prints a warning.
+
+GUARD = Path(__file__).resolve().parent.parent / "lib" / "private-git-guard.sh"
+MAX_SYNC_FILE_BYTES = 1 << 20   # a stray large file must not be committed into the private repo
+
+
+def _guard(*args: str) -> subprocess.CompletedProcess:
+    """Run the shared guard (scripts/lib/private-git-guard.sh), also used by the
+    weekly usage job, so both jobs apply one definition of "safe to touch the repo"."""
+    return subprocess.run(["bash", str(GUARD), *args], capture_output=True, text=True,
+                          timeout=GIT_TIMEOUT_S)
+
+
+def run_sync() -> int:
+    """Stage the instincts path, commit if staged, pull --rebase, push.
+
+    The operator may be mid-rebase in the private repo, so: a busy repo (rebase/merge in
+    progress, detached HEAD, unmerged entries, no upstream) skips the whole sync; the pull
+    is skipped, never autostashed, while tracked files outside the instincts path are
+    modified; the push needs the .grid-private-remote marker to match and every unpushed
+    commit to touch only the instincts path.
+    Returns 0 for every outcome (a git, network or filesystem failure prints a warning),
+    except 4 when the push was refused because of a foreign unpushed commit.
     """
     try:
         priv = lib.private_dir()
@@ -1156,10 +1186,11 @@ def run_sync() -> int:
         pathspec = _store_pathspec(priv)
         msg = f"instincts: {lib.host_name()} {lib.current_week()}"
 
-        r = _private_git(priv, "pull", "--rebase", "--autostash")
-        if r.returncode != 0:
-            # Keep going: committing and pushing local work is still worth trying.
-            _sync_warn("git pull failed: " + (r.stderr.strip() or r.stdout.strip()))
+        # The operator's work in progress is never ours to touch: skip the whole sync.
+        busy = _guard("precheck", str(priv))
+        if busy.returncode != 0:
+            print(f"instincts: sync skipped: private repo busy ({busy.stdout.strip()})")
+            return 0
         # On a machine that has produced no instincts yet the path does not exist and
         # `git add` would fail on it; there is simply nothing to stage then.
         if (priv / pathspec).exists():
@@ -1167,12 +1198,14 @@ def run_sync() -> int:
             if r.returncode != 0:
                 _sync_warn("git add failed: " + r.stderr.strip())
                 return 0
+            _unstage_large(priv, pathspec)
         # diff --cached --quiet: exit 0 = nothing staged, 1 = staged change.
         staged = _private_git(priv, "diff", "--cached", "--quiet", "--", pathspec)
         if staged.returncode == 0:
             print("instincts: sync: no changes to commit")
         elif staged.returncode == 1:
             # Commit only our path so anything else already staged in the private repo is left alone.
+            # Committing before the pull leaves the path clean, so no autostash is needed.
             r = _private_git(priv, "commit", "-m", msg, "--", pathspec)
             if r.returncode != 0:
                 _sync_warn("git commit failed: " + (r.stderr.strip() or r.stdout.strip()))
@@ -1181,6 +1214,28 @@ def run_sync() -> int:
         else:
             _sync_warn("git diff failed: " + staged.stderr.strip())
             return 0
+        # Pull only while no tracked file outside our path is modified: a rebase refuses
+        # then, and --autostash would re-apply the operator's edit into conflict markers.
+        if _guard("outside-clean", str(priv), pathspec).returncode == 0:
+            r = _private_git(priv, "pull", "--rebase")
+            if r.returncode != 0:
+                # Keep going: pushing local work is still worth trying. The precheck above
+                # proved no rebase was running, so one found now is ours: abort it.
+                _sync_warn("git pull failed: " + (r.stderr.strip() or r.stdout.strip()))
+                if _guard("precheck", str(priv)).stdout.strip() == "rebase-in-progress":
+                    _private_git(priv, "rebase", "--abort")
+        else:
+            print("instincts: sync: private repo has other changes; pull skipped")
+        # A failed pull must never leave a conflicted state that is pushed from.
+        busy = _guard("precheck", str(priv))
+        if busy.returncode != 0:
+            _sync_warn(f"push skipped: private repo busy ({busy.stdout.strip()})")
+            return 0
+        ok = _guard("push-ok", str(priv), pathspec)
+        if ok.returncode != 0:
+            _sync_warn(f"push skipped: {ok.stdout.strip()}")
+            # 4 = foreign unpushed commit; 3 (remote not confirmed) stays a warning.
+            return 4 if ok.returncode == 4 else 0
         r = _private_git(priv, "push")
         if r.returncode != 0:
             _sync_warn("git push failed: " + (r.stderr.strip() or r.stdout.strip()))

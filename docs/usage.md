@@ -113,11 +113,32 @@ identical files and prints `unchanged`.
 - Test it once by hand before trusting the schedule: `bash scripts/usage/weekly.sh`.
 
 What `weekly.sh` does each run: extract into `<private>/usage/`; if the private
-dir is a git repo, `pull --rebase --autostash`, commit only `usage/<host>.json`
-with the message `usage: <host> <date>`, and push. Pull and push failures are
-logged and never fatal (a failed pull also aborts any half-finished rebase); the
-commit stays local and the next run retries. A private dir that is not a git repo
-just gets the file.
+dir is a git repo, commit only `usage/<host>.json` with the message
+`usage: <host> <date>`, `pull --rebase`, and push. Pull and push failures are
+logged and never fatal; the commit stays local and the next run retries. A private
+dir that is not a git repo just gets the file.
+
+The job never touches your own work in the private repo (shared guard:
+`scripts/lib/private-git-guard.sh`, also used by `instincts.sh sync`):
+
+- **Busy repo:** with a rebase, merge or cherry-pick in progress, a detached HEAD,
+  unmerged entries or no upstream, the whole git phase is skipped (the file is
+  still written) and the reason is logged.
+- **Dirty tree:** if a tracked file outside `usage/` is modified the pull is
+  skipped (`private repo has other changes; pull skipped`); the job still commits
+  its own file. There is no autostash. A pull that conflicts is aborted and the
+  local commit kept.
+- **Push guard:** the push only happens when every unpushed commit touches only
+  `usage/<host>.json`; otherwise it is skipped and the run exits 4.
+- **Remote marker:** the push also needs `<private>/.grid-private-remote`, whose
+  first line is the push URL of the upstream remote. Without it (or on a mismatch)
+  the push is skipped with `push skipped` in `usage.log` and the run still exits 0.
+  Create it once per machine, after confirming the repo is private
+  (`gh repo view <owner>/<private-repo> --json isPrivate`):
+  `git -C "${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}" remote get-url --push origin > "${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}/.grid-private-remote"`.
+- **Hangs and overlap:** each git call is killed after `GRID_GIT_TIMEOUT` seconds
+  (default 120) and prompts are disabled; a second run while one is active logs
+  `already running` and exits 0 (`<state>/weekly.lock`, stale after two hours).
 
 ## Reading `usage/<host>.json`
 
