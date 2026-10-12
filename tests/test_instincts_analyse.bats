@@ -944,6 +944,21 @@ sys.exit(analyse.main(["analyse"]))'
   contains "$output" "git status"
 }
 
+@test "digest: user@host:/path with a single-label host never reaches the model" {
+  local at='@'
+  {
+    printf 's%s|tool|Bash|0|scp f.txt me%sdevbox:/tmp/x\n' 1 "$at" 2 "$at"
+    printf 's%s|tool|Bash|0|rsync -a . me%sdevbox:/srv/app/\n' 1 "$at" 2 "$at"
+    printf 's%s|tool|Bash|0|git status\n' 1 2
+  } | obs
+  neutral 40
+  analyse_run --dry-run
+  [ "$status" -eq 0 ]
+  lacks "$output" "devbox"
+  lacks "$output" "scp"
+  contains "$output" "git status"
+}
+
 @test "validation: an item holding an email, IPv4, SSN or absolute path is dropped as pii" {
   seed_bats
   local at='@'

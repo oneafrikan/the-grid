@@ -361,7 +361,10 @@ _MIXED_WORD = re.compile(r"[A-Za-z]\w*\d|\d\w*[A-Za-z]")
 _LONG_RUN = re.compile(r"[A-Za-z0-9_-]{20,}")
 # Every start is anchored with a lookbehind so a long run of one class is scanned once.
 _EMAIL = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
-_SCP_HOST = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+:[/~\w]")
+# What may follow the colon: a path, `~`, a word, or what the path rewrites leave behind
+# (`(outside)/x` from outside_paths, `./x` from the project-root rewrite). Those rewrites run
+# BEFORE this check, so `user@host:/tmp` arrives here as `user@host:(outside)/tmp`.
+_SCP_HOST = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+:[/~\w(.]")
 # TLDs worth a drop. Left out on purpose because they are file extensions too:
 # py sh md rs pl so cc zip mov pm in (README.md, lib.py, requirements.in).
 _TLDS = ("com|net|org|io|dev|app|co|uk|de|fr|nl|eu|us|ai|cloud|info|biz|edu|gov|mil|int|me|tv|xyz|"
