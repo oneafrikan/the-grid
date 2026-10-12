@@ -221,7 +221,7 @@ symlinks, so nothing is clobbered. `reconcile.sh` then shows exactly which shado
 To make the machine match the-grid exactly, remove those shadows and re-wire:
 
 ```bash
-bash ~/.the-grid/scripts/reconcile.sh --force   # removes shadows (sudo only where needed) + re-wires
+bash ~/.the-grid/scripts/reconcile.sh --force   # moves shadows to a dated backup dir (audit gate first, sudo only where needed) + re-wires
 ```
 
 `reconcile.sh` only ever removes a path that is a **real dir** (never a symlink) and that

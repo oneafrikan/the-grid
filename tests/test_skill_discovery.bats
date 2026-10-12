@@ -130,3 +130,112 @@ check_fixture() { # $1 = repo dir
   GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh" "$MOCK_SKILLS/SKILLS.md"
   grep -q '^## repos/dup (wired) — 1$' "$MOCK_SKILLS/SKILLS.md"
 }
+
+# --- WP-009: path safety (newline paths, symlinked SKILL.md, locale list, inherited GIT_*) ----
+
+# Like rels, but stderr goes to $FIX_ROOT/err so a test can read the warning.
+rels_err() { # $1 = repo dir
+  # shellcheck source=../scripts/lib/find-skill-mds.sh
+  . "$REPO_ROOT/scripts/lib/find-skill-mds.sh"
+  find_skill_mds "$1" 2>"$FIX_ROOT/err" | sed "s|^$1/||" | LC_ALL=C sort
+}
+
+# A skill dir whose NAME holds a line break, next to one real skill.
+populate_newline() { # $1 = repo dir
+  mk "$1" skills/ok
+  mk "$1" "skills/new
+line"
+}
+
+@test "newline path is skipped, with a warning, in the plain fixture" {
+  local d="$FIX_ROOT/other" out
+  populate_newline "$d"
+  out="$(rels_err "$d")"
+  [ "$out" = "skills/ok/SKILL.md" ]
+  [ -s "$FIX_ROOT/err" ]
+}
+
+@test "newline path is skipped, with a warning, in the git fixture" {
+  local d="$FIX_ROOT/other" out
+  populate_newline "$d"
+  gitify "$d"
+  out="$(rels_err "$d")"
+  [ "$out" = "skills/ok/SKILL.md" ]
+  [ -s "$FIX_ROOT/err" ]
+}
+
+# One tree with every shape the two branches used to disagree on.
+populate_hostile() { # $1 = repo dir
+  mk "$1" skills/real
+  mkdir -p "$1/skills/dirskill/SKILL.md"                  # a DIRECTORY named SKILL.md
+  : > "$1/skills/dirskill/SKILL.md/note.txt"
+  mkdir -p "$1/skills/dangling"
+  ln -s "$FIX_ROOT/nowhere" "$1/skills/dangling/SKILL.md" # dangling symlink
+  mk "$1" node_modules/dep                                # vendored copies
+  mk "$1" skills/real/node_modules/inner
+}
+
+@test "git and plain branches return the same set for one hostile tree" {
+  local p="$FIX_ROOT/plain" g="$FIX_ROOT/git" outp outg shape
+  populate_hostile "$p"
+  populate_hostile "$g"
+  gitify "$g"
+  # An untracked file: only the git branch can know it is untracked.
+  mk "$g" skills/untracked
+  outp="$(rels "$p")"
+  outg="$(rels "$g")"
+  [ "$outp" = "skills/real/SKILL.md" ]
+  [ "$outg" = "$outp" ]
+  # Negative checks that cannot pass vacuously: the real skill IS there (above), and
+  # each hostile shape is searched for by name and must NOT be.
+  for shape in dirskill dangling node_modules untracked; do
+    run grep "$shape" <<< "$outp"
+    [ "$status" -ne 0 ]
+    run grep "$shape" <<< "$outg"
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "docs/qa and docs/go are skills; docs/ja-JP, zh-CN, pt-BR, zh-Hans and tr are translations" {
+  local branch d out
+  for branch in plain git; do
+    d="$FIX_ROOT/$branch"
+    mk "$d" docs/qa
+    mk "$d" docs/go
+    mk "$d" docs/ja-JP/a
+    mk "$d" docs/zh-CN/a
+    mk "$d" docs/pt-BR/a
+    mk "$d" docs/zh-Hans/a
+    mk "$d" docs/tr/a
+    if [ "$branch" = git ]; then gitify "$d"; fi
+    out="$(rels "$d")"
+    [ "$out" = "$(printf 'docs/go/SKILL.md\ndocs/qa/SKILL.md')" ]
+  done
+}
+
+@test "a SKILL.md symlink to a file outside the root is skipped (git and plain)" {
+  local branch d out
+  printf -- '---\nname: x\ndescription: d\n---\n' > "$FIX_ROOT/outside.md"
+  for branch in plain git; do
+    d="$FIX_ROOT/$branch"
+    mk "$d" skills/real
+    mkdir -p "$d/skills/linked"
+    ln -s "$FIX_ROOT/outside.md" "$d/skills/linked/SKILL.md"
+    if [ "$branch" = git ]; then gitify "$d"; fi
+    out="$(rels "$d")"
+    [ "$out" = "skills/real/SKILL.md" ]
+  done
+}
+
+@test "GIT_DIR and GIT_INDEX_FILE pointing at another repo give the clean-env result" {
+  local d="$FIX_ROOT/mine" other="$FIX_ROOT/theirs" clean dirty
+  mk "$d" skills/a
+  mk "$d" skills/b
+  gitify "$d"
+  mk "$other" skills/zzz
+  gitify "$other"
+  clean="$(rels "$d")"
+  [ "$clean" = "$(printf 'skills/a/SKILL.md\nskills/b/SKILL.md')" ]
+  dirty="$(GIT_DIR="$other/.git" GIT_INDEX_FILE="$other/.git/index" rels "$d")"
+  [ "$dirty" = "$clean" ]
+}

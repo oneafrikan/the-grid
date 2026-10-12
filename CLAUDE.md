@@ -267,7 +267,7 @@ removes them so the-grid owns the slot, then re-wires. It parses wire.sh's own
 
 ```bash
 bash scripts/reconcile.sh          # dry run — list shadowing dirs
-bash scripts/reconcile.sh --force  # remove them (sudo only where needed) + re-wire
+bash scripts/reconcile.sh --force  # move them to a dated backup dir (audit gate first, sudo only where needed) + re-wire
 ```
 
 Idempotent: a fully-wired machine reports "Nothing to reconcile".
@@ -315,10 +315,20 @@ Agents and sessions must not leave stale worktrees or local branches behind.
 - **Machine key:** `GRID_HOST` env var overrides the overlay host (default `hostname -s`).
 - **Audit before wiring (step 0):** before any teardown `wire.sh` runs `audit.sh --wired --quiet`.
   A high-severity finding (or a broken policy) blocks with **exit 3** and changes nothing,
-  so existing links survive a bad upstream bump. `GRID_AUDIT=warn` prints a warning and
-  wires anyway. `GRID_SKIP_AUDIT=1` skips it (audit.sh's own dry run sets it to avoid
-  recursion). It is also skipped, with a printed notice, when `policy.yaml` or `python3`
-  is absent, and under `--check` / `GRID_SKIP_CATALOG`.
+  so existing links survive a bad upstream bump. A missing `policy.yaml` or `python3` blocks
+  the same way (fail closed). `GRID_AUDIT=warn` prints a warning and wires anyway.
+  `GRID_SKIP_AUDIT=1` is the only bypass (it prints a stderr notice; audit.sh's own dry run
+  sets it to avoid recursion), plus every dry run (`GRID_DRY_HOME`, so `--check`'s child
+  never audits). `GRID_SKIP_CATALOG` alone no longer skips the audit. A mock grid without a
+  `policy.yaml` must set `GRID_SKIP_AUDIT=1` (the bats `common_setup` does). The audit is
+  **point-in-time** (runs at wire time and in the gate, not between; `--check` does not
+  re-audit) and covers skill and agent link targets only: runtime-root `bin/` helpers
+  are not scanned (accepted, see `CURATION.md`).
+- **Manifest problems are announced:** a missing baseline file (default path, or
+  `GRID_BASELINE` set and absent) and a `repo`, `repo/skill`, `-repo` or `-repo/skill`
+  entry that names no dir under `repos/` print a stderr warning and add a
+  `manifest` row (`missing` / `unknown`) to `.wired.manifest`; the wire still runs. An
+  absent per-host overlay is normal and silent.
 - **Runtime map:** `scripts/lib/runtimes.txt` (`repo | link | marker | needs | setup`)
   lists wired repos whose skills need more than files on disk (gstack: its browse
   daemon). wire.sh keeps the runtime-root link `$SKILLS_DIR/<link> -> $GRID_DIR/repos/<repo>`
@@ -331,10 +341,20 @@ Agents and sessions must not leave stale worktrees or local branches behind.
   manifest layer (default `$GRID_DIR/baseline-submodules.txt`); machine overlays
   still load from `$GRID_DIR/machines/`. Tests and CI use it to wire from
   `baseline-submodules.example.txt` when there is no personal baseline.
-- **Teardown scope:** teardown removes only links whose target is under `$GRID_DIR/`
-  (trailing slash: a sibling dir like `${GRID_DIR}-private` is never matched) and
-  follows a skills/agents dir that is itself a symlink (`find -H`), in both the
-  wire and `--check` paths.
+- **Teardown scope:** teardown removes only links whose target RESOLVES to a path under
+  `$GRID_DIR/` (`target_is_ours`: the target's parent is resolved physically, a missing
+  parent is normalised lexically; trailing slash, so a sibling dir like
+  `${GRID_DIR}-private` and `$GRID_DIR/../x` are never matched). `GRID_DIR` itself is
+  canonicalised (`pwd -P`) at start, so every link carries one spelling. It follows a
+  skills/agents dir that is itself a symlink (`find -H`) and tolerates newline names,
+  in both the wire and `--check` paths. The link steps never replace a real file, a
+  dangling link or a foreign link that shares a grid name (`skip (not managed)`).
+- **Failure safety (no lock):** registry dirs are resolved and every written dir is
+  checked writable BEFORE the first `rm`; an unresolvable dir of an active harness or an
+  unwritable dir is **exit 2, nothing changed**. Removed links are logged and an
+  EXIT/INT/TERM/HUP trap restores any that are still absent unless the run completed
+  (SIGKILL cannot be trapped: re-run wire). There is deliberately no lock: **one wire at a
+  time** is the supported use (cron plus a manual run can race, so don't).
 - **Machine hooks:** wire.sh keeps one generated `auto-handoff` SessionEnd entry in
   `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json` via
   `agent-factory/deploy_hooks.py --user` (stdlib only; hand-written hooks and keys are

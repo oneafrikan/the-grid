@@ -349,7 +349,7 @@ GRID_DIR=/path/to/grid SKILLS_DIR=/path/to/skills bash scripts/wire.sh
 
 ```bash
 bash scripts/reconcile.sh           # dry run — list shadowing dirs
-bash scripts/reconcile.sh --force   # remove them (sudo only where needed) + re-wire
+bash scripts/reconcile.sh --force   # move them to a dated backup dir (audit gate first, sudo only where needed) + re-wire
 ```
 
 Idempotent: a fully-wired machine reports "Nothing to reconcile".

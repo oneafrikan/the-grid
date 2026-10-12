@@ -655,6 +655,15 @@ def wired_skill_links(grid_dir, baseline):
         if proc.returncode != 0:
             raise GridError("grid: wire.sh failed while resolving the wired set (exit %d):\n%s"
                             % (proc.returncode, proc.stderr.strip()))
+        # wire.sh does not link a skill dir or agent file whose name is unsafe (anything outside
+        # [A-Za-z0-9._-], e.g. a space, TAB or newline) and says so on stderr. Lock must stay
+        # loud about it: dropping the skill silently would hide a refusal this command has
+        # always made (exit 2, naming it).
+        unsafe = [line.split("): ", 1)[1] for line in proc.stderr.splitlines()
+                  if line.startswith("  skip (invalid name): ")]
+        if unsafe:
+            raise GridError("grid: refusing to resolve the wired set: wire.sh skipped skill or "
+                            "agent names that are unsafe to link: %s" % ", ".join(unsafe))
         # GRID_DRY_HOME puts the skills dir at <home>/.claude/skills (not <tmp>/skills).
         skills = os.path.join(home, ".claude", "skills")
         prefix = grid_dir + "/repos/"

@@ -38,6 +38,8 @@ Agent Skills spec (agentskills.io/specification): `name` at most 64 chars, lower
 | `rules_file` | the global instruction file (rules delivery) |
 | `rules_harness` | value for `rules.py emit --harness` |
 
+`wire.sh` checks every row before it writes anything (`harness_registry_rows_check`): exactly six columns, and `skills_dir`, `agents_dir` and `rules_file` must each be `-`, an absolute path or `~/...` with no `..` component, else it exits 2 naming the row. `HARNESS_REGISTRY=<file>` points wire.sh at another registry file only together with `GRID_ALLOW_REGISTRY=1` (a test-only switch, like `GRID_ALLOW_FILE=1`); on its own the variable is ignored.
+
 A leading `~/` expands to the harness base, `${GRID_DRY_HOME:-${GRID_HARNESS_HOME:-$HOME}}`. `claude` is listed for reference only: wire.sh keeps using `SKILLS_DIR` / `AGENTS_DIR` for Claude exactly as before. Antigravity is skills-only; Pi and OpenClaw are skills-only too (Pi documents no sub-agents; OpenClaw agents come from `compose.py --target openclaw-native`).
 
 `compose_target` is filled in from the start. wire.sh links `agent-factory/projects/<p>/_<compose_target>/agents/*` only when that dir exists and the project is wired, so a target that has not been composed simply links nothing.
@@ -55,10 +57,10 @@ A leading `~/` expands to the harness base, `${GRID_DRY_HOME:-${GRID_HARNESS_HOM
 - One-off, for a single run: `GRID_HARNESS=codex,pi bash scripts/wire.sh`.
 - `claude` is always active. `harness:claude` is accepted and does nothing.
 - Default (no entry anywhere): Claude only, and no other harness dir is created.
-- An unknown name exits 2 before anything is touched and lists the valid names.
+- An unknown name exits 2 before anything is touched and lists the valid names. Names in the manifest are checked even while `GRID_HARNESS` overrides them, and a `GRID_HARNESS` that names no harness at all (`GRID_HARNESS=,`) exits 2 too.
 - An active harness needs `python3` (the portability filter reads frontmatter with it). Without it wire.sh exits 2 before any write.
 
-**`GRID_HARNESS` replaces the manifest set.** A one-off `GRID_HARNESS=pi` run deactivates every other harness, and the teardown below then removes their grid links. Use the overlay for anything lasting.
+**`GRID_HARNESS` replaces the manifest set.** A one-off `GRID_HARNESS=pi` run deactivates every other harness. Teardown removes the grid links in every harness dir, then the active harnesses are linked again: a link in a dir shared with a harness that stays active (the `~/.agents/skills` group) is rebuilt in the same run, so only the per-harness dirs (`~/.codex/agents`, `~/.gemini/agents`, ...) of the deactivated harnesses lose their links. Use the overlay for anything lasting.
 
 ## What gets linked
 
@@ -77,14 +79,23 @@ skill@~/.agents/skills<TAB>claude-skill<TAB><target><TAB>skipped<TAB>claude-spec
 | Reason | Meaning |
 |---|---|
 | `no-frontmatter` | `SKILL.md` has no leading `---` block |
-| `name-mismatch` | frontmatter `name` differs from the dir name |
-| `name-invalid` | dir name fails `^[a-z0-9]+(-[a-z0-9]+)*$` or is over 64 chars |
+| `python-failed` | python3 ran but died while reading the skill (wire.sh normally stops earlier: an active harness needs a python3 that runs, else exit 2) |
+| `name-mismatch` | frontmatter `name` differs from the dir name (an unquoted trailing ` # comment` is not part of the name) |
+| `name-invalid` | dir name fails `^[a-z0-9]+(-[a-z0-9]+)*$`, is over 64 chars, or holds a control character such as a trailing newline |
+| `description-missing` | the description is empty or absent |
 | `description-long` | description over 1024 chars after YAML folding |
-| `claude-specific` | a file in the skill mentions `~/.claude`, `$HOME/.claude`, `.claude/` or `CLAUDE_` |
+| `claude-only-guard` | the frontmatter carries a Claude-only guard key: `disable-model-invocation`, `allowed-tools`, `hooks` or `context` (top-level keys only) |
+| `claude-specific` | a file in the skill mentions `.claude` (not `.claude-foo`), `.the-grid`, `.grid/`, `CLAUDE_` or `CLAUDE.md` (`.git` and `node_modules` are not read, binary files are skipped) |
+| `symlink-escape` | a symlink inside the skill dir resolves outside it |
 | `runtime-root` | the link targets a submodule root (the `gstack` runtime-root link), which is not a skill |
 | `exists, not managed` | something is already at the destination (see below) |
+| `name clash with <project>` | two composed projects ship an agent of the same name; the first project (alphabetical) is linked, the second is skipped |
 
-Rows are `skill@<~dir>` / `agent@<~dir>` (the dir in `~/` form, so the file is home-independent). Portability skips print no stdout line; the manifest is where to read them: `grep skipped .wired.manifest`.
+Rows are `skill@<~dir>` / `agent@<~dir>` (the dir in `~/` form, so the file is home-independent). Portability skips print no stdout line, except `claude-only-guard`, which prints `  skip (<~dir>: claude-only-guard): <name>` because the operator set that guard on purpose; the manifest is where to read the rest: `grep skipped .wired.manifest`.
+
+**`claude-only-guard` withholds the skill from every non-Claude harness** (it is still linked for Claude). The default is the safe one: Codex and Gemini handling of these keys is unverified (see the vendor table), and a skill Claude never auto-triggers (`disable-model-invocation`) must not be auto-invoked elsewhere under a different approval policy. If you decide to share such skills anyway, that is a one-line change in `scripts/lib/skill-portable.sh` (drop the `claude-only-guard` return) plus keeping the printed notice.
+
+The portability filter is a compatibility check, not a security control: its `claude-specific` pattern is easy to slip past on purpose. What protects the shared dir is the audit (`wire.sh` step 0: home paths, symlink escapes), not this filter.
 
 ## Pi and OpenClaw (skills-only rows)
 
@@ -103,9 +114,17 @@ Both rows have `-` for `agents_dir`, `compose_target` and (OpenClaw) `rules_file
 
 - Only symlinks whose target is inside the grid dir (`$GRID_DIR/...`) are ever removed. Real files and dirs, foreign symlinks, and links into a sibling such as `<grid>-private` are left alone.
 - Teardown covers every non-Claude registry dir, active or not, so deactivating a harness removes its links.
-- **Existing entries in a non-Claude dir are never replaced.** `~/.agents/skills` is also written by other tools, so a real dir, a foreign symlink or a dangling symlink at the destination wins and the grid skips it (`exists, not managed`; stdout `  skip (~/.agents/skills: exists, not managed): <name>`). This differs from the Claude dirs, where a grid link replaces a foreign symlink. The line deliberately does not start `skip (real dir, not managed)`: `scripts/reconcile.sh` parses that prefix and would delete the same-named dir in the Claude skills dir.
+- **Existing entries in a non-Claude dir are never replaced.** `~/.agents/skills` is also written by other tools, so a real dir, a foreign symlink or a dangling symlink at the destination wins and the grid skips it (`exists, not managed`; stdout `  skip (~/.agents/skills: exists, not managed): <name>`). The Claude dirs follow the same rule for a foreign or dangling symlink and for a real file (`skip (not managed)`); only a link into the grid is replaced there. The line deliberately does not start `skip (real dir, not managed)`: `scripts/reconcile.sh` parses that prefix and would delete the same-named dir in the Claude skills dir.
 - A skills dir that is itself a symlink is fine: it is followed, both when tearing down and when listing for `--check`.
 - Dirs are created only when a link is about to be made.
+
+## Limits
+
+Layouts the fan-out does not handle. Each is documented rather than implemented (a deliberate choice, not an oversight):
+
+- **Aliased agents dirs.** Two harnesses whose agents dirs are aliased to one directory (a symlink, or two registry rows pointing at the same place) are unsupported: the grid sees two dirs, links into both, and `--check` reports false drift for the second. Give each harness its own dir.
+- **Removed registry rows leave stale links.** Teardown walks the dirs of the rows that exist now. Remove or rename a row only after `-harness:<name>` has been wired once; otherwise the links in that harness's dirs stay behind, and `--check` cannot see them because it no longer knows the dir.
+- **The shared dir follows the Claude dir.** The skills fanned out to `~/.agents/skills` are whatever grid links the Claude skills dir holds after wiring, so when a Claude slot is held by something that is not a grid link (a real dir or a foreign link, `skip (not managed)`), the shared dir lags the Claude dir for that name: it is not linked there either.
 
 ## Drift check
 
@@ -220,7 +239,7 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
 
 - `GRID_HARNESS_HOME` sets the base for every non-Claude dir (default `$HOME`); tests point it at a temp dir.
 - `GRID_DRY_HOME` wins over it and redirects every harness path, so a dry run can never write under the real home.
-- `XDG_CONFIG_HOME` is honoured for OpenCode's `~/.config/...` paths **only** when both `GRID_DRY_HOME` and `GRID_HARNESS_HOME` are unset.
+- `XDG_CONFIG_HOME` is honoured for OpenCode's `~/.config/...` paths **only** when both `GRID_DRY_HOME` and `GRID_HARNESS_HOME` are unset, and only when it is an absolute path (a relative one is ignored, as the XDG spec says).
 - `CODEX_HOME` and `PI_CODING_AGENT_DIR` are **not** honoured. If you relocate those, edit the row in `scripts/lib/harnesses.txt`.
 
 ## Single-file personas
