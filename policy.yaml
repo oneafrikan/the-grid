@@ -184,9 +184,10 @@ rules:
     message: writes under ~/.claude/ (the agent's own configuration)
     regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install|rsync)\b[^\n|;&]{0,200}?|\bsed\s+-i\S*[^\n|;&]{0,200}?)\s*[\"\x27]?(?:~|\$HOME|\$\{HOME\})/\.claude/'
     downgrade: [comment]
-  # hook-declared: in a SKILL.md / agent .md frontmatter the scanner itself denies by default (every line of a
-  # hooks block except tight structural ones, see _HOOK_STRUCTURAL in audit.py), so this regex only covers the
-  # JSON manifests of class hook (hooks.json): any "command" key.
+  # hook-declared: in a SKILL.md / agent .md frontmatter the scanner reads the YAML itself (scripts/lib/fmyaml.py) and
+  # denies by default (every line of a hooks block except pure structure, see _HookStructure in audit.py; an unreadable
+  # frontmatter and a stray `hooks:` token are findings too), so this regex only covers the JSON manifests of class
+  # hook (hooks.json): any "command" key.
   - id: hook-declared
     severity: high
     owned_severity: low

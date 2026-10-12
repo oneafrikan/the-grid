@@ -16,8 +16,9 @@ Exit codes: 0 no un-allowed high finding | 1 at least one high | 2 usage,
 policy, allowlist or CURATION.md error (including a missing target).
 
 Only the Python standard library is used (plus scripts/lib/miniyaml.py, the
-restricted-YAML reader, which lives next to this file's lib/ directory) so the
-scanner runs on a bare machine before any virtualenv exists.
+restricted-YAML reader for the policy files, and scripts/lib/fmyaml.py, the YAML
+structure scanner for SKILL.md / agent frontmatter; both live in lib/ next to this
+file) so the scanner runs on a bare machine before any virtualenv exists.
 
 Do NOT run this under `python3 -I`: isolated mode drops the script directory
 and the sys.path insert below would not be enough for `import audit` in tests.
@@ -37,6 +38,7 @@ import urllib.parse
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, "lib"))
 import miniyaml  # noqa: E402  (needs the sys.path insert above)
+import fmyaml  # noqa: E402
 
 # --------------------------------------------------------------------------
 # Constants
@@ -240,65 +242,164 @@ def _search(rx, text, tick=None):
     return None
 
 
-# Lines of a frontmatter hooks block that run nothing and are not findings: the block's own
-# structure. EVERYTHING ELSE in a hooks block (any `command`, `run`, `exec`, `script`, `args`,
-# `prompt`, `url`, flow mappings, anchors and aliases, unknown keys or hook types, a value on the
-# next line, any quoting of a key) is a finding that an allowlist entry must pin by whole line.
-# This is a deny-by-default list on purpose: a regex that names what is dangerous is always one
-# spelling behind. The patterns are whole-line and tight (no shell metacharacters in a message).
-_HOOK_EVENTS = ("PreToolUse|PostToolUse|Stop|SubagentStop|UserPromptSubmit|SessionStart|"
-                "SessionEnd|Notification|PreCompact")
-_HOOK_STRUCTURAL = [re.compile(p) for p in (
-    r"\s*-?\s*hooks:\s*",
-    r"\s*(?:%s):\s*" % _HOOK_EVENTS,
-    r"""\s*-?\s*matcher:\s*["']?[A-Za-z0-9_|*.:-]*["']?\s*""",
-    r"\s*-?\s*type:\s*command\s*",
-    r"""\s*-?\s*statusMessage:\s*["'][^"'$`\\|;&<>]*["']\s*""",
-    r"\s*-?\s*timeout:\s*[0-9]+\s*",
-)]
+# A SKILL.md / agent .md frontmatter is READ AS YAML (scripts/lib/fmyaml.py), not scanned for
+# lines: every `hooks` key at any depth (block or flow, quoted, under any parent, in an anchored
+# mapping) is a hooks block, and the block is judged DENY BY DEFAULT. The only lines of a hooks
+# block that are not findings are its own structure, decided from the parse tree below: the
+# `hooks:` key, the event keys, and `matcher` / `type: command` / `statusMessage` / `timeout`
+# pairs whose whole line is just that pair. EVERYTHING ELSE (any `command`, `run`, `exec`,
+# `script`, `args`, `prompt`, `url`, flow mappings, anchors and aliases, unknown keys or hook
+# types, a value on the next line, a trailing comment) is a `hook-declared` finding that an
+# allowlist entry must pin by whole line. Deny-by-default on purpose: a pattern that names what
+# is dangerous is always one spelling behind.
+_HOOK_EVENTS = frozenset(("PreToolUse", "PostToolUse", "Stop", "SubagentStop", "UserPromptSubmit",
+                          "SessionStart", "SessionEnd", "Notification", "PreCompact"))
+# Whole-value patterns (fullmatch on a value the parser already isolated; single character
+# classes, so linear). Nothing here can hold a shell metacharacter or a message with a command.
+_SAFE_MATCHER = re.compile(r"[A-Za-z0-9_|*.:-]*")
+_SAFE_STATUS = re.compile(r"[^\"'$`\\|;&<>]*")
+_INTEGER = re.compile(r"[0-9]+")
+MAX_STRUCTURAL_VALUE = 200          # a longer value is a finding whatever it says
 
 
-def _is_hook_structural(text):
-    """True for a hooks-block line that only carries the block's structure."""
-    text = text.rstrip()
-    return any(rx.fullmatch(text) for rx in _HOOK_STRUCTURAL)
+def _plain_key(node):
+    """The text of a plain, property-free scalar key, else None."""
+    if node.kind == "scalar" and node.style == "plain" and not node.props:
+        return node.value
+    return None
 
 
-def _frontmatter_hook_lines(lines):
-    """Indexes of the lines of every `hooks` block in a SKILL.md / agent .md frontmatter.
+class _HookStructure:
+    """Which lines of one `hooks` block are pure structure, decided from the parse tree.
 
-    A `hooks` key counts at ANY indentation and under any parent, quoted or not; the block is the
-    key line plus the lines after it that are blank, comments, deeper indented, or list items at
-    the key's own indent. The frontmatter fences tolerate a BOM, trailing whitespace and CRLF,
-    and a mapping that is itself indented (so none of those hide the block)."""
-    if not lines or lines[0].lstrip("\ufeff").strip() != "---":
-        return []
+    `structural` holds file line indexes that are not findings; `content` holds the lines that
+    are the inside of a multi-line scalar (a line there starting with `#` is text, not a YAML
+    comment, so it is never skipped)."""
+
+    def __init__(self, lines, base):
+        self.lines = lines
+        self.base = base
+        self.structural = set()
+        self.content = set()
+
+    def _line(self, node_line):
+        return self.lines[node_line + self.base].rstrip("\r")
+
+    def _prefix_ok(self, text, key):
+        # Only indentation and the `- ` markers of the sequence entries may precede the key.
+        return set(text[:key.col]) <= {" ", "-"}
+
+    def _bare_key_line(self, key, value, colon_line, colon_col):
+        """`key:` with nothing after the colon on its line, and the value (if any) starting on
+        a later line as a plain block collection."""
+        if _plain_key(key) is None or key.line != colon_line:
+            return False
+        if value.kind != "null" and (value.flow or value.props or value.kind not in ("map", "seq")
+                                     or value.line <= colon_line):
+            return False
+        text = self._line(colon_line)
+        return self._prefix_ok(text, key) and text[colon_col + 1:].strip() == ""
+
+    def _scalar_pair(self, key, value, colon_line, safe):
+        """`key: value` filling its whole line, with `safe(value)` true."""
+        if _plain_key(key) is None or value.kind != "scalar" or value.props:
+            return False
+        if not (key.line == value.line == value.end_line == colon_line):
+            return False
+        text = self._line(colon_line)
+        if not self._prefix_ok(text, key) or len(text.rstrip()) != value.end_col:
+            return False
+        return len(value.value) <= MAX_STRUCTURAL_VALUE and safe(value)
+
+    def mark_hooks_key(self, key, value, colon_line, colon_col):
+        """The `hooks:` key line and, below it, the events -> entries -> hook entries."""
+        if self._bare_key_line(key, value, colon_line, colon_col):
+            self.structural.add(colon_line + self.base)
+            if value.kind == "map":
+                self._events(value)
+
+    def _events(self, node):
+        for key, value, cl, cc in node.pairs:
+            if _plain_key(key) in _HOOK_EVENTS and self._bare_key_line(key, value, cl, cc):
+                self.structural.add(cl + self.base)
+                if value.kind == "seq":
+                    for item in value.items:
+                        if item.kind == "map" and not item.flow and not item.props:
+                            self._entry(item)
+
+    def _entry(self, node):
+        for key, value, cl, cc in node.pairs:
+            name = _plain_key(key)
+            if name == "hooks":
+                if self._bare_key_line(key, value, cl, cc):
+                    self.structural.add(cl + self.base)
+                    if value.kind == "seq":
+                        for item in value.items:
+                            if item.kind == "map" and not item.flow and not item.props:
+                                self._entry(item)
+                continue
+            if name == "matcher":
+                ok = self._scalar_pair(key, value, cl, lambda v: v.style in ("plain", "single", "double")
+                                       and _SAFE_MATCHER.fullmatch(v.value))
+            elif name == "type":
+                ok = self._scalar_pair(key, value, cl, lambda v: v.style == "plain" and v.value == "command")
+            elif name == "statusMessage":
+                ok = self._scalar_pair(key, value, cl, lambda v: v.style in ("single", "double")
+                                       and _SAFE_STATUS.fullmatch(v.value))
+            elif name == "timeout":
+                ok = self._scalar_pair(key, value, cl, lambda v: v.style == "plain"
+                                       and _INTEGER.fullmatch(v.value))
+            else:
+                continue                                # any other key: a finding
+            if ok:
+                self.structural.add(cl + self.base)
+
+    def collect_content(self, node, depth=0):
+        """Lines that continue a multi-line scalar anywhere under `node`."""
+        if node is None or depth > 100:
+            return
+        if node.kind == "scalar" and node.end_line > node.line:
+            self.content.update(range(node.line + 1 + self.base, node.end_line + 1 + self.base))
+        for item in node.items:
+            self.collect_content(item, depth + 1)
+        for key, value, _cl, _cc in node.pairs:
+            self.collect_content(key, depth + 1)
+            self.collect_content(value, depth + 1)
+
+
+def _hook_regions(fm, lines):
+    """[(first line index, last line index, _HookStructure)] for each outermost `hooks` key."""
     out = []
-    i, n = 1, len(lines)
-    while i < n:
-        text = lines[i].rstrip("\r")
-        if text.strip() in ("---", "..."):
-            break
-        if re.match(r"""\s*["']?hooks["']?\s*:""", text):
-            indent = len(text) - len(text.lstrip())
-            out.append(i)
-            j = i + 1
-            while j < n:
-                t = lines[j].rstrip("\r")
-                if t.strip() in ("---", "..."):
-                    break
-                stripped = t.strip()
-                ind = len(t) - len(t.lstrip())
-                if stripped == "" or stripped.startswith("#") or ind > indent \
-                        or (ind == indent and stripped.startswith("- ")):
-                    out.append(j)
-                    j += 1
-                else:
-                    break
-            i = j
-            continue
-        i += 1
+    for key, value, cl, cc in fm.hooks:
+        st = _HookStructure(lines, fm.base)
+        st.mark_hooks_key(key, value, cl, cc)
+        st.collect_content(value)
+        out.append((key.line + fm.base, max(value.end_line, key.line) + fm.base, st))
     return out
+
+
+def _tool_list_item(line):
+    """The tool name of a `- Read` / `- "Bash"` / `- Read  # note` list line, else None.
+    String operations only: the regex this replaces backtracked quadratically on a line of
+    blanks (a hostile frontmatter line must cost milliseconds, never minutes)."""
+    s = line.lstrip()
+    if len(s) < 2 or s[0] != "-" or not s[1].isspace():
+        return None
+    rest = s[1:].lstrip()
+    if rest[:1] in ("'", '"'):
+        rest = rest[1:]
+    cut = len(rest)
+    for ch in "\"'#":
+        i = rest.find(ch)
+        if i != -1 and i < cut:
+            cut = i
+    tail = rest[cut:]
+    if tail[:1] in ("'", '"'):
+        tail = tail[1:]
+    tail = tail.lstrip()
+    if tail and not tail.startswith("#"):
+        return None
+    return rest[:cut].strip()
 
 
 def _frontmatter_tool_lists(lines):
@@ -318,10 +419,10 @@ def _frontmatter_tool_lists(lines):
             items = []
             j = i + 1
             while j < len(lines):
-                m = re.match(r"""^\s*-\s+["']?([^"'#]*?)["']?\s*(#.*)?$""", lines[j].rstrip("\r"))
-                if not m:
+                item = _tool_list_item(lines[j].rstrip("\r"))
+                if item is None:
                     break
-                items.append(m.group(1).strip())
+                items.append(item)
                 j += 1
             if items:
                 out[i] = "allowed-tools: " + ", ".join(items)
@@ -887,33 +988,55 @@ class Scan:
             self.findings[before:] = [f for f in self.findings[before:]
                                       if (f["rule"], f["severity"], f["excerpt"]) not in known]
 
-    def _hook_block_findings(self, lines, display, tier, file_sha):
-        """Default-deny over frontmatter hooks blocks: every non-blank, non-comment line that is
-        not purely structural (see _HOOK_STRUCTURAL) is a `hook-declared` finding, reported at
-        its own line so an allowlist entry pins that exact line."""
+    def _hook_block_findings(self, lines, display, tier, file_sha, fm):
+        """Default-deny over the frontmatter's hooks blocks (see _HookStructure): every non-blank
+        line of a block that is not pure structure is a `hook-declared` finding, reported at its
+        own line so an allowlist entry pins that exact line. Two fail-closed extras: a frontmatter
+        that could not be read is itself a finding, and so is the token `hooks:` anywhere in a
+        frontmatter whose parse found no hooks key (the parser and the consumer may disagree)."""
         rule = next((r for r in self.policy.rules if r.id == "hook-declared"), None)
-        if rule is None:
+        if rule is None or fm is None:
             return
         have = {(f["rule"], f["line"]) for f in self.findings if f["path"] == display}
         sev = rule.owned_severity if (tier == "owned" and rule.owned_severity) else rule.severity
-        for idx in _frontmatter_hook_lines(lines):
-            raw = lines[idx].rstrip("\r")
-            body = raw.strip()
-            if not body or body.startswith("#") or _is_hook_structural(raw):
-                continue
+
+        def flag(idx, raw):
             if ("hook-declared", idx + 1) in have:
-                continue
+                return
+            have.add(("hook-declared", idx + 1))
             self._add("hook-declared", sev, display, idx + 1, "hook", tier, rule.message,
                       excerpt=raw, raw_line=raw)
 
+        if fm.error is not None:
+            idx, msg = fm.error
+            flag(min(idx, len(lines) - 1), "frontmatter not parsed: " + msg)
+        for first, last, st in _hook_regions(fm, lines):
+            for idx in range(first, min(last, len(lines) - 1) + 1):
+                self._tick(display)
+                raw = lines[idx].rstrip("\r")
+                body = raw.strip()
+                if not body or idx in st.structural:
+                    continue
+                if body.startswith("#") and idx not in st.content:
+                    continue                            # a real YAML comment
+                flag(idx, raw)
+        if not fm.hooks:
+            for idx in fm.token_lines:
+                flag(idx, lines[idx].rstrip("\r"))
+
     def _scan_text(self, text, fclass, name, rel_target, rel_root, display, tier, file_sha):
         """Run the line rules over one text view of a file."""
+        loaded_md = name == "SKILL.md" or _is_agent_md(rel_target, rel_root, name)
+        if loaded_md:
+            # YAML (and so Claude's frontmatter reader) breaks lines on CRLF and on a lone CR
+            # as well as LF; split the way it does so a CR cannot hide a key from the scan.
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
         lines = text.split("\n")
-        classes = self._line_classes(lines, fclass, name, rel_target, rel_root)
+        fm = fmyaml.analyse(lines) if loaded_md else None
+        classes = self._line_classes(lines, fclass, name, rel_target, rel_root, fm)
         ext = os.path.splitext(name)[1].lower()
         logical = _logical_lines(lines, COMMENT_PREFIXES_BY_EXT.get(ext, DEFAULT_COMMENT_PREFIXES))
-        tool_lists = (_frontmatter_tool_lists(lines)
-                      if name == "SKILL.md" or _is_agent_md(rel_target, rel_root, name) else {})
+        tool_lists = _frontmatter_tool_lists(lines) if loaded_md else {}
         for k, (idx, line, last) in enumerate(logical):
             if line == "":
                 continue
@@ -927,10 +1050,10 @@ class Scan:
             for p in range(idx + 1, last + 1):         # lines the join swallowed
                 self._scan_line(lines[p].rstrip("\r"), p + 1, classes[p], display, tier,
                                 file_sha, ext, only_physical=True)
-        if name == "SKILL.md" or _is_agent_md(rel_target, rel_root, name):
-            self._hook_block_findings(lines, display, tier, file_sha)
+        if loaded_md:
+            self._hook_block_findings(lines, display, tier, file_sha, fm)
 
-    def _line_classes(self, lines, fclass, name, rel_target, rel_root):
+    def _line_classes(self, lines, fclass, name, rel_target, rel_root, fm=None):
         """Class of each line: the file's class, except (1) frontmatter `hooks:`
         blocks of SKILL.md/agent .md are `hook`, and (2) lines inside ANY fenced
         block of .md/.mdx doc files are `script`, whatever its info string (a
@@ -940,9 +1063,10 @@ class Scan:
         ext = os.path.splitext(name)[1].lower()
 
         # (1) frontmatter hooks blocks
-        if name == "SKILL.md" or _is_agent_md(rel_target, rel_root, name):
-            for i in _frontmatter_hook_lines(lines):
-                classes[i] = "hook"
+        if fm is not None:
+            for first, last, _st in _hook_regions(fm, lines):
+                for i in range(first, min(last, len(lines) - 1) + 1):
+                    classes[i] = "hook"
 
         # (2) fenced code blocks in markdown docs
         if fclass == "doc" and ext in (".md", ".mdx"):
