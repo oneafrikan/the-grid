@@ -98,7 +98,9 @@ add_finding() {
 # Budgets (see hooks/README.md "Tuning"). A scan that cannot finish inside the 5 s hook
 # timeout would let the command through unscanned, so past a budget the hook blocks.
 num_or() { if [[ "$1" =~ ^[0-9]+$ ]]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
-MAX_SCAN_LINES="$(num_or "${GRID_SCAN_MAX_LINES:-}" 3000)"
+MAX_SCAN_LINES="$(num_or "${GRID_SCAN_MAX_LINES:-}" 1000)"
+MAX_GIT_CALLS="$(num_or "${GRID_GUARD_MAX_GIT_CALLS:-}" 40)"
+work=0
 MAX_SCAN_FILES="$(num_or "${GRID_SCAN_MAX_FILES:-}" 500)"
 MAX_SCAN_BYTES="$(num_or "${GRID_SCAN_MAX_BYTES:-}" 5242880)"
 too_large=0          # more candidate lines than MAX_SCAN_LINES
@@ -288,6 +290,15 @@ handled_commit=0     # a commit-making segment was seen (the command text is sca
 
 for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
   sub="${GIT_SUB[$i]}"; start="${GIT_START[$i]}"; len="${GIT_LEN[$i]}"
+  # A plain `git status` needs no repository work. Every other git call forks git at
+  # least twice, so the number is capped: 300 `git commit` segments would take 18 s and
+  # a timed-out hook does not block.
+  is_plain_sub "$sub" && continue
+  work=$((work + 1))
+  if [ "$work" -gt "$MAX_GIT_CALLS" ]; then
+    echo "BLOCKED by the-grid hook pre-bash-secret-scan: command too long to inspect (more than $MAX_GIT_CALLS git calls that need a repository check). Split it into smaller commands, or write the content to a file with the Write tool." >&2
+    exit 2
+  fi
   segment_targets "$i"
   targets=()
   for enc in "${TARGETS[@]}"; do

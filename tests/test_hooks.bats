@@ -415,24 +415,50 @@ STUB
 }
 
 # --- WP-019: a slow guard is a silent guard (Claude Code treats a timed-out hook as
-# non-blocking), so a large input must be decided well inside the 5 s hook timeout.
+# non-blocking), so a large input must be decided well inside the 5 s hook timeout. The
+# shapes below are the worst cases for different parts of the tokenizer: sparse words,
+# one long word, and token-dense text (every token is a loop turn and an array push).
 
-@test "no-bypass: 50 KB padded --no-verify command exits 2 within 5 s" {
-  pad="$(rep 'abcdefghi ' 5000)"
+@test "no-bypass: a large sparse-word --no-verify command is blocked for the flag within 5 s" {
+  pad="$(rep 'abcdefghi ' 1400)"          # about 14 KB, 1,400 tokens: under both caps
   run_hook_within 5 pre-bash-no-bypass "git commit --no-verify -m x; echo $pad"
   [ "$status" -eq 2 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
-  [[ "$output" == *"BLOCKED"* ]] || false
+  [[ "$output" == *"skips git hooks"* ]] || { echo "$output" >&2; false; }
 }
 
-@test "no-bypass: 50 KB single-word padding exits 2 within 5 s" {
-  pad="$(rep 'abcdefghij' 5000)"
+@test "no-bypass: a long single word is blocked for the flag within 5 s" {
+  pad="$(rep 'abcdefghij' 1800)"          # one 18 KB word
   run_hook_within 5 pre-bash-no-bypass "git commit --no-verify -m x; echo $pad"
   [ "$status" -eq 2 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  [[ "$output" == *"skips git hooks"* ]] || { echo "$output" >&2; false; }
 }
 
-@test "no-bypass: a large harmless git-mentioning command passes within 5 s" {
-  pad="$(rep 'abcdefghi ' 5000)"
+@test "no-bypass: token-dense commands are decided within 5 s, under or over the token cap" {
+  # 2,000 one-letter segments: under the token cap, so really tokenized
+  pad="$(rep 'a;' 1000)"
+  run_hook_within 5 pre-bash-no-bypass "git commit --no-verify -m x; $pad"
+  [ "$status" -eq 2 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  [[ "$output" == *"skips git hooks"* ]] || { echo "$output" >&2; false; }
+  pad="$(rep 'a b ' 600)"
   run_hook_within 5 pre-bash-no-bypass "git status; echo $pad"
+  [ "$status" -eq 0 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  # 20,000 segments, 40 KB: over the cap, refused at once instead of being tokenized
+  pad="$(rep 'a;' 10000)"
+  run_hook_within 5 pre-bash-no-bypass "git status; $pad"
+  [ "$status" -eq 2 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  [[ "$output" == *"too long to inspect"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "no-bypass: the size cap reads the text the shell would, so quoting git does not dodge it" {
+  pad="$(rep 'abcdefghi ' 2500)"          # about 25 KB, 2,500 tokens: over the 20,000-byte default
+  run_hook_within 5 pre-bash-no-bypass "g\"\"it commit -n; echo $pad"
+  [ "$status" -eq 2 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  [[ "$output" == *"too long to inspect"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "no-bypass: a very long word is not walked character by character in the segment check" {
+  pad="$(rep 'abcdefghij' 1900)"          # one 19 KB word after git
+  run_hook_within 5 pre-bash-no-bypass "git log $pad"
   [ "$status" -eq 0 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
 }
 
@@ -1401,6 +1427,24 @@ tok_pgp()       { printf '%s' "-----BEGIN PGP PRIV""ATE KEY BLOCK-----"; }
     _secret_match "$s"; echo finished' _ "$REPO_ROOT"
   [ "$status" -eq 0 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
   [[ "$output" == *finished* ]] || false
+}
+
+@test "secret: many git calls in one command are bounded: plain ones are cheap, repository ones are capped" {
+  mkrepo
+  # 300 plain calls need no repository work
+  run_hook_within 5 pre-bash-secret-scan "$(rep 'git status; ' 300)" "$R"
+  [ "$status" -eq 0 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  # 300 commits would fork git several times each: refused at once
+  run_hook_within 5 pre-bash-secret-scan "$(rep 'git commit -m x; ' 300)" "$R"
+  [ "$status" -eq 2 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  [[ "$output" == *"too long to inspect"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "secret: the commit command text with one long word and a key word finishes within 5 s" {
+  mkrepo
+  pad="$(rep 'abcdefghij' 1900)"
+  run_hook_within 5 pre-bash-secret-scan "git commit -m ${pad} token=x" "$R"
+  [ "$status" -eq 0 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; echo "$output" >&2; false; }
 }
 
 @test "secret: a staged file with one very long line and a real key finishes within 5 s" {
