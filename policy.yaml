@@ -184,11 +184,15 @@ rules:
     message: writes under ~/.claude/ (the agent's own configuration)
     regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install|rsync)\b[^\n|;&]{0,200}?|\bsed\s+-i\S*[^\n|;&]{0,200}?)\s*[\"\x27]?(?:~|\$HOME|\$\{HOME\})/\.claude/'
     downgrade: [comment]
+  # A hook is declared by what it RUNS: any `command:` (anywhere on a line, so flow-style `{command: ...}` too),
+  # a non-command hook type, or a `hooks:` key with an inline value. The bare structural keys of a hook block
+  # (`hooks:`, `PreToolUse:`, `matcher:`, `type: command`, `statusMessage:`) run nothing and are not findings,
+  # so an allowlist entry pins the exact command line, not the constant `hooks:` line.
   - id: hook-declared
     severity: high
     owned_severity: low
     message: declares a hook that runs a command
-    regex: '^["'']?hooks["'']?\s*:|"command"\s*:|^\s+(?:-\s+)?["'']?command["'']?\s*:'
+    regex: '^["'']?hooks["'']?\s*:\s*[^\s#]|"command"\s*:|\bcommand\s*:\s*(?!(?:unknown|string|any|number|boolean|object|never|void|undefined)\b)(?=\S)|\btype\s*:\s*["'']?(?:prompt|agent|http)\b'
     physical: true                # anchored: also match lines a continuation join swallowed
     applies: [hook]
     downgrade: []
