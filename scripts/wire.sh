@@ -98,8 +98,9 @@ fi
 # Harness registry helpers and the portability filter for non-Claude skills dirs.
 # shellcheck source=lib/harness.sh
 . "$(dirname "$0")/lib/harness.sh"
-# Two harnesses sharing one rules_file is a registry error, refused before anything is wired.
-harness_registry_check || { echo "wire: the harness registry is invalid (see above)" >&2; exit 2; }
+# A registry error is refused before anything is wired (nothing is touched): a malformed row or
+# a path that could steer a link (rows_check), or two harnesses sharing one rules_file.
+harness_registry_rows_check && harness_registry_check || { echo "wire: the harness registry is invalid (see above); nothing was changed" >&2; exit 2; }
 # shellcheck source=lib/skill-portable.sh
 . "$(dirname "$0")/lib/skill-portable.sh"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
@@ -113,8 +114,6 @@ GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || uname -n 2>/dev/null | cut 
 # have its grid links torn down, and --check must see stale links in its dirs.
 # Claude's own dirs stay on SKILLS_DIR / AGENTS_DIR exactly as before.
 in_list() { local n="$1" x; shift; for x in "$@"; do [ "$x" = "$n" ] && return 0; done; return 1; }
-# A malformed or hostile registry row exits 2 here, before any write (see harness_registry_check).
-harness_registry_check || { echo "wire: nothing was changed" >&2; exit 2; }
 HARNESS_SKILL_DIRS=()
 HARNESS_AGENT_DIRS=()
 while IFS= read -r h_name; do

@@ -897,6 +897,7 @@ write_registry() { # $@ = row lines
 
 @test "the shipped registry passes the registry check" {
   . "$REPO_ROOT/scripts/lib/harness.sh"
+  harness_registry_rows_check
   harness_registry_check
 }
 

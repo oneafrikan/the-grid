@@ -38,7 +38,7 @@ Agent Skills spec (agentskills.io/specification): `name` at most 64 chars, lower
 | `rules_file` | the global instruction file (rules delivery) |
 | `rules_harness` | value for `rules.py emit --harness` |
 
-`wire.sh` checks every row before it writes anything (`harness_registry_check`): exactly six columns, and `skills_dir`, `agents_dir` and `rules_file` must each be `-`, an absolute path or `~/...` with no `..` component, else it exits 2 naming the row. `HARNESS_REGISTRY=<file>` points wire.sh at another registry file only together with `GRID_ALLOW_REGISTRY=1` (a test-only switch, like `GRID_ALLOW_FILE=1`); on its own the variable is ignored.
+`wire.sh` checks every row before it writes anything (`harness_registry_rows_check`): exactly six columns, and `skills_dir`, `agents_dir` and `rules_file` must each be `-`, an absolute path or `~/...` with no `..` component, else it exits 2 naming the row. `HARNESS_REGISTRY=<file>` points wire.sh at another registry file only together with `GRID_ALLOW_REGISTRY=1` (a test-only switch, like `GRID_ALLOW_FILE=1`); on its own the variable is ignored.
 
 A leading `~/` expands to the harness base, `${GRID_DRY_HOME:-${GRID_HARNESS_HOME:-$HOME}}`. `claude` is listed for reference only: wire.sh keeps using `SKILLS_DIR` / `AGENTS_DIR` for Claude exactly as before. Antigravity is skills-only; Pi and OpenClaw are skills-only too (Pi documents no sub-agents; OpenClaw agents come from `compose.py --target openclaw-native`).
 
