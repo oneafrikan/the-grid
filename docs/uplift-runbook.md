@@ -1,3 +1,5 @@
+> **RETIRED - do not deploy.** The uplift issue-loop this runbook describes is abandoned and quarantined; nothing here is live. Several claims below are disproved. See [_retired/issue-loop/RETIRED.md](../_retired/issue-loop/RETIRED.md).
+
 # Uplift runbook: running the-grid's overnight loop
 
 How to run the-grid's unattended issue loop on your own Linux box, and the human steps the uplift changes leave to you. Replace every `<placeholder>` with your own value.
@@ -41,7 +43,7 @@ export XDG_RUNTIME_DIR=/run/user/$(id -u)
 
 Run on the box over SSH. `[sudo]` marks a step that needs sudo. `[browser]` marks a step done on github.com.
 
-Why so much isolation (loops design, Q1 and Q13 revised): the worker runs with `--dangerously-skip-permissions`. It never holds a GitHub token. The runner pushes, opens PRs and relabels using a 1-hour installation token it mints per run for a GitHub App (@APP@) that has write access to the one repo and no Administration or Workflows permission, behind a ruleset that requires a PR on `next`. There is no long-lived token on the box, only the App private key. The runner refuses to start if any of that is missing.
+Why so much isolation (loops design, Q1 and Q13 revised): the worker runs with `--dangerously-skip-permissions`. It never holds a GitHub token (not enforced, see RETIRED.md: the worker shares the runner's `.git` and can reach the token). The runner pushes, opens PRs and relabels using a 1-hour installation token it mints per run for a GitHub App (@APP@) that has write access to the one repo and no Administration or Workflows permission, behind a ruleset that requires a PR on `next`. There is no long-lived token on the box, only the App private key. The runner refuses to start if any of that is missing.
 
 ## Part 1: needs no new code
 

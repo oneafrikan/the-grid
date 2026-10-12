@@ -1,3 +1,5 @@
+> **RETIRED - do not deploy.** The-grid's own unattended issue-loop is abandoned; this playbook is kept as history, not as a procedure to follow. See [_retired/issue-loop/RETIRED.md](../../_retired/issue-loop/RETIRED.md).
+
 # Secure unattended agent loop: OS user + GitHub App + trust gate
 
 A generic playbook for running an AI issue loop (an agent builds labelled GitHub
@@ -10,15 +12,16 @@ Linux machine), `<loop-user>` (the dedicated OS user), `<app-slug>` (the GitHub
 App's slug), `<operator-login>` (your GitHub login), `<slug>` (`<owner>/<repo>`
 with every character outside `[A-Za-z0-9_.-]` replaced by `-`).
 
-> **Status of the code this playbook drives.** The design is specified in the
+> **Status of the code this playbook drives.** The design was specified in the
 > OpenSpec change [`openspec/changes/loops/`](../../openspec/changes/loops/)
-> (`design.md`, `specs/issue-loop-runner/spec.md`, `tasks.md`). Verified against
-> the `next` branch on 2026-10-10: the runner (`run-issues.sh`), the App token
-> minter (`scripts/lib/gh-app-token.sh`), the schedule renderer and
-> `instantiate.sh --profile linux` are **specified, not yet merged**. Steps 1 to 7
-> below (App, key, OS user, Claude login, env file, ruleset) need no the-grid code
-> and can be done now; steps 8 to 11 need the runner and its token minter. Where this playbook states
-> runner behaviour it is quoting the spec, not observed output. The one-shot box
+> (`design.md`, `specs/issue-loop-runner/spec.md`, `tasks.md`). The runner
+> (`run-issues.sh`), the App token minter (`gh-app-token.sh`) and
+> `instantiate.sh --profile linux` were built, then the-grid's own instance was
+> **retired**: the code is quarantined under `_retired/issue-loop/` (the factory
+> pattern in `automation-factory/patterns/issue-loop/` is not). The isolation the
+> playbook describes was never fully enforced; the known defects are listed in
+> [`_retired/issue-loop/RETIRED.md`](../../_retired/issue-loop/RETIRED.md). Where this
+> playbook states runner behaviour it is quoting the spec, not observed output. The one-shot box
 > setup script is a proven private script today; a portable version is tracked in
 > the-grid issue #164. Operator steps in full:
 > [`docs/uplift-runbook.md`](../../docs/uplift-runbook.md).
@@ -47,7 +50,7 @@ What you end up with:
 | Property | How |
 |---|---|
 | The agent cannot read your files | dedicated OS user, your home not listable by it |
-| The agent never holds a GitHub token | the runner holds it; the model process runs without it |
+| The agent never holds a GitHub token (not enforced, see RETIRED.md) | the runner holds it; the model process runs without it |
 | A leaked token expires in an hour | GitHub App installation tokens, minted per run |
 | The agent cannot push to the base branch | token scope plus a server-side ruleset |
 | Random issue text cannot trigger a build | trust gate on author, labeller and editors |

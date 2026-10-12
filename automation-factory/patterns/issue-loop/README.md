@@ -1,5 +1,11 @@
 # Pattern: issue-loop
 
+> **Status note.** This pattern is unchanged and still ships. The-grid's own running instance of it
+> (`loop/`), the token minter and `scripts/instantiate.sh` are retired and quarantined; they are
+> the reference cut of this pattern and carry known defects (the worker shares the runner's
+> user, `.git` and token path). See [`_retired/issue-loop/RETIRED.md`](../../../_retired/issue-loop/RETIRED.md)
+> before running the headless runner.
+
 An autonomous agent that works a repo's GitHub issue backlog, with an automatic
 code review on everything it produces. It runs two ways from the same cut:
 
