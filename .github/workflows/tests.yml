@@ -9,21 +9,25 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same ref supersedes a running gate.
+# A newer push to the same PR supersedes a running gate. Pushes to main/next are NOT
+# cancelled: a cancelled run is neither pass nor fail, so a superseded merge commit
+# would never get a gate result (an automated merger must treat "cancelled" as not green).
 concurrency:
   group: tests-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   gate:
     # Pinned image: ubuntu-latest moves to a new LTS without notice and the
     # loop treats this job as its truth signal.
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
+          # PR code runs below; it must not find a persisted token in .git/config.
+          persist-credentials: false
 
       # The venv-gated tests (compose, lint-roles, deploy, evals) need PyYAML.
       # This is the only venv step in this file; other changes add nothing here.

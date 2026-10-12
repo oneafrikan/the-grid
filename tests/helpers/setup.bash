@@ -183,15 +183,29 @@ make_skill() {
 #   PATH="$(path_without 'python3*' python)" run bash wire.sh
 # Earlier PATH entries win on duplicate names, like a normal lookup. The dir is
 # created under BATS_TEST_TMPDIR when set (bats removes it), else TMPDIR or /tmp.
+# Speed (R15.qa.F5): the basename is cut with ${f##*/} (a `basename` fork per executable
+# on PATH made one call take ~22-24 s), and when BATS_FILE_TMPDIR is set the result is
+# cached there per file, keyed by cksum of "$PATH|$*", so a repeated call is instant. A
+# cached dir is shared by every test in the file, so callers must only READ it (use it as
+# PATH), never add to or remove from it.
 path_without() {
-  local dir d f base g skip
-  dir="$(mktemp -d "${BATS_TEST_TMPDIR:-${TMPDIR:-/tmp}}/pathwithout.XXXXXX")"
+  local dir d f base g skip key="" hit
+  if [ -n "${BATS_FILE_TMPDIR:-}" ] && command -v cksum >/dev/null; then
+    key="$(printf '%s|%s' "$PATH" "$*" | cksum)"; key="${key%% *}"
+    # a finished cache dir carries a .complete marker (a half-built one is never reused)
+    for hit in "$BATS_FILE_TMPDIR"/pathwithout."$key".*; do
+      if [ -e "$hit/.complete" ]; then printf '%s\n' "$hit"; return 0; fi
+    done
+    dir="$(mktemp -d "$BATS_FILE_TMPDIR/pathwithout.$key.XXXXXX")"
+  else
+    dir="$(mktemp -d "${BATS_TEST_TMPDIR:-${TMPDIR:-/tmp}}/pathwithout.XXXXXX")"
+  fi
   local IFS=:
   for d in $PATH; do
     [ -d "$d" ] || continue
     for f in "$d"/*; do
       [ -f "$f" ] && [ -x "$f" ] || continue
-      base="$(basename "$f")"
+      base="${f##*/}"
       skip=0
       for g in "$@"; do
         # $g is deliberately an unquoted glob pattern.
@@ -202,5 +216,6 @@ path_without() {
       [ -e "$dir/$base" ] || [ -L "$dir/$base" ] || ln -s "$f" "$dir/$base"
     done
   done
+  [ -z "$key" ] || : > "$dir/.complete"
   printf '%s\n' "$dir"
 }

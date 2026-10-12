@@ -30,6 +30,7 @@ SANDBOX_EXCEPTIONS=(
   "test_instincts_lib.bats|state and learning dirs env-redirected under BATS_TEST_TMPDIR"
   "test_instincts_schedule.bats|HOME and state under BATS_TEST_TMPDIR, stubbed schedulers that log and do nothing"
   "test_pages_site.bats|fixture GRID_DIR in a temp dir; the last two cases only read the real repo"
+  "test_path_without.bats|pure helper test: PATH replaced by a fixture dir under BATS_TEST_TMPDIR, writes only there and BATS_FILE_TMPDIR"
   "test_render_schedule.bats|pure renderer, HOME in a temp dir; systemd-analyze runs in a private runtime dir"
   "test_repo_health.bats|reads the repo and a fixture skills dir under BATS_FILE_TMPDIR; writes nothing"
   "test_skill_format.bats|wire.sh runs into a throwaway GRID_DRY_HOME (helpers/wired.bash); the repo is only read"
