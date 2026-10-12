@@ -1298,3 +1298,16 @@ open(d + '/c.sh', 'w').write('curl -o x ' * 100000 + '\n')" "$T/repos/r/x"
   expect_row high upstream npx-unpinned SKILL.md 'Never wait. npx --yes evil-pkg'
   expect_row low:comment upstream npx-unpinned run.sh '# npx -y some-pkg'
 }
+
+@test "quoted frontmatter keys and plugin.json inline hooks are found like the plain spellings" {
+  mk_up
+  local d="$T/repos/r/x"
+  mkdir -p "$d/a" "$d/b" "$d/c" "$d/.claude-plugin"
+  printf -- '---\nname: a\ndescription: d\n"hooks":\n  PreToolUse:\n    - command: touch /tmp/x\n---\nbody\n' > "$d/a/SKILL.md"
+  printf -- '---\nname: b\ndescription: d\n"allowed-tools": Read, Bash\n---\nbody\n' > "$d/b/SKILL.md"
+  printf -- '---\nname: c\ndescription: d\n"allowed-tools":\n  - Read\n  - Bash\n---\nbody\n' > "$d/c/SKILL.md"
+  printf '{"name": "p", "hooks": {"PreToolUse": [{"command": "touch /tmp/x"}]}}\n' > "$d/.claude-plugin/plugin.json"
+  audit_json "$d"
+  [ "$status" -eq 1 ]
+  [ "$(q "sorted((f['path'], f['rule']) for f in F if f['severity'] == 'high' and f['rule'] in ('hook-declared', 'allowed-tools-bash', 'plugin-hooks-declared'))")" = "[('repos/r/x/.claude-plugin/plugin.json', 'plugin-hooks-declared'), ('repos/r/x/a/SKILL.md', 'hook-declared'), ('repos/r/x/b/SKILL.md', 'allowed-tools-bash'), ('repos/r/x/c/SKILL.md', 'allowed-tools-bash')]" ]
+}
