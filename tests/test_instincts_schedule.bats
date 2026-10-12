@@ -359,6 +359,23 @@ sync_as() {
   [ "$(git -C "$REMOTE" rev-parse main)" = "$(git -C "$PA" rev-parse main)" ]
 }
 
+@test "sync: a tracked file that grew past 1 MiB is not committed or pushed, and the warning is true" {
+  mk_remote_and_clones
+  write_instinct "$PA" host-a
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  before="$(git -C "$PA" rev-parse HEAD)"
+  head -c 1100000 /dev/zero > "$PA/learning/instincts/aaaaaaaaaaaa/host-a.jsonl"
+  printf '{"id":"another-habit","host":"host-a"}\n' > "$PA/learning/instincts/aaaaaaaaaaaa/small.jsonl"
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"host-a.jsonl"*"limit"* ]]
+  # No commit at all (the whole commit is refused, so the big file is not re-taken
+  # from the working tree), locally or on the remote.
+  [ "$(git -C "$REMOTE" rev-parse main)" = "$before" ]
+  [ "$(git -C "$PA" rev-parse HEAD)" = "$before" ]
+}
+
 @test "sync: a non-ASCII file name under the path does not make the guard reject the job's own commit" {
   mk_remote_and_clones
   write_instinct "$PA" host-a
