@@ -31,13 +31,22 @@ out="${1:-}"
 # refuse anything that is, contains or aliases the repo. A string compare is not enough:
 # '$GRID_DIR//', a symlink to the repo and a parent of the repo all name the same tree.
 # Resolution walks up to the nearest existing ancestor so a not-yet-created out dir works.
+# Every path is canonicalised to ONE leading slash before any comparison: a shell may print a
+# physical path as '//x' (a '//'-prefixed argument, a symlink to '/'), which would never string-
+# match '/x'. '--' keeps a relative name that starts with '-' from being read as an option.
+canon_slashes() {
+  local p="$1"
+  while [ "${p#//}" != "$p" ]; do p="${p#/}"; done
+  printf '%s' "$p"
+}
 resolve_phys() {
   local p="$1" rest=""
   while [ ! -d "$p" ]; do
-    rest="/$(basename "$p")$rest"
-    p="$(dirname "$p")"
+    rest="/$(basename -- "$p")$rest"
+    p="$(dirname -- "$p")"
   done
-  p="$(cd -P "$p" && pwd -P)"
+  p="$(cd -P -- "$p" && pwd -P)"
+  p="$(canon_slashes "$p")"
   [ "$p" = "/" ] && p=""
   printf '%s\n' "$p$rest"
 }
@@ -46,7 +55,7 @@ while [ "${#out_trim}" -gt 1 ] && [ "${out_trim%/}" != "$out_trim" ]; do out_tri
 case "$out_trim" in
   ..|*/..|*/../*|../*) echo "stage-site: refusing out dir '$out' ('..' not allowed)" >&2; exit 2 ;;
 esac
-grid_phys="$(cd -P "$GRID_DIR" && pwd -P)"
+grid_phys="$(canon_slashes "$(cd -P -- "$GRID_DIR" && pwd -P)")"
 out_phys="$(resolve_phys "$out_trim")"
 [ -n "$out_phys" ] || { echo "stage-site: refusing out dir '$out' (filesystem root)" >&2; exit 2; }
 # out is, or is an ancestor of, the repo (this also covers GRID_DIR/.git).
@@ -112,15 +121,18 @@ done < "$list"
 
 # Pass 2: recreate the output dir empty and copy each path to the same
 # relative location (so a second run removes stale files from the first).
-rm -rf "$out"
-mkdir -p "$out"
+# From here on only the canonical physical path is used (the one the guards judged), never
+# the raw argument spelling.
+out="$out_phys"
+rm -rf -- "$out"
+mkdir -p -- "$out"
 for p in ${paths[@]+"${paths[@]}"}; do
-  mkdir -p "$out/$(dirname "$p")"
-  cp -R -P "$GRID_DIR/$p" "$out/$p"
+  mkdir -p -- "$out/$(dirname -- "$p")"
+  cp -R -P -- "$GRID_DIR/$p" "$out/$p"
 done
 # Belt and braces: nothing in the staged tree may be a link, whatever pass 1 missed.
 if [ -n "$(find "$out" -type l -print -quit)" ]; then
-  rm -rf "$out"
+  rm -rf -- "$out"
   echo "stage-site: staged tree contains a symlink; removed $out" >&2; exit 2
 fi
 echo "stage-site: staged ${#paths[@]} path(s) into $out"

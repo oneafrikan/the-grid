@@ -139,6 +139,77 @@ list_fixture() { (cd "$1" && find . | LC_ALL=C sort); }
   rm -rf "$ANC"
 }
 
+# --- WP-044: out-dir path normalisation (leading '//', symlink to '/', option-like names) -----------
+# SAFETY: every path below lives in a throwaway fixture under BATS_TEST_TMPDIR, and `rm` is a
+# stub on PATH that only records its arguments. If the guard ever failed open, nothing would be
+# deleted; the test then fails because the stub was called (or the exit code is not 2).
+stub_rm_setup() {
+  STUBBIN="$BATS_TEST_TMPDIR/stubbin"
+  RMLOG="$BATS_TEST_TMPDIR/rm.log"
+  mkdir -p "$STUBBIN"
+  printf '#!/bin/sh\necho "$*" >> "%s"\nexit 0\n' "$RMLOG" > "$STUBBIN/rm"
+  chmod +x "$STUBBIN/rm"
+  : > "$RMLOG"
+}
+
+# nested_fixture — ANC/repo (with docs/) entirely inside BATS_TEST_TMPDIR
+nested_fixture() {
+  ANC="$BATS_TEST_TMPDIR/anc"
+  REPO="$ANC/repo"
+  mkdir -p "$REPO/docs"
+  printf '<html></html>\n' > "$REPO/index.html"
+  printf 'doc\n' > "$REPO/docs/d.txt"
+  printf 'index.html\n' > "$REPO/site-files.txt"
+}
+
+@test "an out dir spelled with a leading '//' or through a symlink to '/' is refused, rm is never called" {
+  stub_rm_setup
+  nested_fixture
+  # a symlink to / is only ever followed to reach the throwaway fixture below it
+  ln -s / "$BATS_TEST_TMPDIR/alias_root"
+  local before; before="$(list_fixture "$ANC")"
+  local bad
+  for bad in "/$REPO" "/$ANC" "/$REPO/docs" "/$REPO/." "$BATS_TEST_TMPDIR/alias_root$REPO" "$BATS_TEST_TMPDIR/alias_root$ANC" "$BATS_TEST_TMPDIR/alias_root$REPO/docs"; do
+    run env PATH="$STUBBIN:$PATH" GRID_DIR="$REPO" bash "$REPO_ROOT/scripts/stage-site.sh" "$bad"
+    if [ "$status" -ne 2 ]; then
+      echo "expected exit 2 for out dir '$bad', got $status: $output" >&3
+      return 1
+    fi
+    if [ -s "$RMLOG" ]; then
+      echo "rm was called for out dir '$bad': $(cat "$RMLOG")" >&3
+      return 1
+    fi
+    if [ "$(list_fixture "$ANC")" != "$before" ]; then
+      echo "out dir '$bad' changed the fixture tree" >&3
+      return 1
+    fi
+  done
+}
+
+@test "an out dir spelled with a leading '//' outside the repo is accepted and normalised" {
+  stub_rm_setup
+  nested_fixture
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+  run env PATH="$STUBBIN:$PATH" GRID_DIR="$REPO" bash "$REPO_ROOT/scripts/stage-site.sh" "/$BATS_TEST_TMPDIR/elsewhere/site"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -f "$BATS_TEST_TMPDIR/elsewhere/site/index.html" ]
+  # the rm ran on the canonical physical path, not the raw '//...' spelling
+  [ "$(cat "$RMLOG")" = "-rf -- $BATS_TEST_TMPDIR/elsewhere/site" ]
+}
+
+@test "a relative out dir that looks like an option is a path, not an option" {
+  stub_rm_setup
+  nested_fixture
+  mkdir -p "$BATS_TEST_TMPDIR/cwd"
+  cd "$BATS_TEST_TMPDIR/cwd"
+  run env PATH="$STUBBIN:$PATH" GRID_DIR="$REPO" bash "$REPO_ROOT/scripts/stage-site.sh" "-rf"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -f "$BATS_TEST_TMPDIR/cwd/-rf/index.html" ]
+  [ "$(cat "$RMLOG")" = "-rf -- $BATS_TEST_TMPDIR/cwd/-rf" ]
+}
+
 @test "an out dir under the repo is accepted only as a top-level _name that is not tracked" {
   printf 'index.html\n' > "$FIX/site-files.txt"
   mkdir -p "$FIX/_keep"
