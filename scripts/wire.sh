@@ -548,8 +548,6 @@ project_is_wired() {
 # Is a rule pack subtracted (-rules:<pack>) in any manifest layer?
 rule_is_denied() { local r; for r in "${DENY_RULES[@]:-}"; do [ "$r" = "$1" ] && return 0; done; return 1; }
 
-mkdir -p "$SKILLS_DIR" "$AGENTS_DIR"
-
 # --- 0. Vet before touching any link -------------------------------------------
 # Skipped in exactly two cases: every dry run (GRID_DRY_HOME set: --check's child,
 # audit.sh --wired, baseline_wired.py, grid lock; silent, a dry run changes nothing), and
@@ -592,6 +590,10 @@ if [ -z "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_DRY_HOME:-}" ]; then
     fi
   fi
 fi
+
+# Created only now, after the audit: a blocked first run must not leave empty dirs behind
+# ("nothing was changed" is literally true). Before the preflight, which needs them to exist.
+mkdir -p "$SKILLS_DIR" "$AGENTS_DIR"
 
 # --- 0b. Preflight and rollback: a failed or interrupted wire never leaves zero links ---
 # Teardown (step 1) removes every grid link before the wired set is rebuilt, so a failure in
