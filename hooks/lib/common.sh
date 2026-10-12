@@ -42,7 +42,7 @@ grid_require_jq() {
 #     GRID_GUARD_MAX_TOKENS  blanks and separators (; & | ( ) `), default 2500
 #   Measured on a busy box, a token costs about 0.5 ms to tokenize and each separator
 #   about 1 ms more, so the defaults keep the cost of an ordinary command near 2 s of CPU
-#   (heredoc count and substitution depth are capped separately in the tokenizer). This is
+#   (substitution depth is capped separately in the tokenizer). This is
 #   a bound chosen from measurements, not a proof. Both are counted on the text with quotes
 #   and backslashes removed (the way the shell reads it), so quoting `git` cannot dodge the
 #   check. Exits 2 when over a limit
@@ -67,9 +67,8 @@ grid_check_cmd_cap() {
 #   Call right after grid_git_segments. Two conditions mean the tokenizer may have lost
 #   track of where later words start, so a git call after them could be invisible:
 #   a quote or substitution still open at the end (GIT_UNBALANCED), and input the
-#   tokenizer refuses to model (GIT_FAIL: a heredoc delimiter with a backslash or stray
-#   quote, more than 8 heredocs, substitutions nested deeper than 16). Both fail closed
-#   (exit 2), but only for a command that mentions git (any case, quotes removed): a
+#   tokenizer refuses to model (GIT_FAIL: substitutions nested deeper than 16). Both fail
+#   closed (exit 2), but only for a command that mentions git (any case, quotes removed): a
 #   command that never names git passes, as it does at the fast path.
 grid_check_balanced() {
   [ "${GIT_UNBALANCED:-0}" = 1 ] || [ -n "${GIT_FAIL:-}" ] || return 0
@@ -141,90 +140,45 @@ grid_log() {
 #   literal. Inside $'..' a backslash escapes the next character (so \' does not end it).
 #
 #   Quote state must never drift, because a drifted state hides every LATER git call:
-#     - a heredoc body is not code for quote tracking: its lines are tokenized one at a
-#       time with the quote state reset at each newline (so `it's` in a body cannot open
-#       a span that swallows the next command). Whether the lines are READ as code is
-#       decided when the body starts (the end of the line holding <<): data only when
-#       nothing on that line is a shell or an interpreter, the delimiter is a plain word
-#       and a known data sink (cat, tee, read, git commit -F, gh --body-file) is on the
-#       line; anything else is code (the default). << is not a heredoc inside (( )),
-#       after a digit, ) or ] (arithmetic shift), or as <<< or <<-<space|digit>. A
-#       delimiter with a backslash or stray quote, more than 8 heredocs, or substitutions
-#       nested deeper than 16 set GIT_FAIL and the guards fail closed;
+#     - heredoc bodies are plain code: << is an ordinary word and a body is read like any
+#       other lines of shell text. No heredoc state is kept, so there is no mode to get
+#       wrong; the cost is that a body which merely MENTIONS a git flag blocks, and an odd
+#       apostrophe in a body leaves a quote open (the guards then fail closed at the end);
 #     - $(..) and `..` inside double quotes are code with their own quotes, tracked on a
-#       stack, so `"$(echo '"')"` closes correctly and `"$(git commit -n)"` is seen;
+#       stack (16 deep at most; deeper sets GIT_FAIL), so `"$(echo '"')"` closes correctly
+#       and `"$(git commit -n)"` is seen;
 #     - when a quote or substitution is still open at the end, GIT_UNBALANCED is set and
 #       the guards fail closed.
 _grid_tokenize() {
-  local s="$1" n i=0 c nx pv q=0 run buf wl base=0 abs start j dl
-  # Windowed scanning (WP-019): each step costs a bounded amount. A long command used to take longer than the 5 s hook
-  # timeout, and a timed-out hook does not block. Two causes, both fixed here:
+  local s="$1" n i=0 c nx pv q=0 run buf wl base=0 abs start
+  # Windowed scanning (WP-019): each step costs a bounded amount. A long command used to
+  # take longer than the 5 s hook timeout, and a timed-out hook does not block. Two causes,
+  # both addressed here:
   #   1. ${s:$i:k} costs O(i) in bash (it copies the whole string first), so indexing a
   #      long command per character is quadratic. The text is therefore read through a
   #      sliding window `buf` of at most 2048 bytes, so every index is O(2048). A window
   #      starts one character early so the "previous character" test still works, and is
-  #      refilled when fewer than 300 characters remain (the longest look-ahead is a
-  #      heredoc delimiter, at most 200 characters).
+  #      refilled when fewer than 4 characters remain (the longest look-ahead is 1).
   #   2. runs of ordinary characters are consumed with one anchored regex (O(256) slice)
   #      instead of one loop iteration each.
-  # Ordinary = not a quote, backslash, blank, newline or one of ; & | ( ) ` < (the
+  # Ordinary = not a quote, backslash, blank, newline or one of ; & | ( ) ` (the
   # characters the per-character cases below handle). In a bracket expression a
   # backslash is literal.
-  local _TK_ORD=$'^([^\'"\\ \t\n;&|()`<]+)([ \t]?)' _TK_Q1=$'^[^\'\n]+' _TK_Q2=$'^[^"\\$`\n]+'
-  local _TK_Q5=$'^[^\'\\\n]+' _TK_CM=$'^[^\n]+' _TK_HD=$'^[ \t]*([^ \t\n;&|()<>]+)'
-  local _TK_HDP=$'^[A-Za-z0-9_]+$' _TK_HDQ=$'^([\'"])([A-Za-z0-9_]+)([\'"])$'
-  local -a _hdp=() _hdd=() _hdq=() _hdl=() _hdm=()
-  local _hd="" _hdt="" _hdb=0 _hdmode=0 _hdskip=0 _hdn=0 _AR=0 ln rest word k2
+  local _TK_ORD=$'^([^\'"\\ \t\n;&|()`]+)([ \t]?)' _TK_Q1=$'^[^\'\n]+' _TK_Q2=$'^[^"\\$`\n]+'
+  local _TK_Q5=$'^[^\'\\\n]+' _TK_CM=$'^[^\n]+'
   T_RAW=(); T_MASK=(); T_FLAG=(); T_SEP=()
   D_RAW=(); D_MASK=(); D_FLAG=(); D_SEP=()
   _CS_Q=(); _CS_K=(); _CS_D=(); _CS_WR=(); _CS_WM=(); _CS_WF=(); _CS_WI=(); _CS_N=0
-  _LN_SH=0; _LN_SINK=0; _LN_GIT=0; _LN_FILE=0; _LN_GH=0
   _TK_RAW=""; _TK_MASK=""; _TK_FLAG=""; _TK_IN=0; _TK_DLR=0; _TK_DEFER=0
   n=${#s}
   buf="${s:0:2048}"; wl=${#buf}
   while :; do
-    if [ $((i + 1600)) -gt "$wl" ] && [ $((base + wl)) -lt "$n" ]; then
+    if [ $((i + 4)) -gt "$wl" ] && [ $((base + wl)) -lt "$n" ]; then
       abs=$((base + i)); start=$((abs > 0 ? abs - 1 : 0))
       buf="${s:$start:2048}"; wl=${#buf}; base=$start; i=$((abs - start))
     fi
     [ "$i" -lt "$wl" ] || break
     c="${buf:$i:1}"
-
-    # Inside a heredoc body: at the start of a line, the delimiter line ends the body
-    # (leading tabs are ignored for <<-); at a newline the quote state is reset.
-    # What a body line is depends on who reads it (_hdmode, fixed when << was seen):
-    #   0  the heredoc feeds a shell (bash <<EOF): every line is code;
-    #   1  quoted delimiter (<<'EOF'): the body is data, every line is skipped;
-    #   2  unquoted delimiter: the shell expands $( ) and backticks in the body, so a line
-    #      holding one is read as code and every other line is skipped.
-    # A data line is skipped without being tokenized, so prose such as a commit message
-    # that mentions "git push --force" is not mistaken for a command.
-    if [ -n "$_hd" ]; then
-      if [ "$_hdb" = 1 ]; then
-        _hdb=0; _hdskip=0
-        j=$i
-        if [ "$_hdt" = '-' ]; then while [ "${buf:$j:1}" = $'\t' ]; do j=$((j + 1)); done; fi
-        dl=${#_hd}
-        if [ "${buf:$j:$dl}" = "$_hd" ]; then
-          nx="${buf:$((j + dl)):1}"
-          if [ -z "$nx" ] || [ "$nx" = $'\n' ]; then _hd=""; i=$((j + dl)); continue; fi
-        fi
-        if [ "$_hdmode" = 1 ]; then
-          _hdskip=1
-        elif [ "$_hdmode" = 2 ]; then
-          # the line as far as the window shows it (a longer line counts as code)
-          ln="${buf:$i:1500}"; ln="${ln%%$'\n'*}"
-          case "$ln" in *'$('*|*'`'*) ;; *) [ "${#ln}" -lt 1500 ] && _hdskip=1 ;; esac
-        fi
-      fi
-      if [ "$_hdskip" = 1 ]; then
-        if [ "$c" = $'\n' ]; then _hdb=1; i=$((i + 1)); continue
-        elif [[ "${buf:$i:256}" =~ $_TK_CM ]]; then i=$((i + ${#BASH_REMATCH[0]})); continue; fi
-      fi
-      if [ "$c" = $'\n' ]; then
-        q=0; _grid_tk_word; _grid_tk_sep; _hdb=1; i=$((i + 1)); continue
-      fi
-    fi
 
     case "$q" in
       3) # inside a # comment: skipped up to (not including) the newline
@@ -297,28 +251,7 @@ _grid_tokenize() {
             fi
             i=$((i + 1)) ;;
           ' '|$'\t') _grid_tk_word ;;
-          $'\n')
-            _grid_tk_word; _grid_tk_sep
-            # The first newline after a << marker starts the heredoc body, and now the whole
-            # line is known, so the body's mode is decided here (default: code):
-            #   data (1 quoted delimiter, 2 unquoted) only when nothing on the line is a
-            #   shell or interpreter, the delimiter is a plain word, and a data sink is there.
-            if [ "${#_hdp[@]}" -gt 0 ]; then
-              while [ "${#_hdm[@]}" -lt "${#_hdp[@]}" ]; do
-                k2=${#_hdm[@]}
-                if [ "$_LN_SH" = 0 ] && [ "${_hdl[$k2]}" = 1 ] \
-                   && { [ "$_LN_SINK" = 1 ] || { [ "$_LN_GIT" = 1 ] && [ "$_LN_FILE" = 1 ]; } \
-                        || { [ "$_LN_GH" = 1 ] && [ "$_LN_FILE" = 1 ]; }; }; then
-                  if [ "${_hdq[$k2]}" = 1 ]; then _hdm+=(1); else _hdm+=(2); fi
-                else
-                  _hdm+=(0)
-                fi
-              done
-              _hd="${_hdp[0]}"; _hdt="${_hdd[0]}"; _hdmode="${_hdm[0]}"
-              _hdp=("${_hdp[@]:1}"); _hdd=("${_hdd[@]:1}"); _hdq=("${_hdq[@]:1}"); _hdl=("${_hdl[@]:1}"); _hdm=("${_hdm[@]:1}"); _hdb=1
-            fi
-            _LN_SH=0; _LN_SINK=0; _LN_GIT=0; _LN_FILE=0; _LN_GH=0 ;;
-          ';') _grid_tk_word; _grid_tk_sep ;;
+          $'\n'|';') _grid_tk_word; _grid_tk_sep ;;
           '&')
             nx="${buf:$((i + 1)):1}"
             pv=""; [ "$i" -gt 0 ] && pv="${buf:$((i - 1)):1}"
@@ -338,16 +271,12 @@ _grid_tokenize() {
           # Inside a $( opened within double quotes the matching ) returns to the quotes.
           '(')
             _grid_tk_word; _grid_tk_sep
-            if [ "${buf:$((i + 1)):1}" = '(' ]; then
-              _AR=$((_AR + 1)); i=$((i + 1))             # (( opens arithmetic: << inside is a shift
-            elif [ "$_CS_N" -gt 0 ] && [ "${_CS_K[$((_CS_N - 1))]}" = p ]; then
+            if [ "$_CS_N" -gt 0 ] && [ "${_CS_K[$((_CS_N - 1))]}" = p ]; then
               _CS_D[$((_CS_N - 1))]=$((_CS_D[$((_CS_N - 1))] + 1))
             fi ;;
           ')')
             _grid_tk_word; _grid_tk_sep
-            if [ "$_AR" -gt 0 ] && [ "${buf:$((i + 1)):1}" = ')' ]; then
-              _AR=$((_AR - 1)); i=$((i + 1))
-            elif [ "$_CS_N" -gt 0 ] && [ "${_CS_K[$((_CS_N - 1))]}" = p ]; then
+            if [ "$_CS_N" -gt 0 ] && [ "${_CS_K[$((_CS_N - 1))]}" = p ]; then
               if [ "${_CS_D[$((_CS_N - 1))]}" -gt 0 ]; then
                 _CS_D[$((_CS_N - 1))]=$((_CS_D[$((_CS_N - 1))] - 1))
               else
@@ -360,42 +289,6 @@ _grid_tokenize() {
             if [ "$_CS_N" -gt 0 ] && [ "${_CS_K[$((_CS_N - 1))]}" = b ]; then
               _grid_tk_cs_pop; q="$_CS_RESTORE_Q"
             fi ;;
-          # A << marker names a heredoc delimiter; the body starts after the next newline.
-          # Conservative: it is NOT a heredoc (so the text stays code) inside (( )), right
-          # after a digit, ) or ] (an arithmetic shift), as <<< (here-string), or as <<-
-          # followed by a blank or a digit. The < itself is an ordinary word character.
-          '<')
-            pv=""; [ "$i" -gt 0 ] && pv="${buf:$((i - 1)):1}"
-            if [ "${buf:$((i + 1)):1}" = '<' ] && [ "${buf:$((i + 2)):1}" != '<' ] && [ "$pv" != '<' ] \
-               && [ "$_AR" = 0 ]; then
-              case "$pv" in [0-9]|')'|']') ;; *)
-                rest="${buf:$((i + 2)):300}"
-                nx=0; [ "${rest:0:1}" = '-' ] && nx=1
-                case "${rest:$nx:1}" in
-                  ' '|$'\t'|[0-9]) [ "$nx" = 1 ] && rest="" ;;
-                esac
-                if [[ "$rest" =~ $_TK_HD ]]; then
-                  word="${BASH_REMATCH[1]}"
-                  # a leading - was the <<- marker: take it off the word
-                  [ "$nx" = 1 ] && [ "${rest:0:1}" = '-' ] && word="${word#-}"
-                  _hdn=$((_hdn + 1))
-                  if [ "$_hdn" -gt 8 ]; then GIT_FAIL="too many heredocs"; break; fi
-                  if [[ "$word" =~ $_TK_HDP ]]; then
-                    _hdp+=("$word"); _hdq+=(0); _hdl+=(1)
-                  elif [[ "$word" =~ $_TK_HDQ ]] && [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[3]}" ]; then
-                    _hdp+=("${BASH_REMATCH[2]}"); _hdq+=(1); _hdl+=(1)
-                  elif [[ "$word" == *[\\\'\"]* ]]; then
-                    # a delimiter the guard cannot match exactly (a backslash, a stray quote)
-                    GIT_FAIL="unsupported heredoc delimiter"
-                    _hdp+=("$word"); _hdq+=(0); _hdl+=(0)
-                  else
-                    _hdp+=("$word"); _hdq+=(0); _hdl+=(0)
-                  fi
-                  if [ "$nx" = 1 ]; then _hdd+=('-'); else _hdd+=(''); fi
-                fi ;;
-              esac
-            fi
-            _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_FLAG+="$c"; _TK_IN=1 ;;
           *) _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_FLAG+="$c"; _TK_IN=1 ;;
         esac ;;
     esac
@@ -449,18 +342,6 @@ _grid_tk_cs_pop() {
 # A word made only of an empty quoted span ("") is a real, empty word.
 _grid_tk_word() {
   if [ "$_TK_IN" = 1 ]; then
-    # Running flags for the current line (reset at each newline), read when a heredoc body
-    # starts: a shell or interpreter on the line, a data sink, git/gh with a file option.
-    # Command names are short, so a long word is skipped.
-    if [ "${#_TK_FLAG}" -lt 64 ]; then
-      case "${_TK_FLAG##*/}" in
-        sh|bash|zsh|dash|ksh|ash|busybox|eval|source|.|xargs|env|sudo|ssh|exec|-c|python|python[0-9]*|perl|ruby|node|php|lua) _LN_SH=1 ;;
-        cat|tee|read) _LN_SINK=1 ;;
-        git) _LN_GIT=1 ;;
-        gh) _LN_GH=1 ;;
-        -F|--file|--body-file|--notes-file) _LN_FILE=1 ;;
-      esac
-    fi
     if [ "$_TK_DEFER" = 1 ]; then
       D_RAW+=("$_TK_RAW"); D_MASK+=("$_TK_MASK"); D_FLAG+=("$_TK_FLAG"); D_SEP+=(0)
     else

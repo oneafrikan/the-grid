@@ -401,7 +401,6 @@ STUB
     "git commit -m 'docs: git push --force is banned'"
     "git commit -m \"don't use --no-verify\""
     'git commit -m "x" -m "git push -f"'
-    $'git commit -m "$(cat <<\'EOF\'\nfix: stop using git push --force and --no-verify\n\nbody\nEOF\n)"'
     'git push origin next'
     'git push -u origin next'
     'git push -n origin next'
@@ -473,7 +472,7 @@ STUB
 @test "no-bypass: tokenizer is correct across its window refill boundary" {
   # The tokenizer reads through a sliding window; a quote, an escape or && landing on
   # the window refill boundary must not change the result.
-  for len in 440 445 447 448 449 450 451 453 2047 2048 2049; do
+  for len in 2036 2040 2043 2044 2045 2046 2047 2048 2049 2052; do
     pad="$(rep a "$len")"
     expect_block "git commit -m x$pad --no-verify" || { echo "len $len: bare flag after padding" >&2; false; }
     expect_pass "git commit -m \"$pad --no-verify\"" || { echo "len $len: quoted mention" >&2; false; }
@@ -547,15 +546,12 @@ STUB
   expect_pass $'git status \\\n  --short'
 }
 
-# --- quote state must not drift: an apostrophe in a heredoc body, a $'..' string or a
-# quote inside $(..) must not hide the git call that comes after it.
+# --- quote state must not drift: a $'..' string or a quote inside $(..) must not hide the
+# git call that comes after it. Heredoc bodies are CODE (no heredoc modelling at all): a
+# body is read like any other lines of shell text.
 
-@test "no-bypass: a later git call is still seen after a heredoc body, a \$'..' string or a \$(..) with quotes" {
+@test "no-bypass: a later git call is still seen after a \$'..' string or a \$(..) with quotes" {
   rows=(
-    $'cat <<EOF\nit\'s a note\nEOF\ngit commit -n -m x'
-    $'cat <<\'EOF\' > f\ndon\'t\nEOF\ngit push --force'
-    $'cat <<-EOF\n\tit\'s\n\tEOF\ngit commit --no-verify'
-    $'cat <<A <<B\nit\'s\nA\nit\'s too\nB\ngit commit -n'
     $'echo $\'\\\'\' ; git commit --no-verify -m x'
     $'echo "$(echo \'"\')"; git commit -n'
     $'x="$(git commit -n -m y)"'
@@ -572,16 +568,14 @@ STUB
   done
 }
 
-@test "no-bypass: heredoc bodies and quoted substitutions that are balanced still pass" {
+@test "no-bypass: balanced quoting, substitutions and heredoc recipes without stray quotes pass" {
   rows=(
-    $'cat <<EOF\nit\'s fine\nEOF\ngit status'
-    $'git commit -m "$(cat <<\'EOF\'\nthe message\'s body\nEOF\n)"'
     'echo "a $(date) b"; git status'
     $'echo $\'it\\\'s\'; git status'
-    $'cat <<\'EOF\'\ngit push --force and --no-verify\nEOF'
-    $'cat <<EOF\nnever use git push --force\nEOF'
-    $'git commit -F - <<EOF\nfix: stop using git commit -n\nEOF'
     'git commit -m "$(echo a "b c")"'
+    $'git commit -m "$(cat <<\'EOF\'\nfeat: add x\n\nthe body, no apostrophes\nEOF\n)"'
+    $'cat <<EOF\nplain prose\nEOF\ngit status'
+    $'cat > f.sh <<\'EOF\'\n#!/bin/sh\necho "it\'s done"\nEOF\nchmod +x f.sh'
   )
   for row in "${rows[@]}"; do expect_pass "$row"; done
 }
@@ -595,11 +589,11 @@ STUB
   expect_pass "echo 'x"
 }
 
-@test "secret: a later commit is still scanned after a heredoc body or a quote trick" {
+@test "secret: a later commit is still scanned after a quote trick" {
   mkrepo
   stage_line "key = \"$(tok_ghp)\""
-  for row in $'cat <<EOF\nit\'s a note\nEOF\ngit commit -m x' $'echo $\'\\\'\' ; git commit -m x' \
-             $'echo "$(echo \'"\')"; git commit -m x' 'echo "$(git commit -m x)"' 'echo `git commit -m x`'; do
+  for row in $'echo $\'\\\'\' ; git commit -m x' $'echo "$(echo \'"\')"; git commit -m x' \
+             'echo "$(git commit -m x)"' 'echo `git commit -m x`'; do
     scan "$row"
     [ "$status" -eq 2 ] || { echo "expected BLOCK for: $row: $output" >&2; false; }
     [[ "$output" != *"not closed"* ]] || { echo "wrong reason for: $row" >&2; false; }
@@ -607,21 +601,32 @@ STUB
   done
 }
 
-# --- heredoc rules (round 3): the conservative direction is always "read it as code".
+# --- heredoc bodies are code: every program below runs git in real bash, and the guard
+# must block it (a body is read like any other text, whatever consumes it).
 
-@test "no-bypass: << in arithmetic, here-strings and a stray << never hide the next command" {
+@test "no-bypass: git in a heredoc body is blocked, whatever reads the body" {
   rows=(
+    $'bash <<\'OUTER\'\ncat <<\'INNER\'\ntext\nINNER\nOUTER\ngit commit -n'
+    $'ssh host bash <<\'EOF\'\ncat > /tmp/x <<\'EOT\'\nx\nEOT\nEOF\ngit commit -n'
+    $'cat <<\'EOF\' | bash\ncat <<\'EOF\' >/dev/null &&\nEOF\ngit commit -n'
+    $'cat <<\'EOF\' | sh\ngit commit -n\nEOF'
+    $'cat <<\'EOF\' | bash -s\ngit commit -n\nEOF'
+    $'source /dev/stdin <<\'EOF\'\ngit commit -n\nEOF'
+    $'. /dev/stdin <<EOF\ngit commit -n\nEOF'
+    $'python3<<\'EOF\'\ngit commit -n\nEOF'
+    $'cat >f1<<EOF\ngit commit -n\nEOF'
+    $'cat 2<<\'EOF\'\ngit commit -n\nEOF'
+    $'exec 3<<EOF\ngit commit -n\nEOF'
+    $'a[0]<<EOF\ngit commit -n\nEOF'
+    $'cat <<\'EOF\'\nline \\\nEOF\ngit commit -n'
+    $'cat <<\'EOF\'\ngit commit -n\nEOF\n| sh'
     $'echo $((1<<2))\ngit commit -n'
     $'x=$((1<<3))\ngit commit -n'
     $'((y = 1<<2))\ngit commit -n'
-    $'echo $((1 << 2))\ngit commit -n'
+    $'echo $((1 << 2)) | cat\ngit commit -n'
     $'let x=1<<2\ngit commit -n'
-    $'echo $[1<<2]\ngit commit -n'
-    $'echo $((1<<2)) | cat\ngit commit -n'
-    $'((y = 1 << 2)); cat f\ngit commit -n'
     $'cat <<<hello\ngit commit -n'
-    $'cat <<-\ngit commit -n'
-    $'x=$((1<<-2))\ngit commit -n'
+    $'cat <<E\\OF\nx\nEOF\ngit commit -n'
   )
   for row in "${rows[@]}"; do
     expect_block "$row"
@@ -629,72 +634,80 @@ STUB
   done
 }
 
-@test "secret: << in arithmetic does not hide a later commit from the scan" {
+@test "secret: a commit after a nested or shell-fed heredoc is still scanned" {
   mkrepo
   stage_line "key = \"$(tok_ghp)\""
-  for row in $'x=$((1<<3))\ngit commit -m x' $'echo $((1<<2)) | cat\ngit commit -m x' $'((y = 1 << 2)); cat f\ngit commit -m x'; do
+  for row in $'bash <<\'OUTER\'\ncat <<\'INNER\'\ntext\nINNER\nOUTER\ngit commit -m x' \
+             $'cat <<\'EOF\' | sh\necho hi\nEOF\ngit commit -m x' \
+             $'x=$((1<<3))\ngit commit -m x' $'echo $((1<<2)) | cat\ngit commit -m x'; do
     scan "$row"
     [ "$status" -eq 2 ] || { echo "expected BLOCK for: $row: $output" >&2; false; }
     [[ "$output" == *"f.txt:1: github-token"* ]] || { echo "no finding for: $row: $output" >&2; false; }
   done
 }
 
-@test "no-bypass: a heredoc whose body a shell may run is code, wherever the shell is named" {
-  rows=(
-    $'cat <<\'EOF\' | sh\ngit commit -n\nEOF'
-    $'cat <<\'EOF\' | bash -s\ngit commit -n\nEOF'
-    $'source /dev/stdin <<\'EOF\'\ngit commit -n\nEOF'
-    $'. /dev/stdin <<EOF\ngit commit -n\nEOF'
-    $'cat <<EOF | ssh host\ngit commit -n\nEOF'
-    $'cat <<EOF | xargs -0 sh -c\ngit commit -n\nEOF'
-    $'foo <<\'EOF\'\ngit commit -n\nEOF'
-    $'bash <<EOF\ngit commit -n\nEOF'
+@test "no-bypass: an odd apostrophe in a heredoc body is read as an open quote, never a hidden command" {
+  # the body drives quote tracking now, so a stray apostrophe leaves a quote open at the
+  # end: the guard blocks (fail closed) instead of losing track of the later git call
+  expect_block $'cat >f1<<EOF\nit\'s\nEOF\ngit commit -n'
+  expect_block $'cat <<EOF\nit\'s a note\nEOF\ngit commit -n -m x'
+  expect_block $'git commit -m "$(cat <<\'EOF\'\nthe user\'s note\nEOF\n)"'
+  [[ "$output" == *"not closed"* && "$output" == *"Simplify"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "no-bypass: two apostrophes in a heredoc body pair up and can hide a later git call (accepted residual)" {
+  # Documented, not fixed: with the body read as code, an EVEN number of apostrophes forms a
+  # quoted span that swallows the text between them, including a later git call. An odd
+  # number is caught by the open-quote backstop (see the test above).
+  expect_pass $'cat >f1<<EOF\nit\'s\nEOF\ngit commit -n\necho it\'s'
+}
+
+@test "no-bypass: a data heredoc whose body only mentions a git flag is blocked (accepted false block)" {
+  expect_block $'cat <<\'EOF\'\ngit commit --no-verify is banned\nEOF'
+  expect_block $'git commit -F - <<\'EOF\'\nfix: stop using git commit -n\nEOF'
+  # it used to be a row of the pass table (round 1 skipped the body): now an accepted false block
+  expect_block $'git commit -m "$(cat <<\'EOF\'\nfix: stop using git push --force and --no-verify\n\nbody\nEOF\n)"'
+}
+
+@test "no-bypass: realistic commit-message heredocs with apostrophes: the cost is pinned" {
+  # An odd number of apostrophes leaves a quote open: blocked with the 'not closed' message.
+  # An even number pairs up: passes, and (documented residual) the paired text is skipped.
+  odd=(
+    $'git commit -m "$(cat <<\'EOF\'\nfix: don\'t crash on empty input\nEOF\n)"'
+    $'git commit -m "$(cat <<\'EOF\'\nfeat: it\'s now configurable\n\nWhy: the default was not enough\nbut\nEOF\n)"'
+    $'git commit -m "$(cat <<\'EOF\'\ndocs: explain the user\'s options\nEOF\n)"'
+    $'git commit -m "$(cat <<\'EOF\'\nchore: bump deps\n\nCan\'t pin yet\nEOF\n)"'
   )
-  for row in "${rows[@]}"; do
+  even=(
+    $'git commit -m "$(cat <<\'EOF\'\nfix: don\'t crash; it doesn\'t help\nEOF\n)"'
+    $'git commit -m "$(cat <<\'EOF\'\nfeat: it\'s ok and that\'s fine\nEOF\n)"'
+    $'git commit -m "$(cat <<\'EOF\'\ndocs: the \'x\' option\nEOF\n)"'
+    $'gh pr create --title t --body "$(cat <<\'EOF\'\n## Summary\n- it\'s fixed, isn\'t it\nEOF\n)"'
+    $'git commit -m "$(cat <<\'EOF\'\nno apostrophes at all here\nEOF\n)"'
+  )
+  for row in "${odd[@]}"; do
     expect_block "$row"
-    [[ "$output" != *"not closed"* && "$output" != *"too complex"* ]] || { echo "wrong reason for: $row" >&2; false; }
+    [[ "$output" == *"not closed"* ]] || { echo "expected the not-closed message for: $row: $output" >&2; false; }
   done
+  for row in "${even[@]}"; do expect_pass "$row"; done
+  # a PR body through gh names no git: the guard is not involved, apostrophes or not
+  expect_pass $'gh pr create --title t --body "$(cat <<\'EOF\'\n## Summary\n- it\'s fixed\nEOF\n)"'
 }
 
-@test "no-bypass: a plain heredoc to a data sink stays data, so a commit message may say anything" {
-  rows=(
-    $'cat <<\'EOF\'\ngit commit -n and git push --force\nEOF'
-    $'cat > notes.txt <<\'EOF\'\ngit commit -n\nEOF'
-    $'tee notes.txt <<\'EOF\'\ngit push -f\nEOF'
-    $'git commit -F - <<\'EOF\'\nfix: stop using git commit -n\nEOF'
-    $'git commit -m "$(cat <<\'EOF\'\nfix: the user\'s git push --force habit\n\nbody\nEOF\n)"'
-    $'gh pr create --title t --body "$(cat <<\'EOF\'\n## Summary\n- never git commit -n\nEOF\n)"'
-    $'gh pr create --body-file - <<\'EOF\'\nit\'s git push --force text\nEOF'
-    $'read x <<\'EOF\'\ngit commit -n\nEOF'
-    $'cat <<EOF\nplain prose with git commit -n\nEOF'
-  )
-  for row in "${rows[@]}"; do expect_pass "$row"; done
-}
-
-@test "no-bypass: a heredoc delimiter the guard cannot match exactly fails closed" {
-  expect_block $'cat <<E\\OF\nx\nEOF\ngit status'
-  [[ "$output" == *"unsupported heredoc delimiter"* ]] || { echo "$output" >&2; false; }
-  expect_block $'cat <<EO\'F\nx\nEOF\ngit status'
-  [[ "$output" == *"unsupported heredoc delimiter"* ]] || { echo "$output" >&2; false; }
-  # a matching pair around the whole word is fine, and so is a command that never names git
-  expect_pass $'cat <<"EOF"\nx\nEOF\ngit status'
-  expect_pass $'cat <<E\\OF\nx\nEOF\nls'
-}
-
-@test "no-bypass: more than 8 heredocs or 16 nested substitutions are refused as too complex, within 2 s CPU" {
+@test "no-bypass: deep substitutions are refused as too complex and heredoc-looking text is cheap, within 2 s CPU" {
+  # << is an ordinary word now: 800 of them cost like any 800 words
   run_hook_cpu 2 pre-bash-no-bypass "git status; $(rep 'x <<b ' 800)"
-  [ "$status" -eq 2 ] || { echo "status $status (152 = CPU limit)" >&2; false; }
-  [[ "$output" == *"too complex"* ]] || { echo "$output" >&2; false; }
+  [ "$status" -eq 0 ] || { echo "status $status (152 = CPU limit)" >&2; false; }
   run_hook_cpu 2 pre-bash-no-bypass "git status; $(rep 'a <<b ' 400)"
-  [ "$status" -eq 2 ] || { echo "status $status (152 = CPU limit)" >&2; false; }
+  [ "$status" -eq 0 ] || { echo "status $status (152 = CPU limit)" >&2; false; }
   open="$(rep '"$(' 1200)"; close="$(rep ')"' 1200)"
   run_hook_cpu 2 pre-bash-no-bypass "echo ${open} git commit --no-verify ${close}"
   [ "$status" -eq 2 ] || { echo "status $status (152 = CPU limit)" >&2; false; }
   [[ "$output" == *"too complex"* ]] || { echo "$output" >&2; false; }
   # no git named: not our business, and just as cheap
-  run_hook_cpu 2 pre-bash-no-bypass "echo $(rep 'x <<b ' 800)"
+  run_hook_cpu 2 pre-bash-no-bypass "echo ${open} ${close}"
   [ "$status" -eq 0 ] || { echo "status $status (152 = CPU limit)" >&2; false; }
-  # up to the caps it still works
+  # up to the cap it still works
   open="$(rep '"$(' 10)"; close="$(rep ')"' 10)"
   run_hook_cpu 2 pre-bash-no-bypass "echo ${open} git commit --no-verify ${close}"
   [ "$status" -eq 2 ] || { echo "status $status" >&2; false; }
@@ -738,8 +751,8 @@ STUB
   rows=(
     'git status'
     'git commit -m "feat: add x"'
-    $'git commit -m "$(cat <<\'EOF\'\nfeat: x\n\nthe user\'s notes\nEOF\n)"'
-    $'gh pr create --title t --body "$(cat <<\'EOF\'\n## Summary\n- it\'s fine\nEOF\n)"'
+    $'git commit -m "$(cat <<\'EOF\'\nfeat: x\n\nthe body without stray quotes\nEOF\n)"'
+    $'gh pr create --title t --body "$(cat <<\'EOF\'\n## Summary\n- it is fine\nEOF\n)"'
     'git add -A && git commit -m x'
     'x=$((1<<3)); git commit -m x'
     'git log --oneline | head -3'
