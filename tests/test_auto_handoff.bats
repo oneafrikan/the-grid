@@ -977,3 +977,64 @@ lock_dir() { printf '%s\n' "$GRID_HOOK_STATE_DIR/handoff/$SID.lock"; }
   run_worker
   log_has "action=skip reason=already-ran"
 }
+
+# ---- verification by before/after snapshot (no clock stamp) -------------------------------
+
+# cwd_lock <dir>: the per-cwd lock directory the worker uses for <dir> (same key recipe).
+cwd_lock() { printf '%s/handoff/cwd-%s.lock\n' "$GRID_HOOK_STATE_DIR" "$(printf '%s' "$(cd "$1" && pwd -P)" | cksum | cut -d' ' -f1)"; }
+
+@test "race: a file touched right before the hook still ends done" {
+  mk_tx 6
+  echo edited > "$P/just-edited.txt"          # NOT aged: modified well inside the old 2 s back-dated window
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=done"
+  refute log_has "reason=unexpected-file"
+}
+
+@test "a pre-existing file the child modifies is still unexpected-file" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-modify
+  before="$(commits "$P")"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "base.txt"
+  [ "$(commits "$P")" -eq "$before" ]
+}
+
+@test "two sessions in one cwd each commit their own pair" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs STUB_CLAUDE_SLEEP=1
+  before="$(commits "$P")"
+  STUB_HANDOFF_PREFIX=A- bash "$WORKER" "11111111-1111-4111-8111-aaaaaaaaaaaa" "$TXN" "$P" other &
+  STUB_HANDOFF_PREFIX=B- bash "$WORKER" "11111111-1111-4111-8111-bbbbbbbbbbbb" "$TXN" "$P" other &
+  wait
+  [ "$(grep -c 'action=done' "$LOG")" -eq 2 ]
+  refute log_has "reason=unexpected-file"
+  [ "$(commits "$P")" -eq $((before + 2)) ]
+  [ -f "$P/LOGS/A-2026-01-01-testhost-stub-handoff.md" ]
+  [ -f "$P/LOGS/B-2026-01-01-testhost-stub-handoff.md" ]
+}
+
+@test "a second session waits for the cwd lock, then skips with cwd-busy and no marker" {
+  mk_tx 6
+  mkdir -p "$(cwd_lock "$P")"
+  export GRID_AUTOHANDOFF_WAIT=1 STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=skip reason=cwd-busy"
+  [ ! -e "$STUB_DIR/claude.pid" ]
+  [ ! -e "$GRID_HOOK_STATE_DIR/handoff/$SID" ]       # no marker: the session may retry later
+  [ ! -d "$(lock_dir)" ]                              # the session lock was released
+}
+
+@test "cwd = HOME, / or a parent of HOME is skipped with cwd-too-broad and no child spawn" {
+  mk_tx 6
+  local c n=0
+  for c in "$HOME" "/" "$MOCK_HOOK_ROOT"; do
+    n=$((n + 1))
+    SID="11111111-1111-4111-8111-33333333333$n"
+    run bash "$WORKER" "$SID" "$TXN" "$c" other
+    log_has "session=$SID action=skip reason=cwd-too-broad"
+  done
+  [ ! -e "$STUB_DIR/claude.pid" ]
+}
