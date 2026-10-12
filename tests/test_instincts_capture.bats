@@ -389,6 +389,19 @@ prompt_payload() {
   assert_no_file
 }
 
+@test "user@host:/path with a single-label host records nothing (path rewrites run first)" {
+  # The path rewrite turns `me@devbox:/tmp/x` into `me@devbox:(outside)/x` and a project-root path into
+  # `me@devbox:./x`; the scp-host drop has to see through both, or the user name and host leak.
+  for c in "scp f.txt me${AT}devbox:/tmp/x" \
+           "scp f.txt me${AT}devbox:$PROJ/out" \
+           "scp f.txt me${AT}devbox:$HOME/out" \
+           "rsync -a . me${AT}devbox:/srv/app/" \
+           "scp me${AT}devbox:/var/log/x ."; do
+    capture "$(bash_payload "$c")"
+  done
+  assert_no_file
+}
+
 @test "file names that look like hosts are kept (settings.local.json, lib.py, README.md)" {
   capture "$(bash_payload 'cat .claude/settings.local.json lib.py README.md')"
   [ "$(field "$(only_file)" 1 in)" = "cat .claude/settings.local.json lib.py README.md" ]
