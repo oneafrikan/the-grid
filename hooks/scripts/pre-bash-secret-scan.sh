@@ -38,10 +38,18 @@ command="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')"
 [ -n "$command" ] || exit 0
 cwd="$(printf '%s' "$payload" | jq -r '.cwd // empty')"
 
-# Fast path: nothing here can matter unless the text mentions a commit or an add.
-case "$command" in
+# Fast path: nothing here can matter unless the text mentions a commit or an add. The
+# test runs on the text with quotes and backslashes removed, as the shell would (comm""it
+# and ad\d are commit and add); a command holding $ or a backtick may build a word the
+# text test cannot see, so it always goes to the tokenizer.
+stripped="${command//[\"\'\\]/}"
+case "$stripped" in
   *commit*|*add*) ;;
-  *) exit 0 ;;
+  *)
+    case "$command" in
+      *'$'*|*'`'*) ;;
+      *) exit 0 ;;
+    esac ;;
 esac
 
 grid_check_cmd_cap pre-bash-secret-scan "$command"
@@ -134,7 +142,7 @@ for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
     # is a path; before it, option words (leading dash) are skipped.
     after_dd=0
     for ((k = start; k < start + len; k++)); do
-      w="${GIT_RAW[$k]}"
+      w="${GIT_FLAG[$k]}"
       if [ "$after_dd" = 0 ] && [ "$w" = "--" ]; then after_dd=1; continue; fi
       if [ "$after_dd" = 0 ] && [[ "$w" == -* ]]; then continue; fi
       if secret_sensitive_name "${w##*/}"; then add_finding "$w: sensitive-file"; fi
@@ -148,7 +156,7 @@ for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
     # the rest of the word or, when last, the next word.
     pathspecs=(); incl=0; skip_next=0; after_dd=0
     for ((k = start; k < start + len; k++)); do
-      w="${GIT_RAW[$k]}"
+      w="${GIT_FLAG[$k]}"
       if [ "$skip_next" = 1 ]; then skip_next=0; continue; fi
       if [ "$after_dd" = 1 ]; then pathspecs+=("$w"); continue; fi
       case "$w" in

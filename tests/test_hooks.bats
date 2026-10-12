@@ -455,6 +455,99 @@ STUB
   [ "$status" -eq 0 ]
 }
 
+# --- WP-020: quoting, escaping and abbreviating a flag must not hide it from the guard.
+# The shell removes the quotes, so git sees the flag; the guard must too.
+
+@test "no-bypass: quoted and escaped flag forms are blocked" {
+  rows=(
+    'git commit "--no-verify" -m x'
+    "git commit '-n' -m x"
+    'git commit \--no-verify'
+    'git commit --no-ver""ify'
+    "git commit \$'--no-verify' -m x"
+    'git commit -m x "-n"'
+    'git push "--force"'
+    "git push origin '+HEAD:main'"
+  )
+  for row in "${rows[@]}"; do expect_block "$row"; done
+}
+
+@test "no-bypass: unique long-option prefixes are blocked (--no-verify from 7 chars, --mirror from 5)" {
+  rows=(
+    'git commit --no-verif -m x'
+    'git commit --no-veri -m x'
+    'git commit --no-ve -m x'
+    'git push --mirr'
+    'git push --mirro'
+    "git config alias.ci \"commit --no-verif\""
+    "git config alias.ci 'commit \"--no-verify\"'"
+  )
+  for row in "${rows[@]}"; do expect_block "$row"; done
+}
+
+@test "no-bypass: the fast path cannot be skipped by quoting or escaping inside a keyword" {
+  rows=(
+    'g""it commit --no-verify'
+    'g\it commit --no-verify'
+    '"g"it push -f'
+    "git comm\\it -n -m x"
+  )
+  for row in "${rows[@]}"; do expect_block "$row"; done
+}
+
+@test "no-bypass: --config-env with core.hooksPath is a hook-disabling override" {
+  expect_block 'git --config-env=core.hooksPath=VAR commit -m x'
+  expect_block 'git --config-env core.hooksPath=VAR commit -m x'
+  expect_pass 'git --config-env=user.name=VAR commit -m x'
+}
+
+@test "no-bypass: look-alikes that are not the flag still pass" {
+  rows=(
+    'git commit -m "fix --no-verify"'
+    "git commit -m '--no-verify'"
+    'git commit -m x -m "--no-verify"'
+    'git commit --message "-n" --allow-empty'
+    'git commit --author "A -n" -m x'
+    'git push --force-with-lease'
+    'git log --oneline'
+    'git commit --no-verbose-thing-not-a-prefix'
+    'git commit --no-ed'
+    'git push --mirrored-not-a-prefix-of-it origin'
+  )
+  for row in "${rows[@]}"; do expect_pass "$row"; done
+}
+
+@test "no-bypass: only the word that is an option's value is skipped" {
+  # an attached value (-mc) is not a separate word, so the next word is still checked
+  expect_block 'git commit -mc --no-verify'
+  expect_block 'git commit -am x --no-verify'
+  expect_block 'git commit -m x --no-verify -m "second"'
+  expect_block 'git commit -m "a" -m "b" -n'
+  # the value after -m / -nm / -am / --message is skipped, the flag next to it is not
+  expect_pass 'git commit -am "use --no-verify never"'
+  expect_pass 'git commit --message "-n" -m "git push -f"'
+  expect_block 'git commit -nm "msg"'
+}
+
+@test "no-bypass: a flag-looking value of an option that is not listed is a known false block" {
+  # D37: quoted-flag false positives are accepted and documented, not special-cased.
+  expect_block 'git log --grep "--no-verify"'
+}
+
+@test "secret: the fast path cannot be skipped by quoting or escaping inside a keyword" {
+  mkrepo
+  stage_line "key = \"$(tok_ghp)\""
+  scan 'git comm""it -m x'
+  [ "$status" -eq 2 ] || { echo "comm\"\"it: $output" >&2; false; }
+  scan 'git comm\it -m x'
+  [ "$status" -eq 2 ] || { echo "comm\\it: $output" >&2; false; }
+  scan 'git "commit" -m x'
+  [ "$status" -eq 2 ] || { echo "\"commit\": $output" >&2; false; }
+  scan 'git ad""d .env'
+  [ "$status" -eq 2 ] || { echo "ad\"\"d .env: $output" >&2; false; }
+  [[ "$output" == *"sensitive-file"* ]] || false
+}
+
 # --- the bypass-form table (SEC5): one @test per row so a regression names its form.
 # B rows must exit 2, P rows must exit 0.
 
