@@ -791,7 +791,8 @@ class Scan:
                 # text and its findings are de-duplicated.
                 text = data.decode("utf-16")
                 if exec_class:
-                    stripped_view = data.replace(b"\x00", b"").decode("utf-8", errors="replace")
+                    # (without the two BOM bytes, so line 1 reads the same in both views)
+                    stripped_view = data[2:].replace(b"\x00", b"").decode("utf-8", errors="replace")
             elif nul_in_head and _is_known_binary(head) and not exec_class:
                 # An image/archive/font: nothing to scan. Never for executable classes:
                 # a magic-number first line is trivially forged in front of a script
@@ -816,12 +817,14 @@ class Scan:
         self._scan_text(text, fclass, name, rel_target, rel_root, display, tier, file_sha)
         if stripped_view is not None:
             before = len(self.findings)
-            known = {(f["rule"], f["line"]) for f in self.findings
+            known = {(f["rule"], f["severity"], f["excerpt"]) for f in self.findings
                      if f["path"] == display}
             self._scan_text(stripped_view, fclass, name, rel_target, rel_root, display, tier, file_sha)
-            # drop what the decoded view already reported (same rule on the same line)
+            # Drop only a finding the decoded view already reported IDENTICALLY (same rule,
+            # severity and text). Never key on the line number: the two views number lines
+            # differently, and a LOW decoy on the same number must not hide a HIGH payload.
             self.findings[before:] = [f for f in self.findings[before:]
-                                      if (f["rule"], f["line"]) not in known]
+                                      if (f["rule"], f["severity"], f["excerpt"]) not in known]
 
     def _scan_text(self, text, fclass, name, rel_target, rel_root, display, tier, file_sha):
         """Run the line rules over one text view of a file."""
