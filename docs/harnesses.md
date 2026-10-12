@@ -131,15 +131,19 @@ What `wire.sh` does for each file in that column:
 | Same, file absent | no file is created; `.wired.manifest` row `rules@<~file>`, status `skipped`, reason `rules-file-absent` |
 | Same, file is a symlink | the target is not written through; same row with reason `rules-file-symlink` |
 | Same, path is a directory or other non-regular file | not written; same row with reason `rules-file-not-regular` |
+| Same, registry row is not a `~/`-relative `AGENTS.md`, `GEMINI.md` or `CLAUDE.md` | not written; same row with reason `rules-file-not-allowed` |
+| Same, but the block would be over the 12288-byte cap | nothing is written and an existing block is left as it was; row reason `over-cap`; wire stays green |
+| Harness inactive, file holds a damaged block (unbalanced markers) | not touched; warning plus row reason `markers-unbalanced`; wire stays green |
 | Harness inactive, or no pack wired, file holds a block | the block is removed |
 | Harness inactive, or no pack wired, file has no block | no call at all, so an empty opt-in file stays |
 
-- **Token cost:** the block is loaded on every session (these harnesses have no path scoping). `rules.py` caps it and refuses an over-cap selection rather than truncating; wire only the packs you want always loaded.
+- **Token cost:** the block is loaded on every session (these harnesses have no path scoping). `rules.py` caps it at 12288 bytes and, for an over-cap selection, writes nothing (exit 3) rather than truncating; `wire.sh` prints `skipped, block is N bytes, over the 12288-byte cap` and keeps going, so Codex/Gemini rules go stale until you select fewer packs. Wire only the packs you want always loaded.
 - **Removal keeps the file:** if removing the block leaves the file empty, `rules.py` truncates it to 0 bytes and keeps it, so the opt-in survives and re-enabling delivers the block again. Removal also takes back the one blank separator line the append added, so a newline-terminated file is restored byte for byte (a file with no final newline gains one). A CRLF file (every newline CRLF) gets a CRLF block.
-- **Codex prefers `AGENTS.override.md`** over `AGENTS.md` when it exists. The grid only manages `AGENTS.md`, so the block is not read while an override file is present.
+- **Codex prefers `AGENTS.override.md`** over `AGENTS.md` when it exists. The grid only manages `AGENTS.md`, so the block is not read while an override file is present; `wire.sh` prints a warning on every run when it finds one beside the file.
+- Every skip is printed on stderr (`rules (~/.codex/AGENTS.md): skipped, file is a symlink`) as well as recorded in `.wired.manifest`. `wire.sh --check` stays silent about skips, which are not drift.
 - A symlinked instruction file is never edited, not even to remove an old block, because the target may belong to another tool or be regenerated elsewhere.
 - A `rules.py` failure is reported on stderr, the rest of the wire still runs, and `wire.sh` then exits 1.
-- `wire.sh --check` runs the same decisions with `rules.py emit --check` against the live files (read-only): a hand-edited block, a missing block, or a block that should be gone is drift. An absent or symlinked file is not.
+- `wire.sh --check` runs the same decisions with `rules.py emit --check` against the live files (read-only; its output says `would write` / `would remove`): a hand-edited block, a missing block, or a block that should be gone is drift. An absent or symlinked file, an over-cap selection and a damaged block in an inactive harness's file are not.
 
 ## Agent targets
 
