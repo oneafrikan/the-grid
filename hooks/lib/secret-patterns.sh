@@ -30,8 +30,9 @@
 # deliberately NOT documented in the README or named in a block message, so an agent
 # reading either does not learn how to silence the check.
 #
-# The table is the whole scope: no entropy scoring, no tokens split over lines, and an
-# unquoted assigned value made only of letters is not flagged (see _assigned_value).
+# The table is the whole scope: no entropy scoring, no tokens split over lines, and (in
+# default mode) an unquoted assigned value made only of letters is not flagged (see
+# _assigned_value; strict mode flags it).
 
 # --- the table: SECRET_NAMES[i] / SECRET_RES[i] / SECRET_BOUND[i] ----------------
 # SECRET_BOUND[i]=1 means capture group 1 of the regex is the boundary character,
@@ -111,14 +112,18 @@ secret_prefilter_re() {
 # nothing to tune. Known cost: a long base64-looking run (a 64-hex digest, for example) in
 # a handoff is quarantined; the operator reviews the quarantine directory.
 _STRICT_Q="'\""   # a single and a double quote
-STRICT_NAMES=(base64-run bearer-value password-assigned)
+STRICT_NAMES=(base64-run bearer-value url-password password-assigned)
 STRICT_RES=(
   '[A-Za-z0-9+/=]{64,}'
   '[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}'
+  # Any user:password@ in a URL. Wider than the table's db-url-password on purpose: the
+  # password may start with $ < { (a model can pick any first character) and may hold a
+  # colon (legal in RFC 3986). The cost is a quarantined handoff on a templated URL.
+  '://[^/@:[:space:]]+:[^/@[:space:]]{6,}@'
   # case-insensitive; the leading boundary keeps "bypass_cache: enabled" out
   "(^|[^A-Za-z0-9])(pass|pwd|passw(or)?d)[A-Za-z0-9_]*[[:space:]]*[:=][[:space:]]*[${_STRICT_Q}]?[^${_STRICT_Q}[:space:]]{6,}"
 )
-STRICT_BOUND=(0 0 1)
+STRICT_BOUND=(0 0 0 1)
 
 # Set by _secret_match: the matched pattern name and the matched text without its
 # boundary character (callers show only its first four characters).
@@ -131,11 +136,15 @@ SECRET_MATCH_TEXT=""
 #     quoted value    16+ characters right after the opening quote, the first not $ < {
 #                     (a template marker), no blank or quote inside;
 #     unquoted value  16+ characters, the first not $ < {, no ( or ), and at least one
-#                     digit.
+#                     digit. In strict mode (SECRET_STRICT=1) only the length and first-
+#                     character rules apply: a letters-only or parenthesised value counts.
 #   The digit and parenthesis rules keep ordinary code from blocking a commit the agent
 #   cannot clear: `has_token = agents_md.is_file() and ...`, `token = request.headers.get(`,
-#   `secret: ref+vault://...` each fail one of them. Known miss: an all-letter unquoted
-#   value. Chosen over entropy scoring: simple, and the false positives seen each fail one rule.
+#   `secret: ref+vault://...` each fail one of them. Known miss in default mode: an
+#   all-letter unquoted value. Chosen over entropy scoring: simple, and the false positives
+#   seen each fail one rule. Strict mode has no commit to block: a false positive there only
+#   quarantines a handoff for review, so it takes the miss out (the pre-merge strict scan
+#   did the same).
 _AV_RE_Q="^[\"']([^\"'[:space:]\$<{][^\"'[:space:]]{15,})"
 _AV_RE_U="^([^\"'[:space:]\$<{][^\"'[:space:]]{15,})"
 _AV_TOKEN=""
@@ -148,6 +157,7 @@ _assigned_value() {
     *)
       if [[ "$rest" =~ $_AV_RE_U ]]; then
         v="${BASH_REMATCH[1]}"
+        if [ "${SECRET_STRICT:-0}" = 1 ]; then _AV_TOKEN="$v"; return 0; fi
         case "$v" in *\(*|*\)*) return 1 ;; esac
         case "$v" in *[0-9]*) _AV_TOKEN="$v"; return 0 ;; esac
       fi ;;
@@ -231,10 +241,20 @@ _secret_match() {
 #   (a token is far shorter than the overlap), at most 64 pieces (256 KB). Longer text is
 #   reported as a finding named oversize-line: a scan that cannot finish must block, not
 #   pass. Sets the same globals as _secret_match.
+#   Blanks are the one unbounded part of a match (`key =<any number of blanks>value`), so
+#   a long line first has every run of whitespace squeezed to one space: a pad of any
+#   width can then no longer straddle a piece boundary. No row needs more than one blank
+#   where it allows blanks, so squeezing loses no detection. sed uses the same locale
+#   classes as the bash matcher, so a multibyte space is squeezed too. Oversize is judged
+#   on the ORIGINAL length: squeezing must not turn a line the scan could not have
+#   finished into a clean one.
 secret_match_long() {
-  local t="$1" len=${#1} off=0 pieces=0
+  local t="$1" len=${#1} off=0 pieces=0 tlen sq
   if [ "$len" -le 6000 ]; then _secret_match "$t"; return; fi
-  while [ "$off" -lt "$len" ]; do
+  # if sed fails the unsqueezed text is scanned (fail closed on size, never on emptiness)
+  if sq="$(printf '%s' "$t" | sed 's/[[:space:]][[:space:]]*/ /g')"; then t="$sq"; fi
+  tlen=${#t}
+  while [ "$off" -lt "$tlen" ]; do
     pieces=$((pieces + 1))
     if [ "$pieces" -gt 64 ]; then
       SECRET_MATCH_NAME="oversize-line"; SECRET_MATCH_TEXT=""; return 0
@@ -242,6 +262,7 @@ secret_match_long() {
     _secret_match "${t:$off:4352}" && return 0
     off=$((off + 4096))
   done
+  if [ "$len" -gt 262144 ]; then SECRET_MATCH_NAME="oversize-line"; SECRET_MATCH_TEXT=""; return 0; fi
   return 1
 }
 

@@ -505,7 +505,7 @@ home_watch() {
   local f
   for f in .bashrc .bash_profile .bash_login .profile .bash_logout .zshrc .zshenv .zprofile \
            .zlogin .zlogout .gitconfig .xprofile .npmrc .pam_environment .ssh/authorized_keys .ssh/authorized_keys2 \
-           .ssh/config .ssh/rc .ssh/environment .config/git/config .config/git/attributes .config/autostart .bashrc.d; do
+           .ssh/config .ssh/config.d .ssh/rc .ssh/environment .config/git/config .config/git/attributes .config/autostart .bashrc.d; do
     printf '%s\n' "$HOME/$f"
   done
   local c="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
