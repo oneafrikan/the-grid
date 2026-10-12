@@ -288,3 +288,152 @@ EOT
   [[ "$output" == *"E_YAML_PARSE"* ]] || false
   [[ "$output" != *"Traceback"* ]] || false
 }
+
+# ---- WP-050: project / role names, duplicates, private roles dir, paperclip leads -------
+
+# cfg_with_project <yaml scalar> — a one-agent config whose `project:` is the given YAML text
+cfg_with_project() {
+  CFG=$(mktemp -d)/c.yaml
+  printf 'project: %s\nslug: zz\nagents:\n  - role: morpheus\n' "$1" > "$CFG"
+}
+
+@test "an unsafe or malformed project name exits non-zero, in every mode, and writes nothing" {
+  # Nested, and with TMPDIR pointed inside the sandbox too (--check renders into a temp dir):
+  # an unvalidated ".." can then only reach this test's own tree, never /tmp itself.
+  local sb out bad t; sb=$(mktemp -d)
+  out="$sb/a/b/out"
+  mkdir -p "$out" "$sb/a/b/tmp"
+  # YAML scalars: parent/current dir, a path, upper case, a trailing newline (re.match's `$`
+  # would let it through), empty, a number, a list, over-long.
+  for bad in '..' '.' 'a/b' '../victim' 'Up' '"x\n"' '""' '123' '[a]' "$(printf 'a%.0s' $(seq 1 70))"; do
+    cfg_with_project "$bad"
+    for t in openclaw claude-code codex portable paperclip; do
+      TMPDIR="$sb/a/b/tmp" run "$PY" "$COMPOSE" "$CFG" --target "$t" --out "$out"
+      echo "project=$bad target=$t: $output"
+      [ "$status" -ne 0 ]
+      [[ "$output" != *"Traceback"* ]]
+    done
+    TMPDIR="$sb/a/b/tmp" run "$PY" "$COMPOSE" "$CFG" --check --out "$out"
+    [ "$status" -ne 0 ]
+    TMPDIR="$sb/a/b/tmp" run "$PY" "$COMPOSE" "$CFG" --dry-run --out "$out"
+    [ "$status" -ne 0 ]
+    rm -rf "$(dirname "$CFG")"
+  done
+  [ -z "$(ls -A "$out")" ]
+  [ -z "$(ls -A "$sb/a/b/tmp")" ]
+  [ "$(ls "$sb/a/b" | sort | tr '\n' ' ')" = "out tmp " ]
+  rm -rf "$sb"
+}
+
+@test "a valid kebab-case project still composes" {
+  local out; out=$(mktemp -d)
+  cfg_with_project 'my-proj1'
+  run "$PY" "$COMPOSE" "$CFG" --target claude-code --out "$out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -d "$out/my-proj1/_claude-code" ]
+  rm -rf "$out" "$(dirname "$CFG")"
+}
+
+@test "a trailing newline in slug is rejected like any other bad slug" {
+  local cfg; cfg=$(mktemp -d)/c.yaml
+  printf 'project: zz\nslug: "ab\\n"\nagents:\n  - role: morpheus\n' > "$cfg"
+  run "$PY" "$COMPOSE" "$cfg" --target claude-code --out "$(dirname "$cfg")/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"slug"* ]]
+  rm -rf "$(dirname "$cfg")"
+}
+
+@test "a role listed twice exits 1 naming both entries; so does a bare-name collision" {
+  local d; d=$(mktemp -d)
+  printf 'project: zz\nslug: zz\nagents:\n  - role: morpheus\n  - role: oracle\n  - role: morpheus\n' > "$d/dup.yaml"
+  run "$PY" "$COMPOSE" "$d/dup.yaml" --target claude-code --out "$d/out"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"agents[0]"* ]]
+  [[ "$output" == *"agents[2]"* ]]
+  [[ "$output" == *"morpheus"* ]]
+  [ ! -e "$d/out" ]
+  # Two different roles whose composed Claude Code names collide: 'zz-<foo>' bare vs slug-prefixed.
+  make_role foo
+  make_role zz-foo
+  printf 'project: zz\nslug: zz\nagents:\n  - role: foo\n  - role: zz-foo\n    bare: true\n' > "$d/clash.yaml"
+  run "$PY" "$COMPOSE" "$d/clash.yaml" --target claude-code --out "$d/out"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"zz-foo"* ]]
+  [[ "$output" == *"agents[0]"* ]]
+  [[ "$output" == *"agents[1]"* ]]
+  [ ! -e "$d/out" ]
+  rm -rf "$d"
+}
+
+@test "role names that are not a plain lower-case name give E_ROLE_NAME and are never looked up" {
+  local d bad; d=$(mktemp -d)
+  # A fully valid role one level down: a path-shaped name that reaches it must still be refused
+  # (PRIV/sub/good exists, so the old code found a directory there and went on to read it).
+  make_role good
+  mkdir -p "$PRIV/sub"
+  cp -R "$PRIV/good" "$PRIV/sub/good"
+  for bad in 'Up_Case' '"sp ace"' '"../x"' '"a/b"' '"sub/good"' '"x\n"' '"-lead"' '[a]' '12'; do
+    printf 'project: zz\nslug: zz\nagents:\n  - role: %s\n' "$bad" > "$d/c.yaml"
+    run "$PY" "$COMPOSE" "$d/c.yaml" --target claude-code --out "$d/out"
+    echo "role=$bad: $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"E_ROLE_NAME"* ]]
+    [[ "$output" != *"Traceback"* ]]
+  done
+  [ ! -e "$d/out" ]
+  rm -rf "$d"
+}
+
+@test "lint-roles: a role directory with an unsafe name is E_ROLE_NAME" {
+  make_role Up_Case
+  make_role "sp ace"
+  run "$PY" "$COMPOSE" --lint-roles
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_ROLE_NAME: Up_Case"* ]]
+  [[ "$output" == *"E_ROLE_NAME: sp ace"* ]]
+}
+
+@test "a non-empty GRID_PRIVATE_ROLES_DIR that is not a directory is a hard error" {
+  local d; d=$(mktemp -d)
+  printf 'x\n' > "$d/afile"
+  for p in "$d/nonexistent" "$d/afile"; do
+    GRID_PRIVATE_ROLES_DIR="$p" run "$PY" "$COMPOSE" --lint-roles
+    echo "$output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"GRID_PRIVATE_ROLES_DIR not found: $p"* ]]
+    [[ "$output" != *"Traceback"* ]]
+  done
+  rm -rf "$d"
+}
+
+@test "paperclip: a config without the apex or any lead exits with a clean message, not a KeyError" {
+  local d t; d=$(mktemp -d)
+  for t in finance-desk learning-desk core; do
+    run "$PY" "$COMPOSE" "$REPO_ROOT/agent-factory/examples/$t.yaml" --target paperclip --out "$d"
+    echo "$t: $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"paperclip needs"* ]]
+    [[ "$output" != *"KeyError"* ]]
+    [[ "$output" != *"Traceback"* ]]
+    run "$PY" "$COMPOSE" "$REPO_ROOT/agent-factory/examples/$t.yaml" --target paperclip --dry-run --out "$d"
+    [ "$status" -ne 0 ]
+    [[ "$output" != *"Traceback"* ]]
+  done
+  [ -z "$(ls -A "$d")" ]
+  rm -rf "$d"
+}
+
+@test "paperclip: a config with the apex and only some leads composes the leads it has" {
+  local d; d=$(mktemp -d)
+  printf 'project: zz\nslug: zz\nagents:\n  - role: ceo-orchestrator\n    delegates_to: [tech-lead]\n  - role: tech-lead\n    delegates_to: []\n' > "$d/c.yaml"
+  run "$PY" "$COMPOSE" "$d/c.yaml" --target paperclip --out "$d/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -f "$d/out/zz/_paperclip/manifest.json" ]
+  grep -q '"role": "tech-lead"' "$d/out/zz/_paperclip/manifest.json"
+  rm -rf "$d"
+}
