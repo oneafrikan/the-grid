@@ -11,4 +11,4 @@ paths:
 - Compare secrets, signatures and digests with `hmac.compare_digest()`; it avoids content-based short circuiting that enables timing analysis.
 - Create temporary files with `NamedTemporaryFile()`; `tempfile.mktemp()` returns a name another process can claim first.
 - Raise an exception to validate input or enforce access; `assert` emits no code under `python -O`.
-- Pass `filter="data"` to `TarFile.extractall()`; before Python 3.14 the default filter does not block unsafe archive members, and `data` still does not block everything.
+- Pass `filter="data"` to `TarFile.extractall()` (the `filter` parameter was added in Python 3.12); before Python 3.14 the default filter does not block unsafe archive members, and `data` still does not block everything.
