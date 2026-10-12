@@ -19,6 +19,10 @@ not a guarantee. Popularity (stars) is deliberately not given as a reason. Count
 after the allowlist; `high` must be 0 for the gate to pass. An allowlist `contains` must equal
 the whole (stripped) line, so a reviewed line cannot gain an appended payload; an entry may set
 `contains_substring: true` to keep a substring match (only for a line too long to quote).
+A NUL-bearing file in an executable class (script, hook, config, SKILL.md, agent .md) is always an
+`unscannable-file` finding and is also scanned with the NULs removed, even when it starts with an image,
+archive or font magic number (decision D48, fail closed: a magic number is trivially forged in front of
+a script). A genuine binary there is allowlisted by `sha256`.
 
 The audit is point-in-time: it runs when `wire.sh` runs and in the gate, never between
 them, and `wire.sh --check` does not re-audit. At wire time it covers the skill and agent
