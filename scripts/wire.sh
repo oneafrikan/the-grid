@@ -384,6 +384,9 @@ DENY_SKILLS=()     # -repo/skill subtractions
 WIRED_PROJECTS=()  # project:<name> entries
 WIRED_HARNESSES=() # harness:<name> entries (-harness:<name> removes one)
 WIRED_RULES=()     # rules:<pack> entries
+# Audit trail for the manifest written at the end: one row per decision. Declared here, not
+# after the audit, because the manifest LOAD itself records rows (missing / unknown entries).
+MANIFEST_ROWS=()
 DENY_RULES=()      # -rules:<pack> subtractions
 any_project_entry=0
 wire_all_repos=1
@@ -391,9 +394,23 @@ AUTO_HANDOFF=1     # hook:auto-handoff state: on by default, later manifest file
 
 # Parse one manifest file into the arrays above. Later files (the overlay) layer
 # on top of earlier ones (the baseline): additions append, subtractions deny.
+# manifest_note <entry or path> <missing|unknown> <message>: a manifest problem is announced on
+# stderr (once per run: silent under a dry run, whose child output is thrown away) and recorded
+# as a row `manifest TAB <entry> TAB - TAB <status> TAB <reason>` in .wired.manifest. It never
+# fails the wire: a typo should be visible, not fatal (D05 default; no opt-in flag).
+manifest_note() {
+  [ -n "${GRID_DRY_HOME:-}" ] || echo "wire: warning: $3" >&2
+  MANIFEST_ROWS+=("manifest	$1	-	$2	$3")
+}
+
+# $2 = "baseline" marks the first layer: it is expected to exist, so its absence is announced.
+# An absent per-host overlay is normal (no overlay means the baseline as-is) and stays silent.
 load_manifest() {
   local file="$1" line p tmp x
-  [ -f "$file" ] || return 0
+  if [ ! -f "$file" ]; then
+    [ "${2:-}" != baseline ] || manifest_note "$file" missing "baseline manifest not found: $file"
+    return 0
+  fi
   wire_all_repos=0                           # a manifest exists → no legacy wire-all
   while IFS= read -r line; do
     line="${line%%#*}"                       # strip trailing comment
@@ -438,9 +455,25 @@ load_manifest() {
 # GRID_BASELINE lets tests (and CI, which has no personal baseline) point the
 # first layer at another file, e.g. baseline-submodules.example.txt. Overlays
 # below still load from $GRID_DIR/machines/.
-load_manifest "${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}"
+load_manifest "${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}" baseline
 load_manifest "$GRID_DIR/machines/$GRID_HOST.txt"
 load_manifest "$GRID_DIR/machines/$GRID_HOST.local.txt"
+
+# A repo, repo/skill, -repo or -repo/skill entry that names no dir under repos/ is a typo (or a
+# submodule that was never added); it silently wired nothing. Announce each once. (Only the repo
+# part is checked: a per-skill name is matched against what discovery finds, later.)
+manifest_seen=" "
+check_manifest_entry() { # $1 = entry as written (deny entries keep their "-"), $2 = its repo part
+  case "$manifest_seen" in *" $1 "*) return 0 ;; esac
+  manifest_seen="$manifest_seen$1 "
+  [ -d "$GRID_DIR/repos/$2" ] || manifest_note "$1" unknown "manifest entry '$1' names no repo under repos/"
+}
+for me_entry in "${WIRED_REPOS[@]:-}" "${WIRED_SKILLS[@]:-}"; do
+  [ -z "$me_entry" ] || check_manifest_entry "$me_entry" "${me_entry%%/*}"
+done
+for me_entry in "${DENY_REPOS[@]:-}" "${DENY_SKILLS[@]:-}"; do
+  [ -z "$me_entry" ] || check_manifest_entry "-$me_entry" "${me_entry%%/*}"
+done
 
 # --- Active harnesses -----------------------------------------------------------
 # GRID_HARNESS (comma list), when non-empty, REPLACES the manifest's harness: set for
@@ -517,9 +550,6 @@ rule_is_denied() { local r; for r in "${DENY_RULES[@]:-}"; do [ "$r" = "$1" ] &&
 
 mkdir -p "$SKILLS_DIR" "$AGENTS_DIR"
 
-# Audit trail for the manifest written at the end: one row per decision.
-MANIFEST_ROWS=()
-
 # --- 0. Vet before touching any link -------------------------------------------
 # Skipped in exactly two cases: every dry run (GRID_DRY_HOME set: --check's child,
 # audit.sh --wired, baseline_wired.py, grid lock; silent, a dry run changes nothing), and
@@ -528,6 +558,9 @@ MANIFEST_ROWS=()
 # policy.yaml or python3 blocks like a finding does (exit 3), not a silent skip.
 # Runs BEFORE teardown: a blocked wire changes nothing, so a bad upstream bump
 # can never leave a machine half-wired. audit.sh exit 2 (broken policy) blocks too.
+# With no manifest file at all, every repos/ skill is selected (legacy wire-all): say so in a block.
+legacy_note=""
+[ "$wire_all_repos" -eq 0 ] || legacy_note=" No manifest file was found, so EVERY repos/ skill was selected: check GRID_BASELINE / baseline-submodules.txt."
 if [ -n "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_DRY_HOME:-}" ]; then
   echo "wire: GRID_SKIP_AUDIT is set: the audit is SKIPPED, wired content is not vetted" >&2
 fi
@@ -538,7 +571,7 @@ if [ -z "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_DRY_HOME:-}" ]; then
     if [ "${GRID_AUDIT:-}" = warn ]; then
       echo "wire: no policy.yaml to audit against; GRID_AUDIT=warn so wiring continues UNAUDITED" >&2
     else
-      echo "wire: BLOCKED by audit (nothing was changed): no policy.yaml to audit against. Restore it, or set GRID_SKIP_AUDIT=1 for a grid that has none." >&2
+      echo "wire: BLOCKED by audit (nothing was changed): no policy.yaml to audit against. Restore it, or set GRID_SKIP_AUDIT=1 for a grid that has none.$legacy_note" >&2
       exit 3
     fi
   elif ! command -v python3 >/dev/null 2>&1; then
@@ -547,14 +580,14 @@ if [ -z "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_DRY_HOME:-}" ]; then
     if [ "${GRID_AUDIT:-}" = warn ]; then
       echo "wire: python3 not found, so the audit cannot run; GRID_AUDIT=warn so wiring continues UNAUDITED" >&2
     else
-      echo "wire: BLOCKED by audit (nothing was changed): python3 not found, so the audit cannot run. Install python3, or set GRID_AUDIT=warn once." >&2
+      echo "wire: BLOCKED by audit (nothing was changed): python3 not found, so the audit cannot run. Install python3, or set GRID_AUDIT=warn once.$legacy_note" >&2
       exit 3
     fi
   elif ! bash "$(dirname "$0")/audit.sh" --wired --quiet; then
     if [ "${GRID_AUDIT:-}" = warn ]; then
       echo "wire: audit found high-severity issues; GRID_AUDIT=warn so wiring continues" >&2
     else
-      echo "wire: BLOCKED by audit (nothing was changed). Fix, allowlist in CURATION.md with a reason, or set GRID_AUDIT=warn once." >&2
+      echo "wire: BLOCKED by audit (nothing was changed). Fix, allowlist in CURATION.md with a reason, or set GRID_AUDIT=warn once.$legacy_note" >&2
       exit 3
     fi
   fi

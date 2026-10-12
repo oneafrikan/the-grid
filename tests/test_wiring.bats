@@ -484,3 +484,37 @@ links_of() {
   [ "$status" -ne 0 ]
   [ "$(links_of "$MOCK_SKILLS")" = "$before" ]     # all three back, none lost
 }
+
+# --- WP-008: a missing or mistyped manifest is announced, not silently "wire everything" ---
+
+@test "a missing GRID_BASELINE warns and writes a manifest row" {
+  GRID_BASELINE="$BATS_TEST_TMPDIR/nonexistent.txt" GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" \
+    run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"baseline manifest not found: $BATS_TEST_TMPDIR/nonexistent.txt"* ]]
+  grep -q "^manifest	$BATS_TEST_TMPDIR/nonexistent.txt	-	missing	" "$MOCK_GRID/.wired.manifest"
+}
+
+@test "an unknown repo entry warns and writes a manifest row" {
+  make_skill "$MOCK_GRID/repos/realrepo/skill-r" "skill-r"
+  printf 'realrepo\nnosuchrepo\nnosuchrepo2/skill-x\n-nosuchrepo3\n-nosuchrepo4/skill-y\n' \
+    > "$MOCK_GRID/baseline-submodules.txt"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/skill-r" ]
+  local e
+  for e in nosuchrepo nosuchrepo2/skill-x -nosuchrepo3 -nosuchrepo4/skill-y; do
+    [[ "$output" == *"manifest entry '$e' names no repo under repos/"* ]]
+    grep -q "^manifest	$e	-	unknown	" "$MOCK_GRID/.wired.manifest"
+  done
+  [[ "$output" != *"entry 'realrepo'"* ]]
+}
+
+@test "an unknown host with a baseline present does not warn" {
+  make_skill "$MOCK_GRID/repos/baserepo/skill-base" "skill-base"
+  printf 'baserepo\n' > "$MOCK_GRID/baseline-submodules.txt"
+  GRID_HOST=nosuchbox GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"manifest"* ]]
+  ! grep -q '^manifest	' "$MOCK_GRID/.wired.manifest"
+}
