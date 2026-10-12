@@ -30,8 +30,8 @@ only.
 
 | Hook | Event / matcher | Fails | What it does | Cost |
 |---|---|---|---|---|
-| `pre-bash-no-bypass` | PreToolUse / Bash | closed | Blocks `--no-verify` (any git subcommand), `git commit -n`, `-c core.hooksPath=`, `git config` writes of `core.hooksPath` or of an alias hiding `--no-verify`/`-n`, the `GIT_CONFIG_COUNT` / `GIT_CONFIG_PARAMETERS` / `GIT_CONFIG_KEY_*` / `HUSKY=0` assignments, and force pushes (`--force`, `--mirror`, `+refspec`, `-f` clusters). `--force-with-lease` is allowed. | 0 tokens; about 20 ms per Bash call; about 60 tokens only when it blocks |
-| `pre-bash-secret-scan` | PreToolUse / Bash | closed | On `git commit`: scans the added lines of the staged diff (and of the working tree when the commit names paths or uses `-a`/`-i`/`-o`) for secret patterns, and blocks sensitive file names. On `git add`: blocks sensitive file names. | 0 tokens; no work unless the command is `git commit` or `git add`; a short file:line list only when it blocks |
+| `pre-bash-no-bypass` | PreToolUse / Bash | closed | Blocks `--no-verify` (any git subcommand), `git commit -n`, `-c core.hooksPath=`, `git config` writes of `core.hooksPath` or of an alias hiding `--no-verify`/`-n`, the `GIT_CONFIG_COUNT` / `GIT_CONFIG_PARAMETERS` / `GIT_CONFIG_KEY_*` / `HUSKY=0` assignments, and force pushes (`--force`, `--mirror`, `+refspec`, `-f` clusters). `--force-with-lease` is allowed. | 0 tokens; about 50 ms per Bash call (measured on one Linux box); about 60 tokens only when it blocks |
+| `pre-bash-secret-scan` | PreToolUse / Bash | closed | On `git commit`: scans the added lines of the staged diff (and of the working tree when the commit names paths or uses `-a`/`-i`/`-o`) for secret patterns, and blocks sensitive file names. On `git add`: blocks sensitive file names. | 0 tokens; about 60 ms per Bash call (measured on one Linux box), more only for a `git commit` or `git add` that scans a diff; a short file:line list only when it blocks |
 | `instincts-capture-tool` | PostToolUse / Bash, Edit, Write, MultiEdit, NotebookEdit | open | Opt-in (`learning: on`). Appends one scrubbed line (tool, summarised input) to a local file. | 0 tokens; about 30 ms per tool call; prints nothing |
 | `instincts-capture-failure` | PostToolUseFailure / same tools | open | Opt-in. Same, for a failed tool call, with an error flag. | 0 tokens; about 30 ms per failed call; prints nothing |
 | `instincts-capture-prompt` | UserPromptSubmit | open | Opt-in. Appends one scrubbed, truncated line per prompt to a local file. | 0 tokens; about 30 ms per prompt; prints nothing |
@@ -56,9 +56,11 @@ settings.json  ->  bash ".../hooks/run.sh" <id>   ->   hooks/scripts/<id>.sh
                      (id check, kill switches)          (sources hooks/lib/*.sh)
 ```
 
-- `run.sh <id>` rejects an id that is not `[a-z0-9-]+` or has no `scripts/<id>.sh`
-  (exit 2), honours the kill switches, then runs the script with stdin passed through.
-  It needs no `jq`, so it behaves on a machine without it.
+- `run.sh <id>` rejects an id that is not `[a-z0-9-]+` (exit 2), honours the kill
+  switches, then rejects a well-formed id that has no `scripts/<id>.sh` (exit 2), then
+  runs the script with stdin passed through. The kill switches come before the
+  script check, so a stale settings entry for a removed hook can still be switched
+  off. It needs no `jq`, so it behaves on a machine without it.
 - `lib/common.sh` holds the `jq` guard, the log helper and the shell-command tokenizer
   (`grid_git_segments`) both guards use.
 - `lib/secret-patterns.sh` holds the one secret-pattern table.
@@ -220,7 +222,9 @@ ts=<UTC time> session=<id> action=<skip|spawn|done|error> reason=<token> [turns=
   therefore stops guarding, visibly. That is deliberate: bricking every Bash call on a
   machine without the-grid is worse.
 - The one failure inside our control that would otherwise turn a guard into a silent
-  no-op is a missing `jq`, so the guards exit 2 with an install hint when `jq` is absent.
+  no-op is a missing `jq`, so the guards exit 2 when `jq` is absent. That blocks every
+  Bash call (not only git) until `jq` is installed, or until `claude` is restarted with
+  `GRID_HOOKS=off`; the message says so.
 - Both guards exit 0 on input that is not JSON, a tool other than Bash, or no command.
 
 ## Adding a hook

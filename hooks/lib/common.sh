@@ -26,7 +26,10 @@ grid_require_jq() {
       echo "the-grid hook: jq not found, hook skipped (install jq to enable it)" >&2
       exit 0 ;;
     *)
-      echo "the-grid hook: jq not found, so this guard cannot inspect the command and blocks it. Install jq, or set GRID_HOOKS=off to disable the-grid hooks." >&2
+      # Fail closed (D36): the guard cannot tell a git call from any other, so it blocks
+      # every Bash call until jq is installed. Name both ways out: only a human can
+      # restart claude with the switch, so the message says what to do, not just why.
+      echo "the-grid hook: jq not found, so this guard cannot inspect the command and blocks every Bash call until jq is installed. Fix: install jq, or restart claude with GRID_HOOKS=off to disable the-grid hooks." >&2
       exit 2 ;;
   esac
 }
