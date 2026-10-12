@@ -530,3 +530,139 @@ gemini_roles() {
   echo "$output"
   [ "$status" -eq 0 ]
 }
+
+# ================================================================ WP-050: writer safety ====
+# Every writer vets its target dir, renders before it touches disk, swaps atomically and (for
+# the legacy default target) wipes only its own output. Author's own checks, not independent
+# verification.
+
+# snap DIR — path + content hash of every file under DIR, so "left alone" is checkable
+snap() {
+  (cd "$1" && find . -type f -o -type l | LC_ALL=C sort | xargs -r shasum)
+}
+
+@test "writers: every target composed into one --out, then the default target: siblings survive and --check passes" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" t
+  for t in claude-code codex opencode gemini-cli portable paperclip openclaw-native; do
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$TMP/out"
+    echo "$t: $output"
+    [ "$status" -eq 0 ]
+  done
+  # A leftover from a role that no longer exists: only the legacy wipe should remove it.
+  mkdir -p "$TMP/out/fx/gone-role"
+  printf 'x\n' > "$TMP/out/fx/gone-role/SOUL.md"
+  local before; before="$(snap "$TMP/out/fx" | grep -v '/gone-role/')"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  for t in claude-code codex opencode gemini-cli portable paperclip openclaw; do
+    [ -d "$TMP/out/fx/_$t" ]
+  done
+  [ ! -e "$TMP/out/fx/gone-role" ]
+  [ -f "$TMP/out/fx/agents.yaml" ]
+  # Every _<target> dir is byte-identical to before the default-target run.
+  [ "$(snap "$TMP/out/fx" | grep '/_')" = "$(printf '%s\n' "$before" | grep '/_')" ]
+  # --check on the default target ignores the sibling _* dirs ...
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --check --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  # ... but still sees drift in its own output.
+  printf 'x\n' > "$TMP/out/fx/stray.txt"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --check --out "$TMP/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"stray.txt"* ]]
+  # No swap leftovers anywhere.
+  [ -z "$(find "$TMP/out" -name '*.tmp' -o -name '*.old')" ]
+}
+
+@test "writers: an unsafe project name never reaches disk outside --out (every writer, called directly)" {
+  gemini_env
+  # Nested two levels under $TMP so that even an unguarded "..", "../.." or "." writer can only
+  # damage this test's own temp tree, never /tmp itself.
+  local base="$TMP/sb/deep"
+  mkdir -p "$base/victim/_claude-code" "$base/victim/_codex" "$base/out"
+  printf 'keep\n' > "$base/victim/_claude-code/keep.txt"
+  printf 'keep\n' > "$base/victim/_codex/keep.txt"
+  printf 'keep\n' > "$base/victim/keep.txt"
+  printf 'keep\n' > "$base/keep-top.txt"
+  run "$PY" "$BATS_TEST_DIRNAME/lib/writer_guard_probe.py" "$REPO_ROOT/agent-factory" \
+    "$REPO_ROOT/tests/fixtures/compose/fixture.yaml" "$base/out" "$base/victim"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$base/victim/_claude-code/keep.txt")" = keep ]
+  [ "$(cat "$base/victim/_codex/keep.txt")" = keep ]
+  [ "$(cat "$base/victim/keep.txt")" = keep ]
+  [ "$(cat "$base/keep-top.txt")" = keep ]
+  [ -d "$base/out" ]
+}
+
+@test "writers: a write-phase failure leaves the prior tree intact, with a clean error" {
+  [ "$(id -u)" -ne 0 ] || skip "root ignores directory permissions"
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" t
+  for t in claude-code codex portable openclaw; do
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$TMP/out"
+    [ "$status" -eq 0 ]
+  done
+  local before; before="$(snap "$TMP/out")"
+  chmod a-w "$TMP/out/fx"
+  for t in claude-code codex portable openclaw; do
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$TMP/out"
+    echo "$t: $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"error:"* ]]
+    [[ "$output" != *"Traceback"* ]]
+  done
+  chmod u+w "$TMP/out/fx"
+  [ "$before" = "$(snap "$TMP/out")" ]
+  [ -z "$(find "$TMP/out" -name '*.tmp' -o -name '*.old')" ]
+}
+
+@test "writers: a symlinked <out>/<name> or _<target> is refused with a clean error and never written through" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" t
+  mkdir -p "$TMP/real" "$TMP/out"
+  printf 'keep\n' > "$TMP/real/keep.txt"
+  ln -s "$TMP/real" "$TMP/out/fx"
+  for t in claude-code codex portable paperclip openclaw-native openclaw; do
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$TMP/out"
+    echo "$t: $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"symlink"* ]]
+    [[ "$output" != *"Traceback"* ]]
+  done
+  [ "$(ls "$TMP/real")" = "keep.txt" ]
+  rm "$TMP/out/fx"
+  mkdir -p "$TMP/out/fx"
+  ln -s "$TMP/real" "$TMP/out/fx/_claude-code"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$TMP/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"symlink"* ]]
+  [ "$(ls "$TMP/real")" = "keep.txt" ]
+  # --check must not call a symlinked tree "up to date".
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --check --out "$TMP/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"up to date"* ]]
+  [[ "$output" != *"Traceback"* ]]
+}
+
+@test "--check sees a symlink and an empty dir inside a composed tree" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target codex --out "$TMP/out"
+  [ "$status" -eq 0 ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target codex --check --out "$TMP/out"
+  [ "$status" -eq 0 ]
+  ln -s /etc/hostname "$TMP/out/fx/_codex/agents/link.toml"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target codex --check --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"link.toml"* ]]
+  rm "$TMP/out/fx/_codex/agents/link.toml"
+  mkdir "$TMP/out/fx/_codex/agents/emptydir"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target codex --check --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"emptydir"* ]]
+}

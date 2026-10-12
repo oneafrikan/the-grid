@@ -50,9 +50,10 @@ import os
 import re
 import shutil
 import socket
+import stat
 import sys
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 try:
     import yaml
@@ -87,7 +88,23 @@ USER_CONFIG_PATH = Path(os.environ["GRID_USER_CONFIG"]) if os.environ.get("GRID_
 _PRIVATE_ROLES_DIR = os.environ.get("GRID_PRIVATE_ROLES_DIR")
 if _PRIVATE_ROLES_DIR is None and (Path.home() / ".the-grid-private" / "roles").is_dir():
     _PRIVATE_ROLES_DIR = str(Path.home() / ".the-grid-private" / "roles")
+# An explicitly set, non-empty path that is not a directory is a typo: ignoring it would silently
+# compose without the private roles (same rule as GRID_USER_CONFIG). The ~/.the-grid-private
+# fallback is only chosen when the dir exists, so only the env var can trip this.
+if _PRIVATE_ROLES_DIR and not Path(_PRIVATE_ROLES_DIR).expanduser().is_dir():
+    sys.exit(f"GRID_PRIVATE_ROLES_DIR not found: {_PRIVATE_ROLES_DIR}")
 PRIVATE_ROLES_DIR = Path(_PRIVATE_ROLES_DIR).expanduser().resolve() if _PRIVATE_ROLES_DIR else None
+
+# Names that become path components of generated output. fullmatch, not match: `$` in a
+# pattern also accepts a trailing newline. The length cap keeps a name inside NAME_MAX
+# once a slug prefix and suffix are added.
+PROJECT_RE = re.compile(r"[a-z][a-z0-9-]{0,63}")
+ROLE_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+TARGET_SUB_RE = re.compile(r"_[a-z][a-z-]*")   # the _<target> dir under a project
+
+
+def valid_role_name(role) -> bool:
+    return isinstance(role, str) and ROLE_NAME_RE.fullmatch(role) is not None
 
 
 def role_dir(role: str) -> Path:
@@ -302,8 +319,14 @@ def load_config(path: Path) -> dict:
         if key not in config:
             errors.append(f"missing required top-level key: {key}")
 
+    # `project` is a path component of every writer's output (and is rmtree'd): it must be a
+    # plain kebab-case name, never '..', '.', a path or a non-string.
+    if "project" in config and not (
+            isinstance(config["project"], str) and PROJECT_RE.fullmatch(config["project"])):
+        errors.append("project must be lowercase kebab-case, at most 64 chars (e.g. 'full-team')")
+
     slug = config.get("slug")
-    if slug is not None and not re.match(r'^[a-z][a-z0-9-]+$', str(slug)):
+    if slug is not None and not re.fullmatch(r'[a-z][a-z0-9-]+', str(slug)):
         errors.append("slug must be lowercase kebab-case (e.g. 'full-team')")
     if not isinstance(config.get("bare_names", False), bool):
         errors.append("bare_names must be true/false")
@@ -313,6 +336,8 @@ def load_config(path: Path) -> dict:
         errors.append("`agents` must be a list")
         agents = None
 
+    seen_role: dict[str, int] = {}   # role -> first agents[] index
+    seen_out: dict[str, int] = {}    # composed Claude Code name -> first agents[] index
     for i, agent in enumerate(agents or []):
         where = f"agents[{i}]"
         if not isinstance(agent, dict):
@@ -324,6 +349,19 @@ def load_config(path: Path) -> dict:
             errors.append(f"{where}: missing required key: role")
         else:
             errors.extend(f"{where}: {p}" for p in lint_role(role))
+            # Two entries that write the same output silently overwrite each other (and the
+            # success counts then report the input, not the files).
+            if valid_role_name(role) and isinstance(agent.get("bare", False), bool):
+                if role in seen_role:
+                    errors.append(f"{where}: role '{role}' is already listed at agents[{seen_role[role]}]")
+                else:
+                    seen_role[role] = i
+                    out_name = slugged(agent_slug(agent, cc_slug(config, str(config.get("project")))), role)
+                    if out_name in seen_out:
+                        errors.append(f"{where}: composed name '{out_name}' collides with "
+                                      f"agents[{seen_out[out_name]}]")
+                    else:
+                        seen_out[out_name] = i
 
         if not isinstance(agent.get("bare", False), bool):
             errors.append(f"{where}: bare must be true/false")
@@ -341,7 +379,9 @@ def load_config(path: Path) -> dict:
     # the two stay in lockstep so a roster can never silently render empty (the
     # very drift this mechanism exists to prevent), and that every delegate is a
     # role actually present on this team.
-    team_roles = {a.get("role") for a in (agents or []) if isinstance(a, dict)}
+    # str only: a malformed (list/number) role is already reported above and must not crash here.
+    team_roles = {a.get("role") for a in (agents or [])
+                  if isinstance(a, dict) and isinstance(a.get("role"), str)}
     for i, agent in enumerate(agents or []):
         if not isinstance(agent, dict):
             continue
@@ -353,10 +393,10 @@ def load_config(path: Path) -> dict:
             errors.append(f"{where}: delegates_to must be a list")
             delegates = None
         for d in delegates or []:
-            if d not in team_roles:
+            if not isinstance(d, str) or d not in team_roles:
                 errors.append(f"{where}: delegates_to '{d}' is not a role on this team")
 
-        if role and role_dir(role).is_dir():
+        if valid_role_name(role) and role_dir(role).is_dir():
             agents_md = role_dir(role) / "AGENTS.md"
             has_token = agents_md.is_file() and ROSTER_TOKEN in _read(agents_md)
             if has_token and delegates is None:
@@ -821,6 +861,129 @@ def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
     return {"SKILL.md": _frontmatter(fields) + "\n" + body}
 
 
+# ── writer safety ─────────────────────────────────────────────────────────────
+# Every writer replaces a generated dir. vet_target() decides WHERE it may write (a plain
+# project name, inside --out, never a symlink); install_tree()/install_project() decide HOW
+# (render everything first, write into <target>.tmp, then swap), so a failure mid-write
+# leaves the previous tree untouched and a refusal never prints a traceback.
+
+def _remove(path: Path, strict: bool = True) -> None:
+    """Delete a file, symlink (the link only) or dir; absent is fine. strict=False swallows errors."""
+    try:
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+    except OSError:
+        if strict:
+            raise
+
+
+def vet_target(out_dir: Path, name, sub: str | None = None) -> Path:
+    """The dir a writer will replace: <out_dir>/<name>[/<sub>]. Exits (no traceback) unless the
+    name is a plain project name, neither the project dir nor the target is a symlink or a
+    non-dir, and the resolved target lies strictly inside the resolved out_dir."""
+    if not (isinstance(name, str) and PROJECT_RE.fullmatch(name)):
+        sys.exit(f"error: refusing to write: project name {name!r} is not lowercase kebab-case")
+    if sub is not None and not TARGET_SUB_RE.fullmatch(sub):
+        sys.exit(f"error: refusing to write: target dir {sub!r} is not of the form _<target>")
+    project = out_dir / name
+    target = project / sub if sub else project
+    for p in dict.fromkeys((project, target)):
+        if p.is_symlink():
+            sys.exit(f"error: refusing to write: {p} is a symlink, not a dir")
+        if os.path.lexists(p) and not p.is_dir():
+            sys.exit(f"error: refusing to write: {p} exists and is not a dir")
+    root, resolved = out_dir.resolve(), target.resolve()
+    if resolved == root or root not in resolved.parents:
+        sys.exit(f"error: refusing to write: {target} resolves outside {out_dir}")
+    return target
+
+
+def _materialise(root: Path, files: dict[str, str], dirs=()) -> None:
+    """Write {relative path: text} (plus empty `dirs`) under root. Relative paths are checked
+    to stay inside root, so a role name can never escape the dir being built."""
+    for rel in [*files, *dirs]:
+        parts = PurePosixPath(rel).parts
+        if not parts or PurePosixPath(rel).is_absolute() or any(x in ("", ".", "..") for x in parts):
+            sys.exit(f"error: refusing to write {rel!r}: path escapes {root}")
+    for rel in dirs:
+        (root / rel).mkdir(parents=True, exist_ok=True)
+    for rel, contents in files.items():
+        f = root / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(contents, encoding="utf-8")
+
+
+def install_tree(target: Path, files: dict[str, str], dirs=()) -> None:
+    """Replace `target` with the rendered tree: build in <target>.tmp, rename the old tree to
+    <target>.old, rename tmp into place, delete old. os.replace cannot replace a non-empty
+    dir, hence the two renames. Any failure restores the old tree and exits with an error."""
+    tmp = target.with_name(target.name + ".tmp")
+    old = target.with_name(target.name + ".old")
+    try:
+        for leftover in (tmp, old):          # a crashed earlier run's debris is ours to clear
+            _remove(leftover)
+        tmp.mkdir(parents=True)
+        _materialise(tmp, files, dirs)
+        if os.path.lexists(target):
+            os.rename(target, old)
+        try:
+            os.rename(tmp, target)
+        except OSError:
+            if os.path.lexists(old):
+                os.rename(old, target)
+            raise
+        _remove(old, strict=False)
+    except OSError as exc:
+        _remove(tmp, strict=False)
+        sys.exit(f"error: could not write {target}: {exc}")
+    except BaseException:
+        _remove(tmp, strict=False)
+        raise
+
+
+def install_project(project_dir: Path, files: dict[str, str]) -> None:
+    """Legacy (default target) writer: replace only this target's own output, i.e. every
+    top-level entry of the project dir NOT starting with '_'. The _<target> dirs that the other
+    targets write (and wire.sh symlinks) are never touched. New entries are built in
+    <project>.tmp first; old own-output is moved to <project>.old and put back on failure."""
+    tmp = project_dir.with_name(project_dir.name + ".tmp")
+    old = project_dir.with_name(project_dir.name + ".old")
+    moved_old: list[str] = []
+    moved_new: list[str] = []
+    try:
+        for leftover in (tmp, old):
+            _remove(leftover)
+        tmp.mkdir(parents=True)
+        _materialise(tmp, files)
+        old.mkdir()
+        project_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            for entry in sorted(os.listdir(project_dir)):
+                if not entry.startswith("_"):
+                    os.rename(project_dir / entry, old / entry)
+                    moved_old.append(entry)
+            for entry in sorted(os.listdir(tmp)):
+                os.rename(tmp / entry, project_dir / entry)
+                moved_new.append(entry)
+        except OSError:
+            for entry in moved_new:                  # undo: new entries out, old entries back
+                _remove(project_dir / entry, strict=False)
+            for entry in moved_old:
+                os.rename(old / entry, project_dir / entry)
+            raise
+        _remove(tmp, strict=False)
+        _remove(old, strict=False)
+    except OSError as exc:
+        _remove(tmp, strict=False)
+        _remove(old, strict=False)
+        sys.exit(f"error: could not write {project_dir}: {exc}")
+    except BaseException:
+        _remove(tmp, strict=False)
+        raise
+
+
 def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
     """Emit the team as Claude Code artifacts under <out_dir>/<name>/_claude-code/.
 
@@ -830,26 +993,20 @@ def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
     Slug defaults to the project name when not set in the config.
     """
     slug = cc_slug(config, name)
-    cc_dir = (out_dir / name / "_claude-code")
-    if cc_dir.is_symlink():
-        raise ValueError(f"refusing to write: {cc_dir} is a symlink, not a dir")
-    if cc_dir.exists():
-        shutil.rmtree(cc_dir)
-    (cc_dir / "skills").mkdir(parents=True)
-    (cc_dir / "agents").mkdir(parents=True)
-
+    cc_dir = vet_target(out_dir, name, "_claude-code")
+    # Render everything first; nothing on disk changes until install_tree swaps it in.
+    files: dict[str, str] = {}
     for agent in config["agents"]:
         role = agent["role"]
         aslug = agent_slug(agent, slug)
         slugged_name = slugged(aslug, role)
         if is_orchestrator(role):
-            skill_dir = cc_dir / "skills" / slugged_name
-            skill_dir.mkdir()
             for relpath, contents in emit_cc_skill(agent, aslug).items():
-                (skill_dir / relpath).write_text(contents, encoding="utf-8")
+                files[f"skills/{slugged_name}/{relpath}"] = contents
         else:
             filename, contents = emit_cc_subagent(agent, aslug)
-            (cc_dir / "agents" / filename).write_text(contents, encoding="utf-8")
+            files[f"agents/{filename}"] = contents
+    install_tree(cc_dir, files, dirs=("skills", "agents"))
     return cc_dir
 
 
@@ -870,21 +1027,16 @@ def write_harness_agents(target: str, name: str, config: dict, out_dir: Path) ->
     """
     emit = AGENT_TARGETS[target]
     slug = cc_slug(config, name)
-    target_dir = out_dir / name / f"_{target}"
-    if target_dir.is_symlink():
-        raise ValueError(f"refusing to write: {target_dir} is a symlink, not a dir")
-    # Run every emit BEFORE the wipe so an emitter error leaves the old tree untouched
-    # and writes nothing.
+    target_dir = vet_target(out_dir, name, f"_{target}")
+    # Run every emit BEFORE anything is touched so an emitter error leaves the old tree
+    # untouched and writes nothing.
     rendered = [
         emit(agent, agent_slug(agent, slug))
         for agent in config["agents"]
         if not is_orchestrator(agent["role"])
     ]
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
-    (target_dir / "agents").mkdir(parents=True)
-    for filename, contents in rendered:
-        (target_dir / "agents" / filename).write_text(contents, encoding="utf-8")
+    install_tree(target_dir, {f"agents/{filename}": contents for filename, contents in rendered},
+                 dirs=("agents",))
     return target_dir
 
 
@@ -1045,10 +1197,8 @@ def write_portable(name: str, config: dict, out_dir: Path) -> Path:
     Each file is `# <Title>` + blank line + render_lean_body(agent, ""). Idempotent: the
     _portable dir is wiped and rewritten each run, so a removed role leaves no orphan.
     """
-    target_dir = out_dir / name / "_portable"
-    if target_dir.is_symlink():
-        raise ValueError(f"refusing to write: {target_dir} is a symlink, not a dir")
-    # Render everything BEFORE the wipe so a render error leaves the old tree untouched.
+    target_dir = vet_target(out_dir, name, "_portable")
+    # Render everything BEFORE anything is touched so a render error leaves the old tree untouched.
     # The portable export is public output: it must not name the private repo or its layout.
     # Role sources keep the real path (the agents need it); only this export swaps in a
     # placeholder the reader can map to their own private directory.
@@ -1058,11 +1208,7 @@ def write_portable(name: str, config: dict, out_dir: Path) -> Path:
           + render_lean_body(agent, "")).replace("~/.the-grid-private/", "<private-dir>/"))
         for agent in config["agents"]
     ]
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
-    target_dir.mkdir(parents=True)
-    for filename, contents in rendered:
-        (target_dir / filename).write_text(contents, encoding="utf-8")
+    install_tree(target_dir, dict(rendered))
     return target_dir
 
 
@@ -1091,8 +1237,14 @@ def paperclip_roster(config: dict) -> list[dict]:
     leaf role like product-manager). Returns the agent dicts in their original
     compose-config order (not yet topological — see topological_roster)."""
     by_role = {a["role"]: a for a in config["agents"] if isinstance(a, dict) and a.get("role")}
+    # A config without the apex, or with none of the leads, has no Paperclip roster: say so
+    # instead of a KeyError. A lead that is merely absent is skipped.
+    leads = [lead for lead in PAPERCLIP_LEAD_ROLES if lead in by_role]
+    if PAPERCLIP_APEX_ROLE not in by_role or not leads:
+        sys.exit(f"error: paperclip needs role {PAPERCLIP_APEX_ROLE} and at least one of "
+                 f"{', '.join(PAPERCLIP_LEAD_ROLES)} in this config")
     roster_roles = {PAPERCLIP_APEX_ROLE}
-    for lead in PAPERCLIP_LEAD_ROLES:
+    for lead in leads:
         roster_roles.add(lead)
         roster_roles.update(by_role[lead].get("delegates_to") or [])
     return [a for a in config["agents"] if a.get("role") in roster_roles]
@@ -1182,17 +1334,10 @@ def write_paperclip(name: str, config: dict, out_dir: Path) -> Path:
     parent_map = paperclip_parent_map(config)
     ordered = topological_roster(roster, parent_map)
 
-    pc_dir = out_dir / name / "_paperclip"
-    if pc_dir.is_symlink():
-        raise ValueError(f"refusing to write: {pc_dir} is a symlink, not a dir")
-    if pc_dir.exists():
-        shutil.rmtree(pc_dir)
-    pc_dir.mkdir(parents=True)
-
+    pc_dir = vet_target(out_dir, name, "_paperclip")
     manifest = [paperclip_payload(agent, parent_map, slug) for agent in ordered]
-    (pc_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    install_tree(pc_dir, {
+        "manifest.json": json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"})
     return pc_dir
 
 
@@ -1280,19 +1425,12 @@ def write_openclaw(name: str, config: dict, out_dir: Path) -> Path:
     slug = config.get("slug") or name
     by_role = {a["role"]: a for a in config["agents"] if isinstance(a, dict) and a.get("role")}
 
-    oc_dir = out_dir / name / "_openclaw"
-    if oc_dir.is_symlink():
-        raise ValueError(f"refusing to write: {oc_dir} is a symlink, not a dir")
-    if oc_dir.exists():
-        shutil.rmtree(oc_dir)
-    oc_dir.mkdir(parents=True)
-
+    oc_dir = vet_target(out_dir, name, "_openclaw")
+    files: dict[str, str] = {}
     for role in openclaw_roster_roles(config):
-        role_dir = oc_dir / role
-        role_dir.mkdir()
         for filename, contents in render_openclaw_role(by_role[role], slug).items():
-            (role_dir / filename).write_text(contents, encoding="utf-8")
-
+            files[f"{role}/{filename}"] = contents
+    install_tree(oc_dir, files)
     return oc_dir
 
 
@@ -1301,25 +1439,19 @@ def write_openclaw(name: str, config: dict, out_dir: Path) -> Path:
 def write_project(name: str, config: dict, out_dir: Path) -> Path:
     """Write the rendered team under <out_dir>/<name>/. Idempotent.
 
-    The project dir is generated output, so it is wiped and rewritten each run —
-    the result reflects the config exactly, and a re-run with an unchanged config
-    produces byte-identical files. The wipe is guarded to a real directory under
-    out_dir (never a symlink) for safety.
+    This target's own output (every top-level entry not starting with '_') is replaced each
+    run — the result reflects the config exactly, and a re-run with an unchanged config
+    produces byte-identical files. The _<target> dirs the other targets write beside it
+    (and that wire.sh symlinks into ~/.claude) are never touched. The target is vetted to
+    a real dir under out_dir (never a symlink) first; see vet_target / install_project.
     """
-    project_dir = out_dir / name
-    if project_dir.is_symlink():
-        raise ValueError(f"refusing to write: {project_dir} is a symlink, not a dir")
-    if project_dir.exists():
-        shutil.rmtree(project_dir)
-    project_dir.mkdir(parents=True)
-
+    project_dir = vet_target(out_dir, name)
+    files: dict[str, str] = {}
     for agent in config["agents"]:
-        agent_dir = project_dir / agent["role"]
-        agent_dir.mkdir()
         for filename, contents in render_agent(agent).items():
-            (agent_dir / filename).write_text(contents, encoding="utf-8")
-
-    (project_dir / "agents.yaml").write_text(render_agents_yaml(config), encoding="utf-8")
+            files[f"{agent['role']}/{filename}"] = contents
+    files["agents.yaml"] = render_agents_yaml(config)
+    install_project(project_dir, files)
     return project_dir
 
 
@@ -1335,6 +1467,12 @@ ROLE_MODELS = {"opus", "sonnet", "haiku", "fable"}
 
 def lint_role(role: str) -> list[str]:
     """All problems with one role's source files, as 'CODE: role/file: detail'."""
+    # Checked before any path is built: a name like '../x' must never be looked up, and a name the
+    # harnesses reject (upper case, spaces) must not compose and fail later.
+    if not valid_role_name(role):
+        shown = role if isinstance(role, str) and role.isprintable() else repr(role)
+        return [f"E_ROLE_NAME: {shown}: role names are lowercase letters, digits, '-' and '_', "
+                "start with a letter or digit, at most 64 chars"]
     rdir = role_dir(role)
     if not rdir.is_dir():
         return [f"E_ROLE_MISSING: {role}: no directory at {rdir}"]
@@ -1536,16 +1674,46 @@ def all_roles() -> list[str]:
 
 
 # ── drift check ───────────────────────────────────────────────────────────────
-def _tree(root: Path) -> dict[str, bytes]:
-    """{relative path: bytes} for every file under root ({} if root is absent)."""
+def _tree(root: Path, skip_top: str = "") -> dict[str, bytes]:
+    """{relative path: bytes} for everything under root ({} if root is absent).
+
+    Beyond regular files: a symlink is recorded as `symlink -> <target>` (never followed), an
+    empty dir as `<rel>/` and any other special file as a marker, so diff_trees can report them;
+    a symlinked root is a single `.` entry. `skip_top` drops top-level entries with that prefix
+    (the legacy target ignores its siblings' `_<target>` dirs).
+    """
+    if root.is_symlink():
+        return {".": b"symlink -> " + os.readlink(root).encode()}
     if not root.is_dir():
         return {}
-    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+    out: dict[str, bytes] = {}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        here = Path(dirpath)
+        if here == root and skip_top:
+            dirnames[:] = [d for d in dirnames if not d.startswith(skip_top)]
+            filenames = [f for f in filenames if not f.startswith(skip_top)]
+        dirnames.sort()
+        if here != root and not dirnames and not filenames:
+            out[f"{here.relative_to(root)}/"] = b"empty dir"
+        for d in dirnames:                       # a symlinked dir is listed here, not descended
+            if (here / d).is_symlink():
+                out[str((here / d).relative_to(root))] = b"symlink -> " + os.readlink(here / d).encode()
+        for f in sorted(filenames):
+            path = here / f
+            rel = str(path.relative_to(root))
+            mode = os.lstat(path).st_mode
+            if stat.S_ISLNK(mode):
+                out[rel] = b"symlink -> " + os.readlink(path).encode()
+            elif stat.S_ISREG(mode):
+                out[rel] = path.read_bytes()
+            else:
+                out[rel] = b"special file"
+    return out
 
 
-def diff_trees(expected: Path, actual: Path) -> list[str]:
+def diff_trees(expected: Path, actual: Path, skip_top: str = "") -> list[str]:
     """Human-readable differences between a freshly rendered tree and the one on disk."""
-    exp, act = _tree(expected), _tree(actual)
+    exp, act = _tree(expected), _tree(actual, skip_top)
     problems = [f"missing   {rel}" for rel in sorted(exp.keys() - act.keys())]
     problems += [f"unexpected {rel}" for rel in sorted(act.keys() - exp.keys())]
     problems += [f"stale     {rel}" for rel in sorted(exp.keys() & act.keys()) if exp[rel] != act[rel]]
@@ -1616,7 +1784,8 @@ def main() -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rendered = writers[args.target](name, config, Path(tmp))
             on_disk = args.out / rendered.relative_to(tmp)
-            problems = diff_trees(rendered, on_disk)
+            # The legacy target shares <project>/ with its siblings' _<target> dirs: ignore them.
+            problems = diff_trees(rendered, on_disk, skip_top="_" if args.target == "openclaw" else "")
         if problems:
             print(f"STALE '{name}' ({args.target}): {on_disk}", file=sys.stderr)
             for line in problems:
@@ -1680,7 +1849,9 @@ def main() -> None:
     if args.target == "claude-code":
         cc_dir = write_claude_code(name, config, args.out)
         slug = cc_slug(config, name)
-        print(f"composed '{name}' (claude-code): {len(agents)} agents -> {cc_dir}")
+        # Counts come from what was written, not from the input list.
+        n_cc = sum(len(os.listdir(cc_dir / sub)) for sub in ("skills", "agents"))
+        print(f"composed '{name}' (claude-code): {n_cc} agents -> {cc_dir}")
         for agent in agents:
             role = agent["role"]
             slugged_name = slugged(agent_slug(agent, slug), role)
@@ -1696,7 +1867,7 @@ def main() -> None:
 
     if args.target == "portable":
         pp_dir = write_portable(name, config, args.out)
-        print(f"composed '{name}' (portable): {len(agents)} personas -> {pp_dir}")
+        print(f"composed '{name}' (portable): {len(os.listdir(pp_dir))} personas -> {pp_dir}")
         return
 
     if args.target == "paperclip":
@@ -1721,7 +1892,8 @@ def main() -> None:
         return
 
     project_dir = write_project(name, config, args.out)
-    print(f"composed '{name}': {len(agents)} agents -> {project_dir}")
+    n_roles = sum(1 for e in os.listdir(project_dir) if (project_dir / e).is_dir() and not e.startswith("_"))
+    print(f"composed '{name}': {n_roles} agents -> {project_dir}")
     for agent in agents:
         print(f"  - {agent['role']} ({resolve_model(agent)})  skills: {', '.join(agent_skills(agent))}")
 

@@ -68,7 +68,9 @@ Then compose a team from a config. `compose.py` is a **multi-target compiler** â
 one 5-file source, a different artifact shape per `--target`:
 
 ```bash
-# OpenClaw target (default): 5 identity files + agents.yaml per agent
+# OpenClaw target (default, legacy): 5 identity files + agents.yaml per agent.
+# It replaces only its own output in projects/<name>/ (the role dirs and agents.yaml);
+# the _<target> dirs below, which wire.sh links into ~/.claude, are left alone.
 .venv/bin/python compose.py examples/grid.yaml
 .venv/bin/python compose.py examples/grid.yaml --dry-run     # report only
 
@@ -82,7 +84,8 @@ one 5-file source, a different artifact shape per `--target`:
 ```
 
 Output is regenerable and idempotent: re-running with an unchanged config
-produces byte-identical files (the output dir is wiped and rewritten each run).
+produces byte-identical files (each target's output dir is rebuilt in a `.tmp` dir and swapped
+into place, so a failed run leaves the previous output intact).
 `projects/` output is gitignored â€” the compose config is the tracked artefact.
 
 > **On a machine that just pulled new source, recompose before wiring.** A `git
