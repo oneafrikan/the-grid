@@ -15,11 +15,14 @@ bats_require_minimum_version 1.5.0   # `run -127` below
 load helpers/setup
 load helpers/hooks
 
-# path_without walks every executable on PATH (about 40 s here), so build the
-# jq-less PATH directory ONCE per file and share it; bats removes BATS_FILE_TMPDIR.
-setup_file() {
-  NOJQ_DIR="$(TMPDIR="$BATS_FILE_TMPDIR" path_without jq)"
-  export NOJQ_DIR
+# path_without walks every executable on PATH (about 40 s here, minutes on a busy box),
+# so the jq-less PATH directory is built lazily, by the first test that needs it, and
+# shared through BATS_FILE_TMPDIR (bats removes it). A filtered run that never needs it
+# no longer pays for it.
+nojq_dir() {
+  local f="$BATS_FILE_TMPDIR/nojq.path"
+  [ -s "$f" ] || TMPDIR="$BATS_FILE_TMPDIR" path_without jq > "$f"
+  cat "$f"
 }
 
 setup() {
@@ -185,7 +188,7 @@ grid_require_jq open
 cat > /dev/null
 exit 0
 STUB
-  noj="$NOJQ_DIR"
+  noj="$(nojq_dir)"
   payload="$(sessionend_payload s1 /tmp/transcript.jsonl /tmp/project)"
   PATH="$noj" run bash -c 'printf "%s" "$1" | bash "$2/hooks/run.sh" auto-handoff 2>&1' _ "$payload" "$T"
   [ "$status" -eq 0 ]
@@ -337,7 +340,7 @@ STUB
 }
 
 @test "no-bypass: jq missing fails closed and names jq" {
-  PATH="$NOJQ_DIR" run_hook pre-bash-no-bypass "$(hook_payload 'git status')"
+  PATH="$(nojq_dir)" run_hook pre-bash-no-bypass "$(hook_payload 'git status')"
   [ "$status" -eq 2 ]
   [[ "$output" == *"jq"* ]] || false
   # WP-019: the message names what the operator can do (install, or restart with the switch)
@@ -935,7 +938,7 @@ STUB
 }
 
 @test "secret: jq missing fails closed and names jq" {
-  PATH="$NOJQ_DIR" run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x')"
+  PATH="$(nojq_dir)" run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x')"
   [ "$status" -eq 2 ]
   [[ "$output" == *"jq"* ]] || false
   [[ "$output" == *"GRID_HOOKS=off"* ]] || false
