@@ -46,10 +46,12 @@ reconcile() {
   [ "$(snapshot "$CLAUDE_CONFIG_DIR")" = "$before_c" ]
   [ "$(snapshot "$MOCK_GRID")" = "$before_g" ]
   # Spelled out, so a snapshot helper that silently matched nothing cannot hide a write.
-  [ -d "$MOCK_SKILLS/skill-alpha" ] && [ ! -L "$MOCK_SKILLS/skill-alpha" ]
+  [ -d "$MOCK_SKILLS/skill-alpha" ]
+  [ ! -L "$MOCK_SKILLS/skill-alpha" ]
   [ -f "$MOCK_SKILLS/skill-alpha/stale.txt" ]
   [ ! -e "$CLAUDE_CONFIG_DIR/settings.json" ]
-  [ ! -e "$MOCK_GRID/SKILLS.md" ] && [ ! -e "$MOCK_GRID/.wired.manifest" ]
+  [ ! -e "$MOCK_GRID/SKILLS.md" ]
+  [ ! -e "$MOCK_GRID/.wired.manifest" ]
   [ "$(find "$MOCK_SKILLS" "$MOCK_AGENTS" -type l | wc -l | tr -d ' ')" -eq 0 ]
 }
 

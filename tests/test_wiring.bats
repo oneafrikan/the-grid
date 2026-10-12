@@ -445,7 +445,8 @@ make_fake_real_home() {
   printf -- '---\nname: zz-agent\n---\n' > "$cc/agents/zz-agent.md"
   GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
   [ "$status" -eq 0 ]
-  [ -L "$MOCK_SKILLS/zz-orch" ] && [ -L "$MOCK_AGENTS/zz-agent.md" ]
+  [ -L "$MOCK_SKILLS/zz-orch" ]
+  [ -L "$MOCK_AGENTS/zz-agent.md" ]
   [[ "$(readlink "$MOCK_SKILLS/zz-orch")" != *//* ]]
   [[ "$(readlink "$MOCK_AGENTS/zz-agent.md")" != *//* ]]
 }

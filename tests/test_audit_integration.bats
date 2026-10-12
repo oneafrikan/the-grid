@@ -335,7 +335,8 @@ gitmodules_entry() {
   [ "$status" -eq 3 ]
   [[ "$stderr" == *"no policy.yaml"* ]]
   [[ "$output" != *"no policy.yaml"* ]]       # not on stdout
-  [ ! -e "$MOCK_SKILLS/s" ] && [ ! -L "$MOCK_SKILLS/s" ]
+  [ ! -e "$MOCK_SKILLS/s" ]
+  [ ! -L "$MOCK_SKILLS/s" ]
   GRID_SKIP_AUDIT=1 run_wire
   [ "$status" -eq 0 ]
   [ -L "$MOCK_SKILLS/s" ]
@@ -347,7 +348,8 @@ gitmodules_entry() {
   PATH="$nopy" run_wire
   [ "$status" -eq 3 ]
   [[ "$output" == *"python3 not found"* ]]
-  [ ! -e "$MOCK_SKILLS/s" ] && [ ! -L "$MOCK_SKILLS/s" ]    # nothing was changed
+  [ ! -e "$MOCK_SKILLS/s" ]    # nothing was changed
+  [ ! -L "$MOCK_SKILLS/s" ]
   # The same escape hatch as a finding: warn once, wire anyway.
   PATH="$nopy" GRID_AUDIT=warn run_wire
   [ "$status" -eq 0 ]
