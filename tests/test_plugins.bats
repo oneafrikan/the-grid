@@ -246,3 +246,166 @@ EOF
   rm -rf "$tmp"
   [ "$output" = "0" ]
 }
+
+# ---- WP-041: symlinks, odd files, .DS_Store, private-role pin --------------------------
+
+# Hash only one bundle, so "nothing was deleted" is checkable per bundle.
+snapshot_bundle() {
+  (cd "$MOCK_GRID" && find "plugins/$1" -type f | sort | xargs shasum)
+}
+
+@test "a symlinked bundle dir exits 2 in write and --check mode and deletes nothing" {
+  BUILD
+  before="$(snapshot_bundle agents)"
+  # Both a dir link and a file link in place of a bundle dir (the file link used to be
+  # skipped silently: is_dir() is False for it).
+  for target in "$OTHER_DIR" /etc/hostname; do
+    rm -rf "$MOCK_GRID/plugins/core"
+    ln -s "$target" "$MOCK_GRID/plugins/core"
+    run BUILD
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"symlink"* ]]
+    run BUILD --check
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"symlink"* ]]
+    # The guard fires before the first rmtree: the sibling bundle is byte-identical
+    # and the link is still there.
+    [ "$before" = "$(snapshot_bundle agents)" ]
+    [ -L "$MOCK_GRID/plugins/core" ]
+    rm "$MOCK_GRID/plugins/core"
+  done
+  [ -z "$(ls -A "$OTHER_DIR")" ]
+}
+
+@test "a symlink inside a generated bundle exits 2 and deletes nothing" {
+  BUILD
+  before="$(snapshot_bundle agents)"
+  ln -s /etc/hostname "$MOCK_GRID/plugins/core/skills/alpha/link.md"
+  run BUILD --check
+  [ "$status" -eq 2 ]
+  run BUILD
+  [ "$status" -eq 2 ]
+  [ "$before" = "$(snapshot_bundle agents)" ]
+  rm "$MOCK_GRID/plugins/core/skills/alpha/link.md"
+
+  ln -s "$OTHER_DIR" "$MOCK_GRID/plugins/core/skills/alpha/dirlink"
+  run BUILD --check
+  [ "$status" -eq 2 ]
+  run BUILD
+  [ "$status" -eq 2 ]
+  [ "$before" = "$(snapshot_bundle agents)" ]
+  rm "$MOCK_GRID/plugins/core/skills/alpha/dirlink"
+}
+
+@test "a symlinked marketplace.json or .claude-plugin dir exits 2 and is never written through" {
+  BUILD
+  before="$(snapshot_bundle agents)"
+  printf 'orig\n' > "$OTHER_DIR/mp.json"
+  rm "$MOCK_GRID/.claude-plugin/marketplace.json"
+  ln -s "$OTHER_DIR/mp.json" "$MOCK_GRID/.claude-plugin/marketplace.json"
+  run BUILD
+  [ "$status" -eq 2 ]
+  run BUILD --check
+  [ "$status" -eq 2 ]
+  [ "$(cat "$OTHER_DIR/mp.json")" = "orig" ]
+  [ "$before" = "$(snapshot_bundle agents)" ]
+  rm "$MOCK_GRID/.claude-plugin/marketplace.json"
+  rmdir "$MOCK_GRID/.claude-plugin"
+  mkdir "$OTHER_DIR/cp"
+  ln -s "$OTHER_DIR/cp" "$MOCK_GRID/.claude-plugin"
+  run BUILD
+  [ "$status" -eq 2 ]
+  [ -z "$(ls -A "$OTHER_DIR/cp")" ]
+  [ "$before" = "$(snapshot_bundle agents)" ]
+}
+
+@test "a symlinked file or dir in a bundled skill exits 2 and writes nothing" {
+  ln -s /etc/hostname "$MOCK_GRID/skills/alpha/link.md"
+  run BUILD
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"symlink"* ]]
+  [[ "$output" == *"link.md"* ]]
+  [ ! -e "$MOCK_GRID/plugins/core" ]
+  [ ! -e "$MOCK_GRID/.claude-plugin/marketplace.json" ]
+  rm "$MOCK_GRID/skills/alpha/link.md"
+
+  # A directory link used to be skipped silently by os.walk.
+  ln -s "$OTHER_DIR" "$MOCK_GRID/skills/alpha/dirlink"
+  run BUILD
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"dirlink"* ]]
+  [ ! -e "$MOCK_GRID/plugins/core" ]
+  rm "$MOCK_GRID/skills/alpha/dirlink"
+
+  # A broken link, and a link at a name the builder otherwise ignores.
+  ln -s /nonexistent-target "$MOCK_GRID/skills/alpha/dangling"
+  run BUILD
+  [ "$status" -eq 2 ]
+  rm "$MOCK_GRID/skills/alpha/dangling"
+  ln -s /etc/hostname "$MOCK_GRID/skills/alpha/.DS_Store"
+  run BUILD
+  [ "$status" -eq 2 ]
+}
+
+@test "a symlinked skill dir, a symlinked agent file and a FIFO each exit 2" {
+  # The skill dir itself is a link to a real dir elsewhere.
+  mv "$MOCK_GRID/skills/beta" "$OTHER_DIR/beta"
+  ln -s "$OTHER_DIR/beta" "$MOCK_GRID/skills/beta"
+  run BUILD
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"symlink"* ]]
+  rm "$MOCK_GRID/skills/beta"
+  mv "$OTHER_DIR/beta" "$MOCK_GRID/skills/beta"
+
+  mv "$MOCK_GRID/agents/bot.md" "$OTHER_DIR/bot.md"
+  ln -s "$OTHER_DIR/bot.md" "$MOCK_GRID/agents/bot.md"
+  run BUILD
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"symlink"* ]]
+  rm "$MOCK_GRID/agents/bot.md"
+  mv "$OTHER_DIR/bot.md" "$MOCK_GRID/agents/bot.md"
+
+  # A FIFO would block read_bytes() forever; the timeout turns a hang into a failure.
+  mkfifo "$MOCK_GRID/skills/alpha/pipe"
+  run timeout 20 python3 "$REPO_ROOT/scripts/build-plugins.py"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"pipe"* ]]
+}
+
+@test "--check reports a .DS_Store under plugins/ as extra (exit 1); write removes it" {
+  BUILD
+  echo x > "$MOCK_GRID/plugins/core/skills/alpha/.DS_Store"
+  run BUILD --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"extra:   plugins/core/skills/alpha/.DS_Store"* ]]
+  run BUILD
+  [ "$status" -eq 0 ]
+  [ ! -e "$MOCK_GRID/plugins/core/skills/alpha/.DS_Store" ]
+  run BUILD --check
+  [ "$status" -eq 0 ]
+}
+
+@test "a .DS_Store in a source skill is still ignored" {
+  echo x > "$MOCK_GRID/skills/alpha/.DS_Store"
+  run BUILD
+  [ "$status" -eq 0 ]
+  [ ! -e "$MOCK_GRID/plugins/core/skills/alpha/.DS_Store" ]
+  run BUILD --check
+  [ "$status" -eq 0 ]
+}
+
+@test "a private role never reaches the bundle" {
+  require_venv "$REPO_ROOT/agent-factory/.venv/bin/python"
+  unset GRID_DIR
+  tmp="$(mktemp -d)"
+  # A private role of the same name as a shipped one WINS if the private dir is honoured,
+  # so this proves the GRID_PRIVATE_ROLES_DIR="" pin in run_compose is real.
+  mkdir -p "$tmp/private/qa-engineer"
+  cp "$REPO_ROOT"/tests/fixtures/compose/roles/fx-eng/* "$tmp/private/qa-engineer/"
+  # The role name must match its dir or compose errors out (exit 2) instead of drifting.
+  sed -i 's/^name: fx-eng$/name: qa-engineer/' "$tmp/private/qa-engineer/role.yaml"
+  GRID_PRIVATE_ROLES_DIR="$tmp/private" run BUILD --check
+  rm -rf "$tmp"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
