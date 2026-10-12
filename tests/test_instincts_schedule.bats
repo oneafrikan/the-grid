@@ -329,6 +329,36 @@ sync_as() {
   [ "$(git -C "$PA" show --name-only --format= HEAD)" = "learning/instincts/aaaaaaaaaaaa/host-a.jsonl" ]
 }
 
+@test "sync: push.default=matching with an unpushed commit on another branch: that branch is not pushed" {
+  mk_remote_and_clones
+  git -C "$PA" config push.default matching
+  git -C "$PA" branch side
+  git -C "$PA" push -q origin side
+  git -C "$PA" checkout -q side
+  printf 'unreviewed\n' > "$PA/side.txt"
+  git -C "$PA" add side.txt
+  git -C "$PA" commit -q -m "side work"
+  git -C "$PA" checkout -q main
+  write_instinct "$PA" host-a
+  side_before="$(git -C "$REMOTE" rev-parse side)"
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$REMOTE" rev-parse side)" = "$side_before" ]
+  [ "$(git -C "$REMOTE" rev-parse main)" = "$(git -C "$PA" rev-parse main)" ]
+}
+
+@test "sync: a branch pushRemote pointing at another remote is not used" {
+  mk_remote_and_clones
+  git init -q --bare "$BATS_TEST_TMPDIR/elsewhere.git"
+  git -C "$PA" remote add elsewhere "$BATS_TEST_TMPDIR/elsewhere.git"
+  git -C "$PA" config branch.main.pushRemote elsewhere
+  write_instinct "$PA" host-a
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [ -z "$(git -C "$BATS_TEST_TMPDIR/elsewhere.git" for-each-ref refs/heads)" ]
+  [ "$(git -C "$REMOTE" rev-parse main)" = "$(git -C "$PA" rev-parse main)" ]
+}
+
 @test "sync: a private dir that is not a git repo is skipped with a notice, exit 0" {
   mkdir -p "$BATS_TEST_TMPDIR/plain"
   write_instinct "$BATS_TEST_TMPDIR/plain" host-a

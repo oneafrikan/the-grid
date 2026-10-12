@@ -27,6 +27,13 @@
 #               merge). The jobs skip the push and report failure.
 #       A one-line reason is printed on stdout for exits 3 and 4.
 #
+#   private-git-guard.sh push-args <dir>
+#       Prints "<remote> HEAD:refs/heads/<branch>": the remote and branch that push-ok
+#       validated (branch.<b>.remote and branch.<b>.merge). The jobs push EXACTLY that,
+#       with `git -c push.default=nothing push <remote> <refspec>`, so no push.default,
+#       branch.<b>.pushRemote or remote.pushDefault setting can send anything elsewhere.
+#       Exit 3 (reason on stdout) when it cannot be resolved.
+#
 # Remote marker: <dir>/.grid-private-remote holds, on its first line, the push URL of
 # the upstream remote, e.g.
 #   git -C <dir> remote get-url --push origin > <dir>/.grid-private-remote
@@ -45,7 +52,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 MARKER_NAME=".grid-private-remote"
 
 die_usage() {
-  echo "usage: private-git-guard.sh precheck <dir> | outside-clean <dir> <pathspec> | push-ok <dir> <pathspec>" >&2
+  echo "usage: private-git-guard.sh precheck <dir> | outside-clean <dir> <pathspec> | push-ok <dir> <pathspec> | push-args <dir>" >&2
   exit 2
 }
 
@@ -81,6 +88,18 @@ cmd_outside_clean() {
   # -uno: untracked files never block a pull. The exclude pathspec drops the job's own path.
   changed="$(git -C "$dir" status --porcelain --untracked-files=no -- . ":(exclude)$spec" 2>/dev/null)" || return 1
   [ -z "$changed" ]
+}
+
+cmd_push_args() {
+  local dir="$1" branch remote merge
+  branch="$(git -C "$dir" symbolic-ref -q --short HEAD)" || { echo "detached-head"; return 3; }
+  remote="$(git -C "$dir" config "branch.$branch.remote")" || { echo "no-upstream-remote"; return 3; }
+  merge="$(git -C "$dir" config "branch.$branch.merge")" || { echo "no-upstream-branch"; return 3; }
+  case "$merge" in
+    refs/heads/?*) ;;
+    *) echo "unsupported-upstream-ref"; return 3 ;;
+  esac
+  printf '%s HEAD:%s\n' "$remote" "$merge"
 }
 
 cmd_push_ok() {
@@ -122,5 +141,6 @@ case "$sub" in
   precheck)       [ $# -eq 2 ] || die_usage; cmd_precheck "$dir" ;;
   outside-clean)  [ $# -eq 3 ] || die_usage; cmd_outside_clean "$dir" "$3" ;;
   push-ok)        [ $# -eq 3 ] || die_usage; cmd_push_ok "$dir" "$3" ;;
+  push-args)      [ $# -eq 2 ] || die_usage; cmd_push_args "$dir" ;;
   *)              die_usage ;;
 esac

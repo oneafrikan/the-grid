@@ -1236,7 +1236,14 @@ def run_sync() -> int:
             _sync_warn(f"push skipped: {ok.stdout.strip()}")
             # 4 = foreign unpushed commit; 3 (remote not confirmed) stays a warning.
             return 4 if ok.returncode == 4 else 0
-        r = _private_git(priv, "push")
+        # Push EXACTLY the remote and branch push-ok validated: a bare `git push` follows
+        # push.default, branch.<b>.pushRemote and remote.pushDefault.
+        args = _guard("push-args", str(priv))
+        if args.returncode != 0:
+            _sync_warn(f"push skipped: {args.stdout.strip()}")
+            return 0
+        remote, refspec = args.stdout.split()
+        r = _private_git(priv, "-c", "push.default=nothing", "push", remote, refspec)
         if r.returncode != 0:
             _sync_warn("git push failed: " + (r.stderr.strip() or r.stdout.strip()))
         else:

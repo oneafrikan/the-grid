@@ -314,6 +314,39 @@ install() {
   grep -q 'not a regular file' "$T/state/usage.log"
 }
 
+# --- weekly.sh: the push is explicit (push-guard hardening) ------------------------
+
+@test "push.default=matching with an unpushed commit on another branch: that branch is not pushed" {
+  private_repo
+  mark_remote
+  git -C "$GRID_PRIVATE_DIR" config push.default matching
+  git -C "$GRID_PRIVATE_DIR" branch side
+  git -C "$GRID_PRIVATE_DIR" push -q origin side
+  git -C "$GRID_PRIVATE_DIR" checkout -q side
+  printf 'unreviewed\n' > "$GRID_PRIVATE_DIR/side.txt"
+  git -C "$GRID_PRIVATE_DIR" add side.txt
+  git -C "$GRID_PRIVATE_DIR" commit -q -m "side work"
+  git -C "$GRID_PRIVATE_DIR" checkout -q main
+  side_before="$(git -C "$T/remote.git" rev-parse side)"
+  run bash "$WEEKLY"
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$T/remote.git" rev-parse side)" = "$side_before" ]
+  # The job's own commit still went out on its own branch.
+  [ "$(git -C "$T/remote.git" rev-parse main)" = "$(git -C "$GRID_PRIVATE_DIR" rev-parse main)" ]
+}
+
+@test "a branch pushRemote pointing at another remote is not used: only the verified remote is pushed to" {
+  private_repo
+  mark_remote
+  git init -q --bare "$T/elsewhere.git"
+  git -C "$GRID_PRIVATE_DIR" remote add elsewhere "$T/elsewhere.git"
+  git -C "$GRID_PRIVATE_DIR" config branch.main.pushRemote elsewhere
+  run bash "$WEEKLY"
+  [ "$status" -eq 0 ]
+  [ -z "$(git -C "$T/elsewhere.git" for-each-ref refs/heads)" ]
+  [ "$(git -C "$T/remote.git" rev-parse main)" = "$(git -C "$GRID_PRIVATE_DIR" rev-parse main)" ]
+}
+
 # --- install-schedule.sh -------------------------------------------------------
 
 # paths_ok <file...> — every absolute path in the files is under $T, the repo, or a
