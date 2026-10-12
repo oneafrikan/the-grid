@@ -1391,6 +1391,45 @@ tok_pgp()       { printf '%s' "-----BEGIN PGP PRIV""ATE KEY BLOCK-----"; }
   done
 }
 
+# --- the matcher must stay linear: one long alphanumeric run followed by a key word used
+# to cost seconds (a quadratic prefix in the assigned-secret row) and outran the 5 s timeout.
+
+@test "secret: the matcher is linear on a long alphanumeric run followed by a key word" {
+  run perl -e 'alarm shift; exec @ARGV' 5 bash -c '
+    . "$1/hooks/lib/secret-patterns.sh"
+    s="$(head -c 40000 /dev/zero | tr "\0" a) token=x"
+    _secret_match "$s"; echo finished' _ "$REPO_ROOT"
+  [ "$status" -eq 0 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  [[ "$output" == *finished* ]] || false
+}
+
+@test "secret: a staged file with one very long line and a real key finishes within 5 s" {
+  mkrepo
+  { printf 'key = "%s"\n' "$(tok_ghp)"; head -c 40000 /dev/zero | tr '\0' a; printf ' token=x\n'; } > "$R/long.txt"
+  git -C "$R" add long.txt
+  run_hook_within 5 pre-bash-secret-scan 'git commit -m x' "$R"
+  [ "$status" -eq 2 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  [[ "$output" == *"long.txt:1: github-token"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "secret: a secret deep inside a very long line is still found (long lines are scanned in pieces)" {
+  mkrepo
+  { head -c 30000 /dev/zero | tr '\0' ' '; printf 'key = "%s"\n' "$(tok_ghp)"; } > "$R/wide.txt"
+  git -C "$R" add wide.txt
+  run_hook_within 5 pre-bash-secret-scan 'git commit -m x' "$R"
+  [ "$status" -eq 2 ] || { echo "status $status: $output" >&2; false; }
+  [[ "$output" == *"wide.txt:1: github-token"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "secret: a candidate line over 256 KB blocks as oversize-line instead of being skipped" {
+  mkrepo
+  { head -c 300000 /dev/zero | tr '\0' a; printf ' token=x\n'; } > "$R/huge.txt"
+  git -C "$R" add huge.txt
+  run_hook_within 5 pre-bash-secret-scan 'git commit -m x' "$R"
+  [ "$status" -eq 2 ] || { echo "status $status: $output" >&2; false; }
+  [[ "$output" == *"huge.txt:1: oversize-line"* ]] || { echo "$output" >&2; false; }
+}
+
 @test "secret: only the matched token's own text can exempt it (not the rest of the line)" {
   mkrepo
   t="$(tok_ghp)"

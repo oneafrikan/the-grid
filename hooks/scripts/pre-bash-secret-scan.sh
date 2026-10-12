@@ -155,7 +155,7 @@ consume_stream() {
   while IFS="$US" read -r file lineno content; do
     n=$((n + 1))
     if [ "$n" -gt "$MAX_SCAN_LINES" ]; then too_large=1; return 0; fi
-    if _secret_match "$content"; then
+    if secret_match_long "$content"; then
       add_finding "$(clean_name "$file"):$lineno: $SECRET_MATCH_NAME (${SECRET_MATCH_TEXT:0:4}...)"
     fi
     # Ten findings fill the list; reading on would only burn the timeout.
@@ -397,7 +397,7 @@ done
 
 # 3. the command text of a commit: the message, and a same-command write such as
 #    `echo key=... >> file && git commit -am x` that is not on disk yet.
-if [ "$handled_commit" = 1 ] && _secret_match "$command"; then
+if [ "$handled_commit" = 1 ] && secret_match_long "$command"; then
   add_finding "commit command text: $SECRET_MATCH_NAME (${SECRET_MATCH_TEXT:0:4}...)"
 fi
 

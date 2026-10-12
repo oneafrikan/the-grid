@@ -74,7 +74,7 @@ SECRET_RES=(
   # (a JSON key, "password": ...). Case-insensitive (set by _secret_match). The VALUE
   # side is judged in bash by _assigned_value, because "16+ characters with a digit and
   # no parentheses" cannot be said in one ERE.
-  '[A-Za-z0-9_]*(secret|token|passw(or)?d|api[_-]?key|access[_-]?key|private[_-]?key)[A-Za-z0-9_]*["'"'"']?[[:space:]]*[:=]'
+  '(secret|token|passw(or)?d|api[_-]?key|access[_-]?key|private[_-]?key)[A-Za-z0-9_]*["'"'"']?[[:space:]]*[:=]'
 )
 SECRET_BOUND=(1 0 1 1 1 1 1 0 1 0 1 1  0 0 0 1 1 1 1 1 1 1 1 0 1  0)
 
@@ -189,6 +189,26 @@ _secret_match() {
   [ -n "$hit" ] || return 1
   SECRET_MATCH_NAME="$hit"
   SECRET_MATCH_TEXT="$text"
+}
+
+# secret_match_long <text>
+#   _secret_match for text of any length. The bash matcher is superlinear on long input,
+#   so text over 6,000 bytes is matched in 4,352-byte pieces that overlap by 256 bytes
+#   (a token is far shorter than the overlap), at most 64 pieces (256 KB). Longer text is
+#   reported as a finding named oversize-line: a scan that cannot finish must block, not
+#   pass. Sets the same globals as _secret_match.
+secret_match_long() {
+  local t="$1" len=${#1} off=0 pieces=0
+  if [ "$len" -le 6000 ]; then _secret_match "$t"; return; fi
+  while [ "$off" -lt "$len" ]; do
+    pieces=$((pieces + 1))
+    if [ "$pieces" -gt 64 ]; then
+      SECRET_MATCH_NAME="oversize-line"; SECRET_MATCH_TEXT=""; return 0
+    fi
+    _secret_match "${t:$off:4352}" && return 0
+    off=$((off + 4096))
+  done
+  return 1
 }
 
 # secret_match_line <text>
