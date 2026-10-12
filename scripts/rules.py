@@ -10,9 +10,11 @@ openspec/changes/rule-packs/design.md.
 Usage (python3 scripts/rules.py ...):
   lint [--root DIR] [--check-urls]
         Check every pack. One line per finding, `E_CODE path: message`; exit 1 if
-        any finding, 0 if clean (an absent or empty rules/ is clean). Writes nothing.
-        --check-urls also HEADs every https URL in each pack README's Sources
-        table (needs network; the gate and the tests never pass it).
+        any finding, 0 if clean (an empty rules/ is clean, and so is an absent one
+        when the root is the default; an explicit --root without rules/ exits 2).
+        Writes nothing. --check-urls also checks every https URL in each pack
+        README's Sources table (8 threads, 10 s each; needs network; the gate and the
+        tests never pass it).
   list [--root DIR]
         Print `pack  tier  files  bytes  summary` for every pack, sorted by pack
         name in C locale (code point order), so the output is stable across runs.
@@ -25,11 +27,19 @@ Usage (python3 scripts/rules.py ...):
         --out AGENTS.md / GEMINI.md; capped at BLOCK_CAP bytes; text outside the
         markers is never touched; an empty --packs removes the block). Prints
         `wrote <path>` / `removed <path>` per change. --check writes nothing and
-        exits 1 on any difference. Exit 0 done/no drift, 1 drift (--check), 2 usage
-        or refusal (nothing written).
+        exits 1 on any difference (it prints `would write` / `would remove`, not
+        `wrote` / `removed`). Exit 0 done/no drift, 1 drift (--check), 2 usage,
+        refusal or I/O error (nothing written, except: emit lints every selected
+        pack first; a pack with rule-file findings is excluded and named on stderr,
+        the clean packs are still delivered, and the exit is 2). Exit 3: the block
+        would be over BLOCK_CAP; nothing is written and any existing block is left
+        as it was, so a caller can tell a skip from a refusal without parsing text. Every write is atomic (temp file in
+        the same directory + os.replace), keeps the file mode, never goes through a
+        symlink, and breaks hard links (the replace gives the file a new inode).
 
 Finding codes (stable): E_FRONTMATTER E_PATHS E_TITLE E_STYLE E_FILE_SIZE
-E_PACK_SIZE E_OPINION E_PACK_META E_SOURCES E_ATTRIBUTION E_NAME E_URL.
+E_PACK_SIZE E_OPINION E_PACK_META E_SOURCES E_ATTRIBUTION E_NAME E_URL E_MARKER
+E_ENCODING E_UNREADABLE.
 
 Environment: GRID_DIR (repo root; default: parent of scripts/). --root wins over it.
 
@@ -44,7 +54,11 @@ import itertools
 import json
 import os
 import re
+import stat
 import sys
+import tempfile
+import time
+import unicodedata
 
 # Never leave a __pycache__ behind (this file is run, not imported, but be safe).
 sys.dont_write_bytecode = True
@@ -57,14 +71,88 @@ PACK_MAX_BYTES = 9216    # all rule files of one pack
 BULLET_MAX_CHARS = 240   # one bullet, continuation lines included
 FENCE_MAX_LINES = 10     # lines of content inside one fenced block
 MAX_BRACE_GROUPS = 2     # {a,b} groups per glob
+MAX_ALTERNATIVES = 12    # alternatives in one {a,b,...} group (shipped maximum: 8)
+MAX_EXPANDED_GLOBS = 64  # globs one rule file expands to (shipped maximum: 16)
+MIN_LITERAL_CHARS = 2    # literal characters the last path segment of a glob must hold
+# A header glob is a path pattern, not text: anything else could carry prose into the
+# delivered `applies to:` header, so it is refused outright.
+GLOB_CHARS_RE = re.compile(r"^[A-Za-z0-9_./*?{},\[\]-]+$")
 
 NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")        # kebab-case, lowercase
 TITLE_RE = re.compile(r"^# \S")
 HEADING_RE = re.compile(r"^#{2,3} \S")                    # ## and ### only
 PATH_LINE_RE = re.compile(r'^  - "([^"]+)"$')             # one frontmatter glob
 PACK_KEYS = ("summary", "tier", "adapted_from")           # the only pack.yaml keys
+# Marker text that must never appear in a rule file: the managed-block BEGIN/END lines
+# (line-start test, so prose such as "the-grid rules" is fine) and the .mdc marker token.
+MARKER_PREFIXES = ("<!-- BEGIN the-grid rules", "<!-- END the-grid rules")
+MARKER_TOKEN = "the-grid:rules"
+# Lint findings that stop a pack from being delivered by emit (rule-file checks only:
+# pack metadata, Sources and notices findings do not change what a rule file says).
+EMIT_BLOCKING_CODES = ("E_FRONTMATTER", "E_PATHS", "E_TITLE", "E_STYLE", "E_FILE_SIZE",
+                       "E_OPINION", "E_MARKER", "E_ENCODING", "E_UNREADABLE")
 ATTRIBUTION_LINE = "Adapted from affaan-m/ECC (MIT)"
 URL_RE = re.compile(r"https://[^\s|)>\]]+")
+# A usable Sources URL: https, a dotted host, optional port and path (not just `https://x`).
+URL_FULL_RE = re.compile(r"^https://[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(:[0-9]+)?(/\S*)?$")
+# pack.yaml adapted_from: `<owner>/<repo> rules/<pack> @ <sha> (MIT)`.
+ADAPTED_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+ rules/[A-Za-z0-9._-]+ @ [0-9a-f]{7,40} \(MIT\)$")
+URL_WORKERS = 8          # --check-urls: concurrent checks
+URL_TIMEOUT = 10         # --check-urls: seconds per request
+FENCE_OPEN_RE = re.compile(r"^(\s*)```")
+FENCE_CLOSE_RE = re.compile(r"^\s*`{3,}\s*$")
+
+
+def is_marker_line(line):
+    """True for a line that looks like a managed-block marker or carries the .mdc token."""
+    return line.lstrip().startswith(MARKER_PREFIXES) or MARKER_TOKEN in line
+
+
+def is_invisible(ch):
+    """True for characters that render as nothing (or reorder text): category Cf (zero-width,
+    bidi controls, BOM, soft hyphen), line/paragraph separators, tag characters and variation
+    selectors. None of them has a place in a rule file."""
+    cp = ord(ch)
+    return (unicodedata.category(ch) == "Cf" or cp in (0x2028, 0x2029)
+            or 0xE0000 <= cp <= 0xE007F or 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF)
+
+
+def normalize_for_match(line):
+    """Fold a line for denylist matching: NFKC, invisible characters dropped, whitespace
+    runs (tab, NBSP, double space) collapsed to one space, so spacing tricks cannot dodge a
+    pattern. Mixed-script homoglyphs are NFKC-stable and are caught by mixed_script_words."""
+    text = unicodedata.normalize("NFKC", line)
+    text = "".join(ch for ch in text if not is_invisible(ch))
+    return re.sub(r"\s+", " ", text)
+
+
+def mixed_script_words(line):
+    """Words that mix ASCII letters with Cyrillic or Greek letters (look-alike spoofing)."""
+    out = []
+    for word in re.findall(r"\w+", line):
+        if not any("a" <= c.lower() <= "z" for c in word):
+            continue
+        for c in word:
+            if c.isalpha() and ord(c) > 127 and unicodedata.name(c, "").startswith(("CYRILLIC", "GREEK")):
+                out.append(word)
+                break
+    return out
+
+
+def safe_lines(path):
+    """Strictly decoded lines of `path`: (lines, None) or (None, (code, message)).
+
+    code is MISSING for an absent file (callers decide whether that is a finding),
+    E_ENCODING for bytes that are not UTF-8, E_UNREADABLE for any other OS error.
+    """
+    try:
+        return read_lines(path), None
+    except UnicodeDecodeError:
+        return None, ("E_ENCODING", "not valid UTF-8")
+    except FileNotFoundError:
+        return None, ("MISSING", "is missing")
+    except OSError as exc:
+        return None, ("E_UNREADABLE", "cannot read: %s" % (exc.strerror or exc.__class__.__name__))
 
 
 class Findings(object):
@@ -107,39 +195,68 @@ def parse_frontmatter(lines):
     return globs, end + 1, None
 
 
+def literal_chars(segment):
+    """Literal characters a glob path segment must match: `[...]`, `*` and `?` count 0 and a
+    `{a,b}` group counts as its shortest alternative (so `*.{ts,tsx}` holds 3, `**/*e*` 1)."""
+    def shortest(m):
+        alts = [re.sub(r"\[[^\]]*\]|[*?]", "", a) for a in m.group(1).split(",")]
+        return min(alts, key=len)
+    segment = re.sub(r"\{([^{}]*)\}", shortest, segment)
+    return len(re.sub(r"\[[^\]]*\]|[*?{},\[\]]", "", segment))
+
+
+def expanded_count(glob):
+    """How many globs `{a,b}` expansion makes of `glob` (the product of the group sizes)."""
+    n = 1
+    for group in re.findall(r"\{([^{}]*)\}", glob):
+        n *= len(group.split(","))
+    return n
+
+
 def check_glob(glob):
     """Return a list of problems with one paths glob (empty list = fine)."""
+    if not GLOB_CHARS_RE.match(glob):
+        return ["glob %r has characters outside [A-Za-z0-9_./*?{},[]-]" % glob]
     problems = []
-    if glob.startswith("/"):
-        problems.append("absolute glob %r" % glob)
-    if ".." in glob:
-        problems.append("glob %r contains .." % glob)
-    # Effectively always-on: the last path segment is nothing but wildcard/brace/dot
-    # characters (rejects *, **, **/*, **/*.*, **/**), so it would match every file.
-    last = glob.split("/")[-1]
-    if not re.sub(r"[*?\[\]{},.]", "", last):
-        problems.append("glob %r matches effectively every file" % glob)
-    # Brace limits: no nesting, no empty alternative, at most MAX_BRACE_GROUPS groups.
-    depth, groups, cur, unbalanced = 0, 0, "", False
+    # Brace limits: no nesting, no empty alternative, bounded groups and alternatives.
+    # A nested or unbalanced glob is reported once and not examined further.
+    depth, groups, cur = 0, 0, ""
     for ch in glob:
         if ch == "{":
             if depth:
-                problems.append("glob %r has nested braces" % glob)
-                break
+                return ["glob %r has nested braces" % glob]
             depth, groups, cur = 1, groups + 1, ""
         elif ch == "}":
             if not depth:
-                unbalanced = True
-                break
+                return ["glob %r has unbalanced braces" % glob]
             depth = 0
-            if any(a == "" for a in cur.split(",")):
+            alts = cur.split(",")
+            if any(a == "" for a in alts):
                 problems.append("glob %r has an empty brace alternative" % glob)
+            if len(alts) > MAX_ALTERNATIVES:
+                problems.append("glob %r has a brace group with %d alternatives (max %d)"
+                                % (glob, len(alts), MAX_ALTERNATIVES))
         elif depth:
             cur += ch
-    if unbalanced or depth:
-        problems.append("glob %r has unbalanced braces" % glob)
+    if depth:
+        return ["glob %r has unbalanced braces" % glob]
     if groups > MAX_BRACE_GROUPS:
         problems.append("glob %r has more than %d brace groups" % (glob, MAX_BRACE_GROUPS))
+    segs = glob.split("/")
+    if glob.startswith("/"):
+        problems.append("absolute glob %r" % glob)
+    if ".." in segs:
+        problems.append("glob %r has a .. path segment" % glob)
+    # Too broad: the last path segment must hold at least MIN_LITERAL_CHARS literal
+    # characters, so `*`, `**/*.*`, `**/[a-z]*`, `**/{*,x}` and `**/*e*` (which would load
+    # the rule on nearly every file) are rejected. A directory scope (`src/**`,
+    # `**/migrations/**`) is the one allowed shape ending in a wildcard: its directory
+    # segment must be a plain name with at least MIN_LITERAL_CHARS characters.
+    is_dir_scope = (segs[-1] == "**" and len(segs) >= 2 and len(segs[-2]) >= MIN_LITERAL_CHARS
+                    and not re.search(r"[*?\[\]{},]", segs[-2]))
+    if not is_dir_scope and literal_chars(segs[-1]) < MIN_LITERAL_CHARS:
+        problems.append("glob %r matches nearly every file (last segment needs %d literal characters)"
+                        % (glob, MIN_LITERAL_CHARS))
     return problems
 
 
@@ -153,8 +270,10 @@ def check_style(lines, start):
     `# ` headings or cross-reference lines.
     """
     in_fence = False
+    in_tilde = False         # inside a ~~~ fence (reported once at its opening line)
     fence_open_line = 0
     fence_len = 0
+    saw_bullet = False
     bullet_open = False      # previous non-blank line belongs to a bullet
     bullet_start = 0
     bullet_text = []
@@ -171,23 +290,36 @@ def check_style(lines, start):
     for no in range(start, len(lines)):
         line = lines[no]
         lineno = no + 1
+        if in_tilde:
+            in_tilde = not line.strip().startswith("~~~")
+            continue
         if in_fence:
-            if line.startswith("```"):
+            # A closing line is backticks only; "```python" inside a fence is content.
+            if FENCE_CLOSE_RE.match(line):
                 in_fence = False
                 if fence_len > FENCE_MAX_LINES:
                     out.append((fence_open_line, "fenced block is %d lines (max %d)" % (fence_len, FENCE_MAX_LINES)))
             else:
                 fence_len += 1
             continue
-        if line.startswith("```"):
-            close_bullet()
-            bullet_open, bullet_text = False, []
+        fence = FENCE_OPEN_RE.match(line)
+        if fence and (not fence.group(1) or bullet_open):
+            # A top-level fence ends any bullet; an indented one inside a bullet is part of it.
+            if not fence.group(1):
+                close_bullet()
+                bullet_open, bullet_text = False, []
             in_fence, fence_open_line, fence_len = True, lineno, 0
+        elif line.lstrip().startswith("~~~") and (not line.startswith(" ") or bullet_open):
+            out.append((lineno, "`~~~` fence: use ``` fences"))
+            in_tilde = True
         elif line.strip() == "":
             close_bullet()
             bullet_open, bullet_text = False, []
         elif line.startswith("- "):
             close_bullet()
+            saw_bullet = True
+            if not line[2:].strip():
+                out.append((lineno, "empty bullet"))
             bullet_open, bullet_start, bullet_text = True, lineno, [line.strip()]
         elif line.startswith("  ") and bullet_open:
             bullet_text.append(line.strip())
@@ -203,84 +335,108 @@ def check_style(lines, start):
     close_bullet()
     if in_fence:
         out.append((fence_open_line, "unclosed fenced block"))
+    if not saw_bullet:
+        out.append((max(start, 1), "no bullets: a rule file needs at least one `- ` directive"))
     return out
 
 
 # --- pack.yaml / README / notices readers -------------------------------------------
 def read_pack_yaml(path):
-    """Strict flat `key: value` reader. Returns (dict, [problems])."""
+    """Strict flat `key: value` reader. Returns (dict, [(code, problem)])."""
     data, problems = {}, []
-    try:
-        with open(path, encoding="utf-8") as fh:
-            raw = fh.read().split("\n")
-    except OSError:
-        return data, ["pack.yaml is missing"]
+    raw, err = safe_lines(path)
+    if err:
+        # A missing file is an E_PACK_META problem; a bad encoding / unreadable file keeps its own code.
+        return data, [("E_PACK_META", "pack.yaml is missing")] if err[0] == "MISSING" else [(err[0], "pack.yaml: " + err[1])]
     for i, line in enumerate(raw, start=1):
         text = line.strip()
         if not text or text.startswith("#"):
             continue
-        # Strip a trailing comment ("  # ...") from the value.
-        text = re.split(r"\s+#", text, maxsplit=1)[0]
+        # Strip a trailing comment: two or more spaces then `#` (the documented form), so a
+        # value such as `C# and F # here` survives whole.
+        text = re.split(r"\s{2,}#", text, maxsplit=1)[0]
         m = re.match(r"^([a-z_]+):\s*(.*)$", text)
         if not m:
-            problems.append("line %d is not `key: value`" % i)
+            problems.append(("E_PACK_META", "line %d is not `key: value`" % i))
             continue
         key, val = m.group(1), m.group(2).strip()
         if key not in PACK_KEYS:
-            problems.append("line %d: unknown key %r (allowed: %s)" % (i, key, ", ".join(PACK_KEYS)))
+            problems.append(("E_PACK_META", "line %d: unknown key %r (allowed: %s)" % (i, key, ", ".join(PACK_KEYS))))
         elif key in data:
-            problems.append("line %d: duplicate key %r" % (i, key))
+            problems.append(("E_PACK_META", "line %d: duplicate key %r" % (i, key)))
         else:
             data[key] = val
     return data, problems
 
 
+def extract_urls(text):
+    """https URLs in `text`, minus the sentence punctuation that trails them."""
+    return [u.rstrip(".,;:") for u in URL_RE.findall(text)]
+
+
 def sources_rows(readme_lines):
-    """Map rule-file basename -> list of https URLs from the README table rows."""
-    rows = {}
+    """Rows of the README's `## Sources` table: (has_heading, [(rule file, [urls])]).
+
+    Only lines under the `## Sources` heading (up to the next heading) count, so a table
+    elsewhere in the README cannot satisfy the requirement. The header and separator rows
+    are not data rows.
+    """
+    rows, in_sources, has_heading = [], False, False
     for line in readme_lines:
-        if not line.startswith("|"):
+        if re.match(r"^#{1,6} ", line):
+            in_sources = line.strip() == "## Sources"
+            has_heading = has_heading or in_sources
+            continue
+        if not in_sources or not line.startswith("|"):
             continue
         cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
-        if cells:
-            rows.setdefault(cells[0], []).extend(URL_RE.findall(line))
-    return rows
+        if not cells or cells[0].lower() == "rule file" or all(re.match(r"^:?-+:?$", c) for c in cells):
+            continue
+        rows.append((cells[0], extract_urls(line)))
+    return has_heading, rows
 
 
 def notices_adapted_packs(path):
-    """Pack names listed under `Adapted packs` in THIRD_PARTY_NOTICES.txt."""
+    """Pack names listed under `Adapted packs` in THIRD_PARTY_NOTICES.txt: (names, error).
+
+    The list ends at the next heading (a line underlined with dashes) or at the first
+    line that is not a pack name. `error` is None, or a (code, message) when the file is
+    not UTF-8 or cannot be read (an absent file just lists nothing).
+    """
     names, active = set(), False
-    try:
-        with open(path, encoding="utf-8") as fh:
-            lines = fh.read().split("\n")
-    except OSError:
-        return names
-    for line in lines:
+    lines, err = safe_lines(path)
+    if err:
+        return names, (None if err[0] == "MISSING" else err)
+    for i, line in enumerate(lines):
         text = line.strip()
         if text == "Adapted packs":
             active = True
             continue
-        if not active or not text or text.startswith("#") or set(text) == {"-"}:
+        if not active or not text or text.startswith("#") or set(text) <= {"-", "="}:
             continue
-        names.add(text[2:].strip() if text.startswith("- ") else text)
-    return names
+        under = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if len(under) >= 3 and set(under) <= {"-", "="}:
+            break                                   # the next heading
+        name = text[2:].strip() if text.startswith("- ") else text
+        if not NAME_RE.match(name):
+            break                                   # prose, not a pack name: the list is over
+        names.add(name)
+    return names, None
 
 
 def load_denylist(path):
-    """Compile rules/denylist.txt (one regex per line, # comments). Returns (list, [errors])."""
+    """Compile rules/denylist.txt (one regex per line, # comments). Returns (list, [(code, error)])."""
     pats, errs = [], []
-    try:
-        with open(path, encoding="utf-8") as fh:
-            raw = fh.read().split("\n")
-    except OSError:
-        return pats, ["denylist.txt is missing"]
+    raw, err = safe_lines(path)
+    if err:
+        return pats, [("E_OPINION", "denylist.txt is missing")] if err[0] == "MISSING" else [(err[0], "denylist.txt: " + err[1])]
     for i, line in enumerate(raw, start=1):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         try:
             pats.append((line, re.compile(line, re.IGNORECASE)))
         except re.error as exc:
-            errs.append("line %d: bad regex (%s)" % (i, exc))
+            errs.append(("E_OPINION", "line %d: bad regex (%s)" % (i, exc)))
     return pats, errs
 
 
@@ -304,66 +460,131 @@ def pack_rule_files(pack_dir):
 
 
 def read_lines(path):
-    with open(path, encoding="utf-8", errors="replace") as fh:
+    # Strict decoding: a replacement character would let a bad byte pass lint and then be
+    # silently rewritten by emit. Callers turn UnicodeDecodeError into a finding or a refusal.
+    with open(path, encoding="utf-8") as fh:
         return fh.read().split("\n")
 
 
 def lint_rule_file(rel, path, denylist, f):
     """All per-file checks for one rule file. Returns its size in bytes."""
-    size = os.path.getsize(path)
+    try:
+        size = os.path.getsize(path)
+    except OSError as exc:
+        f.add("E_UNREADABLE", rel, "cannot read: %s" % (exc.strerror or exc.__class__.__name__))
+        return 0
     if size > FILE_MAX_BYTES:
+        # Oversize: say so once and stop (no read of a possibly huge file, no cascade).
         f.add("E_FILE_SIZE", rel, "%d bytes (max %d)" % (size, FILE_MAX_BYTES))
-    lines = read_lines(path)
+        return size
+    lines, err = safe_lines(path)
+    if err:
+        f.add(err[0], rel, err[1])
+        return size
 
-    globs, body, problem = parse_frontmatter(lines)
+    # A BOM is fixed at the source, so it gets its own message rather than a generic
+    # "missing frontmatter" (and is not reported again as an invisible character).
+    bom = lines[0][:1] == "\ufeff"
+    if bom:
+        globs, body, problem = [], 0, "file starts with a UTF-8 byte order mark (BOM); remove it so `---` is the first line"
+    else:
+        globs, body, problem = parse_frontmatter(lines)
     if problem:
         f.add("E_FRONTMATTER", rel, problem)
     elif not globs:
         f.add("E_PATHS", rel, "paths: list is empty")
+    glob_clean = []
     for g in globs:
-        for p in check_glob(g):
+        gp = check_glob(g)
+        for p in gp:
             f.add("E_PATHS", rel, p)
+        if not gp:
+            glob_clean.append(g)
+    # The whole file's expansion is bounded too: emit writes every expanded glob into one .mdc.
+    expanded = sum(expanded_count(g) for g in glob_clean)
+    if expanded > MAX_EXPANDED_GLOBS:
+        f.add("E_PATHS", rel, "paths expand to %d globs (max %d)" % (expanded, MAX_EXPANDED_GLOBS))
 
-    # Title: the first non-blank line after the frontmatter must be `# <Title>`.
-    title_idx = None
-    for i in range(body, len(lines)):
-        if lines[i].strip():
-            title_idx = i
-            break
-    if title_idx is None or not TITLE_RE.match(lines[title_idx]):
-        f.add("E_TITLE", rel, "first line after the frontmatter must be `# <Title>`")
-        style_start = body
-    else:
-        style_start = title_idx + 1
-    for lineno, msg in check_style(lines, style_start):
-        f.add("E_STYLE", rel, "line %d: %s" % (lineno, msg))
+    # Title and body shape are only judged when the frontmatter is sound: with a broken one
+    # every later line is "wrong", which would bury the one real defect under a cascade.
+    if not problem:
+        # Title: the first non-blank line after the frontmatter must be `# <Title>`.
+        title_idx = None
+        for i in range(body, len(lines)):
+            if lines[i].strip():
+                title_idx = i
+                break
+        if title_idx is None or not TITLE_RE.match(lines[title_idx]):
+            f.add("E_TITLE", rel, "first line after the frontmatter must be `# <Title>`")
+            style_start = body
+        else:
+            style_start = title_idx + 1
+        for lineno, msg in check_style(lines, style_start):
+            f.add("E_STYLE", rel, "line %d: %s" % (lineno, msg))
 
-    # Denylist is searched per line (so ^ anchors work), first matching pattern only.
+    # Hidden text, on every line of the file (frontmatter and fences included): an HTML
+    # comment hides text from a rendered view, an invisible character hides it from any view,
+    # and a Cyrillic/Greek look-alike inside an ASCII word dodges the denylist.
     for i, line in enumerate(lines, start=1):
+        if "<!--" in line or "-->" in line:
+            f.add("E_STYLE", rel, "line %d: HTML comment markers are not allowed" % i)
+        scan = line[1:] if (bom and i == 1) else line     # the BOM has its own finding
+        hidden = sorted(set("U+%04X" % ord(ch) for ch in scan if is_invisible(ch)))
+        if hidden:
+            f.add("E_STYLE", rel, "line %d: invisible character %s" % (i, ", ".join(hidden)))
+        for word in mixed_script_words(line):
+            f.add("E_STYLE", rel, "line %d: word %r mixes ASCII with Cyrillic or Greek letters" % (i, word))
+
+    # Marker text anywhere (fenced or not) would corrupt the managed block or the .mdc
+    # generated-file detection once delivered, so it is refused at the source.
+    for i, line in enumerate(lines, start=1):
+        if is_marker_line(line):
+            f.add("E_MARKER", rel, "line %d carries the-grid marker text" % i)
+
+    # Denylist is searched per normalised line (so ^ anchors work and spacing tricks fold
+    # away), first matching pattern only.
+    for i, line in enumerate(lines, start=1):
+        norm = normalize_for_match(line)
         for pat, rx in denylist:
-            if rx.search(line):
+            if rx.search(norm):
                 f.add("E_OPINION", rel, "line %d matches denylist pattern %s" % (i, pat))
                 break
     return size
 
 
-def check_url(url):
-    """HEAD one URL. Returns an error string, or None when it resolves (2xx/3xx)."""
+def _http(url, method, timeout):
+    """One request: (None, status) when the URL resolves, else (error string, status or None)."""
     import urllib.error
     import urllib.request
-    # Some servers reject HEAD (405/501): retry once with GET before failing.
+    req = urllib.request.Request(url, method=method, headers={"User-Agent": "the-grid-rules-lint"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return (None if resp.status < 400 else "HTTP %d" % resp.status), resp.status
+    except urllib.error.HTTPError as exc:
+        if 300 <= exc.code < 400:
+            return None, exc.code           # a redirect with no usable Location: the URL exists
+        return "HTTP %d" % exc.code, exc.code
+    except Exception as exc:  # network/DNS/TLS/timeout: report, never crash the lint
+        return "%s" % exc, None
+
+
+def check_url(url, timeout=URL_TIMEOUT, pause=2):
+    """Check one URL. Returns an error string, or None when it resolves (2xx/3xx).
+
+    HEAD first; any HEAD failure (many servers answer HEAD with 403/405/5xx or time out)
+    is retried with GET. A GET that ends in 429 or 5xx is retried once after `pause` s.
+    """
+    err = None
     for method in ("HEAD", "GET"):
-        req = urllib.request.Request(url, method=method, headers={"User-Agent": "the-grid-rules-lint"})
-        try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                return None if resp.status < 400 else "HTTP %d" % resp.status
-        except urllib.error.HTTPError as exc:
-            if method == "HEAD" and exc.code in (405, 501):
-                continue
-            return "HTTP %d" % exc.code
-        except Exception as exc:  # network/DNS/TLS: report, never crash the lint
-            return "%s" % exc
-    return "unreachable"
+        err, code = _http(url, method, timeout)
+        if err is None:
+            return None
+        if method == "GET" and code is not None and (code == 429 or code >= 500):
+            time.sleep(pause)
+            err, code = _http(url, "GET", timeout)
+            if err is None:
+                return None
+    return err
 
 
 def lint(root, check_urls=False):
@@ -374,10 +595,18 @@ def lint(root, check_urls=False):
     if packs:
         # Fail closed: with packs present, a missing or broken denylist is a finding.
         denylist, deny_errs = load_denylist(os.path.join(base, "denylist.txt"))
-        for e in deny_errs:
-            f.add("E_OPINION", "rules/denylist.txt", e)
-    adapted = notices_adapted_packs(os.path.join(base, "THIRD_PARTY_NOTICES.txt"))
+        for code, e in deny_errs:
+            f.add(code, "rules/denylist.txt", e)
+        if not deny_errs and not denylist:
+            # An empty denylist would pass every opinion: with packs present that fails closed.
+            f.add("E_OPINION", "rules/denylist.txt", "denylist has no patterns")
+    adapted, notices_err = notices_adapted_packs(os.path.join(base, "THIRD_PARTY_NOTICES.txt"))
+    if notices_err:
+        f.add(notices_err[0], "rules/THIRD_PARTY_NOTICES.txt", notices_err[1])
 
+    tiers = {}          # pack -> tier string (for the notices cross-check)
+    outputs = {}        # generated .mdc name -> first rule file that makes it
+    url_jobs = []       # (README path, url) pairs for --check-urls, checked together at the end
     for pack in packs:
         pdir = os.path.join(base, pack)
         prel = "rules/" + pack
@@ -387,28 +616,46 @@ def lint(root, check_urls=False):
         # Every entry must be pack.yaml, README.md or a lowercase kebab-case .md rule.
         for name in sorted(os.listdir(pdir)):
             full = os.path.join(pdir, name)
-            if os.path.isdir(full):
+            if os.path.islink(full) and not os.path.exists(full):
+                f.add("E_NAME", prel + "/" + name, "dangling symlink")
+            elif os.path.isdir(full):
                 f.add("E_NAME", prel + "/" + name, "unexpected directory (rule files are flat)")
             elif name in ("pack.yaml", "README.md"):
                 continue
             elif not name.endswith(".md"):
                 f.add("E_NAME", prel + "/" + name, "unexpected file (a pack holds pack.yaml, README.md and .md rule files)")
+            elif name[:-3].lower() == "readme":
+                f.add("E_NAME", prel + "/" + name, "`readme` is a reserved topic name (README.md is never a rule)")
             elif not NAME_RE.match(name[:-3]):
                 f.add("E_NAME", prel + "/" + name, "rule file name must be lowercase kebab-case")
 
         rule_files = pack_rule_files(pdir)
-        total = 0
+        if not rule_files:
+            f.add("E_PACK_META", prel, "pack has no rule files")
         for name in rule_files:
-            total += lint_rule_file("%s/%s" % (prel, name), os.path.join(pdir, name), denylist, f)
-        if total > PACK_MAX_BYTES:
+            # `a-b` + `c.md` and `a` + `b-c.md` would both write grid-a-b-c.mdc for Cursor.
+            out_name = "grid-%s-%s.mdc" % (pack, name[:-3])
+            if out_name in outputs:
+                f.add("E_NAME", prel + "/" + name, "Cursor output %s collides with %s" % (out_name, outputs[out_name]))
+            else:
+                outputs[out_name] = "%s/%s" % (prel, name)
+        total, oversize = 0, False
+        for name in rule_files:
+            sz = lint_rule_file("%s/%s" % (prel, name), os.path.join(pdir, name), denylist, f)
+            total += sz
+            oversize = oversize or sz > FILE_MAX_BYTES
+        # A pack that is over because one file is already flagged E_FILE_SIZE is one defect.
+        if total > PACK_MAX_BYTES and not oversize:
             f.add("E_PACK_SIZE", prel, "%d bytes across %d rule files (max %d)" % (total, len(rule_files), PACK_MAX_BYTES))
 
         # pack.yaml
         meta, problems = read_pack_yaml(os.path.join(pdir, "pack.yaml"))
-        for p in problems:
-            f.add("E_PACK_META", prel + "/pack.yaml", p)
+        for code, p in problems:
+            f.add(code, prel + "/pack.yaml", p)
         tier = meta.get("tier")
-        yaml_absent = (problems == ["pack.yaml is missing"])   # already reported above
+        tiers[pack] = tier
+        # Missing, undecodable or unreadable: already reported above, so skip the field checks.
+        yaml_absent = any(c != "E_PACK_META" or p == "pack.yaml is missing" for c, p in problems)
         if not yaml_absent and not meta.get("summary"):
             f.add("E_PACK_META", prel + "/pack.yaml", "summary is missing or empty")
         if yaml_absent:
@@ -417,6 +664,9 @@ def lint(root, check_urls=False):
             f.add("E_PACK_META", prel + "/pack.yaml", "tier must be 1 or 2, got %r" % tier)
         elif tier == "2" and not meta.get("adapted_from"):
             f.add("E_PACK_META", prel + "/pack.yaml", "tier 2 requires adapted_from")
+        elif tier == "2" and not ADAPTED_RE.match(meta["adapted_from"]):
+            f.add("E_PACK_META", prel + "/pack.yaml",
+                  "adapted_from must read `<owner>/<repo> rules/<pack> @ <sha> (MIT)`")
         elif tier == "1" and meta.get("adapted_from"):
             f.add("E_PACK_META", prel + "/pack.yaml", "adapted_from is only allowed on tier 2")
 
@@ -426,17 +676,33 @@ def lint(root, check_urls=False):
             f.add("E_SOURCES", prel + "/README.md", "README.md is missing")
             rlines = []
         else:
-            rlines = read_lines(readme)
-            rows = sources_rows(rlines)
-            for name in rule_files:
-                if not rows.get(name):
-                    f.add("E_SOURCES", prel + "/README.md", "no Sources row with an https:// URL for %s" % name)
-            if check_urls:
-                for name in sorted(rows):
-                    for url in sorted(set(rows[name])):
-                        err = check_url(url)
-                        if err:
-                            f.add("E_URL", prel + "/README.md", "%s -> %s" % (url, err))
+            rlines, rerr = safe_lines(readme)
+            if rerr:
+                f.add(rerr[0], prel + "/README.md", rerr[1])
+                rlines = []
+            else:
+                has_heading, rows = sources_rows(rlines)
+                good_urls = {}
+                if not has_heading:
+                    f.add("E_SOURCES", prel + "/README.md", "README.md has no `## Sources` section")
+                for name, urls in rows:
+                    if name not in rule_files:
+                        f.add("E_SOURCES", prel + "/README.md", "Sources row names %s, which is not a rule file of this pack" % name)
+                    for u in urls:
+                        if not URL_FULL_RE.match(u):
+                            f.add("E_SOURCES", prel + "/README.md", "malformed URL %s (need https://host.tld/...)" % u)
+                    good_urls.setdefault(name, []).extend(u for u in urls if URL_FULL_RE.match(u))
+                if has_heading:
+                    row_names = set(n for n, _ in rows)
+                    for name in rule_files:
+                        # A row that only holds a malformed URL was reported above; say it once.
+                        has_any = any(u for n, us in rows if n == name for u in us)
+                        if name not in row_names or not has_any:
+                            f.add("E_SOURCES", prel + "/README.md", "no Sources row with an https:// URL for %s" % name)
+                if check_urls:
+                    for name in sorted(good_urls):
+                        for url in sorted(set(good_urls[name])):
+                            url_jobs.append((prel + "/README.md", url))
 
         # Attribution for tier 2 (adapted) packs.
         if tier == "2":
@@ -445,6 +711,25 @@ def lint(root, check_urls=False):
             if pack not in adapted:
                 f.add("E_ATTRIBUTION", "rules/THIRD_PARTY_NOTICES.txt",
                       "pack %s is not listed under `Adapted packs`" % pack)
+
+    # The notices list is checked the other way too: every name must be a real tier 2 pack.
+    if packs or adapted:
+        for name in sorted(adapted):
+            if name not in tiers:
+                f.add("E_ATTRIBUTION", "rules/THIRD_PARTY_NOTICES.txt",
+                      "%s is listed under `Adapted packs` but rules/%s does not exist" % (name, name))
+            elif tiers[name] != "2":
+                f.add("E_ATTRIBUTION", "rules/THIRD_PARTY_NOTICES.txt",
+                      "%s is listed under `Adapted packs` but %s is not a tier 2 pack" % (name, name))
+
+    if url_jobs:
+        # Bounded concurrency (not a global time budget, which would hide unchecked URLs);
+        # map keeps the findings in job order, so the output stays deterministic.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=URL_WORKERS) as pool:
+            for (rel, url), err in zip(url_jobs, pool.map(lambda job: check_url(job[1]), url_jobs)):
+                if err:
+                    f.add("E_URL", rel, "%s -> %s" % (url, err))
     return f
 
 
@@ -476,12 +761,17 @@ def cmd_list(root):
 # lets emit delete or overwrite a file: unmarked (hand-written) files are never touched.
 MDC_MARKER_PREFIX = "<!-- the-grid:rules generated from "
 MDC_MARKER_FMT = MDC_MARKER_PREFIX + "%s; do not edit -->"
+MDC_MARKER_RE = re.compile("^" + re.escape(MDC_MARKER_PREFIX) + r"rules/[a-z0-9-]+/[a-z0-9-]+\.md; do not edit -->$")
 CURSOR_DEFAULT_OUT = os.path.join(".cursor", "rules")
 HARNESSES = ("cursor", "agents-md", "gemini")
 
 
 class Refusal(Exception):
     """A usage error or refusal: reported on stderr, exit 2, nothing written."""
+
+
+class OverCap(Refusal):
+    """The managed block would exceed BLOCK_CAP: reported on stderr, exit 3, nothing written."""
 
 
 def expand_braces(glob):
@@ -501,13 +791,27 @@ def expand_braces(glob):
     return ["".join(combo) for combo in itertools.product(*choices)]
 
 
+# Plain scalars that YAML 1.1 loads as something other than a string.
+_YAML_WORDS = frozenset(["y", "n", "yes", "no", "true", "false", "on", "off", "null", "~",
+                         ".inf", "-.inf", "+.inf", ".nan"])
+_YAML_TYPED_RES = [re.compile(p) for p in (
+    r"^[-+]?(\.[0-9]+|[0-9][0-9_]*(\.[0-9_]*)?)([eE][-+]?[0-9]+)?$",   # int / float
+    r"^[-+]?0x[0-9a-fA-F_]+$", r"^[-+]?0o?[0-7_]+$", r"^[-+]?0b[01_]+$",  # hex / octal / binary
+    r"^[-+]?[0-9][0-9_]*(:[0-5]?[0-9])+(\.[0-9_]*)?$",                    # sexagesimal
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}([Tt ].*)?$",                            # date / timestamp
+)]
+
+
 def yaml_scalar(text):
     """Render a one-line frontmatter value: bare when plainly safe, else JSON-quoted.
 
     A title such as `Style: naming` or `Use # sparingly` would break an unquoted
-    YAML scalar, so quote (JSON strings are valid YAML) whenever it could.
+    YAML scalar, a tab is not allowed in one, and a title such as `No`, `123` or
+    `2024-01-01` would load as a bool, number or date; so quote (JSON strings are
+    valid YAML) whenever any of that could happen.
     """
-    if re.search(r"(^[^A-Za-z0-9])|(: )|( #)|(:$)", text):
+    if (re.search(r"(^[^A-Za-z0-9])|(: )|( #)|(:$)|\t", text) or text.lower() in _YAML_WORDS
+            or any(rx.match(text) for rx in _YAML_TYPED_RES)):
         return json.dumps(text)
     return text
 
@@ -526,10 +830,11 @@ def render_mdc(rel, path):
     if not rest or not TITLE_RE.match(rest[0]):
         raise Refusal("%s: first line after the frontmatter must be `# <Title>` (run `rules.py lint`)" % rel)
     title = rest[0][2:].strip()
-    out_globs = []
+    out_globs, seen = [], set()
     for g in globs:
         for e in expand_braces(g):
-            if e not in out_globs:        # duplicates dropped, first occurrence wins
+            if e not in seen:             # duplicates dropped, first occurrence wins
+                seen.add(e)               # (a set keeps this linear, not quadratic)
                 out_globs.append(e)
     text = "\n".join(rest)
     if not text.endswith("\n"):
@@ -539,10 +844,67 @@ def render_mdc(rel, path):
 
 
 def is_generated(path):
-    """True when `path` is a regular file carrying the generated-file marker."""
-    if not os.path.isfile(path):
+    """True when `path` is a regular file (never a symlink) that rules.py generated.
+
+    Generated means the marker sits on the line directly after the frontmatter's closing
+    `---`, in the form `rules/<pack>/<name>.md`. A hand-written file that merely quotes
+    the marker somewhere else is not ours, so it is never deleted or overwritten. A
+    symlink is "not generated" even when its target holds the marker: otherwise a planted
+    link would make emit overwrite or delete whatever it points at.
+    """
+    if os.path.islink(path) or not os.path.isfile(path):
         return False
-    return any(ln.startswith(MDC_MARKER_PREFIX) for ln in read_lines(path))
+    try:
+        lines = read_lines(path)
+    except (UnicodeDecodeError, OSError):
+        return False                      # not decodable / not readable: not ours to touch
+    if not lines or lines[0] != "---" or "---" not in lines[1:]:
+        return False
+    end = lines.index("---", 1)
+    return end + 1 < len(lines) and MDC_MARKER_RE.match(lines[end + 1]) is not None
+
+
+def atomic_write(path, data):
+    """Write `data` to `path` via a temp file in the same directory, then os.replace.
+
+    The old file is never truncated, so a failed write (disk full, size limit, kill)
+    leaves it byte-identical. The mode (and, best effort, the owner) of an existing
+    file is kept. os.replace swaps the inode, so a second hard link to the file keeps
+    the OLD content (documented in rules/README.md); a symlink is never followed
+    because callers refuse one first. A read-only existing file is refused: the
+    rename would otherwise succeed in a writable directory and override the operator.
+    """
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, exist_ok=True)
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        st = None
+    if st is not None and not os.access(path, os.W_OK):
+        raise OSError("%s is not writable" % path)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix="." + os.path.basename(path) + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if st is not None:
+            os.chmod(tmp, stat.S_IMODE(st.st_mode))
+            try:
+                os.chown(tmp, st.st_uid, st.st_gid)
+            except (OSError, AttributeError):
+                pass                        # best effort: only root can give files away
+        else:
+            um = os.umask(0)
+            os.umask(um)
+            os.chmod(tmp, 0o666 & ~um)      # mkstemp makes 0600; a new file gets the normal default
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def plan_cursor(root, packs, out):
@@ -598,10 +960,23 @@ BLOCK_BEGIN = "<!-- BEGIN the-grid rules (generated by scripts/rules.py; edits i
 BLOCK_END = "<!-- END the-grid rules -->"
 BLOCK_INTRO = ("## Coding rules (the-grid)\n\n"
                "Apply each rule only when working on files matching its globs.\n")
-# Marker lines are matched at line start by prefix, so a reworded trailing comment in an
-# older block still counts as ours (bytes, because the file is handled as raw bytes).
-BEGIN_RE = re.compile(br"^<!-- BEGIN the-grid rules[^\n]*$", re.M)
-END_RE = re.compile(br"^<!-- END the-grid rules[^\n]*$", re.M)
+# Marker lines are matched as COMPLETE lines (optional trailing CR), never by prefix: a user
+# note that merely starts like a marker is user text, not ours. Every BEGIN/END spelling
+# ever shipped is listed so a future rewording keeps migrating old blocks (the commit
+# history shows only the current spelling has shipped). Bytes, because the file is handled
+# as raw bytes.
+BLOCK_BEGIN_HISTORY = (BLOCK_BEGIN,)
+BLOCK_END_HISTORY = (BLOCK_END,)
+
+
+def _marker_re(spellings):
+    alt = b"|".join(re.escape(t.encode("utf-8")) for t in spellings)
+    return re.compile(b"^(?:" + alt + b")\r?$", re.M)
+
+
+BEGIN_RE = _marker_re(BLOCK_BEGIN_HISTORY)
+BARE_BEGIN_RE = re.compile(br"^<!-- BEGIN the-grid rules[^\n]*$", re.M)
+END_RE = _marker_re(BLOCK_END_HISTORY)
 BLOCK_DEFAULT_OUT = {"agents-md": "AGENTS.md", "gemini": "GEMINI.md"}
 
 
@@ -616,6 +991,10 @@ def render_section(rel, path):
         rest.pop(0)
     if not rest or not TITLE_RE.match(rest[0]):
         raise Refusal("%s: first line after the frontmatter must be `# <Title>` (run `rules.py lint`)" % rel)
+    for ln in rest:
+        # Backstop for callers that skip lint: marker text in a body would wedge removal.
+        if is_marker_line(ln):
+            raise Refusal("%s: a line carries the-grid marker text (E_MARKER)" % rel)
     rest = rest[1:]                       # the H1 goes: the ### header replaces it
     while rest and not rest[0].strip():
         rest.pop(0)
@@ -640,16 +1019,25 @@ def render_block(root, packs):
     text = "%s\n%s\n%s%s\n" % (BLOCK_BEGIN, BLOCK_INTRO, "\n".join(sections), BLOCK_END)
     data = text.encode("utf-8")
     if len(data) > BLOCK_CAP:
-        raise Refusal("block is %d bytes, over the %d-byte cap: select fewer packs" % (len(data), BLOCK_CAP))
+        raise OverCap("block is %d bytes, over the %d-byte cap; nothing written, select fewer packs"
+                      % (len(data), BLOCK_CAP))
     return data
+
+
+def detect_eol(data):
+    """CRLF only when every newline in `data` is a CRLF; otherwise LF (also for no newline)."""
+    n = data.count(b"\n")
+    return b"\r\n" if n and data.count(b"\r\n") == n else b"\n"
 
 
 def plan_block(root, packs, out):
     """Work out the new content of the --out file without touching disk.
 
-    Returns (old, new): bytes or None for "file absent" / "file to be deleted".
+    Returns (old, new): bytes, or None for "file absent" (new is never None).
     Raises Refusal on any problem, before any write.
     """
+    if os.path.islink(out):
+        raise Refusal("--out %s is a symlink; refusing to write through it" % out)
     if os.path.lexists(out) and not os.path.isfile(out):
         raise Refusal("--out %s exists and is not a regular file (agents-md/gemini write a file)" % out)
     old = None
@@ -659,10 +1047,23 @@ def plan_block(root, packs, out):
     # Marker check comes first so a damaged file is refused even for the empty selection.
     begins = list(BEGIN_RE.finditer(old or b""))
     ends = list(END_RE.finditer(old or b""))
-    if len(begins) != len(ends) or len(begins) > 1 or (begins and begins[0].start() > ends[0].start()):
+    if begins:
+        # Only an END after our BEGIN can close our block; an exact END line before it is
+        # user text (e.g. a fenced quote of the markers), so it does not count.
+        ends = [e for e in ends if e.start() > begins[0].start()]
+    elif ends and BARE_BEGIN_RE.search(old):
+        # No exact BEGIN, but a bare BEGIN-like line sits in the file: a user fence quoting
+        # the markers, so the exact END beside it is quoted text as well, not a damaged block.
+        ends = []
+    if len(begins) != len(ends) or len(begins) > 1:
         raise Refusal("%s: expected exactly one BEGIN and one END marker, BEGIN first "
                       "(found %d BEGIN, %d END); fix the markers by hand" % (out, len(begins), len(ends)))
     block = render_block(root, packs)
+    # The block takes the file's line ending, so a CRLF file stays uniformly CRLF and
+    # --check compares like with like after an editor re-save.
+    eol = detect_eol(old or b"")
+    if block is not None and eol == b"\r\n":
+        block = block.replace(b"\n", b"\r\n")
 
     if begins:
         # Replace (or drop) the region from the BEGIN line through the END line's newline.
@@ -671,17 +1072,23 @@ def plan_block(root, packs, out):
         if old[end:end + 1] == b"\n":
             end += 1
         before, after = old[:start], old[end:]
+        if block is None and after == b"" and before.endswith(b"\n"):
+            # Removal at EOF: take back the one newline the append added as a separator,
+            # so emit then emit '' round-trips the operator's bytes.
+            before = before[:-len(eol)] if before.endswith(eol) else before[:-1]
         new = before + (block or b"") + after
     elif block is None:
         return old, old                    # nothing to remove, nothing to add
     else:
-        # No block yet: append, separated from existing text by a blank line.
+        # No block yet: append, separated from existing text by one blank line: one extra
+        # newline after a newline-terminated text, two after text with no final newline,
+        # none for an empty file. (A file with no final newline thus gains one on removal.)
         before = old or b""
-        sep = b"" if (not before or before.endswith(b"\n\n")) else (b"\n" if before.endswith(b"\n") else b"\n\n")
+        sep = b"" if not before else (eol if before.endswith(b"\n") else eol * 2)
         new = before + sep + block
-    # Removing the block from a file that held nothing else deletes the file.
-    if block is None and new == b"":
-        new = None
+    # Removing the block from a file that held nothing else leaves a 0-byte file, never a
+    # deletion: an empty file is the operator's opt-in to receive rules (the grid never
+    # creates the instruction file), and deleting it would silently withdraw that opt-in.
     return old, new
 
 
@@ -691,40 +1098,90 @@ def apply_block(root, packs, out, check):
     if old == new:
         return 0
     if not check:
-        if new is None:
-            os.remove(out)
-        else:
-            os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-            with open(out, "wb") as fh:
-                fh.write(new)
-    print(("removed %s" if new is None else "wrote %s") % out)
+        atomic_write(out, new)
+    print("%s %s" % ("would write" if check else "wrote", out))
     return 1 if check else 0
+
+
+def validate_packs(root, packs):
+    """Re-lint the rule files of each selected pack before delivery.
+
+    Returns (good, bad): `good` keeps the packs to deliver (an unknown pack name stays in
+    it so the normal "unknown pack" refusal fires); `bad` maps a failing pack to its
+    finding lines. Only EMIT_BLOCKING_CODES block: pack metadata, Sources and notices
+    findings say nothing about the text that gets loaded as instructions.
+    """
+    base = rules_dir(root)
+    deny_path = os.path.join(base, "denylist.txt")
+    denylist = load_denylist(deny_path)[0] if os.path.isfile(deny_path) else []
+    good, bad = [], {}
+    for pack in packs:
+        pdir = os.path.join(base, pack)
+        if not NAME_RE.match(pack) or not os.path.isdir(pdir):
+            good.append(pack)
+            continue
+        f = Findings()
+        for name in pack_rule_files(pdir):
+            lint_rule_file("rules/%s/%s" % (pack, name), os.path.join(pdir, name), denylist, f)
+        found = ["%s %s: %s" % (c, pth, m) for c, pth, m in f.items if c in EMIT_BLOCKING_CODES]
+        if found:
+            bad[pack] = found
+        else:
+            good.append(pack)
+    return good, bad
 
 
 def cmd_emit(root, harness, packs_arg, out, check):
     """Run `emit`. Returns the process exit code (0 done, 1 drift, 2 refusal)."""
+    # Sorted, de-duplicated, empty entries dropped: `""` is the empty selection.
+    packs = sorted(set(p.strip() for p in packs_arg.split(",") if p.strip()))
+    # Re-validate what is about to be rendered: emit must not trust that lint ran. A failing
+    # pack is dropped and named; the clean ones still go out, but the exit is 2 so wire
+    # shows red. If EVERY selected pack fails nothing is written (an empty selection would
+    # otherwise strip the rules that are already delivered).
     try:
-        # Sorted, de-duplicated, empty entries dropped: `""` is the empty selection.
-        packs = sorted(set(p.strip() for p in packs_arg.split(",") if p.strip()))
+        packs, bad = validate_packs(root, packs)
+    except (OSError, UnicodeDecodeError) as exc:
+        sys.stderr.write("rules.py emit: %s\n" % exc)
+        return 2
+    for pack in sorted(bad):
+        for line in bad[pack]:
+            sys.stderr.write("rules.py emit: pack %s excluded: %s\n" % (pack, line))
+    if bad and not packs:
+        return 2
+    rc = _emit(root, harness, packs, out, check)
+    return 2 if bad else rc
+
+
+def _emit(root, harness, packs, out, check):
+    """Deliver the already-validated `packs`; the exit code is cmd_emit's contract."""
+    try:
         if harness in BLOCK_DEFAULT_OUT:
             return apply_block(root, packs, out or BLOCK_DEFAULT_OUT[harness], check)
         out = out or CURSOR_DEFAULT_OUT
         writes, removals = plan_cursor(root, packs, out)
     except Refusal as exc:
         sys.stderr.write("rules.py emit: %s\n" % exc)
+        return 3 if isinstance(exc, OverCap) else 2
+    except (OSError, UnicodeDecodeError) as exc:
+        # A failed read or write is a refusal with one line, never a traceback (a direct
+        # caller must be able to tell it from drift, which is exit 1 under --check).
+        sys.stderr.write("rules.py emit: %s\n" % exc)
         return 2
 
     # Validation is complete; from here on we either report (--check) or apply.
-    for path, data in writes:
-        if not check:
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            with open(path, "wb") as fh:
-                fh.write(data)
-        print("wrote %s" % path)
-    for path in removals:
-        if not check:
-            os.remove(path)
-        print("removed %s" % path)
+    try:
+        for path, data in writes:
+            if not check:
+                atomic_write(path, data)
+            print("%s %s" % ("would write" if check else "wrote", path))
+        for path in removals:
+            if not check:
+                os.remove(path)
+            print("%s %s" % ("would remove" if check else "removed", path))
+    except (OSError, UnicodeDecodeError) as exc:
+        sys.stderr.write("rules.py emit: %s\n" % exc)
+        return 2
     return 1 if (check and (writes or removals)) else 0
 
 
@@ -747,6 +1204,11 @@ def main(argv=None):
     sp.add_argument("--check", action="store_true", help="write nothing; exit 1 if a run would change anything")
     args = ap.parse_args(argv)
     root = os.path.realpath(args.root or os.environ.get("GRID_DIR") or os.path.join(HERE, ".."))
+    # An explicit --root is a promise that rules/ is there: a typo must not read as "clean".
+    # (The default root and GRID_DIR, as the gate uses them, stay clean without rules/.)
+    if args.cmd in ("lint", "list") and args.root and not os.path.isdir(rules_dir(root)):
+        sys.stderr.write("rules.py: rules/ not found under %s\n" % args.root)
+        return 2
 
     if args.cmd == "list":
         return cmd_list(root)
