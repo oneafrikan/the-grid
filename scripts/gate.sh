@@ -167,7 +167,9 @@ run_bats() {
   # Bash builtins only (the gate's own tests run with a minimal PATH).
   local tmp rc=0 leftovers
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/grid-bats.XXXXXX")"
-  TMPDIR="$tmp" tests/lib/bats-core/bin/bats tests/ || rc=$?
+  # GRID_REQUIRE_VENV=1: the venv-gated tests (agent-factory) must RUN here. Without it
+  # they skip, bats exits 0, and a machine with no venv passes the gate (R16.qa.F5).
+  TMPDIR="$tmp" GRID_REQUIRE_VENV=1 tests/lib/bats-core/bin/bats tests/ || rc=$?
   shopt -s nullglob dotglob
   leftovers=("$tmp"/*)
   shopt -u nullglob dotglob
