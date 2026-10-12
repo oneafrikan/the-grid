@@ -777,14 +777,21 @@ class Scan:
             return
 
         text = None
+        stripped_view = None
         # A NUL ANYWHERE in the file counts (not just the first BINARY_SNIFF bytes): bash
         # drops NULs, so `cu<NUL>rl ... | ba<NUL>sh` placed after a long padding still runs.
         if b"\x00" in data:
             nul_in_head = b"\x00" in head
             exec_class = self._exec_class(fclass, name, rel_target, rel_root)
             if _plausible_utf16(data):
-                # Genuine UTF-16 with a BOM: decode it and scan the text.
+                # Plausibly UTF-16 with a BOM: decode it and scan the text. "Plausible" can be
+                # forged (a NUL-free first line, aligned UTF-16 padding, then a plain ASCII
+                # payload that bash runs after dropping the NULs), so executable classes ALSO
+                # get the NUL-stripped view below. For real UTF-16 that view equals the decoded
+                # text and its findings are de-duplicated.
                 text = data.decode("utf-16")
+                if exec_class:
+                    stripped_view = data.replace(b"\x00", b"").decode("utf-8", errors="replace")
             elif nul_in_head and _is_known_binary(head) and not exec_class:
                 # An image/archive/font: nothing to scan. Never for executable classes:
                 # a magic-number first line is trivially forged in front of a script
@@ -806,6 +813,18 @@ class Scan:
         # Lines split on \n ONLY, so U+2028/U+2029 never end a line.
         if text is None:
             text = data.decode("utf-8", errors="replace")
+        self._scan_text(text, fclass, name, rel_target, rel_root, display, tier, file_sha)
+        if stripped_view is not None:
+            before = len(self.findings)
+            known = {(f["rule"], f["line"]) for f in self.findings
+                     if f["path"] == display}
+            self._scan_text(stripped_view, fclass, name, rel_target, rel_root, display, tier, file_sha)
+            # drop what the decoded view already reported (same rule on the same line)
+            self.findings[before:] = [f for f in self.findings[before:]
+                                      if (f["rule"], f["line"]) not in known]
+
+    def _scan_text(self, text, fclass, name, rel_target, rel_root, display, tier, file_sha):
+        """Run the line rules over one text view of a file."""
         lines = text.split("\n")
         classes = self._line_classes(lines, fclass, name, rel_target, rel_root)
         ext = os.path.splitext(name)[1].lower()
