@@ -18,6 +18,9 @@
 #     closed  a guard: exit 2 with an install hint (PreToolUse blocks only on 2,
 #             so a missing jq must not turn a guard into a silent no-op)
 #     open    a background hook: note on stderr and exit 0
+#   "closed" covers a missing jq ONLY. A missing launcher (hooks/run.sh) is bash exit 127,
+#   which Claude Code does not treat as blocking, so the guard is off in that case; see
+#   the "What closed covers" paragraph in hooks/README.md.
 #   Returns 0 when jq is on PATH. Otherwise it EXITS the calling script.
 grid_require_jq() {
   command -v jq >/dev/null 2>&1 && return 0

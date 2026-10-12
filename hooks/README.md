@@ -41,6 +41,13 @@ only.
 The machine-readable version of this table is `catalogue.json` (the only place scope,
 profile and cost are defined). Every entry has a non-empty `cost`.
 
+**What "closed" covers.** A `closed` guard blocks when it runs: a missing `jq` makes it
+exit 2 with an install hint, which Claude Code treats as a block. It does not cover a
+missing launcher. If `hooks/run.sh` is gone (a moved or deleted checkout, a wrong
+`GRID_DIR`) the emitted command exits 127, which Claude Code does not treat as
+blocking, so the guard is off until the path is fixed (the failure shows as a hook
+error in the session). A launcher that blocks on its own absence is deferred.
+
 **Opt-in hooks (`instincts-*`).** These four are in no profile. A project turns them on
 with a top-level `learning: on` in its `.grid/project.yaml` (the YAML `true` works too),
 and `deploy_hooks.py` then emits them under every profile, including `off`. Setting the
@@ -75,8 +82,11 @@ settings.json  ->  bash ".../hooks/run.sh" <id>   ->   hooks/scripts/<id>.sh
 
 ## Environment variables
 
-Both are read by `run.sh` from the environment of the shell that launched `claude`;
-no re-emit is needed.
+Both are read by `run.sh` from the environment of the shell that launched `claude`
+(the environment the hook runs in), not from any file; no re-emit is needed. Anything
+that can set those variables for the hook process can switch a guard off, which is
+what a kill switch is; whether a project's own `.claude/settings.json` `env` block
+reaches hook subprocesses has not been verified.
 
 | Variable | Effect |
 |---|---|
