@@ -178,8 +178,8 @@ if [ "${1:-}" = "--check" ]; then
     [ -d "$1" ] || return 0
     # -H: follow the command-line dir if it is itself a symlink (a symlinked
     # skills dir), otherwise find lists nothing and drift is never reported.
-    find -H "$1" -maxdepth 1 -type l | while IFS= read -r l; do
-      t="$(readlink "$l")"; n="$(basename "$l")"
+    find -H "$1" -maxdepth 1 -type l -print0 | while IFS= read -r -d '' l; do
+      t="$(readlink "$l")" || continue; n="${l##*/}"
       if [ -n "${2:-}" ] && { [ -e "$2/$n" ] || [ -L "$2/$n" ]; } && ! link_is_ours "$2/$n"; then continue; fi
       if target_is_ours "$t"; then printf '%s -> %s\n' "$n" "$t"; fi
     done | LC_ALL=C sort
@@ -190,8 +190,8 @@ if [ "${1:-}" = "--check" ]; then
   # the same real-file shadow filter. Prints "pack/topic.md -> target".
   rule_links() {
     [ -d "$1/grid" ] || return 0
-    find -H "$1/grid" -type l | while IFS= read -r l; do
-      t="$(readlink "$l")"; n="${l#"$1"/grid/}"
+    find -H "$1/grid" -type l -print0 | while IFS= read -r -d '' l; do
+      t="$(readlink "$l")" || continue; n="${l#"$1"/grid/}"
       if [ -n "${2:-}" ] && [ -e "$2/grid/$n" ] && [ ! -L "$2/grid/$n" ]; then continue; fi
       if target_is_ours "$t"; then printf '%s -> %s\n' "$n" "$t"; fi
     done | LC_ALL=C sort
@@ -214,8 +214,8 @@ if [ "${1:-}" = "--check" ]; then
   # registry path there, the live side resolves through harness_path as the real run does.
   hlinks() { # $1 = dir to list, $2 = live dir for the shadow filter
     [ -d "$1" ] || return 0
-    find -H "$1" -maxdepth 1 -type l | while IFS= read -r l; do
-      t="$(readlink "$l")"; n="$(basename "$l")"
+    find -H "$1" -maxdepth 1 -type l -print0 | while IFS= read -r -d '' l; do
+      t="$(readlink "$l")" || continue; n="${l##*/}"
       if [ -n "${2:-}" ] && { [ -e "$2/$n" ] || [ -L "$2/$n" ]; }; then
         lt="$(readlink "$2/$n" 2>/dev/null || true)"
         target_is_ours "$lt" || continue
@@ -485,8 +485,10 @@ fi
 teardown_grid_links() {
   local dir="$1" link target
   [ -d "$dir" ] || return 0
-  while IFS= read -r link; do
-    target=$(readlink "$link")
+  # -print0 / read -d '': a link name holding a newline must not be split into two
+  # bogus paths (readlink of a half-name failed under set -e and aborted every run).
+  while IFS= read -r -d '' link; do
+    target=$(readlink "$link") || continue
     # target_is_ours compares resolved paths against "$GRID_DIR"/ (with the slash):
     # a bare prefix would also match a sibling dir such as ${GRID_DIR}-private and
     # delete a foreign link into it.
@@ -494,7 +496,7 @@ teardown_grid_links() {
     rm "$link"
   # find -H: follow $dir itself when it is a symlink to the real skills dir
   # (without it find lists nothing and stale grid links silently survive).
-  done < <(find -H "$dir" -maxdepth 1 -type l 2>/dev/null)
+  done < <(find -H "$dir" -maxdepth 1 -type l -print0 2>/dev/null)
 }
 teardown_grid_links "$SKILLS_DIR"
 teardown_grid_links "$AGENTS_DIR"
@@ -516,11 +518,11 @@ done
 teardown_rule_links() {
   local root="$RULES_DIR/grid" link target
   [ -d "$root" ] || return 0
-  while IFS= read -r link; do
-    target=$(readlink "$link")
+  while IFS= read -r -d '' link; do
+    target=$(readlink "$link") || continue
     target_is_ours "$target" || continue   # not ours, leave it alone
     rm "$link"
-  done < <(find -H "$root" -type l 2>/dev/null)
+  done < <(find -H "$root" -type l -print0 2>/dev/null)
   # -empty -delete only removes directories with nothing in them (-delete implies -depth,
   # so a pack dir emptied by the loop above goes, and so does a parent emptied by that).
   find "$root" -mindepth 1 -type d -empty -delete 2>/dev/null || true
