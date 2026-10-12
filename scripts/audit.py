@@ -369,6 +369,10 @@ class Rule:
         # window: 2 also matches a phrase split over this line and the next.
         self.normalise = bool(d.get("normalise", False))
         self.window = d.get("window", 1)
+        # physical: true also matches every physical line a continuation join swallowed
+        # (anchored rules such as `^hooks:` would otherwise be hidden by a previous line
+        # that ends in a backslash or a pipe).
+        self.physical = bool(d.get("physical", False))
         if self.window not in (1, 2):
             raise UsageError("policy: rule %r: window must be 1 or 2" % rid)
 
@@ -427,6 +431,7 @@ class Policy:
                 raise UsageError("policy: a class has no name")
             self.classes.append((name, [glob_to_regex(g) for g in c.get("globs") or []]))
         self.rules = [Rule(r) for r in (doc.get("rules") or [])]
+        self.physical_rules = [r for r in self.rules if r.physical]
         ids = [r.id for r in self.rules]
         if len(ids) != len(set(ids)):
             raise UsageError("policy: duplicate rule id")
@@ -739,12 +744,15 @@ class Scan:
         classes = self._line_classes(lines, fclass, name, rel_target, rel_root)
         ext = os.path.splitext(name)[1].lower()
         logical = _logical_lines(lines, COMMENT_PREFIXES_BY_EXT.get(ext, DEFAULT_COMMENT_PREFIXES))
-        for k, (idx, line, _last) in enumerate(logical):
+        for k, (idx, line, last) in enumerate(logical):
             if line == "":
                 continue
             self._tick(display)
             nxt = logical[k + 1][1] if k + 1 < len(logical) else ""
             self._scan_line(line, idx + 1, classes[idx], display, tier, file_sha, ext, nxt)
+            for p in range(idx + 1, last + 1):         # lines the join swallowed
+                self._scan_line(lines[p].rstrip("\r"), p + 1, classes[p], display, tier,
+                                file_sha, ext, only_physical=True)
 
     def _line_classes(self, lines, fclass, name, rel_target, rel_root):
         """Class of each line: the file's class, except (1) frontmatter `hooks:`
@@ -795,11 +803,16 @@ class Scan:
                         classes[i] = "script"
         return classes
 
-    def _scan_line(self, line, lineno, cls, display, tier, file_sha, ext="", next_line=""):
+    def _scan_line(self, line, lineno, cls, display, tier, file_sha, ext="", next_line="",
+                   only_physical=False):
         pol = self.policy
+        if only_physical:
+            if not pol.physical_rules:
+                return
+        rules = pol.physical_rules if only_physical else pol.rules
 
         # Built-in: hidden Unicode. One finding per line however many characters.
-        for pos, ch in enumerate(line):
+        for pos, ch in enumerate([] if only_physical else line):
             if not is_hidden_char(ch):
                 continue
             prev = line[pos - 1] if pos > 0 else None
@@ -815,7 +828,7 @@ class Scan:
             break
 
         # Policy rules.
-        for rule in pol.rules:
+        for rule in rules:
             if rule.applies is not None and cls not in rule.applies:
                 continue
             hit = self._rule_match(rule, line, next_line)

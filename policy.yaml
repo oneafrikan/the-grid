@@ -187,6 +187,7 @@ rules:
     owned_severity: low
     message: declares a hook that runs a command
     regex: '^hooks\s*:|"command"\s*:'
+    physical: true                # anchored: also match lines a continuation join swallowed
     applies: [hook]
     downgrade: []
   - id: mcp-declared
@@ -208,5 +209,6 @@ rules:
     owned_severity: low
     message: skill pre-approves unrestricted Bash (scope it, e.g. Bash(git:*))
     regex: '^allowed-tools\s*:[^\n]*?\bBash\b(?!\()|^allowed-tools\s*:[^\n]*\bBash\(\*\)'
+    physical: true                # anchored: also match lines a continuation join swallowed
     applies: [doc]
     downgrade: []
