@@ -1198,7 +1198,7 @@ big_file() {
 
 @test "secret: a control byte at the start of a line cannot hide it from the chained-add scan" {
   mkrepo
-  # 0x1E and 0x1F are the scan's own stream separators: content must not be able to forge them
+  # 0x1E and 0x1F are the scan's own stream separators: content must not be able to fake them
   printf '\036key = "%s"\n' "$(tok_ghp)" > "$R/rs.txt"
   printf '\037\037key = "%s"\n' "$(tok_ghp)" > "$R/us.txt"
   scan 'git add rs.txt && git commit -m x'

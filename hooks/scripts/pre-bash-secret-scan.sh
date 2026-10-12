@@ -178,7 +178,7 @@ consume_stream() {
 #   cloned repo can ship the attribute). NUL bytes are then deleted (tr), which also turns
 #   UTF-16 text back into ASCII-looking text the patterns can match. Every other control
 #   byte except tab and newline is deleted too: 0x1E and 0x1F are this scan's own stream
-#   separators, and content must never be able to forge one.
+#   separators, and content must never be able to fake one.
 #
 #   Speed (WP-019): one awk state machine reads the diff, then one `grep -Ei` with the
 #   union of the pattern table keeps only lines some pattern could match, and only those
