@@ -437,3 +437,57 @@ cfg_with_project() {
   grep -q '"role": "tech-lead"' "$d/out/zz/_paperclip/manifest.json"
   rm -rf "$d"
 }
+
+# ---- WP-051: tool names and description text ----------------------------------------------
+
+@test "lint-roles: a tool name outside the known eight is E_TOOL_UNKNOWN (case-sensitive)" {
+  local bad
+  for bad in Task Frobnicate read bash 'Read '; do
+    make_role zz-t
+    printf 'tools: ["%s"]\n' "$bad" >> "$PRIV/zz-t/role.yaml"
+    run "$PY" "$COMPOSE" --lint-roles
+    echo "tool=$bad: $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"E_TOOL_UNKNOWN: zz-t/role.yaml"* ]]
+    rm -rf "$PRIV/zz-t"
+  done
+  make_role zz-t
+  printf 'tools: [Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch]\n' >> "$PRIV/zz-t/role.yaml"
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 0 ]
+}
+
+@test "lint-roles: a control character in description, title or summary is E_TEXT_CONTROL" {
+  local key
+  for key in description title summary; do
+    make_role zz-c
+    # title and summary already exist (make_role); a duplicate YAML key is an error, so drop
+    # the line before appending the bad one.
+    awk -v k="$key" '$0 !~ "^" k ":"' "$PRIV/zz-c/role.yaml" > "$PRIV/zz-c/role.new"
+    mv "$PRIV/zz-c/role.new" "$PRIV/zz-c/role.yaml"
+    printf '%s: "bad\\x07text"\n' "$key" >> "$PRIV/zz-c/role.yaml"
+    run "$PY" "$COMPOSE" --lint-roles
+    echo "key=$key: $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"E_TEXT_CONTROL: zz-c/role.yaml"* ]]
+    [[ "$output" == *"$key"* ]]
+    rm -rf "$PRIV/zz-c"
+  done
+  # Tab and newline are fine.
+  make_role zz-c
+  printf 'description: "tab\\there"\n' >> "$PRIV/zz-c/role.yaml"
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 0 ]
+}
+
+@test "lint-roles: a description over 250 chars is a warning that does not fail the run" {
+  make_role zz-long
+  printf 'description: %s\n' "$(printf 'x%.0s' $(seq 1 251))" >> "$PRIV/zz-long/role.yaml"
+  make_role zz-edge
+  printf 'description: %s\n' "$(printf 'x%.0s' $(seq 1 250))" >> "$PRIV/zz-edge/role.yaml"
+  run "$PY" "$COMPOSE" --lint-roles
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"W_DESCRIPTION_LONG: zz-long/role.yaml"* ]]
+  [[ "$output" != *"W_DESCRIPTION_LONG: zz-edge"* ]]
+}
