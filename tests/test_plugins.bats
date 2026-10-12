@@ -577,4 +577,48 @@ EOF
   grep -q '^tools:' "$REPO_ROOT/plugins/grid-agents/agents/grid-security-reviewer.md"
   missing="$(for f in "$REPO_ROOT"/plugins/*/agents/*.md; do grep -L '^tools:' "$f"; done | wc -l)"
   [ "$missing" -lt 24 ]
+# plugin_tree_problems DIR -> one line per thing a shipped bundle must not carry: a symlink,
+# an executable file, a hooks/ directory, an MCP config, or a `hooks:` frontmatter key. A plugin
+# that ships any of these runs code or opens a connection on the installer's machine, so the
+# generated tree is meant to be inert content only (portable find/grep: no GNU-only flags).
+plugin_tree_problems() {
+  local d="$1" f
+  find "$d" -type l | sed 's/^/symlink: /'
+  find "$d" -type f \( -perm -u+x -o -perm -g+x -o -perm -o+x \) | sed 's/^/executable: /'
+  find "$d" -type d -name hooks | sed 's/^/hooks dir: /'
+  find "$d" -type f \( -name '.mcp.json' -o -name '.mcp-*.json' \) | sed 's/^/mcp config: /'
+  find "$d" -type f -name '*.md' | while IFS= read -r f; do
+    # frontmatter only: from a first-line `---` to the next `---`
+    awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } /^hooks[[:space:]]*:/ { found = 1 } END { exit !found }' "$f" \
+      && printf 'hooks frontmatter: %s\n' "$f"
+  done
+  return 0
+}
+
+@test "R14.sec.F1: the generated plugins/ tree ships no hooks, MCP config, executable bit or symlink" {
+  run plugin_tree_problems "$REPO_ROOT/plugins"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "R14.sec.F1: the plugin-tree check reports a hooks key, hooks dir, MCP config, executable file and symlink" {
+  local copy="$BATS_TEST_TMPDIR/plugins-copy"
+  cp -R "$REPO_ROOT/plugins" "$copy"
+  local skill
+  skill="$(find "$copy" -name SKILL.md | sort | head -n 1)"
+  # insert a hooks key into that skill's frontmatter
+  awk 'NR == 1 { print; print "hooks:"; print "  PreToolUse: []"; next } { print }' "$skill" > "$skill.new"
+  mv "$skill.new" "$skill"
+  mkdir -p "$(dirname "$skill")/hooks"
+  : > "$(dirname "$skill")/.mcp.json"
+  : > "$(dirname "$skill")/run.sh"
+  chmod +x "$(dirname "$skill")/run.sh"
+  ln -s SKILL.md "$(dirname "$skill")/link.md"
+  run plugin_tree_problems "$copy"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hooks frontmatter: $skill"* ]]
+  [[ "$output" == *"hooks dir: "* ]]
+  [[ "$output" == *"mcp config: "* ]]
+  [[ "$output" == *"executable: "*"run.sh"* ]]
+  [[ "$output" == *"symlink: "*"link.md"* ]]
 }

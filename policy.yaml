@@ -18,6 +18,7 @@ sources:
 
 limits:
   max_file_bytes: 1048576
+  max_seconds: 300             # wall-clock budget for one audit run (exit 2 when spent)
 
 negation: '(?i)\b(?:never|do not|don.t|must not|mustn.t|avoid|reject|refuse)\b'
 
@@ -56,7 +57,7 @@ rules:
   - id: curl-pipe-shell
     severity: high
     message: downloads and executes remote code
-    regex: '\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:(?:ba|z|fi|da)?sh|python3?|node|ruby|perl)\b|\b(?:ba|z)?sh\s+<\(\s*(?:curl|wget)|\b(?:bash|sh|zsh|eval|source|python3?|perl|ruby|node)\b[^\n]*["'']?\$\(\s*(?:curl|wget)\b|(?:\bsource|(?:^|\s)\.)\s+<\(\s*(?:curl|wget)|\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n]*\|\s*iex\b|\biex\s*\(\s*(?:iwr|irm)\b'
+    regex: '\b(?:curl|wget)\b[^\n|]{0,300}(?:\|[^\n|]{0,200}){0,3}\|\s*(?:\S{0,64}/)?(?:sudo(?:\s+-\S+){0,4}\s+)?(?:(?:\S{0,64}/)?env\s+)?(?:\S{0,64}/)?(?:(?:ba|z|k|da|a|c|tc|fi)?sh|python[\d.]*|node|ruby|perl|php|pwsh|deno|bun)\b|\b(?:ba|z|k|da|a|c|tc|fi)?sh\s+<\(\s*(?:\S{0,64}/)?(?:curl|wget)|\b(?:(?:ba|z|k|da|a|c|tc|fi)?sh|eval|source|python[\d.]*|perl|ruby|node|php|pwsh|deno|bun)\b[^\n]{0,300}(?:\$\(|\x60)\s*(?:\S{0,64}/)?(?:curl|wget)\b|(?:\bsource|(?:^|\s)\.)\s+<\(\s*(?:\S{0,64}/)?(?:curl|wget)|\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n]{0,300}\|\s*iex\b|\biex\s*\(\s*(?:iwr|irm)\b'
     downgrade: [comment]          # no negation (prose is not an excuse to run it) and no test (exec rule)
   - id: npx-unpinned
     severity: high
@@ -92,18 +93,20 @@ rules:
   - id: ssh-write
     severity: high
     message: writes to ~/.ssh
-    regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install|rsync|scp)\b[^\n|;&]*?|\bsed\s+-i\S*[^\n|;&]*?)\s*["'']?(?:~|\$HOME|\$\{HOME\})/\.ssh/'
+    regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install|rsync|scp)\b[^\n|;&]{0,200}?|\bsed\s+-i\S*[^\n|;&]{0,200}?)\s*[\"\x27]?(?:~|\$HOME|\$\{HOME\})/\.ssh/'
     downgrade: [comment]
   - id: shell-rc-write
     severity: high
     message: modifies a shell startup file
-    regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install)\b[^\n|;&]*?|\bsed\s+-i\S*[^\n|;&]*?)\s*["'']?(?:~|\$HOME|\$\{HOME\})/\.(?:zshrc|zprofile|zshenv|bashrc|bash_profile|profile)\b|(?:>>?|\btee\b(?:\s+-a)?)\s*["'']?(?:~|\$HOME)/\.config/fish/config\.fish'
+    regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install)\b[^\n|;&]{0,200}?|\bsed\s+-i\S*[^\n|;&]{0,200}?)\s*[\"\x27]?(?:~|\$HOME|\$\{HOME\}|\$\{?ZDOTDIR\}?)/\.(?:zshrc|zprofile|zshenv|zlogin|zlogout|bashrc|bash_profile|bash_login|bash_logout|profile)\b|(?:>>?|\btee\b(?:\s+-a)?)\s*[\"\x27]?(?:~|\$HOME)/\.config/fish/config\.fish'
     downgrade: [comment]
   - id: prompt-injection
     severity: high
     message: text that tries to override the agent's instructions
-    regex: '(?i)\b(?:ignore|disregard|forget)\s+(?:all\s+|any\s+|your\s+)?(?:previous|prior|above|earlier|preceding)\s+(?:instructions|prompts|rules|guidelines|context)|\byou\s+are\s+now\s+(?:in\s+)?(?:developer\s+mode|DAN|jailbroken|unrestricted)|\b(?:do\s+not|don.t|never)\s+(?:tell|inform|reveal\s+(?:this\s+)?to|mention\s+(?:this\s+)?to)\s+the\s+user'
-    downgrade: [negation, test]
+    regex: '(?i)\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|your\s+|the\s+|these\s+|those\s+|my\s+|of\s+)*(?:previous|prior|above|earlier|preceding|system|original)\s+(?:instructions?|prompts?|rules|directions|guidelines|context)\b|\byou\s+are\s+now\s+(?:in\s+)?(?:developer\s+mode|DAN|jailbroken|unrestricted)|\b(?:do\s+not|don.t|never)\s+(?:tell|inform|reveal\s+(?:this\s+)?to|mention\s+(?:this\s+)?to)\s+the\s+user|\bkeep\s+(?:this|that|it)\s+(?:a\s+)?secret\s+from\s+the\s+user|<\s*/\s*system\s*>'
+    normalise: true               # NFKC + confusable fold + invisible chars removed before matching
+    window: 2                     # a phrase split across two lines still matches
+    downgrade: [negation-quoted, test]   # a quote of the phrase after a negation; advisory rule
   - id: hook-network
     severity: high
     applies: [hook]
@@ -115,5 +118,95 @@ rules:
     severity: low
     severity_by_class: {script: high, hook: high}
     message: reads a credential store
-    regex: '(?:~|\$HOME|\$\{HOME\})/(?:\.ssh/id_\w+|\.aws/credentials|\.netrc|\.config/gh/hosts\.yml|\.docker/config\.json|\.npmrc|\.git-credentials)|Library/Keychains|security\s+find-(?:generic|internet)-password'
+    regex: '(?:~|\$HOME|\$\{HOME\})/(?:\.ssh/(?!known_hosts|config\b|\s|$)|\.aws/|\.kube/|\.config/gcloud|\.config/gh/hosts\.yml|\.netrc|\.docker/config\.json|\.npmrc|\.git-credentials)|Library/Keychains|security\s+find-(?:generic|internet)-password|\b(?:cat|less|more|head|tail|base64|xxd|cp|scp)\s+(?:\S{0,64}/)?\.env(?:\.(?!example|sample|template)\w+)?(?=\s|$)|@\.env\b'
     downgrade: [comment]
+  - id: decode-and-exec
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: decodes a payload and pipes it to an interpreter
+    regex: '(?:\bbase64\s+(?:-d|-D|--decode)\b|\bxxd\s+-r\b|\bopenssl\s+(?:enc|base64)\b[^\n|]{0,100}\s-d\b)[^\n|]{0,100}(?:\|[^\n|]{0,100}){0,2}\|\s*(?:\S{0,64}/)?(?:sudo(?:\s+-\S+){0,4}\s+)?(?:(?:\S{0,64}/)?env\s+)?(?:\S{0,64}/)?(?:(?:ba|z|k|da|a|c|tc|fi)?sh|python[\d.]*|node|ruby|perl|php|pwsh|deno|bun)\b'
+    downgrade: [comment]
+  - id: download-then-run
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: downloads a file and then runs it
+    regex: '\b(?:curl|wget)\b[^\n]{0,300}?(?:\s-o\s*|\s-O\s+|--output(?:=|\s+)|--output-document(?:=|\s+)|>\s*)(?P<f>[^\s;&|]+)[^\n]{0,200}?(?:chmod\s+(?:\+x|[0-7]{3,4})\s+(?:\S+\s+)?(?P=f)(?=[\s;&|)]|$)|\b(?:ba|z|k|da|a|c|tc|fi)?sh\s+(?:-\S+\s+)*(?P=f)(?=[\s;&|)]|$)|\./(?P=f)(?=[\s;&|)]|$))'
+    downgrade: [comment]
+  - id: eval-cat
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: evals the contents of a file
+    regex: '\beval\s+[\"\x27]?(?:\$\(|\x60)\s*cat\b'
+    downgrade: [comment]
+  - id: exec-urlopen
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: executes code fetched at run time
+    regex: '\bexec\s*\([^\n]{0,200}\burlopen\b|\.then\s*\(\s*eval\b|\beval\s*\(\s*await\s+fetch\b'
+    downgrade: [comment]
+  - id: powershell-iex
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: PowerShell Invoke-Expression runs a string as code
+    regex: '(?i)\b(?:iex|invoke-expression)\b'
+    ignore_regex: '\|\s*iex\b|\biex\s*\(\s*(?:iwr|irm)\b'
+    downgrade: [comment]
+  - id: pip-git-install
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: installs a package straight from a git URL (unpinned source)
+    regex: '\b(?:pip3?|uv\s+pip|pipx)\s+install\b[^\n]{0,200}\bgit\+'
+    downgrade: [comment]
+  - id: runner-unpinned
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: package runner without a pinned version
+    regex: '(?:^\s*(?:\$\s+)?|[;&|(]\s*|\brun:\s*|\$\(\s*|\bexec\s+|\bsudo\s+)(?:npx|bunx|pnpm\s+dlx|yarn\s+dlx)\s+(?:--?[A-Za-z][\w-]*(?:=\S+)?\s+)*@?[\w.][\w./-]*'
+    ignore_regex: '(?:^\s*(?:\$\s+)?|[;&|(]\s*|\brun:\s*|\$\(\s*|\bexec\s+|\bsudo\s+)(?:npx|bunx|pnpm\s+dlx|yarn\s+dlx)\s+(?:--?[A-Za-z][\w-]*(?:=\S+)?\s+)*@?[\w./-]+@(?:\d|latest\b)|\bnpx\s+(?:--?\S+\s+)*(?:-y|--yes)\b'
+    downgrade: [comment]
+  - id: exfil-pipe
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: sends local files or the environment to a remote host
+    regex: '\b(?:curl|wget)\b[^\n]{0,300}(?:\s(?:-d|--data\S*|-F|--form\S*)\s*=?\s*[\"\x27]?@|\s(?:-T|--upload-file)\s+\S)|\b(?:env|printenv)\b\s*(?:\|[^\n|]{0,100}){0,2}\|\s*(?:curl|wget|nc|ncat|socat)\b'
+    downgrade: [comment]
+  - id: destructive-system
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: deletes the home directory or edits sudoers
+    regex: '\brm\s+-[A-Za-z]*[rR][A-Za-z]*\s+(?:-\S+\s+)*(?:~|\$HOME|\$\{HOME\})/?\*?(?=\s|$|;|&|\|)|/etc/sudoers(?:\.d)?\b'
+    downgrade: [comment]
+  - id: claude-config-write
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: writes under ~/.claude/ (the agent's own configuration)
+    regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install|rsync)\b[^\n|;&]{0,200}?|\bsed\s+-i\S*[^\n|;&]{0,200}?)\s*[\"\x27]?(?:~|\$HOME|\$\{HOME\})/\.claude/'
+    downgrade: [comment]
+  - id: hook-declared
+    severity: high
+    owned_severity: low
+    message: declares a hook that runs a command
+    regex: '^hooks\s*:|"command"\s*:'
+    applies: [hook]
+    downgrade: []
+  - id: mcp-declared
+    severity: high
+    owned_severity: low
+    message: declares an MCP server
+    regex: '"mcpServers"\s*:'
+    applies: [config, hook]
+    downgrade: []
+  - id: lifecycle-script
+    severity: high
+    owned_severity: low
+    message: package.json lifecycle script runs on install
+    regex: '"(?:preinstall|install|postinstall|prepare)"\s*:\s*"'
+    applies: [config]
+    downgrade: []
+  - id: allowed-tools-bash
+    severity: high
+    owned_severity: low
+    message: skill pre-approves unrestricted Bash (scope it, e.g. Bash(git:*))
+    regex: '^allowed-tools\s*:[^\n]*?\bBash\b(?!\()|^allowed-tools\s*:[^\n]*\bBash\(\*\)'
+    applies: [doc]
+    downgrade: []
