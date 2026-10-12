@@ -22,10 +22,12 @@ limits:
 negation: '(?i)\b(?:never|do not|don.t|must not|mustn.t|avoid|reject|refuse)\b'
 
 classes:
-  - name: test
-    globs: ['test/**', 'tests/**', '**/test/**', '**/tests/**', '**/__tests__/**', '**/*.test.*', '**/*.spec.*', '**/fixtures/**', 'evals/**']
+  # hook is listed BEFORE test on purpose: hooks/fixtures/h.sh is a hook, not a fixture.
+  # `test` is also never given to SKILL.md, agent .md, .mcp.json or hooks.json (see file_class).
   - name: hook
     globs: ['hooks/**', '**/hooks/**', '**/hooks.json', '**/*-hook', '**/*-hook.*']
+  - name: test
+    globs: ['test/**', 'tests/**', '**/test/**', '**/tests/**', '**/__tests__/**', '**/*.test.*', '**/*.spec.*', '**/fixtures/**', 'evals/**']
   - name: script
     globs: ['**/*.sh', '**/*.bash', '**/*.zsh', '**/*.py', '**/*.js', '**/*.mjs', '**/*.cjs', '**/*.ts', '**/*.rb', '**/*.ps1', '**/bin/**', '**/*.bat', '**/*.cmd', '**/*.php', '**/*.pl', '**/*.lua', '**/*.fish', '**/*.awk', '**/*.tcl', '**/Makefile', '**/Dockerfile']
   - name: config
@@ -55,13 +57,13 @@ rules:
     severity: high
     message: downloads and executes remote code
     regex: '\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:(?:ba|z|fi|da)?sh|python3?|node|ruby|perl)\b|\b(?:ba|z)?sh\s+<\(\s*(?:curl|wget)|\b(?:bash|sh|zsh|eval|source|python3?|perl|ruby|node)\b[^\n]*["'']?\$\(\s*(?:curl|wget)\b|(?:\bsource|(?:^|\s)\.)\s+<\(\s*(?:curl|wget)|\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n]*\|\s*iex\b|\biex\s*\(\s*(?:iwr|irm)\b'
-    downgrade: [negation, comment, test]
+    downgrade: [comment]          # no negation (prose is not an excuse to run it) and no test (exec rule)
   - id: npx-unpinned
     severity: high
     message: npx -y runs whatever is currently published; pin pkg@x.y.z
     regex: '\bnpx\s+(?:-y|--yes)\b|"args"\s*:\s*\[\s*"(?:-y|--yes)"'
     ignore_regex: '\bnpx\s+(?:(?:-y|--yes)\s+)+(?:--?\S+\s+)*@?[\w./-]+@\d|"(?:-y|--yes)"\s*,\s*"@?[\w./-]+@\d'
-    downgrade: [negation, comment, test]
+    downgrade: [negation, comment]
   - id: latest-tag
     severity: low
     severity_by_class: {script: high, hook: high, config: high}
@@ -91,12 +93,12 @@ rules:
     severity: high
     message: writes to ~/.ssh
     regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install|rsync|scp)\b[^\n|;&]*?|\bsed\s+-i\S*[^\n|;&]*?)\s*["'']?(?:~|\$HOME|\$\{HOME\})/\.ssh/'
-    downgrade: [negation, comment, test]
+    downgrade: [comment]
   - id: shell-rc-write
     severity: high
     message: modifies a shell startup file
     regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install)\b[^\n|;&]*?|\bsed\s+-i\S*[^\n|;&]*?)\s*["'']?(?:~|\$HOME|\$\{HOME\})/\.(?:zshrc|zprofile|zshenv|bashrc|bash_profile|profile)\b|(?:>>?|\btee\b(?:\s+-a)?)\s*["'']?(?:~|\$HOME)/\.config/fish/config\.fish'
-    downgrade: [negation, comment, test]
+    downgrade: [comment]
   - id: prompt-injection
     severity: high
     message: text that tries to override the agent's instructions
@@ -108,10 +110,10 @@ rules:
     message: hook makes a network call
     regex: '\b(?:curl|wget|nc|ncat|telnet|ssh|scp)\s|https?://|\bfetch\s*\(|requests\.(?:get|post|put)|\burllib|\bhttp\.client|Invoke-WebRequest|XMLHttpRequest'
     ignore_regex: 'https?://(?:localhost|127\.0\.0\.1|\[::1\])'
-    downgrade: [comment, test]
+    downgrade: [comment]
   - id: credential-read
     severity: low
     severity_by_class: {script: high, hook: high}
     message: reads a credential store
     regex: '(?:~|\$HOME|\$\{HOME\})/(?:\.ssh/id_\w+|\.aws/credentials|\.netrc|\.config/gh/hosts\.yml|\.docker/config\.json|\.npmrc|\.git-credentials)|Library/Keychains|security\s+find-(?:generic|internet)-password'
-    downgrade: [negation, comment, test]
+    downgrade: [comment]
