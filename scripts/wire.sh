@@ -113,6 +113,8 @@ GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || uname -n 2>/dev/null | cut 
 # have its grid links torn down, and --check must see stale links in its dirs.
 # Claude's own dirs stay on SKILLS_DIR / AGENTS_DIR exactly as before.
 in_list() { local n="$1" x; shift; for x in "$@"; do [ "$x" = "$n" ] && return 0; done; return 1; }
+# A malformed or hostile registry row exits 2 here, before any write (see harness_registry_check).
+harness_registry_check || { echo "wire: nothing was changed" >&2; exit 2; }
 HARNESS_SKILL_DIRS=()
 HARNESS_AGENT_DIRS=()
 while IFS= read -r h_name; do
@@ -494,12 +496,29 @@ done
 HARNESS_SRC=("${WIRED_HARNESSES[@]:-}")
 if [ -n "${GRID_HARNESS:-}" ]; then
   IFS=',' read -r -a HARNESS_SRC <<< "$(printf '%s' "$GRID_HARNESS" | tr -d '[:space:]')"
+  # A value such as "," holds no name at all: silently treating it as "no harness" would tear
+  # every other harness down. Refuse it before anything is touched (D15).
+  gh_named=0
+  for h_name in "${HARNESS_SRC[@]:-}"; do [ -z "$h_name" ] || gh_named=1; done
+  if [ "$gh_named" = 0 ]; then
+    echo "wire: GRID_HARNESS='$GRID_HARNESS' names no harness; nothing was changed" >&2
+    exit 2
+  fi
 fi
 ACTIVE_HARNESSES=()
 unknown_harnesses=""
+# Names in the manifest are validated even when GRID_HARNESS replaces them for this run, so a
+# typo is reported on every run rather than only on the next one without the override.
+for h_name in "${WIRED_HARNESSES[@]:-}"; do
+  [ -n "$h_name" ] || continue
+  if ! harness_valid "$h_name"; then unknown_harnesses="$unknown_harnesses $h_name"; fi
+done
 for h_name in "${HARNESS_SRC[@]:-}"; do
   [ -n "$h_name" ] || continue
-  if ! harness_valid "$h_name"; then unknown_harnesses="$unknown_harnesses $h_name"; continue; fi
+  if ! harness_valid "$h_name"; then
+    in_list "$h_name" ${unknown_harnesses} || unknown_harnesses="$unknown_harnesses $h_name"
+    continue
+  fi
   [ "$h_name" = claude ] && continue
   in_list "$h_name" "${ACTIVE_HARNESSES[@]:-}" || ACTIVE_HARNESSES+=("$h_name")
 done
@@ -1065,9 +1084,25 @@ fi
 # does NOT start `  skip (real dir, not managed)`: reconcile.sh parses that exact
 # prefix and would rm -rf the same-named dir in the Claude skills dir.
 # Manifest rows use kind skill@<~dir> / agent@<~dir> (home-independent), reason last.
-wire_harness_link() { # $1=src $2=dest dir $3=kind (skill|agent) $4=~/-form dir $5=name
-  local src="$1" dest_dir="$2" kind="$3" disp="$4" name="$5"
+# $6 (optional) = the composed project the file comes from: a destination this run already
+# linked for ANOTHER project is a name clash between projects, not a foreign entry.
+HL_DEST=(); HL_PROJ=()   # destinations linked this run, and the project that owns each
+hl_owner() { # $1 = dest path; prints the owning project, exit 1 if not linked this run
+  local i=0
+  while [ "$i" -lt "${#HL_DEST[@]}" ]; do
+    if [ "${HL_DEST[$i]}" = "$1" ]; then printf '%s' "${HL_PROJ[$i]}"; return 0; fi
+    i=$((i + 1))
+  done
+  return 1
+}
+wire_harness_link() { # $1=src $2=dest dir $3=kind (skill|agent) $4=~/-form dir $5=name [$6=project]
+  local src="$1" dest_dir="$2" kind="$3" disp="$4" name="$5" project="${6:-}" owner
   if [ -e "$dest_dir/$name" ] || [ -L "$dest_dir/$name" ]; then
+    if owner="$(hl_owner "$dest_dir/$name")" && [ -n "$owner" ] && [ "$owner" != "$project" ]; then
+      echo "  skip ($disp: name clash with $owner): $name"
+      MANIFEST_ROWS+=("$kind@$disp	$name	$src	skipped	name clash with $owner")
+      return
+    fi
     echo "  skip ($disp: exists, not managed): $name"
     MANIFEST_ROWS+=("$kind@$disp	$name	$src	skipped	exists, not managed")
     return
@@ -1079,7 +1114,11 @@ wire_harness_link() { # $1=src $2=dest dir $3=kind (skill|agent) $4=~/-form dir 
     MANIFEST_ROWS+=("$kind@$disp	$name	$src	skipped	cannot create dir")
     return
   fi
-  ln -s "$src" "$dest_dir/$name"
+  # -n: never follow a directory symlink that appeared at the destination since the check above
+  # (BSD and GNU safe; -T is GNU only). It then fails with "File exists" instead of writing
+  # the link inside whatever that symlink points at.
+  ln -sn -- "$src" "$dest_dir/$name"
+  HL_DEST+=("$dest_dir/$name"); HL_PROJ+=("$project")
   MANIFEST_ROWS+=("$kind@$disp	$name	$src	wired	")
   echo "  wired ($disp): $name"
 }
@@ -1135,7 +1174,7 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ]; then
       project_is_wired "$(basename "$proj_dir")" || continue
       for agent_file in "$proj_dir/_$h_target/agents"/*; do
         [ -f "$agent_file" ] || continue
-        wire_harness_link "$agent_file" "$h_dir" agent "$h_raw" "$(basename "$agent_file")"
+        wire_harness_link "$agent_file" "$h_dir" agent "$h_raw" "$(basename "$agent_file")" "$(basename "$proj_dir")"
       done
     done
   done
