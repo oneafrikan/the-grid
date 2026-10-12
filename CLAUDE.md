@@ -55,11 +55,13 @@ submodules into two tiers:
   not tracked** (#24/#39) — personal and not useful to a fork. On machines that want
   it, it's a symlink into a separate private repo; nothing in the-grid requires it
   to exist.
-- `scripts/budget.py` + `docs/budget-target.json` — measures the skill/role description listing (Claude Code shares one small description budget across all skills and drops the overflow silently) and gates it: `--check` runs in `gate.sh` against a committed ratchet (owned skills + roles always; the baseline scope only on a machine with `baseline-submodules.txt` and initialised submodules, else exit 3 = skipped). `--report` shows the numbers. Lowering a number is normal (`--update-target`); raising one needs `--allow-raise` and review.
+- `scripts/budget.py` + `docs/budget-target.json` — measures the skill/role description listing (Claude Code shares one small description budget across all skills and drops the overflow silently) and gates it: `--check` runs in `gate.sh` against a committed ratchet (owned skills + roles always; the baseline scope against the tracked `baseline-submodules.example.txt` once submodules are initialised, else exit 3 = skipped). A target missing `per_entry_max_chars`, `owned.skill_body_max_bytes` or `schema: 1` fails. `--report` shows the numbers. Lowering a number is normal (`--update-target`); raising one needs `--allow-raise` and review.
 - `scripts/usage/weekly.sh` + `scripts/usage/install-schedule.sh` — the weekly usage job (extract, then commit `usage/<host>.json` to the private repo) and the installer that renders its launchd/systemd/cron schedule via `scripts/lib/render-schedule.sh`. The installer only writes files and PRINTS the activation commands; activating is a human step. See `docs/usage.md`.
 - `scripts/prune-report.sh` (wraps `scripts/usage/prune_report.py`; `scripts/usage/aggregate.py` is the importable per-host summer, no CLI) — read-only report that proposes what to drop from the baseline from the per-host usage files (demote a repo, `name-only` a skill, unused agents); `docs/prune-keep.txt` lists names never proposed. Never reads `tokens`/`hooks`. See `docs/usage.md`.
 - `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
-  repos as counts, reference (no-skill) repos in a footer. Deterministic output.
+  repos as counts, reference (no-skill) repos in a footer. Deterministic output. The committed
+  `SKILLS.md` is rendered from the tracked example baseline (`GRID_BASELINE=baseline-submodules.example.txt
+  bash scripts/catalog.sh`; `wire.sh` and the gate pin it), not a machine's personal one.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
 - `scripts/build-plugins.py` + `plugins/` + `docs/PLUGINS.md` — generates the two Claude Code plugin bundles (`grid-core`, `grid-agents`) and `.claude-plugin/marketplace.json` from `plugins/bundles.json`. `plugins/` is generated output: regenerate with `python3 scripts/build-plugins.py` (needs `agent-factory/.venv`), never hand-edit. `gate.sh` runs `--check` and `claude plugin validate --strict`; `audit.sh --owned` scans `plugins/`.
 - `site-files.txt` + `scripts/stage-site.sh` — define what GitHub Pages publishes:
@@ -89,7 +91,7 @@ submodules into two tiers:
   benchmarks, worked cost maths, and a dated expiry watchlist. Refreshed on demand
   via the `core-researcher` subagent using the brief at the bottom of the file.
 - `evals/` + `agent-factory/run_evals.py` — golden cases for roles (opt-in, capped, tool-less runs; `--validate` runs in the gate). See `evals/README.md`.
-- `loop/` + `scripts/instantiate.sh` + `scripts/lib/render-schedule.sh` + `scripts/lib/gh-app-token.sh` — the-grid's own issue-loop (PR mode to `next`, headless runner `loop/run-issues.sh`, GitHub App token, systemd/launchd units written but never activated). See `loop/README.md` and `automation-factory/patterns/issue-loop/README.md`.
+- **RETIRED, do not deploy:** the-grid's own issue-loop instance (`loop/`, `scripts/instantiate.sh`, `scripts/lib/gh-app-token.sh`, its four bats files) is quarantined under `_retired/issue-loop/` and excluded from the gate, CI and bats; see `_retired/issue-loop/RETIRED.md` (why, known defects, GitHub-side cleanup). Uplift is built by worktree agents and PRs to `next`. Not retired: the factory pattern `automation-factory/patterns/issue-loop/` and `scripts/lib/render-schedule.sh` (shared by the usage and instincts schedulers).
 - `scripts/instincts.sh` — habit learning from your own sessions (opt-in per project with `learning: on`): capture, weekly analysis, injection, `clusters` for tank `evolve`. Data stays in `${GRID_STATE_DIR:-~/.grid}` and the private repo. See `docs/instincts.md`.
 - `scripts/run-record.sh` — appends one JSON line per agent run to a local private log (`${GRID_RUN_LOG:-~/.the-grid-private/runs.jsonl}`); `docs/agent-retro.md` is the review loop that starts from it.
 - `policy.yaml` — vetting policy read by `scripts/audit.py`: rule regexes with severities (`high` blocks, `low` warns), file classes, `owned_roots`, and `sources.allowed_repos` (the single source allowlist; no other file carries one). Restricted-YAML subset read by `scripts/lib/miniyaml.py`; every regex is a single-quoted scalar.
@@ -184,6 +186,8 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 - `scripts/gate.sh` — commit gate; `.githooks/pre-commit` delegates to it and it
   self-installs `core.hooksPath` on first run. `--pre-commit` aborts on unstaged
   changes. `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
+  `--strict` (CI) fails on any skip not named in `GRID_GATE_EXPECT_SKIPPED` (see `.github/workflows/tests.yml`).
+  `catalog`, `sources` (`sources.sh --check-drift`) and `budget` run against the TRACKED `baseline-submodules.example.txt` (`GRID_BASELINE` pin; `wire.sh` pins it for SKILLS.md too), so SKILLS.md, docs/SOURCES.md and the ratchet are machine-independent; a personal baseline is never gated.
   It runs `check-personal.sh` as the `personal` check; with no private denylist on the
   machine (CI, forks) it passes and prints `gate: PASS (skipped: personal-denylist)`.
   It runs `audit.sh --gate --quiet` as the `audit` check (owned assets + the baseline's
@@ -274,7 +278,7 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint + `compose.py --check`, `check-personal.sh`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`. Venv-gated tests (`agent-factory/.venv` with PyYAML) skip on a plain `bats` run, but FAIL when `GRID_REQUIRE_VENV=1` or `CI=true` (the gate sets the former). In a `@test`, write `! cmd || false` and one `[ ]` per line: a bare mid-test `! cmd` or `[ A ] && [ B ]` can never fail (`test_repo_health.bats` lints this).
+All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint (`compose.py --lint-roles`), `compose.py --check` per composed project (local only: composed output is gitignored, so CI runs the lint and lists the uncomposed projects as `compose-<name>` skips), `check-personal.sh`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`. Venv-gated tests (`agent-factory/.venv` with PyYAML) skip on a plain `bats` run, but FAIL when `GRID_REQUIRE_VENV=1` or `CI=true` (the gate sets the former). In a `@test`, write `! cmd || false` and one `[ ]` per line: a bare mid-test `! cmd` or `[ A ] && [ B ]` can never fail (`test_repo_health.bats` lints this).
 
 ## Worktree hygiene
 

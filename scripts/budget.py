@@ -309,6 +309,14 @@ def run_checks(summary, target, grid=None):
         return [f"{TARGET_REL}: missing - create it with: "
                 "python3 scripts/budget.py --update-target --allow-raise"]
     fails = []
+    # 0. the target must be complete: a limit that is missing or null used to switch its own
+    #    check off silently, and `schema` was never read. Fail closed (R20.qa.F7).
+    if target.get("schema") != 1:
+        fails.append(f"{TARGET_REL}: schema is {target.get('schema')!r}, this checker reads schema 1")
+    if target.get("per_entry_max_chars") is None:
+        fails.append(f"{TARGET_REL}: no per_entry_max_chars (the per-entry limit would be skipped)")
+    if target.get("owned", {}).get("skill_body_max_bytes") is None:
+        fails.append(f"{TARGET_REL}: no owned.skill_body_max_bytes (the SKILL.md size limit would be skipped)")
     # 1. totals vs. the ratchet
     for (scope, tkey), measured in sorted(current_numbers(summary).items()):
         limit = target.get(scope, {}).get(tkey)

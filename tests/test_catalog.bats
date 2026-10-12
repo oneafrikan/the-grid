@@ -91,3 +91,64 @@ teardown() {
   grep -q -- '- \*\*real-skill\*\*' "$OUT"
   ! grep -q 'stray-generated' "$OUT"
 }
+
+# --- WP-046: SKILLS.md is rendered from a PINNED baseline -----------------------------------
+# The committed SKILLS.md must be a function of tracked inputs only, so CI and every machine
+# agree. catalog.sh therefore reads ${GRID_BASELINE:-<personal baseline>}; the gate and wire.sh
+# pin it to the tracked example baseline.
+
+# two_baselines — repos pers-repo and ex-repo; the personal file wires one, the example the other
+two_baselines() {
+  make_skill "$MOCK_GRID/repos/pers-repo/sk-p" "sk-p"
+  make_skill "$MOCK_GRID/repos/ex-repo/sk-e" "sk-e"
+  printf 'pers-repo\n' > "$MOCK_GRID/baseline-submodules.txt"
+  printf 'ex-repo\n' > "$MOCK_GRID/baseline-submodules.example.txt"
+}
+
+@test "GRID_BASELINE selects the baseline catalog.sh renders from" {
+  two_baselines
+  GRID_DIR="$MOCK_GRID" GRID_BASELINE="$MOCK_GRID/baseline-submodules.example.txt" bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
+  grep -q '^## repos/ex-repo (wired)' "$OUT"
+  grep -q -- '- \*\*repos/pers-repo\*\* — 1 skills' "$OUT"
+  # without the pin the personal baseline still wins (a developer's own run is unchanged)
+  GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
+  grep -q '^## repos/pers-repo (wired)' "$OUT"
+}
+
+@test "GRID_BASELINE naming a missing file exits 2 and writes nothing" {
+  two_baselines
+  GRID_DIR="$MOCK_GRID" GRID_BASELINE="$MOCK_GRID/no-such-baseline.txt" run bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"no-such-baseline.txt"* ]] || false
+  [ ! -e "$OUT" ]
+}
+
+@test "catalog.sh --check honours the pinned baseline too" {
+  two_baselines
+  GRID_DIR="$MOCK_GRID" GRID_BASELINE="$MOCK_GRID/baseline-submodules.example.txt" bash "$REPO_ROOT/scripts/catalog.sh"
+  GRID_DIR="$MOCK_GRID" GRID_BASELINE="$MOCK_GRID/baseline-submodules.example.txt" run bash "$REPO_ROOT/scripts/catalog.sh" --check
+  [ "$status" -eq 0 ]
+  # the same file is stale against the personal baseline: the pin is what makes the check portable
+  GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/catalog.sh" --check
+  [ "$status" -eq 1 ]
+}
+
+@test "wire.sh with a personal baseline leaves the tracked SKILLS.md equal to the example render" {
+  two_baselines
+  GRID_DIR="$MOCK_GRID" GRID_BASELINE="$MOCK_GRID/baseline-submodules.example.txt" bash "$REPO_ROOT/scripts/catalog.sh" "$MOCK_SKILLS/expected.md"
+  # the reference render really is the example's (not the personal one)
+  grep -q '^## repos/ex-repo (wired)' "$MOCK_SKILLS/expected.md"
+  # wire as a machine whose personal baseline differs from the example
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scripts/wire.sh"
+  [ -f "$MOCK_GRID/SKILLS.md" ]
+  diff -q "$MOCK_SKILLS/expected.md" "$MOCK_GRID/SKILLS.md"
+}
+
+@test "real repo: the committed SKILLS.md is current against the example baseline" {
+  if git -C "$REPO_ROOT" submodule status 2>/dev/null | grep -q '^-'; then
+    skip "uninitialised submodules (git submodule update --init)"
+  fi
+  GRID_BASELINE="$REPO_ROOT/baseline-submodules.example.txt" run bash "$REPO_ROOT/scripts/catalog.sh" --check
+  echo "$output"
+  [ "$status" -eq 0 ]
+}

@@ -47,12 +47,12 @@ convention this led to.
 
 ## Roadmap
 
-- **`instantiate.sh`** ([issue #15](https://github.com/oneafrikan/the-grid/issues/15),
-  `scripts/instantiate.sh`) — machine-profiled (personal / work / mac-mini / linux) cut of
+- **`instantiate.sh`** (**retired**: quarantined under `_retired/issue-loop/scripts/`, see
+  `_retired/issue-loop/RETIRED.md`; [issue #15](https://github.com/oneafrikan/the-grid/issues/15)) — machine-profiled (personal / work / mac-mini / linux) cut of
   a pattern into a target repo: copy into `loop/` + placeholder-fill + settings
   wiring, plus a guard hook + worktree/PR sandboxing (work, mac-mini, linux), and
   systemd / launchd / cron scheduling through the shared `scripts/lib/render-schedule.sh`
-  (files written, activation commands printed, never run). Ships today for `issue-loop`;
+  (files written, activation commands printed, never run). Shipped for `issue-loop` before it was retired;
   PR mode shipped.
 - **`AUTOMATIONS.md`** — a generated index of patterns, parallel to `SKILLS.md`.
 - **More patterns** — issue-loop is the first. Scheduled jobs, watch-and-react

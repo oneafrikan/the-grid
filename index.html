@@ -976,8 +976,8 @@ bash scripts/wire.sh
 
         <div class="ownership-note">
           The template is what the-grid owns; the instance lives in the project it serves.
-          <code>scripts/instantiate.sh &lt;pattern&gt; &lt;target-repo&gt; --profile &lt;personal|work|mac-mini&gt;</code>
-          does the machine-profiled cut: copy into <code>loop/</code> + placeholder-fill + settings
+          <code>scripts/instantiate.sh &lt;pattern&gt; &lt;target-repo&gt; --profile &lt;personal|work|mac-mini&gt;</code> (retired: quarantined under <code>_retired/issue-loop/</code>, see its <code>RETIRED.md</code>)
+          did the machine-profiled cut: copy into <code>loop/</code> + placeholder-fill + settings
           wiring, plus worktree/PR sandboxing on the <code>work</code> profile and a launchd
           nightly run on <code>mac-mini</code>.
         </div>
@@ -1782,7 +1782,7 @@ bash scripts/wire.sh
             </tr>
             <tr>
               <td><code>automation-factory/</code></td>
-              <td>Reusable automation patterns (e.g. <code>issue-loop</code>), cut into a target repo's tracked <code>loop/</code> folder.</td>
+              <td>Reusable automation patterns (e.g. <code>issue-loop</code>), cut into a target repo's tracked <code>loop/</code> folder. The-grid's own loop instance is retired (<code>_retired/issue-loop/</code>).</td>
             </tr>
             <tr>
               <td><code>project-factory/</code></td>
