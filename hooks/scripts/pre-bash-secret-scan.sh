@@ -44,6 +44,8 @@ case "$command" in
   *) exit 0 ;;
 esac
 
+grid_check_cmd_cap pre-bash-secret-scan "$command"
+
 grid_git_segments "$command"
 
 # Which segments are a commit or an add? Stop early (and never touch git) if none.

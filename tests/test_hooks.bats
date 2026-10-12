@@ -62,6 +62,16 @@ rep() {
 # scan <command>: run pre-bash-secret-scan for <command> with cwd=$R.
 scan() { run_hook pre-bash-secret-scan "$(hook_payload "$1" "$R")"; }
 
+# run_hook_within <secs> <id> <command> [cwd]: like run_hook, but the whole hook run is
+# killed by a perl alarm after <secs> (not `timeout`: it is missing on stock macOS).
+# A killed run has status 142, so a hook that is too slow fails the status check.
+# The payload goes through a file so a 50 KB command does not hit the argv limit.
+run_hook_within() {
+  local secs="$1" id="$2" pf="$MOCK_HOOK_ROOT/payload.json"
+  hook_payload "$3" "${4:-}" > "$pf"
+  run perl -e 'alarm shift; exec @ARGV' "$secs" bash -c 'bash "$1/hooks/run.sh" "$2" < "$3" 2>&1' _ "$REPO_ROOT" "$id" "$pf"
+}
+
 # stage_line <line> [file]: write <line> to a file in $R and stage it.
 stage_line() {
   printf '%s\n' "$1" > "$R/${2:-f.txt}"
@@ -400,6 +410,51 @@ STUB
   for row in "${rows[@]}"; do expect_pass "$row"; done
 }
 
+# --- WP-019: a slow guard is a silent guard (Claude Code treats a timed-out hook as
+# non-blocking), so a large input must be decided well inside the 5 s hook timeout.
+
+@test "no-bypass: 50 KB padded --no-verify command exits 2 within 5 s" {
+  pad="$(rep 'abcdefghi ' 5000)"
+  run_hook_within 5 pre-bash-no-bypass "git commit --no-verify -m x; echo $pad"
+  [ "$status" -eq 2 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  [[ "$output" == *"BLOCKED"* ]] || false
+}
+
+@test "no-bypass: 50 KB single-word padding exits 2 within 5 s" {
+  pad="$(rep 'abcdefghij' 5000)"
+  run_hook_within 5 pre-bash-no-bypass "git commit --no-verify -m x; echo $pad"
+  [ "$status" -eq 2 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+}
+
+@test "no-bypass: a large harmless git-mentioning command passes within 5 s" {
+  pad="$(rep 'abcdefghi ' 5000)"
+  run_hook_within 5 pre-bash-no-bypass "git status; echo $pad"
+  [ "$status" -eq 0 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+}
+
+@test "no-bypass: tokenizer is correct across its 2048-byte window boundary" {
+  # The tokenizer reads through a sliding window; a quote, an escape or && landing on
+  # the refill point must not change the result.
+  for len in 2036 2040 2043 2044 2045 2046 2047 2048 2049 2052; do
+    pad="$(rep a "$len")"
+    expect_block "git commit -m x$pad --no-verify" || { echo "len $len: bare flag after padding" >&2; false; }
+    expect_pass "git commit -m \"$pad --no-verify\"" || { echo "len $len: quoted mention" >&2; false; }
+    expect_block "echo $pad && git commit --no-verify -m x" || { echo "len $len: && at boundary" >&2; false; }
+    expect_block "echo \"$pad\" && git push -f" || { echo "len $len: close quote at boundary" >&2; false; }
+  done
+}
+
+@test "no-bypass: a command over GRID_GUARD_MAX_CMD that mentions git exits 2 with the file hint" {
+  pad="$(rep 'abcdefghi ' 200)"
+  GRID_GUARD_MAX_CMD=1000 run_hook pre-bash-no-bypass "$(hook_payload "git status; echo $pad")"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"too long to inspect"* ]] || false
+  [[ "$output" == *"Write tool"* ]] || false
+  # the same size without git is not our business
+  GRID_GUARD_MAX_CMD=1000 run_hook pre-bash-no-bypass "$(hook_payload "echo $pad")"
+  [ "$status" -eq 0 ]
+}
+
 # --- the bypass-form table (SEC5): one @test per row so a regression names its form.
 # B rows must exit 2, P rows must exit 0.
 
@@ -695,6 +750,17 @@ STUB
   [[ "$output" == *"GRID_HOOKS=off"* ]] || false
   [[ "$output" == *"install"* ]] || false
   [[ "$output" == *"every Bash call"* ]] || false
+}
+
+@test "secret: a commit command over GRID_GUARD_MAX_CMD exits 2 with the file hint" {
+  mkrepo
+  pad="$(rep 'abcdefghi ' 200)"
+  GRID_GUARD_MAX_CMD=1000 run_hook pre-bash-secret-scan "$(hook_payload "git commit -m \"$pad\"" "$R")"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"too long to inspect"* ]] || false
+  # over the cap but no git: not the scan's business
+  GRID_GUARD_MAX_CMD=1000 run_hook pre-bash-secret-scan "$(hook_payload "echo commit $pad" "$R")"
+  [ "$status" -eq 0 ]
 }
 
 @test "secret: at most 10 findings are listed" {
