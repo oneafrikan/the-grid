@@ -83,6 +83,16 @@ teardown() {
 # The subshell function keeps `unset HOME` away from the rest of the test.
 assert_sandboxed_without_home() ( unset HOME; assert_sandboxed )
 
+# A target that does not exist yet (the code under test would create it) must still be
+# refused when its path is inside the real ~/.claude: `cd` fails for it, which used to
+# resolve to "" and slip past the first loop (verifier note VF1).
+@test "tripwire refuses a nonexistent target inside the real ~/.claude" {
+  fake_home="$BATS_TEST_TMPDIR/fake-home"; mkdir -p "$fake_home/.claude"
+  REAL_HOME="$fake_home" SKILLS_DIR="$fake_home/.claude/not-created-yet/skills" run assert_sandboxed
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
 @test "tripwire refuses an empty HOME" {
   HOME= run assert_sandboxed
   [ "$status" -eq 1 ]
