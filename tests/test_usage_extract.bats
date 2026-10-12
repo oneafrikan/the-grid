@@ -41,6 +41,8 @@ setup() {
 }
 
 teardown() {
+  # A test may leave an unreadable dir behind; make everything removable first.
+  chmod -R u+rwx "$T" 2>/dev/null || true
   rm -rf "$T"
   common_teardown
 }
@@ -327,4 +329,148 @@ JSON
   run ! grep -E 'a string|999999|not-a-day|bad name|unknown_bucket|top-level extra' "$F"
   # A well-formed value from the old file survives (max-merge keeps the larger).
   [ "$(jget "d['harnesses']['claude-code']['days']['2026-10-08']['skills']['tdd']")" = '99' ]
+}
+
+# --- adapter robustness (WP-058) ------------------------------------------------
+
+# rec_skill <timestamp> <id> — one assistant record that calls the tdd skill on <timestamp>.
+rec_skill() {
+  printf '{"type":"assistant","uuid":"x-%s","timestamp":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"tx-%s","name":"Skill","input":{"skill":"tdd"}}]}}\n' "$2" "$1" "$2"
+}
+
+# day_keys — the sorted day keys of the claude-code block as JSON.
+day_keys() { jget "sorted(d['harnesses']['claude-code']['days'])"; }
+
+# in_time <seconds> <command...> — run under a perl alarm (portable `timeout`); 142 = killed.
+in_time() { local s="$1"; shift; run --separate-stderr perl -e 'alarm shift; exec @ARGV' "$s" "$@"; }
+
+@test "a future-dated record is dropped with a stderr warning and the day is not stored" {
+  mkdir -p "$T/projects/p-x"
+  rec_skill 2099-01-01T00:00:00Z f1 > "$T/projects/p-x/future.jsonl"
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(day_keys)" = '["2026-10-07", "2026-10-08", "2026-10-09"]' ]
+  [[ "$stderr" == *"WARNING"*"timestamp"* ]]
+  [[ "$output" == *"bad_day=1"* ]]
+}
+
+@test "impossible and non-ASCII-digit days are dropped: 2026-02-29, 9999-99-99, Arabic-Indic digits" {
+  mkdir -p "$T/projects/p-x"
+  {
+    rec_skill 2026-02-29T10:00:00Z f1
+    rec_skill 9999-99-99T10:00:00Z f2
+    rec_skill $'\xd9\xa2\xd9\xa0\xd9\xa2\xd9\xa6-\xd9\xa1\xd9\xa0-\xd9\xa0\xd9\xa8T10:00:00Z' f3
+  } > "$T/projects/p-x/odd.jsonl"
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(day_keys)" = '["2026-10-07", "2026-10-08", "2026-10-09"]' ]
+  [[ "$output" == *"bad_day=3"* ]]
+}
+
+@test "an offset timestamp is bucketed by its UTC day: 2026-10-11T23:30:00-05:00 is 2026-10-12" {
+  mkdir -p "$T/projects/p-x"
+  rec_skill 2026-10-11T23:30:00-05:00 o1 > "$T/projects/p-x/offset.jsonl"
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(jget "d['harnesses']['claude-code']['days']['2026-10-12']['skills']")" = '{"tdd": 1}' ]
+  [ "$(jget "'2026-10-11' in d['harnesses']['claude-code']['days']")" = 'false' ]
+}
+
+@test "CLAUDE_CONFIG_DIR is honoured when HOME has no .claude (projects, skills, agents, settings)" {
+  CFG="$T/cfg"
+  mkdir -p "$CFG/skills/tdd" "$CFG/agents" "$T/emptyhome"
+  cp -R "$FIX/claude-projects" "$CFG/projects"
+  touch "$CFG/agents/cfg-agent.md"
+  printf '{"cleanupPeriodDays": 60}\n' > "$CFG/settings.json"
+  unset CLAUDE_PROJECTS_DIR SKILLS_DIR AGENTS_DIR CLAUDE_SETTINGS
+  HOME="$T/emptyhome" CLAUDE_CONFIG_DIR="$CFG" extract
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"events="[1-9]* ]]
+  [ "$(jget "d['harnesses']['claude-code']['wired']")" = '{"agents": ["cfg-agent"], "skills": ["tdd"]}' ]
+  [[ "$stderr" != *cleanupPeriodDays* ]]
+}
+
+@test "a symlinked project dir and a symlinked transcript are not followed, and are counted" {
+  mkdir -p "$T/outside"
+  rec_skill 2026-10-08T10:00:00Z l1 | sed 's/"tdd"/"linked-skill-dir"/' > "$T/outside/dir.jsonl"
+  rec_skill 2026-10-08T10:00:00Z l2 | sed 's/"tdd"/"linked-skill-file"/' > "$T/outside/file.jsonl"
+  ln -s "$T/outside" "$T/projects/linkdir"
+  ln -s "$T/outside/file.jsonl" "$T/projects/proj-alpha/link.jsonl"
+  extract
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipped_links=2"* ]]
+  [[ "$stderr" == *"skipped"* ]]
+  # (last: `run !` replaces $output and $stderr)
+  run ! grep -F 'linked-skill' "$F"
+}
+
+@test "a FIFO named *.jsonl is skipped instead of blocking forever" {
+  mkfifo "$T/projects/proj-alpha/fifo.jsonl"
+  in_time 10 python3 "$EXTRACT" --out "$OUT"
+  [ "$status" -eq 0 ]
+  [ -f "$F" ]
+}
+
+@test "an unreadable project dir is counted in the warning; an unreadable projects root exits 1 untouched" {
+  extract
+  [ "$status" -eq 0 ]
+  cp "$F" "$T/first.json"
+  chmod 000 "$T/projects/proj-beta"
+  # Root ignores modes; fail loudly instead of passing without testing anything.
+  [ ! -r "$T/projects/proj-beta" ]
+  extract
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"walk_errors=1"* ]]
+  [[ "$stderr" == *"unreadable"* ]]
+  chmod 755 "$T/projects/proj-beta"
+  chmod 000 "$T/projects"
+  [ ! -r "$T/projects" ]
+  extract
+  [ "$status" -eq 1 ]
+  cmp "$F" "$T/first.json"
+}
+
+@test "100 KB of whitespace after <command-name> with no closing tag finishes quickly" {
+  mkdir -p "$T/projects/p-x"
+  python3 -c 'import json; print(json.dumps({"type":"user","uuid":"s1","timestamp":"2026-10-08T10:00:00Z","message":{"role":"user","content":"<command-name>" + " " * 100000}}))' > "$T/projects/p-x/ws.jsonl"
+  in_time 5 python3 "$EXTRACT" --out "$OUT"
+  [ "$status" -eq 0 ]
+}
+
+@test "a transcript line nested 12000 deep is counted as bad, the run still exits 0" {
+  mkdir -p "$T/projects/p-x"
+  python3 -c 'print("[" * 12000 + "]" * 12000)' > "$T/projects/p-x/deep.jsonl"
+  extract
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bad_lines=3"* ]]   # the fixture already holds 2 bad lines
+}
+
+@test "a line over the 8 MB cap is counted as bad and not parsed" {
+  mkdir -p "$T/projects/p-x"
+  python3 -c 'import sys; sys.stdout.write("{\"type\":\"x\",\"pad\":\"" + "a" * 9000000 + "\"}\n")' > "$T/projects/p-x/big.jsonl"
+  extract
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bad_lines=3"* ]]   # the fixture already holds 2 bad lines
+}
+
+@test "skill, agent and model names ending in a newline are dropped; newline-named files are not wired" {
+  mkdir -p "$T/projects/p-x"
+  python3 - "$T/projects/p-x/evil.jsonl" <<'PY'
+import json, sys
+recs = [
+  {"type": "assistant", "uuid": "e1", "timestamp": "2026-10-08T10:00:00Z", "message": {
+     "id": "m-e1", "model": "evil-model\n", "usage": {"input_tokens": 1, "output_tokens": 1},
+     "content": [{"type": "tool_use", "id": "te1", "name": "Skill", "input": {"skill": "evil-skill\n"}},
+                 {"type": "tool_use", "id": "te2", "name": "Task", "input": {"subagent_type": "evil-agent\n"}}]}},
+  {"type": "attachment", "uuid": "e3", "timestamp": "2026-10-08T10:00:01Z",
+   "attachment": {"type": "hook_success", "hookName": "evil-hook\n"}},
+]
+open(sys.argv[1], "w").write("\n".join(json.dumps(r) for r in recs) + "\n")
+PY
+  touch "$T/agents/bad"$'\n'"agent.md"
+  mkdir "$T/skills/bad"$'\n'"skill"
+  extract
+  [ "$status" -eq 0 ]
+  run ! grep -F 'evil' "$F"
+  [ "$(jget "d['harnesses']['claude-code']['wired']")" = '{"agents": ["grid-qa-engineer"], "skills": ["handoff", "tdd"]}' ]
 }

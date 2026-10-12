@@ -9,7 +9,9 @@ activating the schedule is a manual step per machine (see [Install](#install)).
 ## What is collected
 
 Counts per UTC day, read from the Claude Code transcripts under
-`~/.claude/projects` (override: `CLAUDE_PROJECTS_DIR`):
+`~/.claude/projects` (override: `CLAUDE_PROJECTS_DIR`; or, when Claude Code's config
+dir is moved, `$CLAUDE_CONFIG_DIR/projects`, with skills, agents and `settings.json`
+read from the same dir):
 
 - Skill-tool calls, by skill name.
 - Agent/Task-tool calls, by subagent type.
@@ -213,6 +215,18 @@ One `<host>.json` per machine under `${GRID_PRIVATE_DIR:-~/.the-grid-private}/us
 - `tokens`: per model `msgs`, `in`, `out`, `cache_read`, `cache_write`.
 
 Counts only: no prompt text, paths, project names, session ids or message ids.
+
+**What the extractor skips (and says so on stderr).** Each record's day is its
+timestamp converted to UTC; a timestamp that is malformed or outside
+2024-01-01..tomorrow (UTC) is dropped and counted as `bad_day`. Symlinked project
+directories and transcripts, FIFOs and other non-regular files are not followed
+(`skipped_links`); unreadable directories are counted too (`walk_errors`); an
+unreadable projects root exits 1 and leaves the host file untouched. A transcript
+line over 8 MB or nested too deep to parse is counted as a bad line. Stored names
+must be ASCII and match the name filter, and at most 500 wired names per list are kept.
+The prune report ignores stored days outside that range, never ends its window after
+today, and prints file and skill names escaped. It is for you to read: do not feed it
+to an agent that can apply proposals on its own.
 
 **Names are stored as seen.** A private skill, agent or slash command named after
 a client or a project lands in the usage file, and so in the private repo. Never

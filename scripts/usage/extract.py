@@ -226,12 +226,15 @@ def sum_events(events):
 
 def retention_warning():
     """Return a warning string when cleanupPeriodDays is unset or too low."""
-    path = os.environ.get("CLAUDE_SETTINGS") or os.path.expanduser("~/.claude/settings.json")
+    # CLAUDE_SETTINGS wins; else <config dir>/settings.json, where the config dir is
+    # CLAUDE_CONFIG_DIR or ~/.claude (a machine that sets it has no ~/.claude).
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    path = os.environ.get("CLAUDE_SETTINGS") or os.path.join(cfg, "settings.json")
     value = None
     try:
         with open(path, encoding="utf-8") as fh:
             value = json.load(fh).get("cleanupPeriodDays")
-    except (OSError, ValueError, AttributeError):
+    except (OSError, ValueError, RecursionError, AttributeError):
         pass
     if isinstance(value, bool) or not isinstance(value, int) or value < MIN_RETENTION_DAYS:
         return ('WARNING: cleanupPeriodDays is %s in the Claude Code settings; transcripts expire '
@@ -271,7 +274,7 @@ def main():
         try:
             with open(target, encoding="utf-8") as fh:
                 old = json.load(fh)
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             old = None
         if not isinstance(old, dict) or old.get("schema") != SCHEMA:
             die(1, "existing %s is unparseable or has an unknown schema; left untouched" % target)
@@ -280,6 +283,10 @@ def main():
     adapters = [a for a in adapters if a.available()]
     if not adapters:
         print("usage-extract: no adapters available; nothing to do")
+        # Exit stays 0 (a thin client has none), but a machine whose transcripts are
+        # somewhere this run did not look would otherwise log success and write nothing.
+        print("usage-extract: WARNING: no adapters available, so nothing was recorded; if this "
+              "machine runs Claude Code, check CLAUDE_CONFIG_DIR / CLAUDE_PROJECTS_DIR", file=sys.stderr)
         return 0
 
     if old:
@@ -293,7 +300,11 @@ def main():
     harnesses = doc.setdefault("harnesses", {})
     total, notes, warnings = 0, [], []
     for a in adapters:
-        scan, n = sum_events(a.events(args.since_day))
+        try:
+            scan, n = sum_events(a.events(args.since_day))
+        except OSError as exc:
+            # e.g. the projects root exists but cannot be read: not "no usage".
+            die(1, "cannot read %s transcripts (%s); the host file is left untouched" % (a.name, exc))
         total += n
         h = harnesses.setdefault(a.name, {})
         h["days"] = merge_max(h.get("days", {}), scan["days"])
@@ -308,6 +319,12 @@ def main():
             # Drift canary: a parser that recognises nothing looks like "nothing was used".
             if (st.get("lines", 0) > 0 and st.get("assistant", 0) == 0) or st.get("bad_lines", 0) * 20 > st.get("lines", 0):
                 warnings.append("WARNING: transcript format may have changed (%s); counts may be too low" % notes[-1])
+            if st.get("bad_day", 0) > 0:
+                warnings.append("WARNING: %d record(s) skipped: timestamp malformed or outside 2024-01-01..tomorrow (UTC)"
+                                % st["bad_day"])
+            if st.get("walk_errors", 0) > 0 or st.get("skipped_links", 0) > 0:
+                warnings.append("WARNING: %d unreadable and %d symlinked or non-regular transcript entries were skipped; "
+                                "counts may be too low" % (st.get("walk_errors", 0), st.get("skipped_links", 0)))
 
     if doc == old:
         status = "unchanged"

@@ -9,7 +9,8 @@
 
     skills / agents / slash / hooks   {name: count} summed over all hosts, over
                                       the WINDOW only (the last `window_days`
-                                      days, ending at the latest day stored)
+                                      days, ending at the latest valid day stored
+                                      or today (UTC), whichever is earlier)
     tokens                            {"YYYY-MM": {model: {msgs, in, out,
                                       cache_read, cache_write}}} summed over all
                                       hosts and ALL stored days (months are the
@@ -17,6 +18,8 @@
     hosts                             number of host files that reported it
     first_day / last_day              earliest / latest day key across hosts
     coverage_days                     inclusive span first_day..last_day
+    rejected_days                     stored day keys ignored (not a date, before
+                                      2024-01-01 or after today + 1 day, UTC)
     wired                             {"skills": [...], "agents": [...]} union of
                                       every host's latest wired snapshot
 
@@ -31,8 +34,15 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import re
 
 SCHEMA = 1                      # the only schema this reader understands
+# Local copies of the adapter's filters (WP-059 consolidates the constants). ASCII-only
+# and \Z-anchored: `$` matches before a trailing newline and `\d` matches other scripts' digits.
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_.-]{0,63}\Z", re.ASCII)
+DAY_SHAPE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z", re.ASCII)
+MIN_DAY = datetime.date(2024, 1, 1)   # earlier days are bogus (same bound as the extractor)
+MAX_WIRED_NAMES = 500                 # per list, per host file
 TOKEN_FIELDS = ("msgs", "in", "out", "cache_read", "cache_write")
 COUNT_KINDS = ("skills", "agents", "slash", "hooks")
 
@@ -50,7 +60,7 @@ def _load(path: str):
     try:
         with open(path, encoding="utf-8") as fh:
             doc = json.load(fh)
-    except (OSError, ValueError):          # unreadable, truncated, conflict markers
+    except (OSError, ValueError, RecursionError):   # unreadable, truncated, conflict markers, nested bomb
         return None
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
         return None
@@ -59,15 +69,22 @@ def _load(path: str):
     return doc
 
 
-def _is_day(key) -> bool:
-    try:
-        datetime.date.fromisoformat(key)
-        return True
-    except (TypeError, ValueError):
+def _is_day(key, today) -> bool:
+    """A real calendar day between MIN_DAY and today + 1 (UTC). One forged or
+    clock-skewed future day would otherwise move the window end and make every
+    skill read "never"."""
+    if not isinstance(key, str) or not DAY_SHAPE.match(key):
         return False
+    try:
+        day = datetime.date.fromisoformat(key)
+    except ValueError:
+        return False
+    return MIN_DAY <= day <= today + datetime.timedelta(days=1)
 
 
-def aggregate(dir, window_days):
+def aggregate(dir, window_days, today=None):
+    if today is None:
+        today = datetime.datetime.now(datetime.timezone.utc).date()
     ignored = []
     docs = []                               # (file name, parsed doc), sorted by name
     for fname in sorted(os.listdir(dir)) if os.path.isdir(dir) else []:
@@ -92,26 +109,30 @@ def aggregate(dir, window_days):
     for harness, datas in sorted(blocks.items()):
         # All valid day keys across hosts: they fix first/last/coverage and the window.
         all_days = sorted({d for data in datas
-                           for d in (data.get("days") or {}) if _is_day(d)})
+                           for d in (data.get("days") or {}) if _is_day(d, today)})
+        rejected = sum(1 for data in datas for d in (data.get("days") or {}) if not _is_day(d, today))
         res = {"skills": {}, "agents": {}, "slash": {}, "hooks": {},
                "tokens": {}, "hosts": len(datas),
                "first_day": None, "last_day": None, "coverage_days": 0,
+               "rejected_days": rejected,
                "wired": {"skills": [], "agents": []}}
         if all_days:
             first = datetime.date.fromisoformat(all_days[0])
             last = datetime.date.fromisoformat(all_days[-1])
             res["first_day"], res["last_day"] = all_days[0], all_days[-1]
             res["coverage_days"] = (last - first).days + 1
-            # The window ends at the latest day stored, not at "today", so a
-            # report on stale data is still self-consistent.
-            win_start = (last - datetime.timedelta(days=max(window_days, 1) - 1)).isoformat()
+            # The window ends at the latest valid day stored (so a report on stale data is
+            # still self-consistent), but never later than today: a day in the future
+            # cannot move it.
+            anchor = min(last, today)
+            win_start = (anchor - datetime.timedelta(days=max(window_days, 1) - 1)).isoformat()
         else:
             win_start = ""
 
         wired = {"skills": set(), "agents": set()}
         for data in datas:
             for day, bucket in (data.get("days") or {}).items():
-                if not _is_day(day) or not isinstance(bucket, dict):
+                if not _is_day(day, today) or not isinstance(bucket, dict):
                     continue
                 # Counts: window only.
                 if day >= win_start:
@@ -135,7 +156,10 @@ def aggregate(dir, window_days):
             if isinstance(w, dict):
                 for kind in ("skills", "agents"):
                     if isinstance(w.get(kind), list):
-                        wired[kind].update(n for n in w[kind] if isinstance(n, str))
+                        # Names come from a pulled file: keep only well-formed ones, and a
+                        # bounded number, so no hostile name reaches the report.
+                        wired[kind].update([n for n in w[kind] if isinstance(n, str)
+                                            and NAME_RE.match(n)][:MAX_WIRED_NAMES])
         res["wired"] = {k: sorted(v) for k, v in wired.items()}
         # Zero counts (e.g. malformed values) are noise; drop them.
         for kind in COUNT_KINDS:

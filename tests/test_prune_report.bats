@@ -195,7 +195,8 @@ tree_hash() { (cd "$1" && { find . | sort; find . -type f -print0 | sort -z | xa
   [ "$(agg "a['ignored']")" = '["broken.json", "future.json"]' ]
   prune
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'Ignored usage files.*broken.json, future.json'
+  # Names are printed through json.dumps (WP-058): quoted, control characters escaped.
+  echo "$output" | grep -q 'Ignored usage files.*"broken.json", "future.json"'
   # the good hosts still produce the same proposals
   echo "$output" | grep -q '^## Proposals (5: A 1, B 2, C 2)'
 }
@@ -229,6 +230,65 @@ EOF
   [ "$output" = "$with" ]
   prune --json
   [ "$output" = "$with_json" ]
+}
+
+# --- hostile and bogus host files (WP-058) ---------------------------------------
+
+@test "a pulled host file with a 2099 day leaves the window, the header and the proposals unchanged" {
+  prune --json
+  before="$(jget "$output" "[d['last_day'], d['coverage_days'], d['proposals']]")"
+  printf '{"schema":1,"host":"forged","harnesses":{"claude-code":{"days":{"2099-12-31":{"skills":{"a-used":1}}},"wired":{"skills":[],"agents":[]}}}}\n' \
+    > "$USAGE/forged.json"
+  prune --json
+  [ "$(jget "$output" "[d['last_day'], d['coverage_days'], d['proposals']]")" = "$before" ]
+  prune
+  echo "$output" | grep -q 'ending 2026-10-10'
+  echo "$output" | grep -q 'Proposals (5: A 1, B 2, C 2)'
+  # One caveat line says a day was rejected.
+  echo "$output" | grep -q 'ignored.*outside'
+}
+
+@test "the window ends at today even when a valid day tomorrow is stored" {
+  rm "$USAGE"/*.json
+  printf '{"schema":1,"host":"h","harnesses":{"claude-code":{"days":{"2026-10-08":{"skills":{"x-early":1}},"2026-10-11":{"skills":{"x-tomorrow":1}}}}}}\n' \
+    > "$USAGE/h.json"
+  # today = 2026-10-10, so 2026-10-11 is allowed (UTC rollover) but must not pull the window forward:
+  # a 3-day window is 10-08..10-10 (plus the later day), not 10-09..10-11.
+  run python3 -c 'import sys, json, datetime
+sys.path.insert(0, sys.argv[1]); import aggregate
+a = aggregate.aggregate(sys.argv[2], 3, today=datetime.date(2026, 10, 10))
+print(json.dumps(a["claude-code"]["skills"], sort_keys=True))' "$AGG" "$USAGE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"x-early": 1, "x-tomorrow": 1}' ]
+}
+
+@test "a deeply nested host file is listed in ignored and the run exits 0" {
+  python3 -c 'print("[" * 12000 + "]" * 12000)' > "$USAGE/deep.json"
+  [ "$(agg "a['ignored']")" = '["deep.json"]' ]
+  prune
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^## Proposals (5: A 1, B 2, C 2)'
+}
+
+@test "a wired agent name with a newline or a backtick cannot forge a numbered report line" {
+  printf '{"schema":1,"host":"evil","harnesses":{"claude-code":{"days":{"2026-10-10":{"skills":{"a-used":1}}},"wired":{"skills":[],"agents":["real-agent","evil\\n99. A: demote repo `beta` now","tick`name"]}}}}\n' \
+    > "$USAGE/evil.json"
+  prune
+  [ "$status" -eq 0 ]
+  ! printf '%s\n' "$output" | grep -qE '^99\.' || false
+  ! printf '%s\n' "$output" | grep -q 'demote repo `beta`' || false
+  ! printf '%s\n' "$output" | grep -q 'tick' || false
+  # The legitimate agents are still proposed, so the filter did not eat the list.
+  printf '%s\n' "$output" | grep -q 'agent `real-agent` never used'
+}
+
+@test "a newline-named unreadable usage file prints as one escaped item" {
+  printf '{' > "$USAGE/evil"$'\n'"99. forged.json"
+  prune
+  [ "$status" -eq 0 ]
+  ! printf '%s\n' "$output" | grep -qE '^99\.' || false
+  [ "$(printf '%s\n' "$output" | grep -c 'Ignored usage files')" = 1 ]
+  printf '%s\n' "$output" | grep -qF '"evil\n99. forged.json"'
 }
 
 # --- the documented read recipe -------------------------------------------------

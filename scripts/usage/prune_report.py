@@ -19,6 +19,10 @@ Inputs
 It deliberately never reads `tokens` or `hooks` from the aggregate: those are for
 cost analysis, not for pruning decisions.
 
+The report is for the OPERATOR to read. Do not feed it to an agent that can apply
+proposals on its own: names in it come from host files pulled from the private repo
+(filtered to a safe shape and escaped here, but still data from outside this checkout).
+
 Per baseline skill:  uses = Skill-tool calls + slash invocations of that name,
 all hosts, inside the window.  state = never (0) | rare (1..--rare) | used.
 
@@ -117,9 +121,10 @@ def build(grid, usage_dir, window_days, rare, min_days):
     a = agg.aggregate(usage_dir, window_days)
     h = a.get(HARNESS) or {"skills": {}, "agents": {}, "slash": {}, "hosts": 0,
                            "first_day": None, "last_day": None, "coverage_days": 0,
-                           "wired": {"skills": [], "agents": []}}
+                           "rejected_days": 0, "wired": {"skills": [], "agents": []}}
     rep.update(hosts=h["hosts"], first_day=h["first_day"], last_day=h["last_day"],
-               coverage_days=h["coverage_days"], ignored=a["ignored"])
+               coverage_days=h["coverage_days"], rejected_days=h["rejected_days"],
+               ignored=a["ignored"])
 
     keep = set(read_names(os.path.join(grid, "docs", "prune-keep.txt")))
 
@@ -197,6 +202,19 @@ def build(grid, usage_dir, window_days, rare, min_days):
     return rep
 
 
+_PLAIN = re.compile(r"[A-Za-z0-9-][A-Za-z0-9._:@+-]*\Z", re.ASCII)
+
+
+def _q(name):
+    """A name for the markdown. A well-formed name is printed as is; anything else (a
+    control character, a backtick, a newline that could start a forged numbered line) is
+    printed JSON-escaped, with the backtick escaped too."""
+    name = str(name)
+    if _PLAIN.match(name):
+        return name
+    return json.dumps(name).replace("`", "\\u0060")
+
+
 def render(rep):
     """Markdown for the report dict."""
     if rep["status"] == "no-baseline":
@@ -216,16 +234,16 @@ def render(rep):
               'Reply e.g. "apply 2, skip 3".', ""]
         for p in ps:
             if p["kind"] == "A":
-                keepers = ", ".join(p["keep_per_skill"]) or "none"
-                L.append(f"{p['n']}. A: demote repo `{p['name']}` to library, saves "
-                         f"~{p['saved_chars']} chars. Drops: {', '.join(p['dropped'])}. "
+                keepers = ", ".join(_q(k) for k in p["keep_per_skill"]) or "none"
+                L.append(f"{p['n']}. A: demote repo `{_q(p['name'])}` to library, saves "
+                         f"~{p['saved_chars']} chars. Drops: {', '.join(_q(d) for d in p['dropped'])}. "
                          f"Or replace the line with per-skill entries for the used ones: {keepers}.")
             elif p["kind"] == "B":
-                L.append(f"{p['n']}. B: name-only `{p['name']}` ({p['state']}, {p['uses']} uses), "
+                L.append(f"{p['n']}. B: name-only `{_q(p['name'])}` ({p['state']}, {p['uses']} uses), "
                          f"saves ~{p['saved_chars']} chars.")
             else:
-                hint = f" Overlay: `{p['overlay']}`." if p["overlay"] else ""
-                L.append(f"{p['n']}. C: agent `{p['name']}` never used.{hint}")
+                hint = f" Overlay: `{_q(p['overlay'])}`." if p["overlay"] else ""
+                L.append(f"{p['n']}. C: agent `{_q(p['name'])}` never used.{hint}")
         if not ps:
             L.append("Nothing to propose.")
         L.append("")
@@ -238,7 +256,13 @@ def render(rep):
           f"- Day coverage: {rep['coverage_days']} days "
           f"({rep['first_day'] or 'n/a'} to {rep['last_day'] or 'n/a'})"]
     if rep["ignored"]:
-        L.append(f"- Ignored usage files (unparseable or unknown schema): {', '.join(rep['ignored'])}")
+        # File names come from a pulled repo: json.dumps keeps a newline in a name from
+        # starting a forged line of the report.
+        names = ", ".join(json.dumps(n).replace("`", "\\u0060") for n in rep["ignored"])
+        L.append(f"- Ignored usage files (unparseable or unknown schema): {names}")
+    if rep.get("rejected_days"):
+        L.append(f"- Caveat: {rep['rejected_days']} stored day key(s) were ignored: outside 2024-01-01..tomorrow (UTC) "
+                 f"or not a date.")
     L += [f"- Caveat: {c}" for c in CAVEATS]
     return "\n".join(L) + "\n"
 

@@ -239,7 +239,7 @@ sync_as() {
   write_instinct "$PA" host-a
   sync_as host-a "$PA"
   [ "$status" -eq 0 ]
-  ! grep -rq '^<<<<<<<' "$PA" --exclude-dir=.git
+  ! grep -rq '^<<<<<<<' "$PA" --exclude-dir=.git || false
   [ "$(cat "$PA/README")" = "line one local" ]
   [[ "$output" == *"pull skipped"* ]]
   [ "$(git -C "$PA" show --name-only --format= HEAD)" = "learning/instincts/aaaaaaaaaaaa/host-a.jsonl" ]

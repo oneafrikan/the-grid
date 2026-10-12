@@ -12,26 +12,45 @@ count below must be right the first time.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
+import stat
 
 # Names we are willing to store. Anything else (paths, pasted prose,
 # "<synthetic>") is dropped, so free text can never reach the output file.
-NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_.-]{0,63}$")
+# The name/day patterns are ASCII-only and anchored with \Z (used with .match):
+# `$` also matches before a trailing newline, and `\d` matches non-ASCII digits,
+# so "evil\n" and Arabic-Indic digits used to pass.
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_.-]{0,63}\Z", re.ASCII)
 # Hook names are "<event>" or "<event>:<matcher>"; a matcher may be a regex such
 # as "Edit|Write", so allow a few more characters than NAME_RE (still no "/" or
 # whitespace). The hook *command* (which holds paths) is never read.
-HOOK_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_.|*()-]{0,127}$")
-DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+HOOK_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_.|*()-]{0,127}\Z", re.ASCII)
+DAY_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z", re.ASCII)
+# A transcript timestamp: date, optional time (fraction ignored), optional Z/offset.
+TS_RE = re.compile(
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})"
+    r"(?:[T ]([0-9]{2}):([0-9]{2}):([0-9]{2})(?:[.,][0-9]+)?)?"
+    r"(Z|[+-][0-9]{2}:?[0-9]{2})?\Z",
+    re.ASCII,
+)
+# Days outside this range are bogus (a clock set wrong, a forged line): they would
+# move the report window. The upper bound is today UTC + 1 (clock skew, UTC rollover).
+MIN_DAY = datetime.date(2024, 1, 1)
 # A slash command is only a message that STARTS with <command-name> (optionally
 # after one <command-message>..</command-message>). No "leading /token" fallback.
+# Every quantifier is bounded and the input is cut to 1 KiB first: the old
+# `.*?` / `\s*` pair backtracked cubically (a 3 KB line took 77 s).
 SLASH_RE = re.compile(
-    r"^\s*(?:<command-message>.*?</command-message>\s*)?"
-    r"<command-name>\s*(.*?)\s*</command-name>",
-    re.DOTALL,
+    r"\s{0,64}(?:<command-message>[^<]{0,256}</command-message>\s{0,64})?"
+    r"<command-name>\s{0,64}([^<]{1,64}?)\s{0,64}</command-name>"
 )
+SLASH_SCAN_CHARS = 1024
 DEFAULT_AGENT = "(default)"  # Agent/Task call with no subagent_type
+MAX_LINE = 8 * 1024 * 1024    # a transcript line longer than this is counted as bad, not parsed
+MAX_WIRED_NAMES = 500         # per list; a wired list is stored in the host file
 
 
 def _count(value):
@@ -41,12 +60,41 @@ def _count(value):
     return value
 
 
+def config_dir():
+    """Claude Code's config dir: $CLAUDE_CONFIG_DIR, else ~/.claude."""
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+
+
+def _today():
+    return datetime.datetime.now(datetime.timezone.utc).date()
+
+
 def _day(record):
-    """UTC day from the record timestamp, or None when missing/malformed."""
+    """UTC day (YYYY-MM-DD) of the record timestamp.
+
+    Returns (day, reason): day is None when unusable and reason is "missing" (no
+    timestamp string at all) or "bad" (present but malformed, an impossible date,
+    or outside MIN_DAY..today+1). An offset timestamp is converted to UTC first, so a
+    late-evening local time lands on the right UTC day."""
     ts = record.get("timestamp")
-    if isinstance(ts, str) and DAY_RE.match(ts[:10]):
-        return ts[:10]
-    return None
+    if not isinstance(ts, str):
+        return None, "missing"
+    m = TS_RE.match(ts)
+    if not m:
+        return None, "bad"
+    y, mo, d, hh, mi, ss, tz = m.groups()
+    try:
+        when = datetime.datetime(int(y), int(mo), int(d), int(hh or 0), int(mi or 0), int(ss or 0))
+        if tz and tz != "Z":
+            digits = tz[1:].replace(":", "")
+            off = datetime.timedelta(hours=int(digits[:2]), minutes=int(digits[2:]))
+            when = when - off if tz[0] == "+" else when + off
+    except (ValueError, OverflowError):
+        return None, "bad"
+    day = when.date()
+    if day < MIN_DAY or day > _today() + datetime.timedelta(days=1):
+        return None, "bad"
+    return day.isoformat(), None
 
 
 def _list_names(path, strip_md=False):
@@ -63,29 +111,37 @@ def _list_names(path, strip_md=False):
             if not n.endswith(".md"):
                 continue
             n = n[:-3]
+        # Only names that pass the same filter as every other stored name: a file
+        # name with a newline or a backtick must never reach the host file or the report.
+        if not NAME_RE.match(n):
+            continue
         out.append(n)
-    return sorted(out)
+    return sorted(out)[:MAX_WIRED_NAMES]
 
 
 class ClaudeCode:
     name = "claude-code"
 
     def __init__(self):
-        self.projects = os.environ.get("CLAUDE_PROJECTS_DIR") or os.path.expanduser("~/.claude/projects")
+        self.projects = os.environ.get("CLAUDE_PROJECTS_DIR") or os.path.join(config_dir(), "projects")
         self._reset_stats()
 
     def _reset_stats(self):
         # Drift canary: the extractor warns when these look wrong (e.g. many
         # lines but no assistant records). Never written to the output file.
+        # bad_day: a timestamp that is malformed or outside the sane range.
+        # walk_errors / skipped_links: directories or entries that could not be read or were
+        # deliberately not followed (symlinks, FIFOs, devices): they make counts too low.
         self.stats = {"files": 0, "lines": 0, "bad_lines": 0,
-                      "assistant": 0, "no_day": 0, "no_id": 0}
+                      "assistant": 0, "no_day": 0, "no_id": 0, "bad_day": 0,
+                      "walk_errors": 0, "skipped_links": 0}
 
     def available(self):
         return os.path.isdir(self.projects)
 
     def wired(self):
-        skills = _list_names(os.environ.get("SKILLS_DIR") or os.path.expanduser("~/.claude/skills"))
-        agents = _list_names(os.environ.get("AGENTS_DIR") or os.path.expanduser("~/.claude/agents"),
+        skills = _list_names(os.environ.get("SKILLS_DIR") or os.path.join(config_dir(), "skills"))
+        agents = _list_names(os.environ.get("AGENTS_DIR") or os.path.join(config_dir(), "agents"),
                              strip_md=True)
         out = {}
         # A missing directory yields no key, so the merge keeps the old snapshot.
@@ -98,11 +154,28 @@ class ClaudeCode:
     def _files(self):
         """Every *.jsonl under the projects dir, in a stable order.
         Yields (path, is_subagent_file)."""
-        for root, dirs, files in os.walk(self.projects):
+        def on_error(_exc):
+            # os.walk skips an unreadable directory silently; count it so the
+            # extractor can warn that the counts are an undercount.
+            self.stats["walk_errors"] += 1
+
+        for root, dirs, files in os.walk(self.projects, onerror=on_error):
             dirs.sort()
+            # os.walk lists symlinked directories but never descends into them; count them.
+            self.stats["skipped_links"] += sum(1 for d in dirs if os.path.islink(os.path.join(root, d)))
             for f in sorted(files):
                 if f.endswith(".jsonl"):
                     path = os.path.join(root, f)
+                    # Regular files only: a symlink may point anywhere, a FIFO blocks the
+                    # read forever and a device (/dev/zero) never ends.
+                    try:
+                        regular = stat.S_ISREG(os.lstat(path).st_mode)
+                    except OSError:
+                        self.stats["walk_errors"] += 1
+                        continue
+                    if not regular:
+                        self.stats["skipped_links"] += 1
+                        continue
                     rel = os.path.relpath(path, self.projects).split(os.sep)
                     yield path, "subagents" in rel[:-1]
 
@@ -117,6 +190,10 @@ class ClaudeCode:
         def wanted(day):
             return since_day is None or day >= since_day
 
+        # An unreadable projects root must not look like "no usage": let the OSError reach
+        # the extractor, which exits 1 and leaves the host file untouched.
+        os.listdir(self.projects)
+
         for path, is_sub in self._files():
             st["files"] += 1
             try:
@@ -125,13 +202,25 @@ class ClaudeCode:
                 st["bad_lines"] += 1  # unreadable file: count it, move on
                 continue
             with fh:
-                for line in fh:  # streamed: never hold a whole file
+                while True:
+                    # Bounded read: one huge line must not cost its own size (about twice)
+                    # in memory. A line over MAX_LINE is drained in chunks and counted bad.
+                    line = fh.readline(MAX_LINE + 1)
+                    if not line:
+                        break
+                    if len(line) > MAX_LINE and not line.endswith("\n"):
+                        st["lines"] += 1
+                        st["bad_lines"] += 1
+                        while line and not line.endswith("\n"):
+                            line = fh.readline(MAX_LINE)
+                        continue
                     if not line.strip():
                         continue
                     st["lines"] += 1
                     try:
                         rec = json.loads(line)
-                    except ValueError:
+                    except (ValueError, RecursionError):
+                        # RecursionError: a deeply nested line; it is not a ValueError.
                         rec = None
                     if not isinstance(rec, dict):
                         st["bad_lines"] += 1
@@ -139,9 +228,9 @@ class ClaudeCode:
                     rtype = rec.get("type")
                     if rtype == "assistant":
                         st["assistant"] += 1
-                    day = _day(rec)
+                    day, why = _day(rec)
                     if day is None:
-                        st["no_day"] += 1
+                        st["bad_day" if why == "bad" else "no_day"] += 1
                         continue
                     if rtype == "assistant":
                         yield from self._assistant(rec, day, seen_tools, messages, wanted)
@@ -224,7 +313,7 @@ class ClaudeCode:
             content = texts[0] if texts else None
         if not isinstance(content, str):
             return None
-        m = SLASH_RE.match(content)
+        m = SLASH_RE.match(content[:SLASH_SCAN_CHARS])
         uid = rec.get("uuid")
         if not m or not isinstance(uid, str) or uid in seen_slash:
             return None

@@ -180,9 +180,9 @@ install() {
   printf 'line one local\n' > "$GRID_PRIVATE_DIR/README.md"          # operator's uncommitted edit
   run bash "$WEEKLY"
   [ "$status" -eq 0 ]
-  ! grep -rq '^<<<<<<<' "$GRID_PRIVATE_DIR" --exclude-dir=.git
+  ! grep -rq '^<<<<<<<' "$GRID_PRIVATE_DIR" --exclude-dir=.git || false
   [ "$(cat "$GRID_PRIVATE_DIR/README.md")" = "line one local" ]       # operator edit preserved
-  ! git -C "$GRID_PRIVATE_DIR" log -p --all | grep -q '^+<<<<<<<'
+  ! git -C "$GRID_PRIVATE_DIR" log -p --all | grep -q '^+<<<<<<<' || false
   grep -q 'pull skipped' "$T/state/usage.log"
   [ ! -e "$GRID_PRIVATE_DIR/.git/rebase-merge" ]
 }
@@ -293,7 +293,7 @@ install() {
   [ "$status" -eq 0 ]
   wait "$first"
   [ "$(grep -c 'already running' "$T/state/usage.log")" = 1 ]
-  ! grep -q Traceback "$T/state/usage.log"
+  ! grep -q Traceback "$T/state/usage.log" || false
 }
 
 @test "usage/<host>.json as a symlink is not staged" {
