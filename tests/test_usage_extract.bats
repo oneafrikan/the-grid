@@ -223,3 +223,108 @@ day() { jget "d['harnesses']['claude-code']['days']['$1'].get('$2')"; }
   # skills kept from the earlier snapshot; agents replaced by the new listing
   [ "$(jget "d['harnesses']['claude-code']['wired']")" = '{"agents": ["other"], "skills": ["handoff", "tdd"]}' ]
 }
+
+# --- write hygiene (WP-026) -----------------------------------------------------
+
+# fake_repo — a throwaway repo layout holding a COPY of the extractor, so a test that
+# must run it against a "repo" never reaches the real checkout (red runs included).
+# Sets REPO_COPY and X (the copied extract.py). Bytecode from earlier runs is removed.
+fake_repo() {
+  REPO_COPY="$T/fakerepo"
+  mkdir -p "$REPO_COPY/scripts"
+  cp -R "$BATS_TEST_DIRNAME/../scripts/usage" "$REPO_COPY/scripts/usage"
+  find "$REPO_COPY" -name __pycache__ -exec rm -rf {} +
+  X="$REPO_COPY/scripts/usage/extract.py"
+}
+
+@test "a planted .<host>.json.tmp symlink to a victim file is not followed" {
+  printf 'victim-original\n' > "$T/victim.txt"
+  mkdir -p "$OUT"
+  ln -s "$T/victim.txt" "$OUT/.testhost.json.tmp"
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(cat "$T/victim.txt")" = "victim-original" ]
+  [ -f "$F" ] && [ ! -L "$F" ]
+}
+
+@test "8 parallel runs x 3 rounds all exit 0 and leave valid JSON" {
+  local round i p pids
+  for round in 1 2 3; do
+    rm -rf "$OUT"
+    pids=()
+    for i in 1 2 3 4 5 6 7 8; do
+      python3 "$EXTRACT" --out "$OUT" > "$T/par.$round.$i.log" 2>&1 &
+      pids+=($!)
+    done
+    for p in "${pids[@]}"; do
+      wait "$p" || { cat "$T"/par.*.log; false; }
+    done
+    python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$F"
+  done
+}
+
+@test "a stale GRID_DIR does not defeat the --out-inside-the-repo guard" {
+  fake_repo
+  GRID_DIR=/nonexistent run --separate-stderr python3 "$X" --out "$REPO_COPY/usage"
+  [ "$status" -eq 2 ]
+  [ ! -e "$REPO_COPY/usage" ]
+}
+
+@test "--host . and --host .. and a bad --since-day exit 2 and write nothing" {
+  extract --host .
+  [ "$status" -eq 2 ]
+  extract --host ..
+  [ "$status" -eq 2 ]
+  extract --host .hidden
+  [ "$status" -eq 2 ]
+  extract --since-day garbage
+  [ "$status" -eq 2 ]
+  extract --since-day $'2026-10-01\n'
+  [ "$status" -eq 2 ]
+  [ ! -e "$OUT" ]
+}
+
+@test "a run leaves no __pycache__ under scripts/usage" {
+  fake_repo
+  # Bytecode writing is ON for this run (the default); the extractor must turn it off itself.
+  env -u PYTHONDONTWRITEBYTECODE python3 "$X" --out "$OUT"
+  [ -z "$(find "$REPO_COPY" -name __pycache__)" ]
+}
+
+@test "an --out that is a symlink exits 2 and writes nothing through it" {
+  mkdir -p "$T/elsewhere"
+  ln -s "$T/elsewhere" "$T/linkout"
+  run --separate-stderr python3 "$EXTRACT" --out "$T/linkout"
+  [ "$status" -eq 2 ]
+  [ -z "$(ls -A "$T/elsewhere")" ]
+}
+
+@test "a host file that is itself a symlink exits 2 and the link target is untouched" {
+  printf 'victim-original\n' > "$T/victim.txt"
+  mkdir -p "$OUT"
+  ln -s "$T/victim.txt" "$F"
+  extract
+  [ "$status" -eq 2 ]
+  [ "$(cat "$T/victim.txt")" = "victim-original" ]
+}
+
+@test "extra keys, string leaves and badly named counts in an existing host file are dropped" {
+  mkdir -p "$OUT"
+  cat > "$F" <<'JSON'
+{"schema": 1, "host": "testhost", "updated": "2026-10-01", "evil": "top-level extra",
+ "harnesses": {"claude-code": {"extra": 1,
+   "days": {"2026-10-08": {"skills": {"tdd": 99, "handoff": "a string", "bad name": 999999},
+                           "unknown_bucket": {"x": 1}},
+            "not-a-day": {"skills": {"tdd": 5}}},
+   "listing": {"2026-10-08": {"skills": 12, "chars": 480, "note": "x"}},
+   "wired": {"skills": ["tdd", "bad name"], "agents": [], "other": ["x"]}}}}
+JSON
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(jget "sorted(d)")" = '["harnesses", "host", "schema", "updated"]' ]
+  [ "$(jget "sorted(d['harnesses']['claude-code'])")" = '["days", "listing", "wired"]' ]
+  [[ "$stderr" == *"dropped"* ]]
+  run ! grep -E 'a string|999999|not-a-day|bad name|unknown_bucket|top-level extra' "$F"
+  # A well-formed value from the old file survives (max-merge keeps the larger).
+  [ "$(jget "d['harnesses']['claude-code']['days']['2026-10-08']['skills']['tdd']")" = '99' ]
+}
