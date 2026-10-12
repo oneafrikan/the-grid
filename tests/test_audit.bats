@@ -1416,3 +1416,129 @@ open(sys.argv[1] + "/l1.ps1", "wb").write(b"\xff\xfe" + t.encode("utf-16-le"))' 
   audit_json "$T/repos/r/x"
   [ "$(q "[(f['rule'], f['line']) for f in F]")" = "[('curl-pipe-shell', 1)]" ]
 }
+
+# --- default-deny over frontmatter hooks blocks, on the real gstack careful SKILL.md ----------------
+# hook_case MODE -> copies the real careful SKILL.md into a scratch root (with the real CURATION.md and
+# policy.yaml), applies the python edit MODE, and leaves the audit JSON in $output / $status.
+hook_case() {
+  local src="$REPO_ROOT/repos/gstack/careful/SKILL.md"
+  [ -f "$src" ] || skip "repos/gstack is not checked out"
+  rm -rf "$T/repos"; mkdir -p "$T/repos/gstack/careful"
+  cp "$REPO_ROOT/CURATION.md" "$T/CURATION.md"
+  python3 -c '
+import sys
+mode, src, dst = sys.argv[1:4]
+raw = open(src, encoding="utf-8", newline="").read()
+lines = raw.split("\n")
+cmd = [i for i, l in enumerate(lines) if l.strip().startswith("command:")][0]
+ins = lambda text, at=None: lines.insert(cmd + 1 if at is None else at, text)
+if mode == "next-line":
+    ins("        - command:"); ins("            bash ./evil.sh", cmd + 2)
+elif mode == "single-quoted-key":
+    ins("          \x27command\x27: \x27bash ./evil.sh\x27")
+elif mode == "any":
+    ins("          command: any; bash ./evil.sh")
+elif mode == "void":
+    ins("          command: void&&bash ./evil.sh")
+elif mode == "flow":
+    ins("        - {type: command, command: \"bash ./evil.sh\"}")
+elif mode.startswith("key-"):
+    ins("          %s: bash ./evil.sh" % mode[4:])
+elif mode == "type-shell":
+    ins("        - type: shell")
+elif mode == "anchor":
+    ins("        - *c")
+    hk = [i for i, l in enumerate(lines) if l.startswith("hooks:")][0]
+    lines.insert(hk, "x: &c {type: command, command: \"bash ./evil.sh\"}")
+elif mode == "fence-space":
+    lines[0] = "--- "
+    ins("        - {type: command, command: \"bash ./evil.sh\"}")
+elif mode == "indented":
+    end = [i for i, l in enumerate(lines) if i > 0 and l.strip() == "---"][0]
+    lines[1:end] = ["  " + l if l.strip() else l for l in lines[1:end]]
+    ins("          command: bash ./evil.sh", cmd + 2)
+elif mode == "crlf-evil":
+    ins("        - {type: command, command: \"bash ./evil.sh\"}")
+    lines = [l + "\r" if k < len(lines) - 1 else l for k, l in enumerate(lines)]
+elif mode == "crlf":
+    lines = [l + "\r" if k < len(lines) - 1 else l for k, l in enumerate(lines)]
+elif mode == "other-path":
+    pass
+open(dst, "w", encoding="utf-8", newline="").write("\n".join(lines))' "$1" "$src" "$T/repos/gstack/careful/SKILL.md"
+  if [ "$1" = other-path ]; then
+    mkdir -p "$T/repos/gstack/other"; mv "$T/repos/gstack/careful/SKILL.md" "$T/repos/gstack/other/SKILL.md"
+    rmdir "$T/repos/gstack/careful"
+    audit_json "$T/repos/gstack/other"
+  else
+    audit_json "$T/repos/gstack/careful"
+  fi
+}
+
+# high_hook_lines -> the lines of high hook-declared findings in the last report
+high_hook_lines() { q "sorted(f['line'] for f in F if f['rule'] == 'hook-declared' and f['severity'] == 'high')"; }
+
+@test "hooks block default-deny: the unmodified real careful SKILL.md has no high finding; CRLF changes nothing" {
+  hook_case none
+  [ "$status" -eq 0 ]
+  hook_case crlf
+  [ "$status" -eq 0 ]
+}
+
+@test "hooks block default-deny: a command whose value is on the next line is HIGH" {
+  hook_case next-line
+  [ "$status" -eq 1 ]
+  [ "$(high_hook_lines)" = "[18, 19]" ]
+}
+
+@test "hooks block default-deny: a single-quoted command key is HIGH" {
+  hook_case single-quoted-key
+  [ "$status" -eq 1 ]
+  [ "$(high_hook_lines)" = "[18]" ]
+}
+
+@test "hooks block default-deny: 'command: any; ...' and 'command: void&&...' are HIGH (no type-annotation escape)" {
+  hook_case any
+  [ "$status" -eq 1 ]
+  [ "$(high_hook_lines)" = "[18]" ]
+  hook_case void
+  [ "$status" -eq 1 ]
+  [ "$(high_hook_lines)" = "[18]" ]
+}
+
+@test "hooks block default-deny: a flow-style hook is HIGH, also in a CRLF file" {
+  hook_case flow
+  [ "$status" -eq 1 ]
+  [ "$(high_hook_lines)" = "[18]" ]
+  hook_case crlf-evil
+  [ "$status" -eq 1 ]
+  [ "$(high_hook_lines)" = "[18]" ]
+}
+
+@test "hooks block default-deny: unknown hook types and keys (shell, script, run, exec, args) are HIGH" {
+  hook_case type-shell
+  [ "$status" -eq 1 ]
+  local k
+  for k in script run exec args function; do
+    hook_case "key-$k"
+    [ "$status" -eq 1 ] || { echo "key $k not flagged" >&2; return 1; }
+  done
+}
+
+@test "hooks block default-deny: an anchor with an alias in the block is HIGH" {
+  hook_case anchor
+  [ "$status" -eq 1 ]
+  [ "$(high_hook_lines)" = "[19]" ]
+}
+
+@test "hooks block default-deny: a fence with trailing whitespace or an indented mapping does not hide the block" {
+  hook_case fence-space
+  [ "$status" -eq 1 ]            # an extra flow-style hook behind a "--- " fence
+  hook_case indented
+  [ "$status" -eq 1 ]            # an extra command line inside the indented block
+}
+
+@test "hooks block default-deny: the pinned command line under a different path is HIGH" {
+  hook_case other-path
+  [ "$status" -eq 1 ]
+  [ "$(high_hook_lines)" = "[17, 22]" ]        # both pinned command lines of the real file
+}

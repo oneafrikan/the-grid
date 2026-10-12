@@ -240,6 +240,67 @@ def _search(rx, text, tick=None):
     return None
 
 
+# Lines of a frontmatter hooks block that run nothing and are not findings: the block's own
+# structure. EVERYTHING ELSE in a hooks block (any `command`, `run`, `exec`, `script`, `args`,
+# `prompt`, `url`, flow mappings, anchors and aliases, unknown keys or hook types, a value on the
+# next line, any quoting of a key) is a finding that an allowlist entry must pin by whole line.
+# This is a deny-by-default list on purpose: a regex that names what is dangerous is always one
+# spelling behind. The patterns are whole-line and tight (no shell metacharacters in a message).
+_HOOK_EVENTS = ("PreToolUse|PostToolUse|Stop|SubagentStop|UserPromptSubmit|SessionStart|"
+                "SessionEnd|Notification|PreCompact")
+_HOOK_STRUCTURAL = [re.compile(p) for p in (
+    r"\s*-?\s*hooks:\s*",
+    r"\s*(?:%s):\s*" % _HOOK_EVENTS,
+    r"""\s*-?\s*matcher:\s*["']?[A-Za-z0-9_|*.:-]*["']?\s*""",
+    r"\s*-?\s*type:\s*command\s*",
+    r"""\s*-?\s*statusMessage:\s*["'][^"'$`\\|;&<>]*["']\s*""",
+    r"\s*-?\s*timeout:\s*[0-9]+\s*",
+)]
+
+
+def _is_hook_structural(text):
+    """True for a hooks-block line that only carries the block's structure."""
+    text = text.rstrip()
+    return any(rx.fullmatch(text) for rx in _HOOK_STRUCTURAL)
+
+
+def _frontmatter_hook_lines(lines):
+    """Indexes of the lines of every `hooks` block in a SKILL.md / agent .md frontmatter.
+
+    A `hooks` key counts at ANY indentation and under any parent, quoted or not; the block is the
+    key line plus the lines after it that are blank, comments, deeper indented, or list items at
+    the key's own indent. The frontmatter fences tolerate a BOM, trailing whitespace and CRLF,
+    and a mapping that is itself indented (so none of those hide the block)."""
+    if not lines or lines[0].lstrip("\ufeff").strip() != "---":
+        return []
+    out = []
+    i, n = 1, len(lines)
+    while i < n:
+        text = lines[i].rstrip("\r")
+        if text.strip() in ("---", "..."):
+            break
+        if re.match(r"""\s*["']?hooks["']?\s*:""", text):
+            indent = len(text) - len(text.lstrip())
+            out.append(i)
+            j = i + 1
+            while j < n:
+                t = lines[j].rstrip("\r")
+                if t.strip() in ("---", "..."):
+                    break
+                stripped = t.strip()
+                ind = len(t) - len(t.lstrip())
+                if stripped == "" or stripped.startswith("#") or ind > indent \
+                        or (ind == indent and stripped.startswith("- ")):
+                    out.append(j)
+                    j += 1
+                else:
+                    break
+            i = j
+            continue
+        i += 1
+    return out
+
+
 def _frontmatter_tool_lists(lines):
     """{index of the key line: "allowed-tools: a, b"} for an `allowed-tools:` key written as
     a YAML block list in the frontmatter (`- Read` / `- Bash` on following lines). The
@@ -826,6 +887,25 @@ class Scan:
             self.findings[before:] = [f for f in self.findings[before:]
                                       if (f["rule"], f["severity"], f["excerpt"]) not in known]
 
+    def _hook_block_findings(self, lines, display, tier, file_sha):
+        """Default-deny over frontmatter hooks blocks: every non-blank, non-comment line that is
+        not purely structural (see _HOOK_STRUCTURAL) is a `hook-declared` finding, reported at
+        its own line so an allowlist entry pins that exact line."""
+        rule = next((r for r in self.policy.rules if r.id == "hook-declared"), None)
+        if rule is None:
+            return
+        have = {(f["rule"], f["line"]) for f in self.findings if f["path"] == display}
+        sev = rule.owned_severity if (tier == "owned" and rule.owned_severity) else rule.severity
+        for idx in _frontmatter_hook_lines(lines):
+            raw = lines[idx].rstrip("\r")
+            body = raw.strip()
+            if not body or body.startswith("#") or _is_hook_structural(raw):
+                continue
+            if ("hook-declared", idx + 1) in have:
+                continue
+            self._add("hook-declared", sev, display, idx + 1, "hook", tier, rule.message,
+                      excerpt=raw, raw_line=raw)
+
     def _scan_text(self, text, fclass, name, rel_target, rel_root, display, tier, file_sha):
         """Run the line rules over one text view of a file."""
         lines = text.split("\n")
@@ -847,6 +927,8 @@ class Scan:
             for p in range(idx + 1, last + 1):         # lines the join swallowed
                 self._scan_line(lines[p].rstrip("\r"), p + 1, classes[p], display, tier,
                                 file_sha, ext, only_physical=True)
+        if name == "SKILL.md" or _is_agent_md(rel_target, rel_root, name):
+            self._hook_block_findings(lines, display, tier, file_sha)
 
     def _line_classes(self, lines, fclass, name, rel_target, rel_root):
         """Class of each line: the file's class, except (1) frontmatter `hooks:`
@@ -857,22 +939,10 @@ class Scan:
         classes = [fclass] * len(lines)
         ext = os.path.splitext(name)[1].lower()
 
-        # (1) frontmatter hooks
+        # (1) frontmatter hooks blocks
         if name == "SKILL.md" or _is_agent_md(rel_target, rel_root, name):
-            first = lines[0].lstrip("﻿").rstrip("\r") if lines else ""
-            if first == "---":
-                in_hooks = False
-                for i in range(1, len(lines)):
-                    text = lines[i].rstrip("\r")
-                    if text in ("---", "..."):
-                        break                 # end of frontmatter
-                    if re.match(r"""["']?hooks["']?\s*:""", text):
-                        in_hooks = True
-                        classes[i] = "hook"
-                    elif in_hooks and (text == "" or text[0] in " \t-"):
-                        classes[i] = "hook"
-                    else:
-                        in_hooks = False
+            for i in _frontmatter_hook_lines(lines):
+                classes[i] = "hook"
 
         # (2) fenced code blocks in markdown docs
         if fclass == "doc" and ext in (".md", ".mdx"):
