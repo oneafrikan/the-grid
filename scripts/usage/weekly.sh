@@ -39,6 +39,9 @@ HOST_RAW="${GRID_HOST:-$(hostname -s 2>/dev/null)}"
 HOST="$(printf '%s' "$HOST_RAW" | tr -c 'A-Za-z0-9._-' '_')"
 
 mkdir -p "$STATE" || { echo "usage-weekly: cannot create $STATE" >&2; exit 1; }
+# mkdir -p succeeds on an existing read-only dir, and then every log append would fail
+# silently and leave no durable record of the run: refuse instead.
+[ -w "$STATE" ] || { echo "usage-weekly: state dir $STATE is not writable" >&2; exit 1; }
 
 # log <text...> — one timestamped line appended to usage.log.
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG"; }

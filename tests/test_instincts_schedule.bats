@@ -137,6 +137,23 @@ sync_as() {
   no_scheduler_calls
 }
 
+@test "schedule: the printed header names the model call, the per-run cap and the claude PATH requirement" {
+  fake_uname Linux
+  run bash "$SH" schedule
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"up to 5 paid model calls"* ]]
+  [[ "$output" == *"0.05 USD"* ]]
+  [[ "$output" == *"needs \`claude\` on the job PATH"* ]]
+}
+
+@test "schedule: a set GRID_STATE_DIR / GRID_PRIVATE_DIR / GRID_HOST prints the not-carried note on stderr" {
+  fake_uname Linux
+  run --separate-stderr bash "$SH" schedule
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"not carried into the scheduled job"* ]]
+  [[ "$output" != *"not carried"* ]]
+}
+
 @test "schedule: --install and any other argument exit 2" {
   run bash "$SH" schedule --install
   [ "$status" -eq 2 ]
