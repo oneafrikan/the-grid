@@ -771,6 +771,23 @@ wire_nohome() {
   [ "$status" -eq 2 ]
 }
 
+@test "a hand-made link into the grid in a harness dir is reported when removed" {
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  [ -L "$HS/skill-alpha" ]
+  # The operator's own link into the grid, with a name the grid never wired.
+  ln -s "$MOCK_GRID/skills/skill-alpha" "$HS/my-own"
+  wire
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"wire: removed link not in the previous manifest: $HS/my-own"* ]]
+  # Removal itself is unchanged (D16 default: report, keep removing) ...
+  [ ! -e "$HS/my-own" ] && [ ! -L "$HS/my-own" ]
+  # ... and a link wire itself made last time is not reported.
+  [[ "$stderr" != *"previous manifest: $HS/skill-alpha"* ]]
+  [ -L "$HS/skill-alpha" ]
+}
+
 @test "--check with HOME unset and no active harness does not report drift" {
   wire
   wire_nohome --check

@@ -438,6 +438,18 @@ make_fake_real_home() {
   [ "$status" -eq 0 ]
 }
 
+@test "composed-project link targets contain no //" {
+  local cc="$MOCK_GRID/agent-factory/projects/zz/_claude-code"
+  make_skill "$cc/skills/zz-orch" "zz-orch"
+  mkdir -p "$cc/agents"
+  printf -- '---\nname: zz-agent\n---\n' > "$cc/agents/zz-agent.md"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/zz-orch" ] && [ -L "$MOCK_AGENTS/zz-agent.md" ]
+  [[ "$(readlink "$MOCK_SKILLS/zz-orch")" != *//* ]]
+  [[ "$(readlink "$MOCK_AGENTS/zz-agent.md")" != *//* ]]
+}
+
 # links_of DIR: "name -> target" for every symlink in DIR, C-sorted (NUL-safe enough for tests).
 links_of() {
   find "$1" -maxdepth 1 -type l | LC_ALL=C sort | while IFS= read -r l; do
