@@ -794,7 +794,8 @@ wire_nohome() {
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"wire: removed link not in the previous manifest: $HS/my-own"* ]]
   # Removal itself is unchanged (D16 default: report, keep removing) ...
-  [ ! -e "$HS/my-own" ] && [ ! -L "$HS/my-own" ]
+  [ ! -e "$HS/my-own" ]
+  [ ! -L "$HS/my-own" ]
   # ... and a link wire itself made last time is not reported.
   [[ "$stderr" != *"previous manifest: $HS/skill-alpha"* ]]
   [ -L "$HS/skill-alpha" ]
@@ -857,7 +858,8 @@ STUB
   # pass left openclaw deactivated, so look at the first two harnesses' dirs directly.)
   printf 'harness:codex\nharness:gemini\nharness:opencode\n' > "$OVERLAY"
   wire
-  [ -L "$GRID_HARNESS_HOME/.codex/agents/a.toml" ] && [ -L "$GRID_HARNESS_HOME/.gemini/agents/a.md" ]
+  [ -L "$GRID_HARNESS_HOME/.codex/agents/a.toml" ]
+  [ -L "$GRID_HARNESS_HOME/.gemini/agents/a.md" ]
   printf 'harness:codex\nharness:gemini\nharness:opencode\n-harness:codex\n' > "$OVERLAY"
   wire
   [ ! -L "$GRID_HARNESS_HOME/.codex/agents/a.toml" ]
@@ -886,7 +888,8 @@ write_registry() { # $@ = row lines
     write_registry "$row"
     GRID_ALLOW_REGISTRY=1 HARNESS_REGISTRY="$REG" GRID_HARNESS=codex wire
     [ "$status" -eq 2 ]
-    [[ "$stderr" == *"registry"* ]] && [[ "$stderr" == *"codex"* ]]
+    [[ "$stderr" == *"registry"* ]]
+    [[ "$stderr" == *"codex"* ]]
     [ -z "$(tree "$GRID_HARNESS_HOME")" ]
     [ -z "$(tree "$MOCK_SKILLS")" ]            # nothing written, not even the Claude links
   done
@@ -993,7 +996,8 @@ disable-model-invocation: true'
   GRID_HARNESS=codex wire
   [ "$status" -eq 0 ]
   [ -L "$MOCK_SKILLS/guarded" ]
-  [ ! -e "$HS/guarded" ] && [ ! -L "$HS/guarded" ]
+  [ ! -e "$HS/guarded" ]
+  [ ! -L "$HS/guarded" ]
   [[ "$output" == *"skip (~/.agents/skills: claude-only-guard): guarded"* ]]
   [[ "$output" != *"skip (real dir, not managed)"* ]]
   grep -qF "skill@~/.agents/skills	guarded	$MOCK_GRID/skills/guarded/	skipped	claude-only-guard" "$MANIFEST"
