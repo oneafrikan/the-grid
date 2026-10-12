@@ -52,11 +52,14 @@ import argparse  # noqa: E402
 import datetime as dt  # noqa: E402
 import hashlib  # noqa: E402
 import json  # noqa: E402
+import math  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
+import shutil  # noqa: E402
 import signal  # noqa: E402
 import subprocess  # noqa: E402
 import tempfile  # noqa: E402
+import time  # noqa: E402
 from collections import defaultdict  # noqa: E402
 
 import lib  # noqa: E402
@@ -79,6 +82,13 @@ TOTAL_CAP = 16000
 MAX_ITEMS_OUT = 8           # model items beyond the 8th are dropped (over-cap)
 RETENTION_DAYS = 28         # local observation files older than this are deleted
 KEEP_RUNS = 8               # run history kept per project in status.json
+MAX_REPLY_BYTES = 1024 * 1024        # a longer model reply is `not-json`, never held in memory
+MAX_OBS_BYTES = 4 * 1024 * 1024      # observation bytes read per week file (a partial last line is dropped)
+# The `claude` child sees only these variables (+ LC_*, + names in INSTINCTS_PASS_ENV): the call
+# is tool-less, so cloud, git and agent tokens in the parent environment have no business there.
+CHILD_ENV_ALLOW = frozenset([
+    "PATH", "HOME", "LANG", "TERM", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"])
 FILE_TOOLS = frozenset(["Edit", "Write", "MultiEdit", "NotebookEdit"])
 OUTPUT_KEYS = frozenset(["kind", "id", "trigger", "action", "domain", "evidence"])
 
@@ -173,11 +183,23 @@ def atomic_write(path: Path, text: str) -> None:
         raise
 
 
-def read_jsonl(path: Path) -> list:
-    """Parsed objects of a JSONL file; unreadable file -> []; bad lines are skipped."""
+def read_jsonl(path: Path, max_bytes: int | None = None) -> list:
+    """Parsed objects of a JSONL file; unreadable file -> []; bad lines are skipped.
+
+    With max_bytes only the first max_bytes are read and a line cut by the limit is dropped,
+    so a huge (or tampered) file cannot exhaust memory or time.
+    """
     out = []
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        if max_bytes is None:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        else:
+            with open(path, "rb") as fh:
+                raw = fh.read(max_bytes + 1)
+            if len(raw) > max_bytes:
+                raw = raw[:max_bytes]
+                raw = raw[:raw.rfind(b"\n") + 1]        # drop the partial last line
+            text = raw.decode("utf-8", errors="replace")
     except OSError:
         return out
     for ln in text.splitlines():
@@ -199,6 +221,31 @@ def project_dirs() -> list[str]:
     return sorted(p.name for p in base.iterdir() if p.is_dir() and PROJECT_DIR_RE.match(p.name))
 
 
+def enabled_state(pid: str) -> str:
+    """`enabled`, `not-enabled` (no machine-local marker) or `opt-out` (the flag is off everywhere now).
+
+    The marker is written by the emitter (deploy_hooks.py) and lists the checkout roots, so the
+    analyser can re-read `learning:` there: a project switched off since still has a marker
+    until the emitter is re-run, and must not be sent to a model. It is enabled while ANY listed
+    checkout that still exists has the flag on; roots that no longer exist cannot be checked
+    and, when none exists, the project counts as enabled (the marker is the operator's own act).
+    """
+    roots = lib.marker_roots(pid)
+    if roots is None:
+        return "not-enabled"
+    existing = [r for r in roots if Path(r).is_dir()]
+    if not existing:
+        return "enabled"
+    for r in existing:
+        try:
+            text = (Path(r) / ".grid" / "project.yaml").read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if lib.read_learning_flag(text):
+            return "enabled"
+    return "opt-out"
+
+
 def obs_files(pid: str) -> list[Path]:
     return sorted((lib.instincts_state_dir() / pid).glob("obs-*.jsonl"))
 
@@ -212,7 +259,7 @@ def load_observations(pid: str, since_ts: str | None) -> list[dict]:
     """
     events: list[dict] = []
     for f in obs_files(pid):
-        for o in read_jsonl(f):
+        for o in read_jsonl(f, MAX_OBS_BYTES):
             if not isinstance(o, dict) or o.get("ev") not in ("tool", "prompt"):
                 continue
             if not isinstance(o.get("in"), str):
@@ -306,6 +353,14 @@ def clean(text: str) -> str:
     return lib.sanitize(lib.scrub(text))
 
 
+def safe(text: str) -> str:
+    """Digest input rule (D40): rewrite absolute paths, drop every line that holds a secret
+    keyword with a value, a long token-like run, an email, host, IP, SSN or card number, then
+    scrub and flatten. "" when nothing is left, and the caller then sends nothing."""
+    kept = lib.drop_sensitive_lines(lib.outside_paths(text))
+    return clean(kept) if kept.strip() else ""
+
+
 def strip_delims(text: str) -> str:
     """Remove the digest delimiters from item text so it cannot imitate a real line.
 
@@ -316,21 +371,41 @@ def strip_delims(text: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
-def norm_prompt(text: str) -> str:
-    """Prompt normalisation: lowercase, whitespace collapsed, first 200 chars."""
-    return strip_delims(clean(text).lower()[:200])
+def prompt_stems(text: str) -> str:
+    """A correction reduced to keyword stems; "" for any prompt that is not a correction.
+
+    Only correction prompts (CORR_RE) reach the digest, and as the correction words plus up to
+    8 plain lowercase words of 3-20 letters (no digits, no punctuation inside): the sentence the
+    developer typed is never sent, so free text (names, secrets in prose) cannot ride along.
+    """
+    low = safe(text).lower()
+    if not low or not CORR_RE.search(low):
+        return ""
+    kws: list[str] = []
+    for k in CORR_RE.findall(low):
+        k = k.lower()
+        if k not in kws:
+            kws.append(k)
+    words: list[str] = []
+    for w in low.split():
+        w = w.strip(".,;:!?()[]{}\"'")
+        if re.fullmatch(r"[a-z]{3,20}", w) and w not in kws and w not in words:
+            words.append(w)
+        if len(words) >= 8:
+            break
+    return " ".join(kws + words)
 
 
 def norm_cmd(text: str, max_len: int = 120) -> str:
     """Command normalisation: first segment only, digits to N, long tokens to <long>."""
-    seg = _SEGMENT_SPLIT.split(clean(text), maxsplit=1)[0]
+    seg = _SEGMENT_SPLIT.split(safe(text), maxsplit=1)[0]
     seg = _DIGITS.sub("N", seg)
     seg = " ".join("<long>" if len(tok) > 40 else tok for tok in seg.split())
     return strip_delims(seg[:max_len])
 
 
 def norm_path(text: str) -> str:
-    return strip_delims(clean(text))[:200]
+    return strip_delims(safe(text))[:200]
 
 
 class Item:
@@ -376,7 +451,7 @@ def _ts(o: dict) -> str:
 
 
 def build_p(events) -> list[Item]:
-    items = _merge((norm_prompt(o["in"]), _sid(o), _ts(o)) for o in events if o["ev"] == "prompt")
+    items = _merge((prompt_stems(o["in"]), _sid(o), _ts(o)) for o in events if o["ev"] == "prompt")
     for it in items.values():
         it.corr = bool(CORR_RE.search(it.text))
     # corr first, then s desc, n desc, newest; text last so the order is total.
@@ -553,34 +628,68 @@ def command_line(body: str) -> list[str]:
         "--setting-sources", "",
         "--strict-mcp-config",
         "--no-session-persistence",
+        "--max-turns", "1",
         "--output-format", "json",
         "--max-budget-usd", os.environ.get("INSTINCTS_BUDGET_USD") or "0.05",
     ]
 
 
+def child_env() -> dict:
+    """The environment the `claude` child gets: an allowlist, never the parent's whole env."""
+    extra = {n for n in re.split(r"[,\s]+", os.environ.get("INSTINCTS_PASS_ENV", "")) if n}
+    env = {k: v for k, v in os.environ.items()
+           if k in CHILD_ENV_ALLOW or k.startswith("LC_") or k in extra}
+    env["GRID_INSTINCTS_SKIP"] = "1"          # so this call is never observed by the capture hook
+    return env
+
+
 def call_model(body: str, digest: str) -> tuple[str, float | None]:
     """Run the one call; return (reply text, cost). Raises CallError on any failure."""
     timeout = _env_float("INSTINCTS_TIMEOUT_S", 120)
-    # GRID_INSTINCTS_SKIP=1 so this call is never observed by the capture hook.
-    env = dict(os.environ, GRID_INSTINCTS_SKIP="1")
+    argv = command_line(body)
+    exe = shutil.which(argv[0])               # an absolute path: no PATH surprises inside the child
+    if exe is None:
+        raise CallError("exit")
+    argv[0] = exe
     # A fresh empty cwd so no project files or settings can be picked up.
-    with tempfile.TemporaryDirectory(prefix="instincts-call-") as cwd:
+    with tempfile.TemporaryDirectory(prefix="instincts-call-") as cwd, tempfile.TemporaryFile() as outf:
         try:
-            # Own process group so a timeout kills grandchildren too (a hung
-            # child holding the pipe would otherwise block the post-kill read).
-            proc = subprocess.Popen(command_line(body), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, cwd=cwd, env=env, start_new_session=True)
+            # Own process group so a timeout kills grandchildren too. stdout goes to a file,
+            # not a pipe, so the reply size can be bounded without reading it all into memory.
+            proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=outf, stderr=subprocess.DEVNULL,
+                                    cwd=cwd, env=child_env(), start_new_session=True)
         except OSError:
             raise CallError("exit")
-        try:
-            out, _ = proc.communicate(digest.encode("utf-8"), timeout=timeout)
-        except subprocess.TimeoutExpired:
+
+        def kill() -> None:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except OSError:
                 pass
-            proc.communicate()
-            raise CallError("timeout")
+            proc.wait()
+
+        try:
+            # The digest is capped at TOTAL_CAP chars, far below the pipe buffer: no writer thread.
+            proc.stdin.write(digest.encode("utf-8", errors="replace"))
+            proc.stdin.close()
+        except OSError:
+            pass                              # the child may exit without reading; the exit code tells
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                proc.wait(timeout=0.2)
+                break
+            except subprocess.TimeoutExpired:
+                if os.fstat(outf.fileno()).st_size > MAX_REPLY_BYTES:
+                    kill()
+                    raise CallError("not-json")
+                if time.monotonic() > deadline:
+                    kill()
+                    raise CallError("timeout")
+        outf.seek(0)
+        out = outf.read(MAX_REPLY_BYTES + 1)
+    if len(out) > MAX_REPLY_BYTES:
+        raise CallError("not-json")
     text = out.decode("utf-8", errors="replace")
     try:
         env_json = json.loads(text)
@@ -640,6 +749,14 @@ def check_field_shapes(item: dict) -> bool:
             and all(isinstance(e, str) and 0 < len(e) <= 16 for e in ev))
 
 
+# Personal-data shapes an instinct must not carry: email, IPv4, SSN-like, absolute path.
+_PII_RE = re.compile(
+    r"[\w.+-]+@[\w-]+\.[\w.-]+"
+    r"|(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w])"
+    r"|(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"
+    r"|(?:^|\s)/(?:[\w.-]+/[\w./-]+|(?:etc|home|usr|var|srv|opt|tmp|root|Users)\b)")
+
+
 def validate_items(items: list, digest: Digest, known: dict[str, dict]):
     """-> (valid items, drops by reason). Each valid item is a dict:
     {kind, id, trigger, action, domain} where confirm/contradict carry the STORED text.
@@ -665,6 +782,10 @@ def validate_items(items: list, digest: Digest, known: dict[str, dict]):
         if any(lib.UNSAFE_RE.search(v) or lib.UNSAFE_RE.search(lib.sanitize(v)) or lib.scrub(v) != v
                for v in (raw["trigger"], raw["action"])):
             drops["unsafe-text"] += 1
+            continue
+        # pii: shapes that must never be stored as a habit or sent back out through sync.
+        if any(_PII_RE.search(v) for v in (raw["trigger"], raw["action"])):
+            drops["pii"] += 1
             continue
         cleaned = lib.validate_instinct(raw)
         if cleaned is None:
@@ -889,6 +1010,11 @@ def plan(pids: list[str], force: bool, now: dt.datetime, st: dict):
     week = iso_week(now.date())
     todo, skipped = [], []
     for pid in pids:
+        state = enabled_state(pid)
+        if state != "enabled":
+            # Never sent to a model: no marker (not opted in on this machine) or the repo flag is off now.
+            skipped.append((pid, state, None))
+            continue
         ps = st["projects"].get(pid, {})
         if not force and ps.get("last_week") == week:
             skipped.append((pid, "already-analysed", None))
@@ -906,6 +1032,10 @@ def plan(pids: list[str], force: bool, now: dt.datetime, st: dict):
 
 
 def cmd_analyse(args) -> int:
+    if os.environ.get("GRID_INSTINCTS") == "0":
+        # The kill switch stops analysis (and its upload) as well as capture; even --dry-run.
+        print("instincts: GRID_INSTINCTS=0: analysis disabled, nothing sent")
+        return 0
     now = now_utc()
     week = iso_week(now.date())
     st = load_status()

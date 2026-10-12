@@ -32,6 +32,7 @@ Results go to evals/results/*.jsonl (git-ignored) with pass rate and flip rate.
 import argparse
 import fnmatch
 import json
+import math
 import os
 import re
 import subprocess
@@ -49,7 +50,7 @@ import compose  # noqa: E402  (role lookup + model resolution, same code the dep
 REPO = HERE.parent
 CASES_DIR = REPO / "evals" / "cases"
 RESULTS_DIR = REPO / "evals" / "results"
-DEFAULT_MAX_TOTAL = 5.00   # USD; --changed refuses a plan whose worst case is above this
+DEFAULT_MAX_TOTAL = 5.00   # USD; any run refuses a plan whose worst case is above this
 EXPECT = {"pass", "fail", "unknown"}
 REQUIRED = ("role", "finding", "expect_today", "prompt", "must_match")
 DEFAULT_RUNS = 3
@@ -135,6 +136,12 @@ def load_touchfiles(repo: Path) -> tuple[list[dict], list[str]]:
         paths, roles = rule.get("paths"), rule.get("roles")
         if not (isinstance(paths, list) and paths and all(isinstance(p, str) and p for p in paths)):
             errs.append(f"{where}: rule {i}: 'paths' must be a non-empty list of patterns")
+        if "eval" in rule:
+            # A pointer rule: the files feed a separate eval runner, so a change prints its command.
+            if "roles" in rule or rule["eval"] not in EVAL_POINTERS:
+                errs.append(f"{where}: rule {i}: 'eval' must be one of {', '.join(EVAL_POINTERS)} and cannot be "
+                            "combined with 'roles'")
+            continue
         if roles in ("all", "orchestrators"):
             continue
         if not (isinstance(roles, list) and roles and all(isinstance(r, str) for r in roles)):
@@ -142,6 +149,20 @@ def load_touchfiles(repo: Path) -> tuple[list[dict], list[str]]:
             continue
         errs += [f"{where}: rule {i}: unknown role {r!r}" for r in roles if not compose.role_dir(r).is_dir()]
     return ([] if errs else rules), errs
+
+
+# `eval:` touchfile rules: eval name -> the line --changed prints when a matching file changed.
+EVAL_POINTERS = {
+    "instincts": "instincts eval selected: run GRID_EVALS=1 scripts/instincts.sh eval-prompt --yes",
+}
+
+
+def eval_pointers_for_path(path: str, rules: list[dict]) -> set[str]:
+    """Pointer lines for a changed path: the FIRST matching rule decides, and only an `eval:` rule gives one."""
+    for rule in rules:
+        if any(fnmatch.fnmatchcase(path, pat) for pat in rule["paths"]):
+            return {EVAL_POINTERS[rule["eval"]]} if "eval" in rule else set()
+    return set()
 
 
 def roles_for_path(path: str, rules: list[dict]) -> set[str]:
@@ -152,6 +173,8 @@ def roles_for_path(path: str, rules: list[dict]) -> set[str]:
         return {m.group(1)}
     for rule in rules:
         if any(fnmatch.fnmatchcase(path, pat) for pat in rule["paths"]):
+            if "eval" in rule:
+                return set()           # a pointer rule selects no role
             if rule["roles"] == "all":
                 return set(all_roles())
             if rule["roles"] == "orchestrators":
@@ -235,9 +258,12 @@ def main() -> int:
     ap.add_argument("--repo", type=Path, default=REPO, help="checkout --changed and evals/touchfiles.yaml read from")
     ap.add_argument("--changed", metavar="RANGE", help="only roles touched by this git range, e.g. origin/next...HEAD")
     ap.add_argument("--max-total", type=float, default=DEFAULT_MAX_TOTAL,
-                    help="with --changed: refuse a plan whose worst case exceeds this many USD")
+                    help="refuse a plan whose worst case exceeds this many USD")
     args = ap.parse_args()
 
+    if not (math.isfinite(args.budget) and args.budget > 0 and math.isfinite(args.max_total) and args.max_total > 0):
+        print("refusing: --budget and --max-total must be finite numbers above 0.", file=sys.stderr)
+        return 2
     cases = load_cases(args.cases_dir)
     rules, tf_problems = load_touchfiles(args.repo)
     problems = [e for c in cases for e in validate(c)] + tf_problems
@@ -253,6 +279,7 @@ def main() -> int:
         if files is None:
             return 2
         selected = set().union(*(roles_for_path(f, rules) for f in files))
+        pointers = sorted(set().union(*(eval_pointers_for_path(f, rules) for f in files)))
         no_cases = sorted(selected - {c["role"] for c in cases})
         # Intersect with roles that have cases; the --role/--case filter above already narrowed `cases`.
         cases = [c for c in cases if c["role"] in selected]
@@ -260,8 +287,11 @@ def main() -> int:
         if names or no_cases:
             print(f"changed: {len(files)} file(s); selected roles: {', '.join(names) or 'none'}; "
                   f"no cases: {', '.join(no_cases) or 'none'}")
+        for line in pointers:
+            print(line)
         if not cases:
-            print("no eval-relevant changes")
+            if not pointers:
+                print("no eval-relevant changes")
             return 0
     if args.list:
         for c in cases:
@@ -271,8 +301,8 @@ def main() -> int:
     plan = [(c, args.runs or c.get("runs", DEFAULT_RUNS)) for c in cases]
     total = sum(n for _, n in plan)
     print(f"plan: {len(plan)} case(s), {total} run(s); worst case ${total * args.budget:.2f} (cap ${args.budget:.2f}/run)")
-    # Spend cap for --changed. Before the --dry-run return so a dry run shows the refusal too.
-    if args.changed and total * args.budget > args.max_total:
+    # Spend cap for every plan. Before the --dry-run return so a dry run shows the refusal too.
+    if total * args.budget > args.max_total:
         print(f"refusing: worst case ${total * args.budget:.2f} exceeds --max-total ${args.max_total:.2f}. "
               "Narrow it with --role, or raise --max-total.", file=sys.stderr)
         return 2

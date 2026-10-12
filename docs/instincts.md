@@ -19,7 +19,7 @@ injected back at session start. Nothing here is on until you switch it on for a 
 - Store files are created `0600` and their directories `0700`.
 - The project id is the first 12 hex characters of a SHA-256 of the normalised git remote URL. It is an identifier, not a secret: anyone who can guess the remote URL can recompute it, so do not treat the directory name as anonymous.
 - `instincts.sh sync` (run at the end of every analysis) commits and pushes only `learning/instincts` in the private repo, and never touches your own work there: it is skipped while a rebase/merge is in progress, on a detached HEAD or with no upstream; the pull is skipped (no autostash) while tracked files outside the store are modified; files over 1 MiB are not committed; the push needs `<private>/.grid-private-remote` (first line = the push URL of the upstream remote, see `docs/usage.md`) and only own unpushed commits. A refused push because of a foreign unpushed commit makes `sync` exit 4; a missing or mismatched marker, or a remote with more than one push URL (`multiple-push-urls`), is a warning and exit 0.
-- The weekly analysis sends a digest of the scrubbed observations to a model (default `haiku`, `$0.05` cap per project). Do not enable it on a project whose prompts you would not send to a model. The emitter prints a one-line notice saying so each time it emits the instincts hooks.
+- The weekly analysis sends a digest to a model (default `haiku`, `$0.05` cap per project). The digest holds no prompt text beyond keyword stems of corrections (the correction words plus a few plain words), and the same line-drop and path rules as capture are applied again before anything is sent. Only projects that still have the opt-in marker and `learning: on` are analysed; others show up as `not-enabled` or `opt-out` in `status`. The model call runs with a scrubbed environment (only `PATH`, `HOME`, locale, proxy and Claude auth variables; add more with `INSTINCTS_PASS_ENV="NAME1 NAME2"`) and a one-turn limit. The emitter prints a one-line notice saying so each time it emits the instincts hooks.
 
 ## How to enable
 
@@ -46,7 +46,7 @@ injected back at session start. Nothing here is on until you switch it on for a 
 
 ## Kill switches
 
-- `GRID_INSTINCTS=0` — disables capture and injection.
+- `GRID_INSTINCTS=0` — disables capture, injection and the weekly analysis (no model call, even with `--dry-run`).
 - `GRID_HOOKS=off` — every grid hook, including these.
 - `GRID_DISABLED_HOOKS=<id>` — one hook, e.g. `instincts-capture-prompt`.
 - `learning: off` in `.grid/project.yaml` — per project.

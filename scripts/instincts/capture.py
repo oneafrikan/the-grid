@@ -62,12 +62,6 @@ SENSITIVE_RE = re.compile(
     r"|\.ssh/|\.aws/|\.gnupg|\.git-credentials|\.htpasswd",
     re.I)
 
-# An absolute path that survived the root/HOME rewrite lies outside both. It is kept
-# as `(outside)/<last component>` (same rule as relative_path): the habit ("cat /etc/x")
-# is data, the directory layout and user names are not. The lookbehind skips URL paths
-# (`https://h/a`), `~/x`, `./x`, `a/b` and an already rewritten `(outside)/x`.
-_ABS_PATH = re.compile(r"(?<![\w.~$/)@%+-])/(?=[\w.])[^\s'\"`;|&<>()=:]*")
-
 
 def skip_by_env() -> bool:
     """True when an environment kill switch or unattended-session marker is set."""
@@ -86,7 +80,7 @@ def rewrite_paths(text: str, root: str) -> str:
     for prefix, repl in ((root, "."), (str(Path.home()), "~")):
         if len(prefix) > 1:
             text = re.sub(re.escape(prefix) + r"(?![\w.-])", repl, text)
-    return _ABS_PATH.sub(lambda m: "(outside)/" + m.group(0).rstrip("/").rsplit("/", 1)[-1], text)
+    return lib.outside_paths(text)
 
 
 def clean(text: str, root: str, limit: int, paths: bool = True) -> str:

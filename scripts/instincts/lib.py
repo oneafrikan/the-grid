@@ -362,6 +362,18 @@ _SSN = re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)")
 _CARD = re.compile(r"(?<![\d-])(?:\d[ -]?){12,18}\d(?!\d)")
 
 
+# An absolute path that survived the root/HOME rewrite lies outside both. It is kept as
+# `(outside)/<last component>`: the habit ("cat /etc/x") is data, the directory layout and
+# user names are not. The lookbehind skips URL paths (`https://h/a`), `~/x`, `./x`, `a/b`
+# and an already rewritten `(outside)/x`.
+_ABS_PATH = re.compile(r"(?<![\w.~$/)@%+-])/(?=[\w.])[^\s'\"`;|&<>()=:]*")
+
+
+def outside_paths(text: str) -> str:
+    """Rewrite every absolute path in text to `(outside)/<last component>` (idempotent)."""
+    return _ABS_PATH.sub(lambda m: "(outside)/" + m.group(0).rstrip("/").rsplit("/", 1)[-1], text)
+
+
 def _luhn(digits: str) -> bool:
     total = 0
     for i, ch in enumerate(reversed(digits)):
