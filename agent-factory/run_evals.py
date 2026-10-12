@@ -13,7 +13,7 @@ Usage:
     GRID_EVALS=1 run_evals.py --yes          # run for real (costs money)
     run_evals.py --changed origin/next...HEAD --dry-run   # only the roles a git range touched
     options: --role R  --case NAME  --runs N  --budget USD  --cases-dir D  --results-dir D
-             --changed RANGE  --max-total USD (default 5.00; --changed only)  --repo D (default: this repo)
+             --changed RANGE  --max-total USD (default 5.00; caps every plan)  --repo D (default: this repo)
 
 A case (evals/cases/<role>/<name>.yaml):
     role:          the grid role under test (must exist)
