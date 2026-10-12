@@ -348,3 +348,21 @@ make_generator_fixture() {
   ! grep -q '^### bad / ' "$GRID_HARNESS_HOME/.codex/AGENTS.md" || false
   [[ "$stderr" == *"bad"* ]]
 }
+
+# ---------------------------------------------------------------- WP-011: the empty-rules warning
+
+@test "a wire with no rules: entry prints no 'empty rules' warning" {
+  wire
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"empty rules"* ]]
+  # --check too (it runs a child wire whose output is discarded, but its own stderr counts).
+  wire --check
+  [[ "$stderr" != *"empty rules"* ]]
+}
+
+@test "a bare 'rules:' line still warns" {
+  printf 'rules:\n' > "$BASE"
+  wire
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"empty rules: entry ignored"* ]]
+}

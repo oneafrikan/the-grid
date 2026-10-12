@@ -13,7 +13,9 @@
 #   repo-name            → wire ALL skills in that submodule
 #   repo-name/skill      → wire ONLY that specific skill
 #   project:<name>       → wire a composed agent-factory project's CC output
-#   -repo | -repo/skill  → SUBTRACT (overlay escape hatch — remove a baseline entry)
+#   -repo | -repo/skill  → SUBTRACT (overlay escape hatch — remove a baseline entry).
+#                          A subtraction always wins: -repo removes every skill of that
+#                          repo, even one a repo/skill entry names.
 #   -project:<name>      → un-gate a project
 #   rules:<pack>         → wire a rule pack (rules/<pack>/*.md) into ~/.claude/rules/grid/<pack>/.
 #                          Opt-in: no rules: entry anywhere means no rules are wired. Each

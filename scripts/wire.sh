@@ -47,7 +47,7 @@
 #   GRID_HARNESS_HOME — base for every non-Claude harness dir (default: $HOME). Tests point
 #                   it at a temp dir; GRID_DRY_HOME overrides it (see above).
 #
-# Exit codes: 0 wired | 1 --check found drift | 2 bad harness name / python3 missing for an
+# Exit codes: 0 wired | 1 --check found drift | 2 unknown argument / bad harness name / python3 missing for an
 #             active harness / a dir that must be written is unwritable or an active
 #             harness dir cannot be resolved (HOME unset); nothing changed in every case |
 #             3 blocked by the audit (nothing changed)
@@ -59,7 +59,15 @@
 #   bash wire.sh           # wire (idempotent)
 #   bash wire.sh --check   # change nothing; exit 1 if live links differ from
 #                          # what a fresh wire would create
+#   Any other argument: usage message on stderr, exit 2, nothing changed.
 set -euo pipefail
+
+# Arguments are checked before anything is touched or forced: the only accepted argument is
+# --check. Anything else (--dry-run, --help, a typo) used to fall through to a REAL wire.
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--check" ]; }; then
+  echo "usage: wire.sh [--check]" >&2
+  exit 2
+fi
 
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 # Canonical spelling: physical path, no trailing slash. Every link wire creates carries
@@ -364,7 +372,9 @@ fi
 # Entry grammar (identical in both files):
 #   repo                 → wire ALL skills in that submodule
 #   repo/skill           → wire ONLY that skill
-#   -repo  | -repo/skill → SUBTRACT (remove a baseline entry — overlay escape hatch)
+#   -repo  | -repo/skill → SUBTRACT (remove a baseline entry — overlay escape hatch).
+#                          A subtraction always wins: -repo removes every skill of that
+#                          repo, even one a repo/skill entry names.
 #   project:<name>       → wire that composed agent-factory project's _claude-code output
 #   -project:<name>      → un-gate a project
 #   rules:<pack>         → wire rules/<pack>/*.md into $RULES_DIR/grid/<pack>/ (opt-in:
@@ -522,6 +532,7 @@ repo_is_wired() {
 
 # Is a specific skill (repo, skill-name) wired by a per-skill entry (not denied)?
 skill_is_wired() {
+  repo_is_denied "$1" && return 1          # -repo removes every skill of that repo (D04)
   skill_is_denied "$1" "$2" && return 1
   local entry="$1/$2" s
   for s in "${WIRED_SKILLS[@]:-}"; do [ "$s" = "$entry" ] && return 0; done
@@ -531,6 +542,7 @@ skill_is_wired() {
 # Does this repo have any per-skill entries in WIRED_SKILLS?
 repo_has_skill_entries() {
   local repo="$1" s
+  repo_is_denied "$repo" && return 1       # -repo beats a repo/skill entry (D04)
   for s in "${WIRED_SKILLS[@]:-}"; do
     [[ "$s" == "$repo/"* ]] && return 0
   done
@@ -733,6 +745,28 @@ teardown_rule_links() {
 }
 teardown_rule_links
 
+# valid_link_name <name>: a skill dir / agent file name safe to link and to record. The
+# manifest is tab-separated with one row per line, so a TAB or newline in a name would add
+# columns or forge a row. Wider than skill_portable's lower-case grammar on purpose: Claude-side
+# wiring has always accepted upstream names with capitals and underscores, and a strict rule
+# would silently unwire them. C collation so [A-Za-z] cannot match other letters.
+valid_link_name() {
+  local LC_COLLATE=C
+  case "$1" in
+    ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  return 0
+}
+# skip_invalid_name <kind> <name> <path>: report on stderr and record a fixed-column row with
+# control characters in the name and path replaced by "?".
+skip_invalid_name() {
+  local san_name san_path
+  san_name="$(printf '%s' "$2" | LC_ALL=C tr '[:cntrl:]' '?')"
+  san_path="$(printf '%s' "$3" | LC_ALL=C tr '[:cntrl:]' '?')"
+  echo "  skip (invalid name): $san_name" >&2
+  MANIFEST_ROWS+=("$1	$san_name	$san_path	skipped	invalid name")
+}
+
 # Wire a skill directory to SKILLS_DIR.
 # Replaces only what the grid owns: a free name, or a link into the grid (a root skill
 # overriding a repo skill wired a moment ago). A real dir, a regular file, a dangling
@@ -741,8 +775,14 @@ teardown_rule_links
 wire_skill() {
   local skill_dir="$1"
   local name
-  name=$(basename "$skill_dir")
+  # Parameter expansion, not basename: $(basename) strips a trailing newline from the name.
+  name="${skill_dir%/}"; name="${name##*/}"
   local target="$SKILLS_DIR/$name"
+
+  if ! valid_link_name "$name"; then
+    skip_invalid_name skill "$name" "$skill_dir"
+    return
+  fi
 
   if [ -d "$target" ] && [ ! -L "$target" ]; then
     echo "  skip (real dir, not managed): $name"
@@ -766,8 +806,13 @@ wire_skill() {
 wire_agent() {
   local agent_file="$1"
   local name
-  name=$(basename "$agent_file")
+  name="${agent_file##*/}"
   local target="$AGENTS_DIR/$name"
+
+  if ! valid_link_name "$name"; then
+    skip_invalid_name agent "$name" "$agent_file"
+    return
+  fi
 
   if [ -e "$target" ] && [ ! -L "$target" ]; then
     echo "  skip (real file, not managed): $name"
@@ -934,7 +979,9 @@ fi
 # target is left alone, as with skills and agents.
 rules_done=" "   # packs already handled this run (a pack named in baseline AND overlay)
 RULES_EFFECTIVE=()   # the wired packs that exist (input to step 3f, rules delivery)
-for rule_pack in "${WIRED_RULES[@]:-}"; do
+# ${arr[@]+"${arr[@]}"}: no iterations for an empty array (the ":-" form expands it to ONE
+# empty word and warned on every run); a bare `rules:` line is a real "" element and still warns.
+for rule_pack in ${WIRED_RULES[@]+"${WIRED_RULES[@]}"}; do
   [ -n "$rule_pack" ] || { echo "warning: empty rules: entry ignored" >&2; continue; }
   rule_is_denied "$rule_pack" && continue
   case "$rules_done" in *" $rule_pack "*) continue ;; esac

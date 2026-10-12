@@ -485,6 +485,50 @@ links_of() {
   [ "$(links_of "$MOCK_SKILLS")" = "$before" ]     # all three back, none lost
 }
 
+# --- WP-011: CLI and manifest hygiene -----------------------------------------------
+
+@test "unknown arguments exit 2, print usage and change nothing" {
+  local before_s before_a before_g a
+  before_s="$(snapshot "$MOCK_SKILLS")"; before_a="$(snapshot "$MOCK_AGENTS")"
+  before_g="$(snapshot "$MOCK_GRID")"
+  for a in "--dry-run" "--help" "--chek" "--check extra" "extra"; do
+    # $a is split on purpose: "--check extra" is two arguments.
+    # shellcheck disable=SC2086
+    GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh" $a
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"usage: wire.sh [--check]"* ]]
+  done
+  [ "$(snapshot "$MOCK_SKILLS")" = "$before_s" ]
+  [ "$(snapshot "$MOCK_AGENTS")" = "$before_a" ]
+  [ "$(snapshot "$MOCK_GRID")" = "$before_g" ]
+  [ ! -e "$MOCK_SKILLS/skill-alpha" ]
+}
+
+@test "a skill dir with TAB or newline in its name is skipped and every manifest row keeps its column count" {
+  local tab=$'\t' nl=$'\n'
+  make_skill "$MOCK_GRID/skills/bad${tab}name" "bad-tab"
+  make_skill "$MOCK_GRID/skills/bad${nl}row" "bad-nl"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skip (invalid name)"* ]]
+  [ -L "$MOCK_SKILLS/skill-alpha" ]
+  [ "$(find "$MOCK_SKILLS" -type l | wc -l | tr -d ' ')" -eq 2 ]    # only the two good ones
+  # Five tab-separated columns on EVERY row; none forged by the odd names.
+  [ "$(awk -F'\t' 'NF != 5' "$MOCK_GRID/.wired.manifest" | wc -l | tr -d ' ')" -eq 0 ]
+  grep -q "^skill	bad?name	.*	skipped	invalid name$" "$MOCK_GRID/.wired.manifest"
+  grep -q "^skill	bad?row	.*	skipped	invalid name$" "$MOCK_GRID/.wired.manifest"
+}
+
+@test "-repo beats a per-skill repo/skill entry for the same repo" {
+  make_skill "$MOCK_GRID/repos/anthropic/docx" "docx"
+  printf 'anthropic/docx\n' > "$MOCK_GRID/baseline-submodules.txt"
+  mkdir -p "$MOCK_GRID/machines"
+  printf -- '-anthropic\n' > "$MOCK_GRID/machines/testbox.txt"
+  GRID_HOST=testbox GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$MOCK_SKILLS/docx" ] && [ ! -L "$MOCK_SKILLS/docx" ]
+}
+
 # --- WP-009: a hostile tracked path must not link anything outside the repo ----
 
 @test "a tracked newline path creates no link outside GRID_DIR and wire.sh exits 0" {
