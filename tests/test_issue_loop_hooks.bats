@@ -8,9 +8,34 @@ load helpers/stubs
 
 PAT_DIR="$BATS_TEST_DIRNAME/../automation-factory/patterns/issue-loop"
 
+# A backgrounded review hook keeps running after the test body ends. If it calls `gh`
+# after teardown removed the stub dir, PATH falls through to the REAL gh (the repo
+# owner/name is a fixture default, not a reserved name). This shim sits behind the
+# stubs on PATH, so a late call lands here instead: it logs and exits 99, and
+# teardown_file fails the file if anything was logged (R16.qa.F1).
+setup_file() {
+  REAL_GH_SHIM="$BATS_FILE_TMPDIR/real-gh-shim"
+  mkdir -p "$REAL_GH_SHIM"
+  printf '#!/bin/bash\necho "gh $*" >> "%s/real-gh.log"\nexit 99\n' "$BATS_FILE_TMPDIR" > "$REAL_GH_SHIM/gh"
+  chmod +x "$REAL_GH_SHIM/gh"
+  export REAL_GH_SHIM
+}
+
+# Let any straggling hook finish, then fail the file if one reached the real-gh slot.
+teardown_file() {
+  sleep 2
+  if [ -s "$BATS_FILE_TMPDIR/real-gh.log" ]; then
+    echo "a hook reached the REAL gh after stub teardown:" >&2
+    cat "$BATS_FILE_TMPDIR/real-gh.log" >&2
+    return 1
+  fi
+}
+
 setup() {
   T="$(mktemp -d)"
   export HOME="$T/home"
+  # Behind the stubs make_stubs prepends below: reached only once the stub dir is gone.
+  export PATH="$REAL_GH_SHIM:$PATH"
   mkdir -p "$HOME"
   export GRID_RUN_LOG="$T/runs.jsonl"
   # never consult a real the-grid checkout for the shared parser
@@ -38,6 +63,13 @@ setup() {
 }
 
 teardown() {
+  # The review hook is backgrounded: wait (bounded, 5 s) for it to exit BEFORE the stub
+  # dir is removed, so its final `gh` call still lands on the stub, not a real gh.
+  local i
+  for i in $(seq 1 50); do
+    pgrep -f "$T/repo/loop/hooks/" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
   clean_stubs
   # a backgrounded review may still be writing its log; retry once rather than flake
   rm -rf "$T" 2>/dev/null || { sleep 1; rm -rf "$T"; }
@@ -205,6 +237,10 @@ wait_for_log() {
   return 1
 }
 
+# wait_for_review_post — the review's LAST action is its `gh ... comment`; waiting for
+# the claude call alone returns while the hook is still about to call gh.
+wait_for_review_post() { wait_for_log "gh issue comment"; }
+
 # settle — give a backgrounded hook time to do something it should NOT do.
 settle() { sleep 0.5; }
 
@@ -213,12 +249,15 @@ settle() { sleep 0.5; }
   run_review 'git commit -m "x #3"'
   [ "$status" -eq 0 ]
   wait_for_log "claude "
+  wait_for_review_post
   : > "$STUB_LOG"; rm -f "$REPO/.git/post-commit-review.last"
   run_review "git -C $REPO commit -m \"x #3\""
   wait_for_log "claude "
+  wait_for_review_post
   : > "$STUB_LOG"; rm -f "$REPO/.git/post-commit-review.last"
   run_review "cd $REPO && git commit -m \"x #3\""
   wait_for_log "claude "
+  wait_for_review_post
 }
 
 @test "review: look-alikes queue nothing" {
@@ -238,6 +277,7 @@ settle() { sleep 0.5; }
   git -C "$T/wt" commit -q -m "work in worktree #3"
   run_review 'git commit -m "work in worktree #3"' "$T/wt"
   wait_for_log "claude "
+  wait_for_review_post
   grep '^claude ' "$STUB_LOG" | grep -q 'wtfile.txt'
   # second payload for the same HEAD: deduped
   run_review 'git commit -m "work in worktree #3"' "$T/wt"
@@ -271,6 +311,7 @@ settle() { sleep 0.5; }
   git -C "$REPO" commit -q --allow-empty -m "x #3"
   run_review 'git commit -m "x #3"'
   wait_for_log "claude "
+  wait_for_review_post
   line="$(grep '^claude ' "$STUB_LOG")"
   contains "$line" "--model sonnet"
   contains "$line" "--max-budget-usd 1"
@@ -282,6 +323,7 @@ settle() { sleep 0.5; }
   export GRID_REVIEW_MODEL=haiku GRID_REVIEW_BUDGET_USD=0.25
   run_review 'git commit -m "x #3"'
   wait_for_log "claude "
+  wait_for_review_post
   line="$(grep '^claude ' "$STUB_LOG")"
   contains "$line" "--model haiku"
   contains "$line" "--max-budget-usd 0.25"
@@ -310,6 +352,7 @@ EOF
   git -C "$REPO" commit -q --allow-empty -m "x #3"
   run_review 'git commit -m "x #3"'
   for _ in $(seq 1 60); do [ -f "$T/env.log" ] && break; sleep 0.1; done
+  wait_for_review_post
   grep -q 'REVIEW_RUNNING=1' "$T/env.log"
 }
 

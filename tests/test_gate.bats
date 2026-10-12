@@ -51,6 +51,25 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" bash scripts/gate.s
   [[ "$output" == *"gate: FAIL"* ]] || false
 }
 
+@test "a bats run that leaves files in its TMPDIR fails the gate and names them" {
+  # The stub bats leaks one file the way a test that forgot its rm -rf would.
+  printf '#!/usr/bin/env bash\n: > "$TMPDIR/leaked-by-a-test"\necho "1..0"\nexit 0\n' > "$G/tests/lib/bats-core/bin/bats"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"leaked-by-a-test"* ]] || false
+  [[ "$output" == *"gate: FAIL — bats"* ]] || false
+}
+
+@test "a bats run that cleans up after itself leaves no TMPDIR behind" {
+  # The stub records the dir it was given; the gate must remove it afterwards.
+  printf '#!/usr/bin/env bash\necho "$TMPDIR" > "%s/bats-tmpdir"\necho "1..0"\nexit 0\n' "$BATS_TEST_TMPDIR" > "$G/tests/lib/bats-core/bin/bats"
+  run run_gate
+  [ "$status" -eq 0 ]
+  seen="$(cat "$BATS_TEST_TMPDIR/bats-tmpdir")"
+  [ -n "$seen" ]
+  [ ! -e "$seen" ]
+}
+
 @test "--pre-commit aborts on unstaged changes to tracked files" {
   echo x >> "$G/scripts/catalog.sh"
   run run_gate --pre-commit

@@ -4,6 +4,9 @@
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
 common_setup() {
+  # An empty/unset HOME makes `cd ""` succeed, turning the "real home" into the cwd and
+  # disarming every comparison below; refuse before anything is derived from it.
+  [ -n "${HOME:-}" ] || { echo "REFUSING: HOME is unset or empty" >&2; return 1; }
   # Capture the real home FIRST: a test may later point HOME at a temp dir, and the
   # sandbox check below must still know where the real ~/.claude, ~/.grid and
   # ~/.the-grid-private live.
@@ -40,6 +43,15 @@ common_setup() {
   export GRID_HOOK_STATE_DIR="$MOCK_HOOK_ROOT/state"
   export GRID_HANDOFF_FALLBACK_DIR="$MOCK_HOOK_ROOT/fallback"
   export GRID_PRIVATE_DIR="$MOCK_HOOK_ROOT/private"
+  # Machine-local state (~/.grid by default) and the user runtime dir (/run/user/<uid>,
+  # where the live systemd manager's sockets live) are sandboxed too. REAL_XDG_RUNTIME_DIR
+  # remembers the real one, as REAL_HOME does, because it is not under $HOME and so the
+  # tripwire needs the value itself.
+  export REAL_XDG_RUNTIME_DIR="${REAL_XDG_RUNTIME_DIR-${XDG_RUNTIME_DIR:-}}"
+  mkdir -p "$MOCK_HOOK_ROOT/grid-state" "$MOCK_HOOK_ROOT/runtime"
+  chmod 700 "$MOCK_HOOK_ROOT/runtime"
+  export GRID_STATE_DIR="$MOCK_HOOK_ROOT/grid-state"
+  export XDG_RUNTIME_DIR="$MOCK_HOOK_ROOT/runtime"
   # A path, not a file: the run log is created by the first append.
   export GRID_RUN_LOG="$MOCK_HOOK_ROOT/runs.jsonl"
   # Tripwire: the claude binary resolves to a path that cannot execute, so a test
@@ -62,13 +74,16 @@ common_setup() {
 # Abort the test (loudly) if a wire/catalog/hook target points at the real ~/.claude,
 # ~/.grid or ~/.the-grid-private, or if the claude tripwire has been unset.
 assert_sandboxed() {
+  # An empty/unset HOME makes `cd ""` succeed, turning the "real home" into the cwd and
+  # disarming every comparison below; refuse before anything is derived from it.
+  [ -n "${HOME:-}" ] || { echo "REFUSING: HOME is unset or empty" >&2; return 1; }
   local real d real_dirs r
   real="${REAL_HOME:-$HOME}/.claude"
   # Resolve symlinks on both sides (macOS /var -> /private/var) so spelling can't dodge the guard.
   real="$(cd "$real" 2>/dev/null && pwd -P || echo "$real")"
   for d in "${SKILLS_DIR:-}" "${AGENTS_DIR:-}" "${RULES_DIR:-}"; do
     [ -n "$d" ] || continue
-    case "$(cd "$d" 2>/dev/null && pwd -P)" in
+    case "$(cd "$d" 2>/dev/null && pwd -P || echo "$d")" in
       "$real"|"$real"/*) echo "REFUSING: test target $d is inside the real $real" >&2; return 1 ;;
     esac
   done
@@ -86,6 +101,29 @@ assert_sandboxed() {
       esac
     done
   done
+  # Whole-home targets: state, learning store and scheduler unit dirs default to places
+  # under ~ that are NOT one of the three roots above (~/.config/systemd/user,
+  # ~/Library/LaunchAgents), so these are compared against the real home itself.
+  r="$(cd "${REAL_HOME:-$HOME}" 2>/dev/null && pwd -P || echo "${REAL_HOME:-$HOME}")"
+  for d in "${GRID_STATE_DIR:-}" "${GRID_LEARNING_DIR:-}" "${LAUNCH_AGENTS_DIR:-}" "${SYSTEMD_USER_DIR:-}"; do
+    [ -n "$d" ] || continue
+    d="$(cd "$d" 2>/dev/null && pwd -P || echo "$d")"
+    case "$d" in
+      "$r"|"$r"/*) echo "REFUSING: test dir $d is inside the real home $r" >&2; return 1 ;;
+    esac
+  done
+  # The live user runtime dir holds the systemd manager's private socket: a test that
+  # runs systemd-analyze/systemctl against it can unlink that socket.
+  if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    d="$(cd "$XDG_RUNTIME_DIR" 2>/dev/null && pwd -P || echo "$XDG_RUNTIME_DIR")"
+    for r in "${REAL_XDG_RUNTIME_DIR:-}" "/run/user/$(id -u)"; do
+      [ -n "$r" ] || continue
+      r="$(cd "$r" 2>/dev/null && pwd -P || echo "$r")"
+      case "$d" in
+        "$r"|"$r"/*) echo "REFUSING: XDG_RUNTIME_DIR $d is the real runtime dir $r (or inside it)" >&2; return 1 ;;
+      esac
+    done
+  fi
   # GRID_HARNESS_HOME must be set and must stay out of the real home: it is the base of
   # every non-Claude harness dir (~/.agents/skills, ~/.codex/agents, ...).
   if [ -z "${GRID_HARNESS_HOME:-}" ]; then
@@ -109,7 +147,27 @@ common_teardown() {
          "${MOCK_HARNESS_ROOT:-}"
   unset AGENTS_DIR SKILLS_DIR RULES_DIR GRID_PRIVATE_ROLES_DIR CLAUDE_CONFIG_DIR GRID_HOOK_LOG_DIR \
         GRID_HOOK_STATE_DIR GRID_HANDOFF_FALLBACK_DIR GRID_PRIVATE_DIR GRID_RUN_LOG GRID_CLAUDE \
-        GRID_HARNESS_HOME GRID_HARNESS MOCK_HARNESS_ROOT MOCK_HARNESS_HOME
+        GRID_HARNESS_HOME GRID_HARNESS MOCK_HARNESS_ROOT MOCK_HARNESS_HOME \
+        GRID_STATE_DIR XDG_RUNTIME_DIR REAL_XDG_RUNTIME_DIR
+}
+
+# systemd_verify_private <unit file>... — `run` `systemd-analyze --user verify` against a
+# PRIVATE runtime dir (R16.qa.F2, R06.qa.F12). verify talks to a user manager through
+# $XDG_RUNTIME_DIR/systemd/private: with the real runtime dir set it can unlink the live
+# manager's socket, with it unset it fails outright. So the runtime dir (and config dir)
+# are temp dirs under $BATS_TEST_TMPDIR, and the test SKIPS, not fails, when a probe of a
+# known-good unit cannot succeed there (no user-mode systemd, or the AF_UNIX socket path
+# is too long for a deep TMPDIR). Sets $status/$output via `run`.
+systemd_verify_private() {
+  local rt="$BATS_TEST_TMPDIR/xdg-rt"
+  mkdir -p "$rt/config"
+  chmod 700 "$rt"
+  printf '[Unit]\nDescription=probe\n[Service]\nType=oneshot\nExecStart=/bin/true\n' > "$rt/probe.service"
+  if ! env XDG_RUNTIME_DIR="$rt" XDG_CONFIG_HOME="$rt/config" \
+       systemd-analyze --user verify "$rt/probe.service" >/dev/null 2>&1; then
+    skip "systemd-analyze --user cannot run in a private runtime dir here"
+  fi
+  run env XDG_RUNTIME_DIR="$rt" XDG_CONFIG_HOME="$rt/config" systemd-analyze --user verify "$@"
 }
 
 # Write a minimal valid skill dir to a given path
