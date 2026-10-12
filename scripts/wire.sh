@@ -531,6 +531,12 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ] && ! command -v python3 >/dev/null 2>&1; 
   echo "wire: python3 is required to wire a non-Claude harness (the skill portability filter reads frontmatter with it); nothing was changed" >&2
   exit 2
 fi
+# python3 on PATH is not python3 that runs: a broken one made every skill "no-frontmatter" with
+# exit 0 and an empty shared dir. Prove it can run before anything is written.
+if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ] && ! python3 -I -c 'pass' >/dev/null 2>&1; then
+  echo "wire: python3 is present but cannot run (the skill portability filter needs it); nothing was changed" >&2
+  exit 2
+fi
 # Hand --check the active set the manifest + GRID_HARNESS resolved to (dry run only).
 [ -z "${GRID_DRY_HOME:-}" ] || printf '%s\n' "${ACTIVE_HARNESSES[@]:-}" > "$GRID_DRY_HOME/.harness-active"
 # Resolve every registry dir now, before the audit or any teardown (see resolve_harness_dirs).
@@ -1153,6 +1159,11 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ]; then
     while [ "$i" -lt "${#HL_NAME[@]}" ]; do
       if [ -n "${HL_REASON[$i]}" ]; then
         MANIFEST_ROWS+=("skill@$h_raw	${HL_NAME[$i]}	${HL_SRC[$i]}	skipped	${HL_REASON[$i]}")
+        # The one reason that is announced: a guard the operator set is being withheld, and
+        # silence would look like a bug. (Not the reconcile.sh "real dir" prefix.)
+        if [ "${HL_REASON[$i]}" = claude-only-guard ]; then
+          echo "  skip ($h_raw: claude-only-guard): ${HL_NAME[$i]}"
+        fi
       else
         wire_harness_link "${HL_SRC[$i]}" "$h_dir" skill "$h_raw" "${HL_NAME[$i]}"
       fi
