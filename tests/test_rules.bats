@@ -993,6 +993,54 @@ no_tmp_left() { [ -z "$(find "$1" -maxdepth 1 -name '*.tmp' -print -quit)" ]; }
   [ "$(cat "$R/other.md")" = "notes" ]
 }
 
+# --- separator and line endings (WP-052) ------------------------------------------------------
+# `emit` then `emit ''` must give the operator's bytes back. A file with no final newline
+# gains exactly one (documented: the original cannot be told apart from "newline-terminated").
+
+# roundtrip INPUT_PRINTF_FORMAT EXPECTED_PRINTF_FORMAT
+roundtrip() {
+  printf "$1" > "$R/AGENTS.md"
+  printf "$2" > "$R/expected"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  run emit --harness agents-md --packs "" --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  cmp "$R/AGENTS.md" "$R/expected"
+}
+
+@test "emit agents-md: emit then emit '' restores newline-terminated input byte for byte" {
+  make_pack sql
+  roundtrip 'hello\nworld\n' 'hello\nworld\n'
+  roundtrip '\n' '\n'
+  roundtrip '\xef\xbb\xbfhello\n' '\xef\xbb\xbfhello\n'
+  roundtrip 'a\n\n' 'a\n\n'
+  roundtrip 'a\n\n\n' 'a\n\n\n'
+  roundtrip 'hello\r\nworld\r\n' 'hello\r\nworld\r\n'
+  roundtrip '' ''
+}
+
+@test "emit agents-md: a file with no final newline gains exactly one newline after emit then remove" {
+  make_pack sql
+  roundtrip 'hello\nworld' 'hello\nworld\n'
+  roundtrip 'hello\r\nworld' 'hello\r\nworld\r\n'
+}
+
+@test "emit agents-md: a CRLF file gets a CRLF block, and --check is clean after an editor re-save as CRLF" {
+  make_pack sql
+  printf 'one\r\ntwo\r\n' > "$R/AGENTS.md"
+  emit --harness agents-md --packs sql --out "$R/AGENTS.md" >/dev/null
+  # Every LF in the file is part of a CRLF (no bare LF in the block).
+  [ "$(grep -c $'\r$' "$R/AGENTS.md")" -eq "$(wc -l < "$R/AGENTS.md")" ]
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md" --check
+  [ "$status" -eq 0 ]
+  # An LF file that an editor re-saves with CRLF endings is not drift either.
+  printf 'one\ntwo\n' > "$R/AGENTS.md"
+  emit --harness agents-md --packs sql --out "$R/AGENTS.md" >/dev/null
+  sed -i 's/$/\r/' "$R/AGENTS.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md" --check
+  [ "$status" -eq 0 ]
+}
+
 # --- the real tree --------------------------------------------------------------------------
 
 @test "real packs lint clean" {
