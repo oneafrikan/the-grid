@@ -54,6 +54,11 @@
 set -euo pipefail
 
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+# Canonical spelling: physical path, no trailing slash. Every link wire creates carries
+# this spelling, and ownership (target_is_ours) is decided on resolved paths, so a clone
+# reached through a symlink, a trailing slash or a ".." no longer splits the grid's links
+# across two spellings that neither teardown nor --check could match.
+GRID_DIR="$(cd "$GRID_DIR" 2>/dev/null && pwd -P)" || { echo "wire: GRID_DIR is not a directory" >&2; exit 2; }
 
 # GRID_DRY_HOME: redirect EVERY home-derived target into a throwaway home.
 # Values are forced, not defaulted, so an inherited SKILLS_DIR or
@@ -102,19 +107,56 @@ while IFS= read -r h_name; do
   if [ "$h_dir" != "-" ] && ! in_list "$h_dir" "${HARNESS_AGENT_DIRS[@]:-}"; then HARNESS_AGENT_DIRS+=("$h_dir"); fi
 done < <(harness_names)
 
-# link_is_ours <path>: true when <path> is a symlink whose target lies under GRID_DIR.
-# Accepts both spellings of GRID_DIR (as given, and the physical one from pwd -P): an
-# earlier wire through a symlinked clone path leaves links in the other spelling, and
-# refusing to replace them would turn that stale-link bug into a permanent skip.
-# Used by the link steps (wire_skill / wire_agent) and by the --check shadow filter so a
-# foreign link, a dangling one or a real file at a grid name is never replaced.
-GRID_DIR_PHYS="$(cd "$GRID_DIR" 2>/dev/null && pwd -P || printf '%s' "$GRID_DIR")"
+# --- ownership: is a link target inside the grid? ---------------------------------
+# lex_norm <abs path>: collapse "//", "." and ".." lexically into NORM (no forks).
+lex_norm() {
+  local part res="" parts
+  IFS=/ read -r -d '' -a parts < <(printf '%s' "$1") || true
+  for part in "${parts[@]:-}"; do
+    case "$part" in
+      ''|.) ;;
+      ..)   res="${res%/*}" ;;
+      *)    res="$res/$part" ;;
+    esac
+  done
+  NORM="${res:-/}"
+}
+
+# target_is_ours <link target>: true when the target RESOLVES to a path under GRID_DIR.
+# Resolution, not a string prefix: the target's parent is resolved physically (cd -P, so
+# symlinks and ".." in it are followed) and the last component is appended unresolved
+# (a link's own target is what is compared, not where that finally ends up). When the
+# parent does not exist (a dangling grid link) the path is normalised lexically instead.
+# Only absolute targets can be ours: wire writes nothing else, so a relative one is
+# foreign. "$GRID_DIR/../x" is textually under the grid and physically outside it: not ours.
+target_is_ours() {
+  local t="$1" dir base phys res=""
+  case "$t" in /*) ;; *) return 1 ;; esac
+  while [ "${t%/}" != "$t" ] && [ -n "${t%/}" ]; do t="${t%/}"; done   # trailing slashes
+  base="${t##*/}"
+  case "$base" in
+    .|..)                       # the target IS a directory spelled "." / "..": resolve it whole
+      if phys="$(cd -P "$t" 2>/dev/null && pwd -P)"; then res="$phys"; fi ;;
+    *)
+      dir="${t%/*}"; [ -n "$dir" ] || dir=/
+      if phys="$(cd -P "$dir" 2>/dev/null && pwd -P)"; then
+        [ "$phys" = / ] && phys=""
+        res="$phys/$base"
+      fi ;;
+  esac
+  if [ -z "$res" ]; then lex_norm "$t"; res="$NORM"; fi   # parent missing: lexical
+  case "$res" in "$GRID_DIR"/*) return 0 ;; esac
+  return 1
+}
+
+# link_is_ours <path>: true when <path> is a symlink whose target is ours. Used by the link
+# steps (wire_skill / wire_agent) and the --check shadow filter, so a foreign link, a dangling
+# one or a real file at a grid name is never replaced.
 link_is_ours() {
   [ -L "$1" ] || return 1
   local t
   t="$(readlink "$1")" || return 1
-  case "$t" in "$GRID_DIR"/*|"$GRID_DIR_PHYS"/*) return 0 ;; esac
-  return 1
+  target_is_ours "$t"
 }
 
 # --- --check: dry-run drift detector ----------------------------------------
@@ -139,7 +181,7 @@ if [ "${1:-}" = "--check" ]; then
     find -H "$1" -maxdepth 1 -type l | while IFS= read -r l; do
       t="$(readlink "$l")"; n="$(basename "$l")"
       if [ -n "${2:-}" ] && { [ -e "$2/$n" ] || [ -L "$2/$n" ]; } && ! link_is_ours "$2/$n"; then continue; fi
-      case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
+      if target_is_ours "$t"; then printf '%s -> %s\n' "$n" "$t"; fi
     done | LC_ALL=C sort
   }
   # Recursive twin of links() for the rules tree: rules are symlinks nested one level
@@ -151,7 +193,7 @@ if [ "${1:-}" = "--check" ]; then
     find -H "$1/grid" -type l | while IFS= read -r l; do
       t="$(readlink "$l")"; n="${l#"$1"/grid/}"
       if [ -n "${2:-}" ] && [ -e "$2/grid/$n" ] && [ ! -L "$2/grid/$n" ]; then continue; fi
-      case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
+      if target_is_ours "$t"; then printf '%s -> %s\n' "$n" "$t"; fi
     done | LC_ALL=C sort
   }
   rc=0
@@ -176,9 +218,9 @@ if [ "${1:-}" = "--check" ]; then
       t="$(readlink "$l")"; n="$(basename "$l")"
       if [ -n "${2:-}" ] && { [ -e "$2/$n" ] || [ -L "$2/$n" ]; }; then
         lt="$(readlink "$2/$n" 2>/dev/null || true)"
-        case "$lt" in "$GRID_DIR"/*) ;; *) continue ;; esac
+        target_is_ours "$lt" || continue
       fi
-      case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
+      if target_is_ours "$t"; then printf '%s -> %s\n' "$n" "$t"; fi
     done | LC_ALL=C sort
   }
   for raw in "${HARNESS_SKILL_DIRS[@]:-}" "${HARNESS_AGENT_DIRS[@]:-}"; do
@@ -445,10 +487,10 @@ teardown_grid_links() {
   [ -d "$dir" ] || return 0
   while IFS= read -r link; do
     target=$(readlink "$link")
-    # "$GRID_DIR"/* (with the slash), not "$GRID_DIR"*: the bare prefix also
-    # matches a sibling dir such as ${GRID_DIR}-private and would delete a
-    # foreign link into it.
-    [[ "$target" == "$GRID_DIR"/* ]] || continue   # not ours, leave it alone
+    # target_is_ours compares resolved paths against "$GRID_DIR"/ (with the slash):
+    # a bare prefix would also match a sibling dir such as ${GRID_DIR}-private and
+    # delete a foreign link into it.
+    target_is_ours "$target" || continue   # not ours, leave it alone
     rm "$link"
   # find -H: follow $dir itself when it is a symlink to the real skills dir
   # (without it find lists nothing and stale grid links silently survive).
@@ -476,7 +518,7 @@ teardown_rule_links() {
   [ -d "$root" ] || return 0
   while IFS= read -r link; do
     target=$(readlink "$link")
-    [[ "$target" == "$GRID_DIR"/* ]] || continue   # not ours, leave it alone
+    target_is_ours "$target" || continue   # not ours, leave it alone
     rm "$link"
   done < <(find -H "$root" -type l 2>/dev/null)
   # -empty -delete only removes directories with nothing in them (-delete implies -depth,
@@ -607,7 +649,7 @@ if [ -f "$RUNTIMES_FILE" ]; then
       # grid (a skill that happens to share the name) is ours: the runtime
       # link wins the clash.
       if { [ -e "$rt_target" ] || [ -L "$rt_target" ]; } &&
-         { [ ! -L "$rt_target" ] || [[ "$(readlink "$rt_target")" != "$GRID_DIR"/* ]]; }; then
+         { [ ! -L "$rt_target" ] || ! link_is_ours "$rt_target"; }; then
         echo "  skip (runtime root occupied, not managed): $rt_link"
         MANIFEST_ROWS+=("runtime-link	$rt_link	$rt_root	skipped	runtime root occupied, not managed")
       else
@@ -791,7 +833,7 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ]; then
   HL_NAME=(); HL_SRC=(); HL_REASON=()
   while IFS= read -r hl_link; do
     hl_t="$(readlink "$hl_link")"
-    [[ "$hl_t" == "$GRID_DIR"/* ]] || continue          # foreign link: not ours to fan out
+    target_is_ours "$hl_t" || continue                  # foreign link: not ours to fan out
     hl_reason=""
     hl_rel="${hl_t%/}"
     case "$hl_rel" in
