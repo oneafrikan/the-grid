@@ -30,7 +30,7 @@ injected back at session start. Nothing here is on until you switch it on for a 
 
 ## Read it
 
-- `scripts/instincts.sh show [PROJECT]` — merged instincts (default: the current repo).
+- `scripts/instincts.sh show [PROJECT]` — merged instincts (default: the current repo). A new habit starts as `pending`: it is never injected into a session until you review it and run `scripts/instincts.sh approve ID` in that repo (it then becomes `active`). Habit text must be plain ASCII letters; anything that imitates the injection block, a chat turn, a download or a weaker permission setting is dropped. Injected hints appear as quoted lines ending with `[end of hints]`, and each injection writes its ids and confidences to the run log.
 - `scripts/instincts.sh status [--project ID]` — the funnel per project. Three different zeros:
   - `ret=0`: the model saw no habit.
   - `ret>0 valid=0`: the prompt and the validator disagree.
@@ -40,8 +40,8 @@ injected back at session start. Nothing here is on until you switch it on for a 
 
 ## Forget and tune
 
-- `scripts/instincts.sh retire ID [PROJECT]` — stop using one instinct.
-- `scripts/instincts.sh forget PROJECT --yes` — delete the local observations and this machine's instincts for a project.
+- `scripts/instincts.sh retire ID [PROJECT] [--global]` — stop using one instinct in a project. A GLOBAL instinct (shared by every project) is retired only with `--global`.
+- `scripts/instincts.sh forget PROJECT --yes` — delete the local observations, this machine's instinct file, the project's status entry, its opt-in marker and (when no other host file remains) its `META.json`. It does not touch other hosts' files, derived `_global` lines or the git history of the private repo: purge those by hand. Capture stays off until the emitter is re-run; set `learning: off` to keep it off.
 - Thresholds are environment variables, not a config file: `INSTINCTS_MODEL`, `INSTINCTS_BUDGET_USD`, `INSTINCTS_TIMEOUT_S`, `INSTINCTS_MIN_OBS`, `INSTINCTS_MAX_PROJECTS`, `INSTINCTS_MIN_CONF`, `INSTINCTS_MAX_ITEMS`, `INSTINCTS_MAX_CHARS`.
 
 ## Kill switches

@@ -634,7 +634,9 @@ ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$")
 WEEK_RE = re.compile(r"^\d{4}-W\d{2}$")
 DOMAINS = frozenset(["testing", "git", "style", "workflow", "tooling", "docs", "security", "preference"])
 SCOPES = frozenset(["project", "global"])
-STATUSES = frozenset(["active", "retired"])
+# `pending`: written by the analyser for a new project instinct and never injected until
+# the operator runs `instincts.sh approve ID` (design D43: a human gate before a habit reaches a session).
+STATUSES = frozenset(["active", "pending", "retired"])
 KINDS = frozenset(["new", "confirm", "contradict"])   # model-output items only
 MAX_TRIGGER = 120
 MAX_ACTION = 200
@@ -659,6 +661,21 @@ _UNSAFE_ALTERNATIVES = [
     r"token|password|passwd|secret|credential|api[ _-]?key|private key|\.env\b|id_rsa|id_ed25519",
     # exfiltration
     r"\b(?:exfiltrat\w*|upload|send|post|email)\b.{0,40}\b(?:to|at)\b",
+    # frame and role forgery: text that imitates the injection block or a chat turn
+    r"\b(?:system|assistant|human|user)\s*:", r"</?system>", r"</?the-grid-hints>",
+    r"the-grid habit hints", r"end of hints", r"(?:^|\s)#+\s*(?:system|assistant|human|user)\b",
+    # a bare domain with a path is a download by another name (no `curl` needed)
+    r"\b[\w-]+\.[a-z]{2,}/\S+",
+    # habits that weaken the controls a human put in place (WP-030): approving unread,
+    # permissions and sandbox, shell wrappers and download-and-run, environment dumps,
+    # history rewriting, and treating tool output as an authority
+    r"\b(?:approv|accept|merge|trust|apply|run)\w*\b.{0,40}\bwithout\s+(?:read|review|check|look|inspect)\w*",
+    r"\b(?:permissions?|allow\s*rules?|allowlist|sandbox|auto-?approv\w*|approval\s+prompts?|dangerously|bypass\w*)\b",
+    r"\b(?:printenv|environment\s+variables?)\b|\bprint\w*\b.{0,20}\benv\w*",
+    r"\b(?:bash|sh|zsh)\s+-c\b|\bxargs\b|\bsubshell\b",
+    r"\b(?:download|fetch|grab|install)\w*\b.{0,40}\b(?:and|then)\s+(?:run|execute|pipe|source)\w*",
+    r"\brewrit\w*\b.{0,20}\bhistory\b|filter-branch",
+    r"\b(?:follow|obey|trust|treat|execute)\w*\b.{0,30}\b(?:tool|command|file|web|page)\s+(?:output|result|content)s?\b",
 ]
 UNSAFE_RE = re.compile("|".join(f"(?:{a})" for a in _UNSAFE_ALTERNATIVES), re.I)
 
@@ -667,7 +684,14 @@ def _clean_text(value, cap: int) -> str | None:
     """A trigger/action: str, no backtick/fence, <= cap chars once cleaned, not UNSAFE."""
     if not isinstance(value, str) or "`" in value:       # rejected, not stripped: a fence is hostile
         return None
-    cleaned = sanitize(value)                            # newlines, control and hidden chars out
+    # NFKC folds fullwidth/compatibility lookalikes (`ｃｕｒｌ`) onto ASCII so the denylist sees them.
+    # What NFKC cannot fold (Greek or Cyrillic lookalikes) is refused outright: a confusables table is
+    # never complete. Cost: habit text must be plain ASCII letters (non-English habits are refused).
+    cleaned = sanitize(unicodedata.normalize("NFKC", value))     # newlines, control and hidden chars out
+    # Letters AND combining marks: a mark wedged inside `ignore` would split the word past the
+    # denylist while still reading as the word.
+    if any(ord(c) > 127 and (c.isalpha() or unicodedata.category(c).startswith("M")) for c in cleaned):
+        return None
     if not cleaned or len(cleaned) > cap or UNSAFE_RE.search(cleaned):
         return None
     return cleaned
@@ -686,7 +710,7 @@ def validate_instinct(obj) -> dict | None:
         return None
     out: dict = {}
     i = obj.get("id")
-    if not isinstance(i, str) or not ID_RE.match(i):
+    if not isinstance(i, str) or not ID_RE.fullmatch(i):
         return None
     out["id"] = i
     trigger = _clean_text(obj.get("trigger"), MAX_TRIGGER)
@@ -766,7 +790,7 @@ def current_week() -> str:
 
 def _valid_scope_dir(name: str) -> bool:
     """A store sub-directory name we accept from callers: `_global` or a 12-hex project id."""
-    return name == GLOBAL_DIR or bool(PROJECT_DIR_RE.match(name))
+    return name == GLOBAL_DIR or bool(PROJECT_DIR_RE.fullmatch(name))
 
 
 def read_lines(scope_dir: str) -> list[dict]:
@@ -823,18 +847,20 @@ def merge_instincts(scope_dir: str) -> list[dict]:
     for iid in sorted(groups):
         lines = groups[iid]
         active = [l for l in lines if l["status"] == "active"]
+        live = active + [l for l in lines if l["status"] == "pending"]   # lines that still count for the id
         retired = [l for l in lines if l["status"] == "retired"]
-        newest_active = max(active, key=_line_order) if active else None
-        if retired and (newest_active is None
-                        or max(r["last_seen"] for r in retired) >= newest_active["last_seen"]):
+        newest_live = max(live, key=_line_order) if live else None
+        if retired and (newest_live is None
+                        or max(r["last_seen"] for r in retired) >= newest_live["last_seen"]):
             m = dict(max(retired, key=_line_order), status="retired")
         else:
-            m = dict(newest_active, status="active")
-            m["confidence"] = max(l["confidence"] for l in active)
-            firsts = [l["first_seen"] for l in active if "first_seen" in l]
+            # `active` as soon as ANY host holds an active line (an approval), else `pending`.
+            m = dict(newest_live, status="active" if active else "pending")
+            m["confidence"] = max(l["confidence"] for l in live)
+            firsts = [l["first_seen"] for l in live if "first_seen" in l]
             if firsts:
                 m["first_seen"] = min(firsts)
-            weeks = [l["weeks_seen"] for l in active if "weeks_seen" in l]
+            weeks = [l["weeks_seen"] for l in live if "weeks_seen" in l]
             if weeks:
                 m["weeks_seen"] = max(weeks)
         m["scope"] = "global" if scope_dir == GLOBAL_DIR else "project"
@@ -849,7 +875,7 @@ def project_dirs() -> list[str]:
     d = store_dir()
     if not d.is_dir():
         return []
-    return sorted(p.name for p in d.iterdir() if p.is_dir() and PROJECT_DIR_RE.match(p.name))
+    return sorted(p.name for p in d.iterdir() if p.is_dir() and PROJECT_DIR_RE.fullmatch(p.name))
 
 
 # --------------------------------------------------------------------------
@@ -971,13 +997,30 @@ def promote() -> list[dict]:
     return pending
 
 
+def approve_pending(pid: str, iid: str) -> tuple[bool, str] | None:
+    """Approve a PENDING instinct of project `pid`: append an active line to this host's file.
+
+    None when the id is not pending in that project (the caller then tries the global promotion
+    path). Approving twice is a no-op success (the merged status is already active).
+    """
+    if not ID_RE.fullmatch(iid or ""):
+        return None
+    m = next((x for x in merge_instincts(pid) if x["id"] == iid), None)
+    if m is None or m["status"] == "retired":
+        return None
+    if m["status"] == "active":
+        return True, f"already approved: {iid}"
+    _append_line(pid, host_name(), _stored_line(dict(m, status="active"), host_name()))
+    return True, f"approved: {iid} (project {pid}) conf={m['confidence']:.2f}"
+
+
 def approve(iid: str) -> tuple[bool, str]:
     """Write the `scope: global` line for a CURRENT candidate; returns (ok, message).
 
     Not a candidate: (False, "not a promotion candidate") and nothing written.
     Already approved: a no-op success (file untouched).
     """
-    if not ID_RE.match(iid or ""):
+    if not ID_RE.fullmatch(iid or ""):
         return False, "not a promotion candidate"
     if any(l["id"] == iid for l in read_lines(GLOBAL_DIR)):
         return True, f"already approved: {iid}"
@@ -1024,7 +1067,12 @@ def retire(iid: str, scope_dirs: list[str]) -> list[str]:
 
 
 def forget(pid: str) -> list[Path]:
-    """Delete local observations and THIS host's instinct file for a project; returns paths removed."""
+    """Delete what this machine derived for a project; returns paths removed.
+
+    Local observations, THIS host's instinct file, `META.json` once no host file remains, the
+    project's entry in status.json and its opt-in marker. Other hosts' files, derived `_global`
+    lines and git history are NOT touched (the CLI says so).
+    """
     removed = []
     obs = instincts_state_dir() / pid
     if obs.is_dir():
@@ -1034,6 +1082,24 @@ def forget(pid: str) -> list[Path]:
     if mine.is_file():
         mine.unlink()
         removed.append(mine)
+    store_pid = store_dir() / pid
+    meta = store_pid / "META.json"
+    if meta.is_file() and not list(store_pid.glob("*.jsonl")):
+        meta.unlink()
+        removed.append(meta)
+    sp = _status_path()
+    try:
+        status = json.loads(sp.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        status = None
+    if isinstance(status, dict) and isinstance(status.get("projects"), dict) and pid in status["projects"]:
+        del status["projects"][pid]
+        _write_if_changed(sp, json.dumps(status, indent=2, sort_keys=True) + "\n")
+        removed.append(sp)
+    marker = marker_path(pid)
+    if marker.is_file():
+        remove_marker(pid)
+        removed.append(marker)
     return removed
 
 
@@ -1067,6 +1133,15 @@ def cmd_clusters() -> str:
 # --------------------------------------------------------------------------
 
 def main(argv: list[str]) -> int:
+    """CLI entry: a data path inside the repo is a one-line error, never a traceback."""
+    try:
+        return _main(argv)
+    except RepoPathError as e:
+        print(f"instincts: {e}", file=sys.stderr)
+        return 1
+
+
+def _main(argv: list[str]) -> int:
     cmd = argv[0] if argv else ""
     if cmd == "project-id" and len(argv) <= 2:
         pid = git_project_id(argv[1] if len(argv) == 2 else ".")
@@ -1090,32 +1165,49 @@ def main(argv: list[str]) -> int:
             print(f"pending global: {c['id']} projects={c['projects']} conf={c['confidence']:.2f}")
         return 0
     if cmd == "approve" and len(argv) == 2:
+        # A pending instinct of the current project is approved first; otherwise today's
+        # global promotion path.
+        here = git_project_id(".")
+        pend = approve_pending(here, argv[1]) if here else None
+        if pend is not None:
+            print(pend[1])
+            return 0
         ok, msg = approve(argv[1])
         print(msg, file=sys.stdout if ok else sys.stderr)
         return 0 if ok else 1
     if cmd == "show" and len(argv) <= 2:
         pid = argv[1] if len(argv) == 2 else git_project_id(".")
-        if pid is None or not PROJECT_DIR_RE.match(pid):
+        if pid is None or not PROJECT_DIR_RE.fullmatch(pid):
             print("instincts: pass a project id (12 hex), or run inside a repo with a git remote",
                   file=sys.stderr)
             return 1
         print(cmd_show(pid))
         return 0
-    if cmd == "retire" and len(argv) in (2, 3):
-        # Scopes: the named (or current) project, plus the global set.
-        pid = argv[2] if len(argv) == 3 else git_project_id(".")
-        scopes = ([pid] if pid and PROJECT_DIR_RE.match(pid) else []) + [GLOBAL_DIR]
-        if len(argv) == 3 and not scopes[0] == pid:
+    if cmd == "retire" and 2 <= len(argv) <= 4:
+        # Scopes: the named (or current) project only. The GLOBAL instinct (every project's) needs --global.
+        args = [a for a in argv[1:] if a != "--global"]
+        want_global = len(args) != len(argv) - 1
+        if not 1 <= len(args) <= 2:
+            print("instincts: usage: retire ID [PROJECT] [--global]", file=sys.stderr)
+            return 2
+        iid = args[0]
+        pid = args[1] if len(args) == 2 else git_project_id(".")
+        if len(args) == 2 and not (pid and PROJECT_DIR_RE.fullmatch(pid)):
             print("instincts: bad project id", file=sys.stderr)
             return 1
-        done = retire(argv[1], scopes)
+        scopes = ([pid] if pid and PROJECT_DIR_RE.fullmatch(pid) else []) + ([GLOBAL_DIR] if want_global else [])
+        done = retire(iid, scopes)
         if not done:
-            print(f"instincts: no active instinct '{argv[1]}' to retire", file=sys.stderr)
+            shown = sanitize(iid, 60)
+            hint = ""
+            if not want_global and any(x["id"] == iid and x["status"] == "active" for x in merge_instincts(GLOBAL_DIR)):
+                hint = " (it is active as a GLOBAL instinct for every project: add --global to retire that)"
+            print(f"instincts: no active instinct '{shown}' to retire{hint}", file=sys.stderr)
             return 1
-        print(f"retired {argv[1]} in: {', '.join(done)}")
+        print(f"retired {sanitize(iid, 60)} in: {', '.join(done)}")
         return 0
     if cmd == "forget" and len(argv) in (2, 3) and (len(argv) == 2 or argv[2] == "--yes"):
-        if not PROJECT_DIR_RE.match(argv[1]):
+        if not PROJECT_DIR_RE.fullmatch(argv[1]):
             print("instincts: forget needs a project id (12 hex)", file=sys.stderr)
             return 1
         if len(argv) == 2:
@@ -1125,9 +1217,12 @@ def main(argv: list[str]) -> int:
             return 1
         for p in forget(argv[1]):
             print(f"deleted {p}")
+        print("note: capture stays off until the emitter is re-run; set `learning: off` in the project's "
+              ".grid/project.yaml to keep it off. Not removed: git history of the private repo, other "
+              "hosts' files and derived _global lines (purge them by hand).")
         return 0
     print("usage: lib.py project-id [DIR] | scrub | promote | approve ID | show [PROJECT] "
-          "| retire ID [PROJECT] | forget PROJECT --yes | clusters", file=sys.stderr)
+          "| retire ID [PROJECT] [--global] | forget PROJECT --yes | clusters", file=sys.stderr)
     return 2
 
 

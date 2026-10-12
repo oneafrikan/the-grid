@@ -188,8 +188,9 @@ print(m["newer-retired"], m["older-retired"])'
   n="$(printf '%s\n' "$out" | grep -c '^- ')"
   [ "$n" -ge 1 ]
   [ "$n" -lt 6 ]
-  # every item line is complete: it still ends with its (conf x.xx) tail
+  # every item line is complete: it still ends with its (conf x.xx) tail, and the block its end marker
   [ "$(printf '%s\n' "$out" | grep '^- ' | grep -vc '(conf [0-9.]*)$')" -eq 0 ]
+  [ "$(printf '%s\n' "$out" | tail -1)" = "[end of hints]" ]
 }
 
 @test "inject: confidence 0.49 is excluded, 0.50 included" {
@@ -338,4 +339,125 @@ print(m["newer-retired"], m["older-retired"])'
   [[ "$output" != *"testing-one"* ]]
   [[ "$output" == *"global: strong-global"* ]]
   [[ "$output" != *"weak-global"* ]]
+}
+
+
+# --- WP-030: pending gate, hint framing, run log, retire and forget semantics ---------------
+
+@test "inject: hints are quoted lines and the block ends with [end of hints]" {
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  fx "$PID" host-a good-habit 0.7 2026-W40
+  cd "$BATS_TEST_TMPDIR/repo"
+  run "$SH" inject
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'- hint: "when testing good-habit: do the good-habit thing" (conf 0.70)'* ]]
+  [ "$(printf '%s\n' "$output" | tail -1)" = "[end of hints]" ]
+}
+
+@test "inject: a pending instinct is never printed; an approved one is" {
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  fx "$PID" host-a unreviewed-habit 0.8 2026-W40 pending
+  fx "$PID" host-a reviewed-habit 0.7 2026-W40
+  cd "$BATS_TEST_TMPDIR/repo"
+  run "$SH" inject
+  [[ "$output" == *"reviewed-habit"* ]]
+  [[ "$output" != *"unreviewed-habit"* ]]
+  run "$SH" approve unreviewed-habit
+  [ "$status" -eq 0 ]
+  run "$SH" inject
+  [[ "$output" == *"unreviewed-habit"* ]]
+}
+
+@test "merge: pending when only pending lines exist, active when any line is active, retired rule unchanged" {
+  fx $PA host-a only-pending 0.6 2026-W40 pending
+  fx $PA host-a both 0.4 2026-W40 pending
+  fx $PA host-b both 0.5 2026-W40 active
+  fx $PA host-a gone 0.6 2026-W39 pending
+  fx $PA host-b gone 0.6 2026-W40 retired
+  run pylib 'm={x["id"]:x for x in lib.merge_instincts("aaaaaaaaaaaa")}
+print(m["only-pending"]["status"], m["both"]["status"], m["both"]["confidence"], m["gone"]["status"])'
+  [ "$status" -eq 0 ]
+  [ "$output" = "pending active 0.5 retired" ]
+}
+
+@test "approve: a pending instinct of the current project becomes active; a second approve is a no-op success" {
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  fx "$PID" host-b new-habit 0.3 2026-W40 pending
+  cd "$BATS_TEST_TMPDIR/repo"
+  run "$SH" approve new-habit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"approved"* ]]
+  grep -q '"status": "active"' "$STORE/$PID/host-a.jsonl"
+  before="$(snapshot)"
+  run "$SH" approve new-habit
+  [ "$status" -eq 0 ]
+  [ "$(snapshot)" = "$before" ]
+}
+
+@test "show: pending instincts are listed with their status" {
+  fx $PA host-a waiting-habit 0.3 2026-W40 pending
+  run "$SH" show $PA
+  [[ "$output" == *"pending"* && "$output" == *"waiting-habit"* ]]
+}
+
+@test "inject: the injected ids and confidences are written to the run log; a broken run-record never breaks the hook" {
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  fx "$PID" host-a first-habit 0.7 2026-W40
+  fx "$PID" host-a second-habit 0.6 2026-W40
+  cd "$BATS_TEST_TMPDIR/repo"
+  export GRID_RUN_LOG="$BATS_TEST_TMPDIR/runs.jsonl"
+  run "$SH" inject
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .role "$GRID_RUN_LOG")" = "instincts" ]
+  [ "$(jq -r .action "$GRID_RUN_LOG")" = "inject" ]
+  [ "$(jq -r .note "$GRID_RUN_LOG")" = "ids=first-habit:0.70,second-habit:0.60" ]
+  # an unwritable log must not change the hook's output or status
+  GRID_RUN_LOG="/proc/no/such/dir/runs.jsonl" run "$SH" inject
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"first-habit"* ]]
+}
+
+@test "retire: ID PROJECT retires the project scope only; --global retires the global one" {
+  fx $PA host-a shared-habit 0.7 2026-W40
+  fx _global host-a shared-habit 0.7 2026-W40
+  run "$SH" retire shared-habit $PA
+  [ "$status" -eq 0 ]
+  run pylib 'print(lib.merge_instincts("aaaaaaaaaaaa")[0]["status"], lib.merge_instincts("_global")[0]["status"])'
+  [ "$output" = "retired active" ]
+  run "$SH" retire shared-habit $PA --global
+  [ "$status" -eq 0 ]
+  run pylib 'print(lib.merge_instincts("_global")[0]["status"])'
+  [ "$output" = "retired" ]
+}
+
+@test "retire: an id that is active only globally prints the --global hint and changes nothing" {
+  fx _global host-a only-global 0.7 2026-W40
+  before="$(snapshot)"
+  run "$SH" retire only-global $PA
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--global"* ]]
+  [ "$(snapshot)" = "$before" ]
+}
+
+@test "forget: also drops META.json, the status entry and the marker, keeps other hosts' files, and says what remains" {
+  mkdir -p "$GRID_STATE_DIR/instincts/$PA" "$GRID_STATE_DIR/instincts/enabled"
+  echo '{}' > "$GRID_STATE_DIR/instincts/$PA/obs-2026-W40.jsonl"
+  printf '/some/root' > "$GRID_STATE_DIR/instincts/enabled/$PA"
+  echo '{"version":1,"projects":{"aaaaaaaaaaaa":{"last_week":"2026-W40"},"bbbbbbbbbbbb":{"last_week":"2026-W40"}},"other":1}' > "$GRID_STATE_DIR/instincts/status.json"
+  fx $PA host-a mine 0.6 2026-W40
+  fx $PA host-b theirs 0.6 2026-W40
+  echo '{"id":"aaaaaaaaaaaa"}' > "$STORE/$PA/META.json"
+  run "$SH" forget $PA --yes
+  [ "$status" -eq 0 ]
+  [ ! -e "$GRID_STATE_DIR/instincts/enabled/$PA" ]
+  [ "$(jq -r '.projects | keys | join(",")' "$GRID_STATE_DIR/instincts/status.json")" = "bbbbbbbbbbbb" ]
+  [ "$(jq -r .other "$GRID_STATE_DIR/instincts/status.json")" = "1" ]
+  [[ "$output" == *"learning: off"* ]]
+  [[ "$output" == *"git history"* ]]
+  # another host's file remains, so META.json stays; once it is gone too, forget removes META.json
+  [ -f "$STORE/$PA/META.json" ]
+  [ -f "$STORE/$PA/host-b.jsonl" ]
+  rm "$STORE/$PA/host-b.jsonl"; fx $PA host-a again 0.6 2026-W40
+  run "$SH" forget $PA --yes
+  [ ! -e "$STORE/$PA/META.json" ]
 }

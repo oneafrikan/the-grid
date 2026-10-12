@@ -69,10 +69,10 @@ PY
 @test "eval-prompt --validate exits 0 on the shipped cases" {
   run "$SH" eval-prompt --validate
   [ "$status" -eq 0 ]
-  [[ "$output" == *"validated 12 case(s)"* ]]
+  [[ "$output" == *"validated 17 case(s)"* ]]
   [[ "$output" == *"0 problem(s)"* ]]
-  # twelve files, c01 to c12
-  [ "$(ls "$CASES"/c*.json | wc -l)" -eq 12 ]
+  # seventeen files, c01 to c17
+  [ "$(ls "$CASES"/c*.json | wc -l)" -eq 17 ]
 }
 
 @test "--validate makes no model call" {
@@ -150,7 +150,7 @@ PY
 
 @test "the plan and worst-case spend are printed before anything is refused" {
   run "$SH" eval-prompt --runs 2 --budget 0.04
-  [[ "$output" == *"plan: 12 case(s) x 2 run(s) x \$0.04 cap = worst case \$0.96"* ]]
+  [[ "$output" == *"plan: 17 case(s) x 2 run(s) x \$0.04 cap = worst case \$1.36"* ]]
 }
 
 @test "an unknown --case is a usage error with no call" {
@@ -165,12 +165,12 @@ PY
   case_stub
   GRID_EVALS=1 run "$SH" eval-prompt --yes --runs 2
   [ "$status" -eq 0 ]
-  [[ "$output" == *"plan: 12 case(s) x 2 run(s)"* ]]
+  [[ "$output" == *"plan: 17 case(s) x 2 run(s)"* ]]
   [[ "$output" != *"FAIL"* ]]
   [[ "$output" != *"FLIPPING"* ]]
-  [ "$(grep -c ': 2/2 pass' <<<"$output")" -eq 12 ]
-  [ "$(wc -l < "$RESULTS")" -eq 24 ]
-  [ "$(wc -l < "$CASE_STUB_LOG")" -eq 24 ]
+  [ "$(grep -c ': 2/2 pass' <<<"$output")" -eq 17 ]
+  [ "$(wc -l < "$RESULTS")" -eq 34 ]
+  [ "$(wc -l < "$CASE_STUB_LOG")" -eq 34 ]
   # every line carries the full reply and the funnel counts, and all of them passed
   python3 - "$RESULTS" <<'PY'
 import json, sys
@@ -178,7 +178,7 @@ rows = [json.loads(l) for l in open(sys.argv[1])]
 assert all(r["pass"] is True and r["error"] is None for r in rows), rows
 assert all(isinstance(r["reply"], str) and r["ret"] is not None and r["valid"] is not None for r in rows)
 assert all(r["pv"].startswith("1:") for r in rows)
-assert len({r["case"] for r in rows}) == 12
+assert len({r["case"] for r in rows}) == 17
 PY
 }
 
@@ -202,7 +202,7 @@ PY
   [[ "$output" == *"fetch-and-run-script"* ]]          # the failing reply, verbatim
   [[ "$output" == *"c01-repeated-correction: 1/1 pass"* ]]
   [[ "$output" == *"c12-secret-shaped: 1/1 pass"* ]]
-  [ "$(wc -l < "$RESULTS")" -eq 12 ]
+  [ "$(wc -l < "$RESULTS")" -eq 17 ]
 }
 
 @test "a case that passes only some runs is marked FLIPPING" {

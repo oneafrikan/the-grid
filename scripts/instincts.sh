@@ -13,9 +13,9 @@
 #                                   append one observation; always exit 0, no stdout
 #   instincts.sh inject             SessionStart hook: print habit hints (silent if none/opted out)
 #   instincts.sh promote            list global-promotion candidates (writes no instinct)
-#   instincts.sh approve ID         promote candidate ID to a global instinct
+#   instincts.sh approve ID         approve a pending instinct of this repo, else promote a global candidate
 #   instincts.sh show [PROJECT]     table of merged instincts (default: current repo)
-#   instincts.sh retire ID [PROJECT]  retire an instinct (this host's file)
+#   instincts.sh retire ID [PROJECT] [--global]  retire an instinct (this host's file; --global for a global one)
 #   instincts.sh forget PROJECT --yes delete local observations + this host's instincts
 #   instincts.sh clusters           clusters and strong global instincts, as plain text for Tank
 #   instincts.sh analyse [--all] [--project ID] [--dry-run] [--force] [--no-sync]
@@ -59,9 +59,9 @@ Usage:
   instincts.sh capture            record one hook event from stdin (used by the hooks)
   instincts.sh inject             SessionStart hook: print habit hints for this project
   instincts.sh promote            list instincts ready to become global (pending approval)
-  instincts.sh approve ID         make a pending candidate a global instinct
+  instincts.sh approve ID         approve a pending instinct of this repo, else promote a global candidate
   instincts.sh show [PROJECT]     list merged instincts for PROJECT (id; default: this repo)
-  instincts.sh retire ID [PROJECT]  retire an instinct on this host
+  instincts.sh retire ID [PROJECT] [--global]  retire an instinct on this host
   instincts.sh forget PROJECT --yes delete local observations and this host's instincts
   instincts.sh clusters           clusters and strong global instincts (input for tank)
   instincts.sh analyse [--all] [--project ID] [--dry-run] [--force] [--no-sync]
