@@ -116,6 +116,8 @@ if [ -n "$top" ] && [ "$top" = "$phys" ]; then
         out="$(pgit commit -m "usage: $HOST $(date -u +%Y-%m-%d)" -- "$file" 2>&1)"; rc=$?
         logcmd "git commit" "$rc" "$out"
       fi
+    elif [ -e "$PRIVATE/$file" ] || [ -L "$PRIVATE/$file" ]; then
+      log "git add skipped: $file is not a regular file"
     fi
 
     # Pull only while no tracked file outside usage/ is modified: a rebase refuses

@@ -274,6 +274,43 @@ install() {
   [ ! -e "$T/state/weekly.lock" ]
 }
 
+# --- weekly.sh write hygiene (WP-026) --------------------------------------------
+
+@test "two simultaneous weekly.sh runs: one logs already running, no traceback" {
+  private_repo
+  mark_remote
+  # A python3 shim that stalls the first run inside the extractor so the second overlaps it.
+  mkdir -p "$T/slowbin"
+  printf '#!/bin/bash\nsleep 3\nexec %s "$@"\n' "$(command -v python3)" > "$T/slowbin/python3"
+  chmod +x "$T/slowbin/python3"
+  PATH="$T/slowbin:$PATH" bash "$WEEKLY" &
+  first=$!
+  sleep 1
+  PATH="$T/slowbin:$PATH" run bash "$WEEKLY"
+  [ "$status" -eq 0 ]
+  wait "$first"
+  [ "$(grep -c 'already running' "$T/state/usage.log")" = 1 ]
+  ! grep -q Traceback "$T/state/usage.log"
+}
+
+@test "usage/<host>.json as a symlink is not staged" {
+  private_repo
+  mark_remote
+  mkdir -p "$GRID_PRIVATE_DIR/usage"
+  printf 'victim\n' > "$T/victim.txt"
+  ln -s "$T/victim.txt" "$GRID_PRIVATE_DIR/usage/testhost.json"
+  # An extractor that "succeeds" without writing, so weekly.sh reaches the staging step.
+  mkdir -p "$T/okbin"
+  printf '#!/bin/bash\nexit 0\n' > "$T/okbin/python3"
+  chmod +x "$T/okbin/python3"
+  before="$(git -C "$GRID_PRIVATE_DIR" rev-parse HEAD)"
+  PATH="$T/okbin:$PATH" run bash "$WEEKLY"
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$GRID_PRIVATE_DIR" rev-parse HEAD)" = "$before" ]
+  [ -z "$(git -C "$GRID_PRIVATE_DIR" ls-files usage)" ]
+  grep -q 'not a regular file' "$T/state/usage.log"
+}
+
 # --- install-schedule.sh -------------------------------------------------------
 
 # paths_ok <file...> — every absolute path in the files is under $T, the repo, or a

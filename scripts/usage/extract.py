@@ -15,8 +15,17 @@ never double counts across overlapping weekly scans. It cannot repair an
 inflated value, which is why the adapter's de-duplication must be right.
 
 Exit codes: 0 ok (including "no adapters available"), 1 existing host file is
-unusable (left untouched), 2 refused (bad host name, or --out inside the repo).
+unusable (left untouched), 2 refused (bad host name or --since-day, --out inside
+the repo, or --out / the host file is a symlink).
 Output holds counts only: no prompt text, paths, project names or ids.
+
+Writes: the document is REBUILT from a whitelist (schema, host, updated,
+harnesses.<name>.{days,listing,wired}); anything else in an existing host file
+(extra keys, strings, odd names) is dropped with one stderr note, so a tampered or
+hand-edited file self-heals instead of being re-published. Adding a new field to the
+output therefore needs an edit to `sanitize_old` below. The file is written through a
+unique temp file (mkstemp, O_EXCL) and renamed over the target, never through a
+fixed name that a planted symlink could redirect.
 """
 from __future__ import annotations
 
@@ -28,11 +37,23 @@ import os
 import re
 import socket
 import sys
+import tempfile
+
+# Never leave __pycache__ in the checkout (set before the adapters are imported).
+sys.dont_write_bytecode = True
 
 SCHEMA = 1
 # Below this the transcripts may expire before a missed weekly run catches up.
 MIN_RETENTION_DAYS = 45
 TOKEN_FIELDS = ("in", "out", "cache_read", "cache_write")
+
+# Shapes a stored name/day may have. Duplicated from adapters/claude_code.py on
+# purpose (this script knows nothing about adapters); they are the whitelist applied
+# to an EXISTING host file, so keep them in step with the adapter's own filters.
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_.-]{0,63}")
+HOOK_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_.|*()-]{0,127}")
+DAY_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+DEFAULT_AGENT = "(default)"  # the adapter's name for an Agent call with no subagent_type
 
 
 def die(code, msg):
@@ -49,6 +70,10 @@ def pick_host(arg):
     host = re.sub(r"[^A-Za-z0-9._-]", "_", raw)
     if not host or host.lower() == "localhost":
         die(2, "refusing host name %r (empty or localhost); pass --host or set GRID_HOST" % raw)
+    # "." and ".." would escape the host-file namespace; a leading "." makes a file the
+    # aggregator skips as hidden, so the data would silently never be read.
+    if host.startswith("."):
+        die(2, "refusing host name %r (starts with '.'); pass --host or set GRID_HOST" % raw)
     return host
 
 
@@ -78,6 +103,97 @@ def merge_max(old, new):
             and not isinstance(old, bool) and not isinstance(new, bool)):
         return max(old, new)
     return new
+
+
+def _is_count(v):
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+def sanitize_old(old, host, drops):
+    """Rebuild an existing host file from the whitelist; `drops` (a one-item list)
+    counts every entry left out. Only day keys, non-negative int counts and names
+    that pass the filters survive. A valid-looking but inflated count cannot be told
+    from a real one (max-merge keeps it); only the shape is enforced here."""
+    def counts(m, name_re, extra=()):
+        out = {}
+        if not isinstance(m, dict):
+            drops[0] += 1
+            return out
+        for k, v in m.items():
+            if isinstance(k, str) and (name_re.fullmatch(k) or k in extra) and _is_count(v):
+                out[k] = v
+            else:
+                drops[0] += 1
+        return out
+
+    def day_bucket(b):
+        out = {}
+        if not isinstance(b, dict):
+            drops[0] += 1
+            return out
+        for key, val in b.items():
+            if key in ("skills", "slash"):
+                c = counts(val, NAME_RE)
+            elif key == "agents":
+                c = counts(val, NAME_RE, (DEFAULT_AGENT,))
+            elif key == "hooks":
+                c = counts(val, HOOK_NAME_RE)
+            elif key == "tokens":
+                c = {}
+                for model, tok in (val.items() if isinstance(val, dict) else ()):
+                    if isinstance(model, str) and NAME_RE.fullmatch(model) and isinstance(tok, dict):
+                        t = {f: v for f, v in tok.items() if f in TOKEN_FIELDS + ("msgs",) and _is_count(v)}
+                        drops[0] += len(tok) - len(t)
+                        c[model] = t
+                    else:
+                        drops[0] += 1
+            else:
+                drops[0] += 1
+                continue
+            if c:
+                out[key] = c
+        return out
+
+    updated = old.get("updated")
+    clean = {"schema": SCHEMA, "host": host,
+             "updated": updated if isinstance(updated, str) and DAY_RE.fullmatch(updated) else None,
+             "harnesses": {}}
+    drops[0] += len(set(old) - set(clean))
+    harnesses = old.get("harnesses")
+    for name, blk in (harnesses.items() if isinstance(harnesses, dict) else ()):
+        if not (isinstance(name, str) and NAME_RE.fullmatch(name) and isinstance(blk, dict)):
+            drops[0] += 1
+            continue
+        h = {"days": {}, "listing": {}}
+        drops[0] += len(set(blk) - {"days", "listing", "wired"})
+        days = blk.get("days")
+        for day, b in (days.items() if isinstance(days, dict) else ()):
+            if isinstance(day, str) and DAY_RE.fullmatch(day):
+                cb = day_bucket(b)
+                if cb:
+                    h["days"][day] = cb
+            else:
+                drops[0] += 1
+        listing = blk.get("listing")
+        for day, ls in (listing.items() if isinstance(listing, dict) else ()):
+            if (isinstance(day, str) and DAY_RE.fullmatch(day) and isinstance(ls, dict)
+                    and set(ls) <= {"skills", "chars"} and all(_is_count(v) for v in ls.values())):
+                h["listing"][day] = dict(ls)
+            else:
+                drops[0] += 1
+        wired = blk.get("wired")
+        if isinstance(wired, dict):
+            w = {}
+            for kind, names in wired.items():
+                if kind in ("skills", "agents") and isinstance(names, list):
+                    w[kind] = [n for n in names if isinstance(n, str) and NAME_RE.fullmatch(n)]
+                    drops[0] += len(names) - len(w[kind])
+                else:
+                    drops[0] += 1
+            if w:
+                h["wired"] = w
+        clean["harnesses"][name] = h
+    return clean
 
 
 def sum_events(events):
@@ -134,12 +250,21 @@ def main():
     args = ap.parse_args()
 
     host = pick_host(args.host)
-    # Personal data never lands in the public repo.
-    grid_dir = os.environ.get("GRID_DIR") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    if inside(args.out, grid_dir):
-        die(2, "refusing --out %s: it is inside the repo (%s)" % (args.out, grid_dir))
+    if args.since_day is not None and not DAY_RE.fullmatch(args.since_day):
+        die(2, "--since-day %r is not a YYYY-MM-DD date" % args.since_day)
+    # Personal data never lands in the public repo. Check against BOTH this script's own
+    # repo root and $GRID_DIR: a stale or wrong $GRID_DIR must not disarm the guard.
+    own_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for root in sorted({own_root, os.environ.get("GRID_DIR") or own_root}):
+        if inside(args.out, root):
+            die(2, "refusing --out %s: it is inside the repo (%s)" % (args.out, root))
+    # A symlinked --out or host file would redirect the write somewhere else.
+    if os.path.islink(args.out):
+        die(2, "refusing --out %s: it is a symlink" % args.out)
 
     target = os.path.join(args.out, host + ".json")
+    if os.path.islink(target):
+        die(2, "refusing %s: the host file is a symlink" % target)
     old = None
     if os.path.exists(target):
         # Never overwrite a file we cannot read: the previous good copy is in git.
@@ -157,7 +282,14 @@ def main():
         print("usage-extract: no adapters available; nothing to do")
         return 0
 
-    doc = json.loads(json.dumps(old)) if old else {"schema": SCHEMA, "host": host, "updated": None, "harnesses": {}}
+    if old:
+        drops = [0]
+        doc = sanitize_old(old, host, drops)
+        if drops[0]:
+            print("usage-extract: dropped %d unexpected entries from the existing %s" % (drops[0], target),
+                  file=sys.stderr)
+    else:
+        doc = {"schema": SCHEMA, "host": host, "updated": None, "harnesses": {}}
     harnesses = doc.setdefault("harnesses", {})
     total, notes, warnings = 0, [], []
     for a in adapters:
@@ -182,12 +314,19 @@ def main():
     else:
         doc["updated"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
         os.makedirs(args.out, exist_ok=True)
-        # Hidden temp name in the same directory: atomic rename, and a leftover
-        # can never be mistaken for a host file.
-        tmp = os.path.join(args.out, "." + host + ".json.tmp")
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(doc, sort_keys=True, indent=2) + "\n")
-        os.replace(tmp, target)
+        # Unique hidden temp name in the same directory (mkstemp opens it O_EXCL, so a
+        # planted file or symlink is never opened and two runs never share one): atomic
+        # rename, and a leftover can never be mistaken for a host file.
+        fd, tmp = tempfile.mkstemp(dir=args.out, prefix="." + host + ".json.")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(doc, sort_keys=True, indent=2) + "\n")
+            os.replace(tmp, target)
+        finally:
+            try:
+                os.unlink(tmp)   # still there only when the write or the rename failed
+            except FileNotFoundError:
+                pass
         status = "written"
 
     print("usage-extract: host=%s adapters=%s events=%d %s %s%s"

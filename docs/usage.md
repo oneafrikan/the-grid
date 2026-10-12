@@ -30,6 +30,13 @@ One file per host: `<private>/usage/<host>.json` (default private dir
 `~/.the-grid-private`, override: `GRID_PRIVATE_DIR`). Only that host writes it, so
 git never conflicts. Keys are sorted, output is 2-space indented.
 
+The extractor rebuilds the file from a whitelist of the keys below on every write:
+anything else in an existing file (extra keys, strings, names that fail the filters)
+is dropped with a one-line stderr note. It writes through a unique temp file and a
+rename, and refuses (exit 2) a symlinked `--out` or host file, a `--host` starting
+with `.`, and an `--out` inside this checkout (checked against the script's own
+location as well as `GRID_DIR`).
+
 ```json
 {
   "schema": 1,
