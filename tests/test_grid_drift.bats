@@ -258,7 +258,8 @@ assert d["ProgramArguments"][-2:] == ["drift", "--quiet"], d["ProgramArguments"]
   contains "$output" "00 09 * * 1"
   # The cron line is identified by its text, not by a tag comment.
   lacks "$output" "# the-grid drift"
-  contains "$output" "(crontab -l 2>/dev/null; echo '"
+  contains "$output" "crontab -l >"
+  contains "$output" "grep -vxF -- '"
 }
 
 @test "a grid path containing a space makes schedule install exit 2 and write nothing" {
