@@ -11,7 +11,7 @@
 #                               skills_dir agents_dir compose_target rules_file
 #                               rules_harness. Prints nothing for an unknown name.
 #   harness_valid <name>        exit 0 when <name> is a registry row
-#   harness_registry_check      validate every registry row (see below); exit 1 + message
+#   harness_registry_rows_check validate every registry row's shape and paths; exit 1 + message
 #   harness_path <value>        expand a registry path value (see below)
 #   harness_registry_check      exit 2 when two rows share a rules_file
 #   harness_rules_action <file> <active 0|1> <csv> [<raw>]
@@ -51,12 +51,12 @@ harness_field() {
   _harness_rows | awk -v n="$name" -v i="$idx" '$1 == n { print $i; exit }'
 }
 
-# harness_registry_check: every row must have exactly 6 columns, and skills_dir, agents_dir
+# harness_registry_rows_check: every row must have exactly 6 columns, and skills_dir, agents_dir
 # and rules_file must each be '-', an absolute path or '~/...' with no '..' component. wire.sh
 # calls it before any write, so a malformed or hostile row exits 2 instead of steering a link
 # (a short row used to reach harness_path with an empty value, a relative one landed under the
 # cwd). Prints "harness registry: row '<name>': <problem>" to stderr and returns 1 on the first.
-harness_registry_check() {
+harness_registry_rows_check() {
   local name skills agents _target rules rharness extra col val
   while read -r name skills agents _target rules rharness extra; do
     if [ -z "$rharness" ] || [ -n "$extra" ]; then
