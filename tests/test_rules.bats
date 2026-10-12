@@ -4,6 +4,8 @@
 # --root, so the real rules/ is only touched by the one `real packs lint clean` test.
 # These are the author's own checks; independent verification is qa-engineer's.
 
+bats_require_minimum_version 1.5.0   # `run --separate-stderr`
+
 load helpers/setup
 
 setup() {
@@ -639,11 +641,23 @@ fixture_block() {
     "$BEGIN_LINE" "$1" "$END_LINE"
 }
 
-# pad_pack PACK N: a single-rule pack whose body line is exactly N bytes, so the block
-# size is controllable. emit does not lint, so oversize rule files are fine as fixtures.
+# pad_pack PACK N: a pack of five lint-clean rule files whose bodies hold exactly N bytes in
+# all (bullet lines, newlines included), so the block size is controllable: block bytes =
+# fixed overhead + N. Valid fixtures, because emit re-lints every selected pack. N >= 20.
 pad_pack() {
-  mkdir -p "$R/rules/$1"
-  printf -- '---\npaths:\n  - "**/*.sql"\n---\n# Pad\n\n%s\n' "$(n_chars "$2")" > "$R/rules/$1/pad.md"
+  python3 - "$R/rules/$1" "$2" <<'PY'
+import os, sys
+d, n = sys.argv[1], int(sys.argv[2])
+os.makedirs(d, exist_ok=True)
+files = 5
+for i in range(files):
+    t = n // files + (1 if i < n % files else 0)      # body bytes of this file
+    lines = -(-t // 240)                               # fewest bullets of at most 240 bytes
+    sizes = [t // lines + (1 if k < t % lines else 0) for k in range(lines)]
+    body = "".join("- " + "x" * (sz - 3) + "\n" for sz in sizes)
+    with open(os.path.join(d, "pad%d.md" % i), "w") as fh:
+        fh.write('---\npaths:\n  - "**/*.sql"\n---\n# Pad\n\n' + body)
+PY
 }
 
 @test "emit agents-md: creates the file with exactly one block (H1 removed, header carries globs)" {
@@ -772,15 +786,15 @@ pad_pack() {
 }
 
 @test "emit agents-md: a block of exactly 12288 bytes is accepted, 12289 is refused" {
-  # Measure the fixed overhead with a 1-byte body line, then pad to the exact cap.
-  pad_pack pad 1
+  # Measure the fixed overhead with a 20-byte body, then pad to the exact cap.
+  pad_pack pad 20
   emit --harness agents-md --packs pad --out "$R/probe.md" >/dev/null
   base=$(wc -c < "$R/probe.md")
-  pad_pack pad $((1 + 12288 - base))
+  pad_pack pad $((20 + 12288 - base))
   run emit --harness agents-md --packs pad --out "$R/at-cap.md"
   [ "$status" -eq 0 ]
   [ "$(wc -c < "$R/at-cap.md")" -eq 12288 ]
-  pad_pack pad $((1 + 12289 - base))
+  pad_pack pad $((20 + 12289 - base))
   run emit --harness agents-md --packs pad --out "$R/over.md"
   [ "$status" -eq 2 ]
   [ ! -e "$R/over.md" ]
@@ -957,7 +971,9 @@ no_tmp_left() { [ -z "$(find "$1" -maxdepth 1 -name '*.tmp' -print -quit)" ]; }
 @test "emit cursor: a symlink at a target path pointing at a marker-bearing file is refused, victim survives" {
   make_pack sql
   mkdir -p "$R/out"
-  printf '<!-- the-grid:rules generated from rules/x/y.md; do not edit -->\nvictim\n' > "$R/victim.mdc"
+  # A genuine generated file as the victim (marker right after the frontmatter).
+  emit --harness cursor --packs sql --out "$R/gen" >/dev/null
+  cp "$R/gen/grid-sql-style.mdc" "$R/victim.mdc"
   cp "$R/victim.mdc" "$R/victim.orig"
   ln -s "$R/victim.mdc" "$R/out/grid-sql-style.mdc"
   run emit --harness cursor --packs sql --out "$R/out"
@@ -1039,6 +1055,141 @@ roundtrip() {
   sed -i 's/$/\r/' "$R/AGENTS.md"
   run emit --harness agents-md --packs sql --out "$R/AGENTS.md" --check
   [ "$status" -eq 0 ]
+}
+
+# --- marker handling and poisoning (WP-053) ---------------------------------------------------
+# Markers match only our exact lines; rule bodies may not carry marker text; emit re-lints.
+
+# A rule file whose fenced block holds a bare BEGIN/END marker pair (lint skips fenced text).
+write_poison_rule() {
+  printf -- '---\npaths:\n  - "**/*.sql"\n---\n# Poison\n\n```\n<!-- BEGIN the-grid rules -->\nx\n<!-- END the-grid rules -->\n```\n' > "$1"
+}
+
+@test "emit agents-md: a user fence quoting bare BEGIN/END lines survives emit and emit ''" {
+  make_pack sql
+  printf 'notes\n```\n<!-- BEGIN the-grid rules -->\nexample\n<!-- END the-grid rules -->\n```\n' > "$R/AGENTS.md"
+  cp "$R/AGENTS.md" "$R/orig"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  head -c "$(wc -c < "$R/orig")" "$R/AGENTS.md" | cmp - "$R/orig"
+  run emit --harness agents-md --packs "" --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  cmp "$R/AGENTS.md" "$R/orig"
+}
+
+@test "emit agents-md: lines that merely start like the markers (rules-docs) are user text" {
+  make_pack sql
+  printf 'keep1\n<!-- BEGIN the-grid rules-docs -->\nuser text between\n<!-- END the-grid rules-docs -->\nkeep2\n' > "$R/AGENTS.md"
+  cp "$R/AGENTS.md" "$R/orig"
+  run emit --harness agents-md --packs "" --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  cmp "$R/AGENTS.md" "$R/orig"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  grep -q 'user text between' "$R/AGENTS.md"
+}
+
+@test "E_MARKER: a marker line in a rule file is reported, bare or fenced, and a lone the-grid:rules mention too" {
+  make_pack bare
+  printf '<!-- BEGIN the-grid rules -->\n' >> "$R/rules/bare/style.md"
+  expect_code E_MARKER
+  rm -rf "$R/rules/bare"
+  make_pack fenced
+  write_poison_rule "$R/rules/fenced/style.md"
+  expect_only E_MARKER
+  rm -rf "$R/rules/fenced"
+  make_pack mention
+  printf -- '- Do not copy the-grid:rules lines.\n' >> "$R/rules/mention/style.md"
+  expect_only E_MARKER
+}
+
+@test "E_MARKER: prose that merely says the-grid rules (with a space) is not flagged" {
+  make_pack prose
+  printf -- '- Follow the-grid rules for naming.\n' >> "$R/rules/prose/style.md"
+  run lint
+  [ "$status" -eq 0 ]
+}
+
+@test "emit refuses a rule body that carries a marker line and does not write it" {
+  make_pack sql
+  write_poison_rule "$R/rules/sql/style.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [ ! -e "$R/AGENTS.md" ]
+  run emit --harness cursor --packs sql --out "$R/out"
+  [ "$status" -eq 2 ]
+  [ ! -e "$R/out" ]
+}
+
+@test "emit agents-md: a pack that fails lint is excluded and named, the clean pack is delivered (exit 2)" {
+  make_pack good
+  make_pack bad
+  write_poison_rule "$R/rules/bad/style.md"
+  run --separate-stderr emit --harness agents-md --packs good,bad --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"bad"* ]]
+  [[ "$stderr" == *"E_MARKER"* ]]
+  grep -q '^### good / style' "$R/AGENTS.md"
+  ! grep -q '^### bad / ' "$R/AGENTS.md" || false
+  # The delivered file still has exactly one block, so a later clean run can replace it.
+  [ "$(grep -c '^<!-- BEGIN the-grid rules' "$R/AGENTS.md")" -eq 1 ]
+}
+
+@test "emit cursor: a pack that fails lint is excluded, the clean pack is written (exit 2)" {
+  make_pack good
+  make_pack bad
+  write_poison_rule "$R/rules/bad/style.md"
+  run emit --harness cursor --packs good,bad --out "$R/out"
+  [ "$status" -eq 2 ]
+  [ -f "$R/out/grid-good-style.mdc" ]
+  [ ! -e "$R/out/grid-bad-style.mdc" ]
+}
+
+@test "render_block itself refuses marker text even when lint is bypassed (backstop)" {
+  make_pack sql
+  write_poison_rule "$R/rules/sql/style.md"
+  run python3 -c "
+import sys
+sys.path.insert(0, '$REPO_ROOT/scripts')
+import rules
+try:
+    rules.render_block('$R', ['sql'])
+except rules.Refusal as exc:
+    print('refused:', exc)
+    sys.exit(0)
+sys.exit(1)"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"refused"* ]]
+}
+
+@test "emit: a rule-file lint finding (E_STYLE prose line) blocks that pack" {
+  make_pack sql
+  printf 'This is a prose paragraph line.\n' >> "$R/rules/sql/style.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [ ! -e "$R/AGENTS.md" ]
+}
+
+@test "emit: pack-level findings (README, pack.yaml) do not block delivery" {
+  make_pack sql
+  rm "$R/rules/sql/README.md" "$R/rules/sql/pack.yaml"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  [ -f "$R/AGENTS.md" ]
+}
+
+@test "emit cursor: a hand-written grid-*.mdc quoting the marker mid-file survives emit '' and is refused as a target" {
+  make_pack sql
+  mkdir -p "$R/out"
+  printf -- '---\ndescription: mine\n---\nnotes\n<!-- the-grid:rules generated from rules/x/y.md; do not edit -->\nmore\n' > "$R/out/grid-mine.mdc"
+  cp "$R/out/grid-mine.mdc" "$R/mine.orig"
+  run emit --harness cursor --packs "" --out "$R/out"
+  [ "$status" -eq 0 ]
+  cmp "$R/out/grid-mine.mdc" "$R/mine.orig"
+  cp "$R/out/grid-mine.mdc" "$R/out/grid-sql-style.mdc"
+  run emit --harness cursor --packs sql --out "$R/out"
+  [ "$status" -eq 2 ]
+  cmp "$R/out/grid-sql-style.mdc" "$R/mine.orig"
 }
 
 # --- the real tree --------------------------------------------------------------------------

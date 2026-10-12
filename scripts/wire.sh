@@ -77,6 +77,8 @@ fi
 # Harness registry helpers and the portability filter for non-Claude skills dirs.
 # shellcheck source=lib/harness.sh
 . "$(dirname "$0")/lib/harness.sh"
+# Two harnesses sharing one rules_file is a registry error, refused before anything is wired.
+harness_registry_check || { echo "wire: the harness registry is invalid (see above)" >&2; exit 2; }
 # shellcheck source=lib/skill-portable.sh
 . "$(dirname "$0")/lib/skill-portable.sh"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
@@ -189,13 +191,18 @@ if [ "${1:-}" = "--check" ]; then
     while IFS=$'\t' read -r rw_name rw_active rw_csv; do
       rw_raw="$(harness_field "$rw_name" rules_file)"
       if ! rw_file="$(harness_path "$rw_raw")"; then rc=1; continue; fi
-      rw_action="$(harness_rules_action "$rw_file" "$rw_active" "$rw_csv")"
+      rw_action="$(harness_rules_action "$rw_file" "$rw_active" "$rw_csv" "$rw_raw")"
       case "$rw_action" in
         emit|remove)
           [ "$rw_action" = remove ] && rw_csv=""
           if ! command -v python3 >/dev/null 2>&1; then
             echo "wire --check: python3 not found; rules in $rw_file not checked" >&2
           elif ! rw_out="$(harness_rules_emit "$(harness_field "$rw_name" rules_harness)" "$rw_csv" "$rw_file" --check 2>&1)"; then
+            if [ "$rw_action" = remove ] && [[ "$rw_out" == *"expected exactly one BEGIN"* ]]; then
+              # A damaged block in a file of an inactive harness is a warning, never drift.
+              echo "wire --check: rules ($rw_file): markers unbalanced, not checked" >&2
+              continue
+            fi
             echo "wire --check: rules drift in $rw_file ($rw_name):" >&2
             [ -z "$rw_out" ] || printf '%s\n' "$rw_out" >&2
             rc=1
@@ -836,7 +843,7 @@ while IFS= read -r h_name; do
   if ! rl_file="$(harness_path "$rl_raw")"; then
     echo "wire: rules delivery failed for $rl_raw: cannot resolve the path" >&2; rules_failed=1; continue
   fi
-  rl_action="$(harness_rules_action "$rl_file" "$rl_active" "$rules_csv")"
+  rl_action="$(harness_rules_action "$rl_file" "$rl_active" "$rules_csv" "$rl_raw")"
   case "$rl_action" in
     skip:*)
       MANIFEST_ROWS+=("rules@$rl_raw	$h_name	-	skipped	${rl_action#skip:}") ;;
@@ -847,8 +854,14 @@ while IFS= read -r h_name; do
         MANIFEST_ROWS+=("rules@$rl_raw	$h_name	-	skipped	python3 not found")
       elif rl_out="$(harness_rules_emit "$(harness_field "$h_name" rules_harness)" "$rl_packs" "$rl_file" 2>&1)"; then
         [ -z "$rl_out" ] || echo "  rules ($rl_raw): $rl_out"
+      elif [ "$rl_action" = remove ] && [[ "$rl_out" == *"expected exactly one BEGIN"* ]]; then
+        # Removal only runs for an inactive harness (or no packs): its damaged file is
+        # reported, not a failure, so a stray marker never turns every wire red.
+        echo "warning: rules ($rl_raw): markers unbalanced, block not removed: $rl_out" >&2
+        MANIFEST_ROWS+=("rules@$rl_raw	$h_name	-	skipped	markers-unbalanced")
       else
         echo "wire: rules delivery failed for $rl_raw ($h_name): $rl_out" >&2
+        MANIFEST_ROWS+=("rules@$rl_raw	$h_name	-	failed	emit refused or failed")
         rules_failed=1
       fi ;;
   esac

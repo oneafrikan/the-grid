@@ -332,3 +332,19 @@ make_generator_fixture() {
   GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/catalog.sh" --check
   [ "$status" -eq 0 ]
 }
+
+# ---------------------------------------------------------------- emit re-validation (WP-053)
+
+@test "a lint-failing pack is not delivered to a harness file while a clean pack is (wire exits 1)" {
+  make_pack bad x
+  # A marker line in a fence: lint-clean to the old emit, poison to the block.
+  printf -- '---\npaths:\n  - "**/*.x"\n---\n# x\n\n```\n<!-- BEGIN the-grid rules -->\n```\n' > "$MOCK_GRID/rules/bad/x.md"
+  mkdir -p "$GRID_HARNESS_HOME/.codex"
+  printf 'notes\n' > "$GRID_HARNESS_HOME/.codex/AGENTS.md"
+  printf 'rules:foo\nrules:bad\nharness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 1 ]
+  grep -q '^### foo / a' "$GRID_HARNESS_HOME/.codex/AGENTS.md"
+  ! grep -q '^### bad / ' "$GRID_HARNESS_HOME/.codex/AGENTS.md" || false
+  [[ "$stderr" == *"bad"* ]]
+}
