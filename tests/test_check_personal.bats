@@ -431,3 +431,12 @@ open(sys.argv[1], 'wb').write('contact jane.doe@corp-mail.org\n'.encode('utf-16'
   [[ "$output" == *"evals/case/c.md:1: [author-name-in-rendered-text]"* ]]
   [[ "$output" != *"README.md"* ]]
 }
+
+@test "(q) a NUL byte far into a file (after 400 KB) still makes it unscannable" {
+  python3 -c "
+import sys
+open(sys.argv[1], 'wb').write(b'a\n' * 200000 + b'\0' + b'contact jane.doe@corp-mail.org\n')" "$REPO/late.dat"
+  scan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"late.dat: [unscannable-binary]"* ]]
+}

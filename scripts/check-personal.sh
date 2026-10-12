@@ -329,7 +329,11 @@ if [ "${#FILES[@]}" -gt 0 ]; then
     # A non-empty file `grep -I` treats as binary (NUL byte, UTF-16) was skipped by every
     # line rule above, including the private denylist. Say so instead of passing silently;
     # a genuine binary asset is listed in personal-allow-paths.txt with a reason.
-    if [ "$blocked_here" -eq 0 ] && [ "$size" -gt 0 ] && ! grep -Iq . "$f" 2>/dev/null; then
+    # A NUL ANYWHERE counts, not just in the first buffer grep samples: compare the byte count
+    # with and without NULs.
+    nul_free="$(tr -d '\000' < "$f" | wc -c | tr -d ' ')"
+    if [ "$blocked_here" -eq 0 ] && [ "$size" -gt 0 ] \
+       && { [ "$nul_free" -ne "$size" ] || ! grep -Iq . "$f" 2>/dev/null; }; then
       report "$f: [unscannable-binary] not text: the line rules did not read it (add it to scripts/personal-allow-paths.txt with a reason if it is a genuine binary asset)"
     fi
   done
