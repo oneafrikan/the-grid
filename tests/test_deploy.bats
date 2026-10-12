@@ -4,11 +4,12 @@
 # test deploys into a temp project dir — never the real repo or ~/.claude.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   DEPLOY="$REPO_ROOT/agent-factory/deploy.py"
   PROJ=$(mktemp -d)
 }

@@ -6,11 +6,12 @@
 # roles/ tree is never touched, and output goes to a temp dir.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   COMPOSE="$REPO_ROOT/agent-factory/compose.py"
   PRIV=$(mktemp -d)
   OUT=$(mktemp -d)

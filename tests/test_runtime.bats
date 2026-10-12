@@ -169,7 +169,8 @@ rsetup() { GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scri
   printf 'mine\n' > "$MOCK_SKILLS/stubskill/keep.txt"
   run rsetup gstack
   [ "$status" -eq 0 ]
-  [ -d "$MOCK_SKILLS/stubskill" ] && [ ! -L "$MOCK_SKILLS/stubskill" ]
+  [ -d "$MOCK_SKILLS/stubskill" ]
+  [ ! -L "$MOCK_SKILLS/stubskill" ]
   [ "$(cat "$MOCK_SKILLS/stubskill/keep.txt")" = "mine" ]
 }
 

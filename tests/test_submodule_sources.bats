@@ -52,13 +52,14 @@ active_lines() {
 @test "every positive per-skill entry resolves to a skill dir in its submodule" {
   # shellcheck source=../scripts/lib/find-skill-mds.sh
   . "$REPO_ROOT/scripts/lib/find-skill-mds.sh"
-  local failed=0 entry repo skill head names p
+  local failed=0 seen=0 entry repo skill head names p
   while IFS= read -r entry; do
     case "$entry" in -*) continue ;; esac            # subtraction
     [[ "$entry" == */* ]] || continue                # whole-repo line: test (e)
     head="${entry%%/*}"
     case "$head" in *:*) continue ;; esac            # typed line (project:, rules:, ...)
     repo="$head"; skill="${entry#*/}"
+    seen=$((seen + 1))
     # Uninitialised submodule: report, do not fail (CI inits them all).
     if [ -z "$(ls -A "$REPO_ROOT/repos/$repo" 2>/dev/null)" ]; then
       echo "skipped (repos/$repo not initialised): $entry" >&3
@@ -77,20 +78,24 @@ active_lines() {
       failed=1
     fi
   done < <(active_lines)
+  # A loop over zero entries passes: the example baseline must keep per-skill lines.
+  [ "$seen" -gt 0 ]
   [ "$failed" -eq 0 ]
 }
 
 @test "every positive whole-repo entry names an existing repos/ dir" {
-  local failed=0 entry
+  local failed=0 seen=0 entry
   while IFS= read -r entry; do
     case "$entry" in -*) continue ;; esac
     [[ "$entry" == */* ]] && continue                # per-skill: test (d)
     case "$entry" in *:*) continue ;; esac           # typed line
+    seen=$((seen + 1))
     if [ ! -d "$REPO_ROOT/repos/$entry" ]; then
       echo "no such repo dir: repos/$entry" >&3
       failed=1
     fi
   done < <(active_lines)
+  [ "$seen" -gt 0 ]
   [ "$failed" -eq 0 ]
 }
 

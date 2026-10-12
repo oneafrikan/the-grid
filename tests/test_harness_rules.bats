@@ -127,7 +127,7 @@ assert_user_text() {
   printf 'harness:codex\n' > "$OVERLAY"
   wire
   [ "$status" -eq 0 ]
-  ! grep -qF "$MARK" "$CODEX_MD"
+  ! grep -qF "$MARK" "$CODEX_MD" || false
   assert_user_text "$CODEX_MD" "$BATS_TEST_TMPDIR/user.orig"
 }
 
@@ -151,7 +151,7 @@ assert_user_text() {
   printf 'rules:fx\n' > "$OVERLAY"
   wire
   [ "$status" -eq 0 ]
-  ! grep -qF "$MARK" "$CODEX_MD"
+  ! grep -qF "$MARK" "$CODEX_MD" || false
   assert_user_text "$CODEX_MD" "$BATS_TEST_TMPDIR/user.orig"
 }
 
@@ -163,7 +163,7 @@ assert_user_text() {
   grep -qF "$MARK" "$CODEX_MD"
   GRID_HARNESS=gemini wire
   [ "$status" -eq 0 ]
-  ! grep -qF "$MARK" "$CODEX_MD"
+  ! grep -qF "$MARK" "$CODEX_MD" || false
   grep -qF "$MARK" "$GEMINI_MD"
 }
 

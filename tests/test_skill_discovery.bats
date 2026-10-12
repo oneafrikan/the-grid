@@ -6,12 +6,16 @@
 
 load helpers/setup
 
+# common_setup lives in setup() (not in the one test that needs MOCK_GRID): the sandbox
+# tripwire then runs for every case, and common_teardown runs even when a case fails.
 setup() {
+  common_setup
   FIX_ROOT="$(mktemp -d)"
 }
 
 teardown() {
   rm -rf "$FIX_ROOT"
+  common_teardown
 }
 
 # Write a SKILL.md at <repo>/<rel>.
@@ -56,11 +60,11 @@ check_fixture() { # $1 = repo dir
   printf '%s\n' "$out" | grep -qx 'skills/engineering/b/SKILL.md'
   printf '%s\n' "$out" | grep -qx 'docs/guides/a/SKILL.md'
   # dropped: translations
-  ! printf '%s\n' "$out" | grep -q 'docs/ja-JP'
-  ! printf '%s\n' "$out" | grep -q 'docs/tr/'
-  ! printf '%s\n' "$out" | grep -q 'i18n/zh-CN'
+  ! printf '%s\n' "$out" | grep -q 'docs/ja-JP' || false
+  ! printf '%s\n' "$out" | grep -q 'docs/tr/' || false
+  ! printf '%s\n' "$out" | grep -q 'i18n/zh-CN' || false
   # dropped: harness copies
-  ! printf '%s\n' "$out" | grep -q '^\.kiro'
+  ! printf '%s\n' "$out" | grep -q '^\.kiro' || false
   ! printf '%s\n' "$out" | grep -q '^\.agents'
 }
 
@@ -113,18 +117,16 @@ check_fixture() { # $1 = repo dir
   # No literal count: it moves with every ECC bump. Must be non-empty though.
   [ "$want" -gt 0 ]
   [ "$n" -eq "$want" ]
-  ! printf '%s\n' "$out" | grep -q '/docs/'
-  ! printf '%s\n' "$out" | grep -q '/\.'
+  ! printf '%s\n' "$out" | grep -q '/docs/' || false
+  ! printf '%s\n' "$out" | grep -q '/\.' || false
   # Every path sits under repos/ecc/skills/.
   [ "$(printf '%s\n' "$out" | grep -vc "^$REPO_ROOT/repos/ecc/skills/")" -eq 0 ]
 }
 
 @test "catalog: .kiro copy is not counted, skills/ skill is (count 1)" {
-  common_setup
   make_skill "$MOCK_GRID/repos/dup/skills/real" "real"
   make_skill "$MOCK_GRID/repos/dup/.kiro/skills/real" "real"
   printf 'dup\n' > "$MOCK_GRID/baseline-submodules.txt"
   GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh" "$MOCK_SKILLS/SKILLS.md"
   grep -q '^## repos/dup (wired) — 1$' "$MOCK_SKILLS/SKILLS.md"
-  common_teardown
 }

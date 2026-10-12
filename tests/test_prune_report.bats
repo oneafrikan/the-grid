@@ -131,7 +131,7 @@ tree_hash() { (cd "$1" && { find . | sort; find . -type f -print0 | sort -z | xa
 @test "(e) keep-listed names never appear in proposals" {
   prune
   # grid-help is wired and never used; it must not show up anywhere in the report.
-  ! echo "$output" | grep -q 'grid-help'
+  ! echo "$output" | grep -q 'grid-help' || false
   prune --json
   [ "$(jget "$output" "[p['name'] for p in d['proposals'] if p['name'] == 'grid-help']")" = "[]" ]
 }
@@ -145,7 +145,7 @@ tree_hash() { (cd "$1" && { find . | sort; find . -type f -print0 | sort -z | xa
   prune
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'insufficient history: 1 days of 28 required'
-  ! echo "$output" | grep -qE 'name-only|Proposals|demote|skillOverrides|agent `'
+  ! echo "$output" | grep -qE 'name-only|Proposals|demote|skillOverrides|agent `' || false
   echo "$output" | grep -q '^## Evidence'
   prune --json
   [ "$(jget "$output" "[d['insufficient'], d['proposals']]")" = "[true, []]" ]

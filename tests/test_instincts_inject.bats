@@ -183,7 +183,8 @@ print(m["newer-retired"], m["older-retired"])'
   out="$("$SH" inject)"
   [ "${#out}" -le 1500 ]
   n="$(printf '%s\n' "$out" | grep -c '^- ')"
-  [ "$n" -ge 1 ] && [ "$n" -lt 6 ]
+  [ "$n" -ge 1 ]
+  [ "$n" -lt 6 ]
   # every item line is complete: it still ends with its (conf x.xx) tail
   [ "$(printf '%s\n' "$out" | grep '^- ' | grep -vc '(conf [0-9.]*)$')" -eq 0 ]
 }

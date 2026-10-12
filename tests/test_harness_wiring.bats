@@ -83,8 +83,12 @@ stub_agent() {
   [ "$(find "$HS" -mindepth 1 | wc -l | tr -d ' ')" -eq 2 ]
   [ "$(readlink "$HS/skill-alpha")" = "$MOCK_GRID/skills/skill-alpha/" ]
   # The non-portable ones are absent there but still wired for Claude.
-  [ ! -e "$HS/claude-skill" ] && [ ! -e "$HS/template" ] && [ ! -e "$HS/long-desc" ]
-  [ -L "$MOCK_SKILLS/claude-skill" ] && [ -L "$MOCK_SKILLS/template" ] && [ -L "$MOCK_SKILLS/long-desc" ]
+  [ ! -e "$HS/claude-skill" ]
+  [ ! -e "$HS/template" ]
+  [ ! -e "$HS/long-desc" ]
+  [ -L "$MOCK_SKILLS/claude-skill" ]
+  [ -L "$MOCK_SKILLS/template" ]
+  [ -L "$MOCK_SKILLS/long-desc" ]
   # Claude dirs are still populated; no other harness dir exists (no agents composed).
   [ -L "$MOCK_SKILLS/skill-alpha" ]
   [ ! -e "$GRID_HARNESS_HOME/.codex" ] && [ ! -e "$GRID_HARNESS_HOME/.config" ]
@@ -114,7 +118,8 @@ stub_agent() {
   GRID_HARNESS=nonesuch wire
   [ "$status" -eq 2 ]
   [[ "$stderr" == *"nonesuch"* ]]
-  [[ "$stderr" == *"codex"* ]] && [[ "$stderr" == *"opencode"* ]]
+  [[ "$stderr" == *"codex"* ]]
+  [[ "$stderr" == *"opencode"* ]]
   [ -z "$(tree "$GRID_HARNESS_HOME")" ]
   [ -z "$(tree "$MOCK_SKILLS")" ]
   [ ! -e "$MANIFEST" ]
@@ -161,7 +166,8 @@ only_shared_dir() {
   stub_all_agents
   GRID_HARNESS=pi wire
   [ "$status" -eq 0 ]
-  [ -L "$HS/skill-alpha" ] && [ -L "$HS/skill-beta" ]
+  [ -L "$HS/skill-alpha" ]
+  [ -L "$HS/skill-beta" ]
   # Pi documents no sub-agents: neither its agents dir nor any agent link may appear.
   [ ! -e "$GRID_HARNESS_HOME/.pi/agent/agents" ]
   # The ONLY thing under the harness home is the shared skills dir (no .codex, .config, ...).
@@ -175,7 +181,8 @@ only_shared_dir() {
   stub_all_agents
   GRID_HARNESS=openclaw wire
   [ "$status" -eq 0 ]
-  [ -L "$HS/skill-alpha" ] && [ -L "$HS/skill-beta" ]
+  [ -L "$HS/skill-alpha" ]
+  [ -L "$HS/skill-beta" ]
   [ ! -e "$GRID_HARNESS_HOME/.openclaw" ]
   # Agents for OpenClaw come from deploy_openclaw.sh, never from wire.sh.
   only_shared_dir
@@ -287,13 +294,15 @@ only_shared_dir() {
   printf 'harness:codex\nharness:opencode\n' > "$OVERLAY"
   stub_agent codex x.toml
   wire
-  [ -L "$HS/skill-alpha" ] && [ -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
+  [ -L "$HS/skill-alpha" ]
+  [ -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
   mkdir -p "$OTHER_DIR/ext"
   ln -s "$OTHER_DIR/ext" "$HS/external"
   printf 'harness:codex\nharness:opencode\n-harness:codex\n-harness:opencode\n' > "$OVERLAY"
   wire
   [ "$status" -eq 0 ]
-  [ ! -e "$HS/skill-alpha" ] && [ ! -L "$HS/skill-alpha" ]
+  [ ! -e "$HS/skill-alpha" ]
+  [ ! -L "$HS/skill-alpha" ]
   [ ! -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
   [ "$(readlink "$HS/external")" = "$OTHER_DIR/ext" ]
 }
@@ -312,10 +321,11 @@ only_shared_dir() {
   printf 'mine\n' > "$HS/skill-alpha/note"
   wire
   [ "$status" -eq 0 ]
-  [ ! -L "$HS/skill-alpha" ] && [ -f "$HS/skill-alpha/note" ]
+  [ ! -L "$HS/skill-alpha" ]
+  [ -f "$HS/skill-alpha/note" ]
   [[ "$output" == *"skip (~/.agents/skills: exists, not managed): skill-alpha"* ]]
   # The reconcile.sh prefix must never appear (it would rm -rf the Claude-dir twin).
-  ! printf '%s\n' "$output" | grep -q '^  skip (real dir, not managed)'
+  ! printf '%s\n' "$output" | grep -q '^  skip (real dir, not managed)' || false
   grep -qF "skill@~/.agents/skills	skill-alpha	$MOCK_GRID/skills/skill-alpha/	skipped	exists, not managed" "$MANIFEST"
   # And reconcile.sh, run against the same dirs, finds nothing to reconcile. It calls
   # $GRID_DIR/scripts/wire.sh itself, so the mock grid borrows the real scripts dir.
@@ -422,7 +432,8 @@ only_shared_dir() {
   wire
   [ "$status" -eq 0 ]
   [ "$(readlink "$MOCK_SKILLS/gstack")" = "$MOCK_GRID/repos/gstack" ]   # Claude keeps it
-  [ ! -e "$HS/gstack" ] && [ ! -L "$HS/gstack" ]
+  [ ! -e "$HS/gstack" ]
+  [ ! -L "$HS/gstack" ]
   [ -L "$HS/stubskill" ]                                                # real skills still go
   grep -qF "skill@~/.agents/skills	gstack	$MOCK_GRID/repos/gstack	skipped	runtime-root" "$MANIFEST"
   # No stdout skip line for it either.
@@ -552,22 +563,32 @@ fm_skill() {
   printf -- '---\n%s\n---\n%s\n' "$2" "${3:-body}" > "$1/SKILL.md"
 }
 
+# portable_fails DIR REASON: skill_portable must exit 1 AND print exactly REASON. The old
+# `[ "$(skill_portable DIR || true)" = REASON ]` form discarded the status, so a reason that
+# printed correctly but returned 0 (a skill that would still be linked) went unnoticed.
+portable_fails() {
+  run skill_portable "$1"
+  [ "$status" -eq 1 ]
+  [ "$output" = "$2" ]
+}
+
 @test "skill_portable: the five reasons, in order" {
   . "$REPO_ROOT/scripts/lib/skill-portable.sh"
   local d="$BATS_TEST_TMPDIR/sk"
   mkdir -p "$d/nofm" && printf 'no frontmatter\n' > "$d/nofm/SKILL.md"
-  [ "$(skill_portable "$d/nofm" || true)" = "no-frontmatter" ]
+  portable_fails "$d/nofm" no-frontmatter
   mkdir -p "$d/nofile"
-  [ "$(skill_portable "$d/nofile" || true)" = "no-frontmatter" ]
+  portable_fails "$d/nofile" no-frontmatter
   fm_skill "$d/a-b" 'name: other'
-  [ "$(skill_portable "$d/a-b" || true)" = "name-mismatch" ]
+  portable_fails "$d/a-b" name-mismatch
   fm_skill "$d/Bad_Name" 'name: Bad_Name'
-  [ "$(skill_portable "$d/Bad_Name" || true)" = "name-invalid" ]
+  portable_fails "$d/Bad_Name" name-invalid
   fm_skill "$d/trail--dash" 'name: trail--dash'
-  [ "$(skill_portable "$d/trail--dash" || true)" = "name-invalid" ]
+  portable_fails "$d/trail--dash" name-invalid
   fm_skill "$d/ok" 'name: ok'
   run skill_portable "$d/ok"
-  [ "$status" -eq 0 ] && [ -z "$output" ]
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
   # Each claude-specific marker, including one in a nested file; -I skips a binary.
   fm_skill "$d/c1" 'name: c1' 'see ~/.claude/x'
   fm_skill "$d/c2" 'name: c2' 'see $HOME/.claude'
@@ -576,7 +597,7 @@ fm_skill() {
   fm_skill "$d/c5" 'name: c5'
   mkdir -p "$d/c5/refs" && printf 'x ~/.claude/y\n' > "$d/c5/refs/n.md"
   local s
-  for s in c1 c2 c3 c4 c5; do [ "$(skill_portable "$d/$s" || true)" = "claude-specific" ]; done
+  for s in c1 c2 c3 c4 c5; do portable_fails "$d/$s" claude-specific; done
   fm_skill "$d/bin" 'name: bin'
   printf '\000\001.claude/\000' > "$d/bin/blob.bin"
   run skill_portable "$d/bin"
@@ -584,6 +605,23 @@ fm_skill() {
   # A trailing slash on the dir (how wire.sh links root skills) is the same skill.
   run skill_portable "$d/ok/"
   [ "$status" -eq 0 ]
+}
+
+# The documented order is "the first hit wins" (skill-portable.sh): a skill with two
+# problems reports only the earlier one, so a later check cannot jump the queue unnoticed.
+@test "skill_portable: with two reasons the first in the documented order wins" {
+  . "$REPO_ROOT/scripts/lib/skill-portable.sh"
+  local d="$BATS_TEST_TMPDIR/sk2"
+  # Invalid dir name AND frontmatter naming something else: mismatch is checked first.
+  fm_skill "$d/Bad_Name" 'name: other'
+  portable_fails "$d/Bad_Name" name-mismatch
+  # Invalid dir name AND a Claude-only path in the body: name-invalid is checked first.
+  fm_skill "$d/Bad_Two" 'name: Bad_Two' 'see ~/.claude/x'
+  portable_fails "$d/Bad_Two" name-invalid
+  # Over-long description AND a Claude-only path: description-long is checked first.
+  fm_skill "$d/long-and-claude" "name: long-and-claude
+description: $(printf 'x%.0s' $(seq 1 1100))" 'see ~/.claude/x'
+  portable_fails "$d/long-and-claude" description-long
 }
 
 @test "skill_portable: description limit is 1024 chars after folding a block scalar" {
@@ -660,14 +698,16 @@ description: >
   stub_all_agents
   GRID_HARNESS=gemini wire
   [ "$status" -eq 0 ]
-  [ -L "$HS/skill-alpha" ] && [ -L "$HS/skill-beta" ]
+  [ -L "$HS/skill-alpha" ]
+  [ -L "$HS/skill-beta" ]
   [ -L "$GRID_HARNESS_HOME/.gemini/agents/a.md" ]
   [ "$(readlink "$GRID_HARNESS_HOME/.gemini/agents/a.md")" = "$MOCK_GRID/agent-factory/projects/p/_gemini-cli/agents/a.md" ]
   # Only the gemini agent target was linked: nothing from the codex/opencode/openclaw stubs,
   # and no Antigravity dir (.gemini holds just agents/ and agents/a.md).
   [ "$(find "$GRID_HARNESS_HOME/.gemini" -mindepth 1 | wc -l | tr -d ' ')" -eq 2 ]
   [ ! -e "$GRID_HARNESS_HOME/.gemini/antigravity-cli" ]
-  [ ! -e "$GRID_HARNESS_HOME/.codex" ] && [ ! -e "$GRID_HARNESS_HOME/.config" ]
+  [ ! -e "$GRID_HARNESS_HOME/.codex" ]
+  [ ! -e "$GRID_HARNESS_HOME/.config" ]
   # Idempotent, and no drift afterwards.
   local t1; t1="$(tree "$GRID_HARNESS_HOME")"
   GRID_HARNESS=gemini wire
