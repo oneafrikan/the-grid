@@ -13,9 +13,9 @@
 #                                   append one observation; always exit 0, no stdout
 #   instincts.sh inject             SessionStart hook: print habit hints (silent if none/opted out)
 #   instincts.sh promote            list global-promotion candidates (writes no instinct)
-#   instincts.sh approve ID         promote candidate ID to a global instinct
+#   instincts.sh approve ID         approve a pending instinct of this repo, else promote a global candidate
 #   instincts.sh show [PROJECT]     table of merged instincts (default: current repo)
-#   instincts.sh retire ID [PROJECT]  retire an instinct (this host's file)
+#   instincts.sh retire ID [PROJECT] [--global]  retire an instinct (this host's file; --global for a global one)
 #   instincts.sh forget PROJECT --yes delete local observations + this host's instincts
 #   instincts.sh clusters           clusters and strong global instincts, as plain text for Tank
 #   instincts.sh analyse [--all] [--project ID] [--dry-run] [--force] [--no-sync]
@@ -32,7 +32,7 @@
 #                                   funnel (ret/valid/kept), drop reasons and WARN rules
 #   instincts.sh eval-prompt --validate
 #                                   free checks of the labelled prompt cases (no model call)
-#   instincts.sh eval-prompt --yes [--runs N] [--budget USD] [--case NAME]
+#   instincts.sh eval-prompt --yes [--runs N] [--budget USD] [--max-total USD] [--case NAME]
 #                                   PAID live eval of the prompt; also needs GRID_EVALS=1
 #   instincts.sh help               this text
 #
@@ -59,9 +59,9 @@ Usage:
   instincts.sh capture            record one hook event from stdin (used by the hooks)
   instincts.sh inject             SessionStart hook: print habit hints for this project
   instincts.sh promote            list instincts ready to become global (pending approval)
-  instincts.sh approve ID         make a pending candidate a global instinct
+  instincts.sh approve ID         approve a pending instinct of this repo, else promote a global candidate
   instincts.sh show [PROJECT]     list merged instincts for PROJECT (id; default: this repo)
-  instincts.sh retire ID [PROJECT]  retire an instinct on this host
+  instincts.sh retire ID [PROJECT] [--global]  retire an instinct on this host
   instincts.sh forget PROJECT --yes delete local observations and this host's instincts
   instincts.sh clusters           clusters and strong global instincts (input for tank)
   instincts.sh analyse [--all] [--project ID] [--dry-run] [--force] [--no-sync]
@@ -72,7 +72,7 @@ Usage:
                                   analysis funnel and warnings
   instincts.sh eval-prompt --validate
                                   check the labelled prompt cases (free, no model call)
-  instincts.sh eval-prompt --yes [--runs N] [--budget USD] [--case NAME]
+  instincts.sh eval-prompt --yes [--runs N] [--budget USD] [--max-total USD] [--case NAME]
                                   live prompt eval; costs money, needs GRID_EVALS=1
   instincts.sh help               show this help
 
@@ -168,7 +168,10 @@ case "$cmd" in
     exit 0 ;;
   inject)
     # SessionStart hook body; inject.py puts its own directory on sys.path (-I drops it).
-    exec python3 -I "$SCRIPT_DIR/instincts/inject.py" "$@" ;;
+    # A hook must never fail or print: no exec (python3 missing would be exit 127), stderr dropped,
+    # status forced to 0.
+    python3 -I "$SCRIPT_DIR/instincts/inject.py" "$@" 2>/dev/null
+    exit 0 ;;
   analyse|status|sync)
     # analyse.py adds its own directory to sys.path (python3 -I does not).
     exec python3 -I "$ANALYSE" "$cmd" "$@" ;;

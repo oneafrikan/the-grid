@@ -155,3 +155,108 @@ YAML
   [ "$status" -eq 1 ]
   [[ "$output" == *"E_CASE: touchfiles.yaml"* ]]
 }
+
+
+# --- WP-029: instincts prompt in eval selection (D47) ---------------------------------------
+
+# instincts_pointer — the one line --changed prints when an instincts file changed.
+POINTER="instincts eval selected: run GRID_EVALS=1 scripts/instincts.sh eval-prompt --yes"
+
+@test "an edit to the analyser prompt, analyse.py, lib.py or an instincts case prints the instincts pointer" {
+  for f in scripts/instincts/prompts/analyse-v1.md scripts/instincts/analyse.py scripts/instincts/lib.py \
+           evals/instincts/c01-example.json; do
+    mkdir -p "$R/$(dirname "$f")"; echo base > "$R/$f"; commit "add $f"
+    touch_commit "$f"
+    changed
+    [ "$status" -eq 0 ] || { echo "$f: status $status"; return 1; }
+    [[ "$output" == *"$POINTER"* ]] || { echo "$f: $output"; return 1; }
+    [[ "$output" != *"no eval-relevant changes"* ]] || { echo "$f: said no changes"; return 1; }
+  done
+}
+
+@test "the instincts pointer is printed next to a role selection too" {
+  mkdir -p "$R/scripts/instincts"; echo base > "$R/scripts/instincts/analyse.py"; commit "add analyse"
+  echo change >> "$R/scripts/instincts/analyse.py"
+  echo change >> "$R/agent-factory/roles/qa-engineer/AGENTS.md"
+  commit "both"
+  changed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$POINTER"* ]]
+  [[ "$output" == *"qa-engineer"* ]]
+}
+
+@test "an unrelated instincts-adjacent file (docs) does not print the pointer" {
+  mkdir -p "$R/docs"; echo base > "$R/docs/instincts.md"; commit "add doc"
+  touch_commit docs/instincts.md
+  changed
+  [[ "$output" != *"instincts eval selected"* ]]
+}
+
+@test "validate rejects a malformed eval: rule (unknown value, or mixed with roles)" {
+  cat > "$R/evals/touchfiles.yaml" <<'YAML'
+rules:
+  - paths: ["README.md"]
+    eval: nonsense
+YAML
+  run "$PY" "$EVALS" --validate --repo "$R" --cases-dir "$R/evals/cases"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_CASE: touchfiles.yaml"* ]]
+  cat > "$R/evals/touchfiles.yaml" <<'YAML'
+rules:
+  - paths: ["README.md"]
+    eval: instincts
+    roles: all
+YAML
+  run "$PY" "$EVALS" --validate --repo "$R" --cases-dir "$R/evals/cases"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_CASE: touchfiles.yaml"* ]]
+}
+
+@test "--max-total applies to a real run without --changed too (worst case over the cap is refused)" {
+  run "$PY" "$EVALS" --repo "$R" --cases-dir "$R/evals/cases" --budget 1 --runs 20 --dry-run --max-total 5
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--max-total"* ]]
+  run "$PY" "$EVALS" --repo "$R" --cases-dir "$R/evals/cases" --budget nan --dry-run
+  [ "$status" -eq 2 ]
+}
+
+
+# --- WP-057: selection rules that mutation runs left unpinned ---------------------------------
+
+@test "an explicit roles list in a touchfile rule selects exactly those roles" {
+  cat > "$R/evals/touchfiles.yaml" <<'YAML'
+rules:
+  - paths: ["README.md"]
+    roles: [qa-engineer]
+YAML
+  commit "explicit roles"
+  touch_commit README.md
+  changed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"selected roles: qa-engineer"* ]]
+}
+
+@test "renaming a role's file selects the role (both the old and the new path count)" {
+  git -C "$R" mv agent-factory/roles/qa-engineer/AGENTS.md agent-factory/roles/qa-engineer/OLD.md
+  commit "rename"
+  changed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"selected roles: qa-engineer"* ]]
+}
+
+@test "a range that starts with a dash is rejected as E_RANGE and never reaches git as an option" {
+  run "$PY" "$EVALS" --repo "$R" --cases-dir "$R/evals/cases" "--changed=--output=$TMP/leak" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"E_RANGE"* ]]
+  [ ! -e "$TMP/leak" ]
+}
+
+@test "docs: --max-total is described as capping every plan, and the README lists the eval: rule form" {
+  # The cap became global in WP-029; these pinned the old "--changed only" wording.
+  # (a bare `! grep` does not fail a bats test, so the negatives go through `run`)
+  run grep -c -- '--changed only' "$EVALS"
+  [ "$output" = 0 ]
+  run grep -c -- '`--changed` exits 2' "$REPO_ROOT/evals/README.md"
+  [ "$output" = 0 ]
+  grep -q 'eval: <name>' "$REPO_ROOT/evals/README.md"
+}

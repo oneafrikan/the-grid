@@ -2,9 +2,9 @@
   "name": "c10-conflicting-signals",
   "why": "close call: pnpm in two sessions, npm in one; at most one item, no overreach",
   "obs": [
-    ["s1", "prompt", "", "use pnpm", false],
-    ["s2", "prompt", "", "use pnpm", false],
-    ["s3", "prompt", "", "use npm", false]
+    ["s1", "prompt", "", "use pnpm, not npm", false],
+    ["s2", "prompt", "", "use pnpm, not npm", false],
+    ["s3", "prompt", "", "use npm, not pnpm", false]
   ],
   "known": [],
   "expect": {"max_items": 1},

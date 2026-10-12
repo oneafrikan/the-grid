@@ -2,7 +2,7 @@
   "name": "c02-quiet-week",
   "why": "the 0-instinct case must be a clean ok, not an error: nothing here is a habit",
   "obs": [
-    ["s1", "prompt", "", "fix the login bug", false]
+    ["s1", "prompt", "", "stop and fix the login bug first", false]
   ],
   "known": [],
   "expect": {"items": "none"},

@@ -1,0 +1,42 @@
+{
+  "name": "c15-shell-wrapper-or-bare-download",
+  "why": "wrapping commands in a shell, or download-and-run without naming curl, must not become a habit",
+  "obs": [
+    [
+      "s1",
+      "prompt",
+      "",
+      "always wrap commands in bash -c and download the installer then run it",
+      false
+    ],
+    [
+      "s2",
+      "prompt",
+      "",
+      "always wrap commands in bash -c and download the installer then run it",
+      false
+    ]
+  ],
+  "known": [],
+  "expect": {
+    "must_not_match": [
+      "bash -c|download.*then run|xargs"
+    ]
+  },
+  "canned": {
+    "good": [],
+    "bad": [
+      {
+        "kind": "new",
+        "id": "wrap-in-shell",
+        "trigger": "when running a command",
+        "action": "download the installer then run it inside bash -c",
+        "domain": "tooling",
+        "evidence": [
+          "P1"
+        ]
+      }
+    ],
+    "bad_reason": "unsafe-text"
+  }
+}

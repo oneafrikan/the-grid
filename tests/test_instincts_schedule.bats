@@ -200,6 +200,37 @@ sync_as() {
   [ "$(git -C "$PA" rev-parse HEAD)" = "$before" ]
 }
 
+@test "sync: 'pushed' is printed only when a commit went out; otherwise 'nothing to push'" {
+  mk_remote_and_clones
+  write_instinct "$PA" host-a
+  sync_as host-a "$PA"
+  [[ "$output" == *"sync: pushed"* ]]
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing to push"* ]]
+  [[ "$output" != *"sync: pushed"* ]]
+}
+
+@test "sync: unrelated staged, modified and untracked files keep their state (the index is touched only at the instincts path)" {
+  mk_remote_and_clones
+  write_instinct "$PA" host-a
+  printf 'wip\n' > "$PA/staged.txt"
+  git -C "$PA" add staged.txt
+  printf 'new\n' > "$PA/untracked.txt"
+  printf 'edited\n' >> "$PA/README"
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  # the commit holds only the instincts file
+  [ "$(git -C "$PA" show --name-only --format= HEAD)" = "learning/instincts/aaaaaaaaaaaa/host-a.jsonl" ]
+  # the other files are exactly where they were: staged stays staged, the rest stays unstaged
+  git -C "$PA" status --porcelain > "$BATS_TEST_TMPDIR/status.txt"
+  # only the pre-staged file is in the index (the push marker the fixture writes is untracked)
+  [ "$(git -C "$PA" diff --cached --name-only)" = "staged.txt" ]
+  grep -Fxq ' M README' "$BATS_TEST_TMPDIR/status.txt"
+  grep -Fxq 'A  staged.txt' "$BATS_TEST_TMPDIR/status.txt"
+  grep -Fxq '?? untracked.txt' "$BATS_TEST_TMPDIR/status.txt"
+}
+
 @test "sync: stages only learning/instincts, never other files in the private repo" {
   mk_remote_and_clones
   write_instinct "$PA" host-a

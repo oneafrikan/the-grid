@@ -29,9 +29,12 @@ under `hooks:` is an error. User-scope catalogue hooks are never written to a pr
 
 Opt-in hooks (catalogue entries with "opt_in": "learning" instead of "min_profile") are
 not part of any profile. They are emitted exactly when the project.yaml top-level key
-`learning` is on (the YAML value true/on, or the string "on"/"true", any case), under
-every profile including `off`, and removed again when the flag goes off (see
-docs/instincts.md). `hooks:` still has no per-hook list.
+`learning` is on (the last top-level `learning:` line reads `on` or `true`, any case, quotes
+and a trailing comment allowed; bare `yes` is off; one shared parser, scripts/instincts/lib.py),
+under every profile including `off`, and removed again when the flag goes off (see
+docs/instincts.md). `hooks:` still has no per-hook list. Applying (not --check/--dry-run) also
+creates or removes a machine-local marker under the state dir that capture requires as well,
+and prints a one-line data-use notice when the instincts hooks are emitted.
 
 What lands in <project-dir>/.claude/:
     settings.local.json   (or settings.json with target: shared) gains one handler per hook:
@@ -251,28 +254,61 @@ def load_hooks_config(project: Path) -> dict:
     return cfg
 
 
+def _instincts_lib():
+    """scripts/instincts/lib.py of THIS repo (not $GRID_DIR: a fixture grid has none).
+
+    It is stdlib-only and holds the one `learning` parser and the opt-in marker helpers,
+    so the emitter and the capture hooks cannot disagree."""
+    sys.dont_write_bytecode = True  # importing must not drop a __pycache__ into the repo
+    d = str(REPO_ROOT / "scripts" / "instincts")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    import lib  # noqa: PLC0415
+    return lib
+
+
 def load_learning_flag(project: Path) -> bool:
     """True when <project>/.grid/project.yaml has the top-level `learning` key switched on.
 
-    On means the YAML boolean true (PyYAML reads a bare `on` as true) or the string
-    "on"/"true" in any case. Anything else, or no file, or no key, is off. Not strict like
-    `hooks:`: the value is a switch, and an unrecognised value just leaves it off.
-    load_hooks_config() has already rejected a non-mapping or invalid file by the time
-    this runs, so those cases are not re-reported here."""
+    Parsed by lib.read_learning_flag, the same function capture uses: last `learning:` line
+    wins, quotes and a trailing comment are allowed, and only `on`/`true` (any case) are on;
+    bare `yes`, `1` and unknown values are off. No file, a symlink or no key is off. Not
+    strict like `hooks:`: the value is a switch, and an unrecognised value just leaves it off."""
     path = project / CONTEXT_REL
     if path.is_symlink() or not path.is_file():
         return False
     try:
-        import yaml  # lazy, like load_hooks_config
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception:
+        return _instincts_lib().read_learning_flag(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
         return False
-    if not isinstance(data, dict):
-        return False
-    value = data.get("learning")
-    if value is True:  # `is`, not ==: the integer 1 equals True and must stay off
-        return True
-    return isinstance(value, str) and value.strip().lower() in ("on", "true")
+
+
+NOTICE = ("instincts: prompts and shell commands are recorded locally (lines holding secrets or "
+          "personal data are dropped) and a scrubbed digest is sent to a model weekly; "
+          "set learning: off and re-run this tool to stop")
+
+
+def sync_learning_marker(project: Path, emitting: bool) -> None:
+    """Create (instincts hooks emitted) or remove (not emitted) the machine-local opt-in marker.
+
+    Capture needs the repo flag AND this marker (design D44), so a cloned repo cannot turn
+    capture on by itself. Needs a git remote (the marker is named by the project id). A failure
+    here is a warning: it must not undo the settings files already written."""
+    try:
+        lib = _instincts_lib()
+        root = lib._git(str(project), "rev-parse", "--show-toplevel") or str(project)
+        pid = lib.git_project_id(root)
+        if not pid:
+            if emitting:
+                print("deploy_hooks: warning: no git remote, so instincts capture stays off "
+                      "(the project id is derived from the remote)", file=sys.stderr)
+            return
+        if emitting:
+            lib.write_marker(pid, root)
+        else:
+            lib.remove_marker(pid, root)
+    except (OSError, ValueError) as exc:
+        print(f"deploy_hooks: warning: could not update the instincts marker: {exc}", file=sys.stderr)
 
 
 def desired_for(hooks: list[dict], profile: str, learning: bool = False) -> list[tuple]:
@@ -568,7 +604,11 @@ def main() -> None:
     cfg = load_hooks_config(project)
     profile = args.profile or cfg.get("profile") or "off"      # flag, file, then off
     target = args.target or cfg.get("target") or "local"        # flag, file, then local
-    desired = desired_for(catalogue, profile, load_learning_flag(project))
+    learning = load_learning_flag(project)
+    desired = desired_for(catalogue, profile, learning)
+    # True when this run emits the instincts (opt_in: learning) hooks.
+    emitting_learning = learning and any(
+        h.get("opt_in") == "learning" and h["scope"] == "project" for h in catalogue)
 
     # --- plan every file before touching any: both settings files are swept; only the
     # target gets additions, so a target change moves entries instead of duplicating them.
@@ -617,6 +657,10 @@ def main() -> None:
         atomic_write(project / rel, new_text)
         changed += 1
     print(f"deploy_hooks: {project}  profile={profile}  target={target}  {len(desired)} hook(s), {changed} written.")
+    # Marker work only on a real apply (skipped under --check and --dry-run above).
+    sync_learning_marker(project, emitting_learning)
+    if emitting_learning:
+        print(NOTICE)
 
 
 if __name__ == "__main__":

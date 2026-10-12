@@ -28,6 +28,14 @@ setup() {
   printf 'learning: on\n' > "$PROJ/.grid/project.yaml"
   PID="$("$SH" project-id "$PROJ")"
   OBSDIR="$GRID_STATE_DIR/instincts/$PID"
+  mark_enabled
+}
+
+# mark_enabled — the machine-local opt-in marker the emitter writes (flag AND marker are
+# both required; see lib.learning_enabled). Content = the project root.
+mark_enabled() {
+  mkdir -p "$GRID_STATE_DIR/instincts/enabled"
+  (cd "$PROJ" && pwd -P) > "$GRID_STATE_DIR/instincts/enabled/$PID"
 }
 
 # payload <event> <tool> <key=json-value>... — print a hook payload derived from the fixture.
@@ -118,12 +126,15 @@ PY
   absent "$f" OUTPUTMARK
 }
 
-@test "a secret in the command is redacted in the file" {
+@test "a secret in the command never reaches the file (line dropped, or redacted)" {
   tok="ghp_$(printf 'a1B2c3D4e5F6g7H8i9J0%s' 'k1L2')"
   capture "$(bash_payload "curl -H 'Authorization: Bearer $tok' https://example.test; export API_KEY=abcd1234efgh5678")"
+  # The line holds a keyword with a value and a 20+ char digit-bearing run: dropped whole.
+  assert_no_file
+  # A secret shape with no keyword and no long run is redacted instead.
+  capture "$(bash_payload "docker login -u me -p hunter2x")"
   f="$(only_file)"
-  absent "$f" "$tok"
-  absent "$f" abcd1234efgh5678
+  absent "$f" hunter2x
   grep -q '\[REDACTED\]' "$f"
 }
 
@@ -131,7 +142,7 @@ PY
   long="$(printf 'x%.0s' $(seq 1 400))"
   capture "$(bash_payload "echo $long")"
   [ "$(field "$(only_file)" 1 in | tr -d '\n' | wc -c)" -le 300 ]
-  rm -rf "$GRID_STATE_DIR"
+  rm -rf "$GRID_STATE_DIR"; mark_enabled
   capture "$(bash_payload "cat $HOME/notes.txt $PROJ/src/a.sh")"
   v="$(field "$(only_file)" 1 in)"
   [ "$v" = "cat ~/notes.txt ./src/a.sh" ] || { echo "got: $v"; return 1; }
@@ -177,11 +188,9 @@ PY
   [ "$(field "$(only_file)" 1 in)" = /handoff ]
 }
 
-@test "a secret in a prompt is redacted" {
+@test "a secret in a prompt never reaches the file" {
   capture "$(payload UserPromptSubmit - 'prompt="use password=hunter2hunter2 for this"')"
-  f="$(only_file)"
-  absent "$f" hunter2
-  grep -q '\[REDACTED\]' "$f"
+  assert_no_file
 }
 
 # --- skip conditions: each writes nothing, exits 0, prints nothing ------------------------
@@ -242,8 +251,8 @@ skipped() {
 @test "skip: no git remote" {
   git -C "$PROJ" remote remove origin
   skipped "$(bash_payload ls)"
-  # nothing under the state dir either (no project id to name a directory)
-  [ ! -d "$GRID_STATE_DIR/instincts" ]
+  # no observation directory either (no project id to name one)
+  [ -z "$(ls "$GRID_STATE_DIR/instincts" | grep -v '^enabled$')" ]
 }
 
 @test "skip: cwd is not a git repo" {
@@ -339,4 +348,193 @@ skipped() {
   echo "# 20 captures wall time: $(python3 -c 'import sys; print(round(float(sys.argv[2])-float(sys.argv[1]), 2))' "$start" "$end")s" >&3
   f="$(only_file)"
   [ "$(wc -l < "$f")" -eq 20 ]
+}
+
+# --- WP-028: free text, PII, paths, opt-in marker, retention ---------------------------
+
+AT='@'
+
+# prompt_payload <text> — a UserPromptSubmit payload carrying that prompt.
+prompt_payload() {
+  payload UserPromptSubmit - "prompt=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1")"
+}
+
+@test "prompts holding a natural-language secret, an email, an SSN or a long token record nothing" {
+  for p in "my password is hunter2x please remember it" \
+           "send the report to jane.doe${AT}corp.example.com" \
+           "her SSN is 123-45-6789" \
+           "the deploy key aB3dE5gH7jK9mN1pQ3sT5vW7 is live" \
+           "hunter2x is the password"; do
+    capture "$(prompt_payload "$p")"
+  done
+  assert_no_file
+}
+
+@test "a prompt keeps its clean lines when another line is dropped" {
+  capture "$(prompt_payload $'fix the failing test\nmy password is hunter2x')"
+  f="$(only_file)"
+  absent "$f" hunter2x
+  [ "$(field "$f" 1 in)" = "fix the failing test" ]
+}
+
+@test "commands naming a host, an email or an IP record nothing" {
+  for c in "scp me${AT}box.example.com:/x ." \
+           "git config user.email a${AT}b.example" \
+           "ssh deploy${AT}10.1.2"".3" \
+           'ping db.internal' \
+           "curl http://192.168.0"".7:8080/health" \
+           'ping6 2001:db8::1'; do
+    capture "$(bash_payload "$c")"
+  done
+  assert_no_file
+}
+
+@test "user@host:/path with a single-label host records nothing (path rewrites run first)" {
+  # The path rewrite turns `me@devbox:/tmp/x` into `me@devbox:(outside)/x` and a project-root path into
+  # `me@devbox:./x`; the scp-host drop has to see through both, or the user name and host leak.
+  for c in "scp f.txt me${AT}devbox:/tmp/x" \
+           "scp f.txt me${AT}devbox:$PROJ/out" \
+           "scp f.txt me${AT}devbox:$HOME/out" \
+           "rsync -a . me${AT}devbox:/srv/app/" \
+           "scp me${AT}devbox:/var/log/x ."; do
+    capture "$(bash_payload "$c")"
+  done
+  assert_no_file
+}
+
+@test "file names that look like hosts are kept (settings.local.json, lib.py, README.md)" {
+  capture "$(bash_payload 'cat .claude/settings.local.json lib.py README.md')"
+  [ "$(field "$(only_file)" 1 in)" = "cat .claude/settings.local.json lib.py README.md" ]
+}
+
+@test "an absolute path outside the project and HOME is stored as (outside)/<name>" {
+  capture "$(bash_payload 'cat /ho''me/u/work/x')"
+  capture "$(bash_payload 'ls /etc/ssl/certs; cp a /srv/data/out.txt')"
+  capture "$(bash_payload 'curl https://localhost/a/b')"
+  f="$(only_file)"
+  [ "$(field "$f" 1 in)" = "cat (outside)/x" ]
+  [ "$(field "$f" 2 in)" = "ls (outside)/certs; cp a (outside)/out.txt" ]
+  # URL paths are not filesystem paths
+  [ "$(field "$f" 3 in)" = "curl https://localhost/a/b" ]
+}
+
+@test "each credential-file name drops the whole observation" {
+  for c in 'cat ~/.pgpass' 'cat ~/.npmrc' 'cat ~/.kube/config' 'cat ~/.docker/config.json' \
+           'cp id_ecdsa k' 'cp id_dsa k' 'openssl pkcs12 -in a.p12' 'openssl pkcs12 -in a.pfx' \
+           'cat server.key' 'source .envrc' 'cat terraform.tfstate' 'cat secrets.yml' \
+           'cat ~/.git-credentials' 'cat ~/.pypirc' 'ls ~/.ssh/'; do
+    capture "$(bash_payload "$c")"
+  done
+  capture "$(payload PostToolUse Edit "tool_input={\"file_path\":\"$PROJ/deploy/prod.tfstate\"}")"
+  capture "$(payload PostToolUse Write "tool_input={\"file_path\":\"$PROJ/k/server.key\"}")"
+  assert_no_file
+}
+
+@test "names that merely contain a sensitive word are kept (monkey, keyboard.md)" {
+  capture "$(bash_payload 'cat monkey.txt keyboard.md')"
+  only_file >/dev/null
+}
+
+@test "opt-in: a trailing 'learning: off' after 'learning: on' stops capture" {
+  printf 'learning: on\nname: x\nlearning: off\n' > "$PROJ/.grid/project.yaml"
+  skipped "$(bash_payload ls)"
+}
+
+@test "opt-in: the flag without the machine-local marker records nothing" {
+  rm "$GRID_STATE_DIR/instincts/enabled/$PID"
+  skipped "$(bash_payload ls)"
+  # ... and the marker without the flag records nothing either
+  mark_enabled
+  printf 'learning: off\n' > "$PROJ/.grid/project.yaml"
+  skipped "$(bash_payload ls)"
+}
+
+@test "opt-in: another clone that claims the same remote records nothing until the emitter runs there" {
+  other="$BATS_TEST_TMPDIR/other-clone"
+  mkdir -p "$other/.grid"
+  git -C "$other" init -q
+  git -C "$other" remote add origin https://example.test/owner/repo.git
+  printf 'learning: on\n' > "$other/.grid/project.yaml"
+  PROJ="$other" skipped "$(PROJ="$other" bash_payload ls)"
+  # the original checkout still records
+  capture "$(bash_payload ls)"
+  only_file >/dev/null
+}
+
+@test "opt-in: bare yes is off and quoted 'on' is on, as in the emitter" {
+  printf 'learning: yes\n' > "$PROJ/.grid/project.yaml"
+  skipped "$(bash_payload ls)"
+  printf "learning: 'on'\n" > "$PROJ/.grid/project.yaml"
+  capture "$(bash_payload ls)"
+  only_file >/dev/null
+}
+
+@test "retention: a week file past 28 days is removed when a new week file is created" {
+  mkdir -p "$OBSDIR"
+  old="$(python3 -c 'import datetime as d; y,w,_=(d.date.today()-d.timedelta(days=60)).isocalendar(); print("obs-%d-W%02d.jsonl"%(y,w))')"
+  recent="$(python3 -c 'import datetime as d; y,w,_=(d.date.today()-d.timedelta(days=14)).isocalendar(); print("obs-%d-W%02d.jsonl"%(y,w))')"
+  echo '{}' > "$OBSDIR/$old"; echo '{}' > "$OBSDIR/$recent"
+  capture "$(bash_payload ls)"
+  [ ! -e "$OBSDIR/$old" ]
+  [ -e "$OBSDIR/$recent" ]
+  [ "$(ls "$OBSDIR" | wc -l)" -eq 2 ]
+}
+
+@test "short write: an unterminated line does not swallow the next record" {
+  capture "$(bash_payload 'echo first')"
+  f="$(only_file)"
+  # Pad to just under 1 KiB, then capture under a 1 KiB file-size limit: the append is cut short.
+  python3 -c 'import sys; n=len(open(sys.argv[1]).read()); open(sys.argv[1],"a").write("{\"pad\":\"" + "x"*(1000-n-10) + "\"}\n")' "$f"
+  run bash -c 'ulimit -f 1; printf "%s" "$1" | "$2" capture' _ "$(bash_payload "echo $(printf 'y%.0s' $(seq 1 200))")" "$SH"
+  # A later capture without the limit must land on its own line.
+  capture "$(bash_payload 'echo last')"
+  python3 - "$f" <<'PY'
+import json, sys
+good = []
+for ln in open(sys.argv[1]).read().split("\n"):
+    try:
+        good.append(json.loads(ln))
+    except ValueError:
+        pass
+assert any(o.get("in") == "echo last" for o in good), "last record lost"
+assert any(o.get("in") == "echo first" for o in good)
+PY
+}
+
+@test "observation files are created 0600 even under a permissive umask" {
+  umask 000
+  capture "$(bash_payload ls)"
+  [ "$(stat -c %a "$(only_file)")" = 600 ]
+}
+
+# --- WP-028 round 2: whitespace other than a space must not glue a secret flag to its value ----
+
+# SEPS — printf escapes for the separators under test: tab, VT, FF, NBSP, ideographic space,
+# U+2028, U+2029, U+0085. Each is a real gap between words for some tool or terminal.
+SEPS=('\t' '\v' '\f' '\302\240' '\343\200\200' '\342\200\250' '\342\200\251' '\302\205')
+
+@test "whitespace: a tab, VT, FF, NBSP, ideographic space, U+2028/9 or NEL before a secret flag still redacts" {
+  # Deleting the separator (rather than reading it as a space) glued `mysql -p x` into
+  # `mysql-px`, and the rules, which need whitespace before the flag, matched nothing.
+  local sep cmd
+  for sep in "${SEPS[@]}"; do
+    for cmd in "mysql${sep}-p${sep}hunter2x" \
+               "docker${sep}login${sep}-u${sep}me${sep}-p${sep}hunter2x" \
+               "curl${sep}-u${sep}user:hunter2x${sep}https://example.test/x" \
+               "zip${sep}-P${sep}hunter2x${sep}out.zip${sep}in.txt" \
+               "sshpass${sep}-p${sep}hunter2x${sep}ssh${sep}host"; do
+      capture "$(bash_payload "$(printf "$cmd")")"
+    done
+  done
+  # Something was stored (so the absence below is not vacuous) and no stored line holds the secret.
+  f="$(only_file)"
+  [ "$(wc -l < "$f")" -gt 0 ]
+  absent "$f" hunter2x
+}
+
+@test "whitespace: a tab-separated secret flag is redacted, not glued (exact stored form)" {
+  capture "$(bash_payload "$(printf 'mysql\t-p\thunter2x')")"
+  f="$(only_file)"
+  absent "$f" hunter2x
+  [ "$(field "$f" 1 in)" = "mysql -p [REDACTED]" ]
 }
