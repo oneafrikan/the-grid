@@ -256,4 +256,36 @@ Every entry is a line the scanner flags that was read in context and judged to b
   path: repos/mattpocock/skills/misc/setup-pre-commit/SKILL.md
   contains: 'npx lint-staged'
   reason: line of the pre-commit hook body the skill writes into the user's repo, running the project's own lint-staged dependency; accepted with the mattpocock source trust
+- rule: credential-read
+  path: repos/gstack/browse/test/cookie-import-browser.test.ts
+  contains: '// Intercept security find-generic-password calls'
+  reason: unit-test source of gstack's browse skill that names a macOS keychain path as test data or in a comment; the test fixtures never read a real keychain; accepted with the gstack source trust
+- rule: credential-read
+  path: repos/gstack/browse/test/dia-macos-qualification.test.ts
+  contains: 'const preserved = path.join(home, ''Library/Keychains/fixture-state'');'
+  reason: unit-test source of gstack's browse skill that names a macOS keychain path as test data or in a comment; the test fixtures never read a real keychain; accepted with the gstack source trust
+- rule: credential-read
+  path: repos/gstack/browse/test/dia-macos-qualification.test.ts
+  contains: 'expect(parseKeychainPaths(''    "/Users/runner/Library/Keychains/login.keychain-db"\n    "/tmp/fixture keychain.keychain-db"\n''))'
+  reason: unit-test source of gstack's browse skill that names a macOS keychain path as test data or in a comment; the test fixtures never read a real keychain; accepted with the gstack source trust
+- rule: credential-read
+  path: repos/gstack/browse/test/dia-macos-qualification.test.ts
+  contains: '.toEqual([''/Users/runner/Library/Keychains/login.keychain-db'', ''/tmp/fixture keychain.keychain-db'']);'
+  reason: unit-test source of gstack's browse skill that names a macOS keychain path as test data or in a comment; the test fixtures never read a real keychain; accepted with the gstack source trust
+- rule: credential-read
+  path: repos/gstack/browse/test/dia-macos-qualification.test.ts
+  contains: 'for (const file of [''/Library/Keychains/System.keychain'', ''/System/Library/Keychains/SystemRootCertificates.keychain'', ''/unowned/keychain'']) {'
+  reason: unit-test source of gstack's browse skill that names a macOS keychain path as test data or in a comment; the test fixtures never read a real keychain; accepted with the gstack source trust
+- rule: credential-read
+  path: repos/gstack/browse/test/dia-macos-qualification.test.ts
+  contains: 'expect(prepareKeychainHome(home)).toEqual({ before: { Library: false, ''Library/Preferences'': false, ''Library/Keychains'': false }, directoriesReady: true });'
+  reason: unit-test source of gstack's browse skill that names a macOS keychain path as test data or in a comment; the test fixtures never read a real keychain; accepted with the gstack source trust
+- rule: credential-read
+  path: repos/gstack/browse/test/dia-macos-qualification.test.ts
+  contains: 'for (const directory of [''Library'', ''Library/Preferences'', ''Library/Keychains'']) {'
+  reason: unit-test source of gstack's browse skill that names a macOS keychain path as test data or in a comment; the test fixtures never read a real keychain; accepted with the gstack source trust
+- rule: credential-read
+  path: repos/gstack/browse/test/dia-macos-qualification.test.ts
+  contains: 'expect(prepareKeychainHome(home).before).toEqual({ Library: true, ''Library/Preferences'': true, ''Library/Keychains'': true });'
+  reason: unit-test source of gstack's browse skill that names a macOS keychain path as test data or in a comment; the test fixtures never read a real keychain; accepted with the gstack source trust
 ```
