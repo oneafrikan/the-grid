@@ -127,7 +127,12 @@ profiles. The hook returns in well under a second; the worker runs in its own se
 
 **Wiring.** `scripts/wire.sh` adds one generated SessionEnd entry to
 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json` (`deploy_hooks.py --user`; absolute
-path to this checkout's `hooks/run.sh`), leaving every hand-written hook and key alone.
+path to this checkout's `hooks/run.sh`), leaving every hand-written hook and key alone
+(values and key order are kept, but the first write reformats the whole file as
+2-space-indented JSON: tabs, `\uXXXX` escapes and spellings like `1e5` are normalised).
+A settings file it cannot rewrite faithfully (duplicate keys, `NaN`/`Infinity`, empty,
+read-only, not a regular file) is refused with a warning and left untouched; delete an
+empty file or write `{}` to it.
 Running `wire.sh` again changes nothing; `wire.sh --check` reports a missing entry and
 exits 1. A symlinked settings file or config dir is refused (a warning from `wire.sh`).
 

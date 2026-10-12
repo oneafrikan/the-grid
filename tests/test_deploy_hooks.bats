@@ -904,3 +904,22 @@ PYEOF
   [ "$status" -ne 0 ]
   [ "$(jq -r .theirs "$(user_file)")" = "true" ]
 }
+
+# ---- the documented reformat contract (D09: document, do not text-patch) ----
+
+@test "a tab-indented settings file is rewritten with 2-space indent, same JSON value" {
+  seed_user_file "$(printf '{\n\t"theme": "dark",\n\t"n": 1\n}')"
+  cp "$(user_file)" "$MOCK_HOOK_ROOT/orig"
+  emit_user
+  [ "$status" -eq 0 ]
+  ! grep -q "$(printf '\t')" "$(user_file)" || false          # reformatted: no tabs left
+  grep -q '^  "theme": "dark",$' "$(user_file)"               # 2-space indent
+  # Everything the user had is still there with the same values.
+  [ "$(jq -c 'del(.hooks)' "$(user_file)")" = "$(jq -c . "$MOCK_HOOK_ROOT/orig")" ]
+}
+
+@test "the reformat of the whole settings file is documented where operators look" {
+  grep -qi "reformat" "$REPO_ROOT/agent-factory/deploy_hooks.py"
+  grep -qi "reformat" "$REPO_ROOT/hooks/README.md"
+  grep -qi "reformat" "$REPO_ROOT/scripts/wire.sh"
+}

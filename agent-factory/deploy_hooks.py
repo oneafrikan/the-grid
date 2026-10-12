@@ -63,6 +63,15 @@ Safety (project and user mode):
     before anything is written (a user's settings are never silently discarded)
   - writes are atomic (temp file + rename); a settings file is never created just to hold
     nothing; re-running with unchanged inputs is a byte-for-byte no-op
+  - the FIRST write to a settings file reformats the whole file: it is parsed and
+    re-serialised as 2-space-indented JSON (key order and values are kept; the original
+    indent style, \\uXXXX escapes and number spellings such as 1e5 are not). Later runs
+    leave it byte-identical. A file the rewrite could not reproduce faithfully (duplicate
+    keys, NaN/Infinity/1e999, empty, read-only, not a regular file) is refused instead.
+    A new file gets mode 0666 & ~umask; an existing file keeps its mode. If the file
+    changes between the read and the rename the write is abandoned, not merged.
+  - each mode sweeps only its own scope's ids (plus ids the catalogue no longer knows),
+    so the user file and a project's settings file being the same path is safe
   - the merge is one function, merge_owned(), shared by project mode and --user mode
   - user mode refuses a symlinked config dir or settings.json (replacing the file would
     break a dotfiles link) just as project mode refuses a symlinked .claude
