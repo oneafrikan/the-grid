@@ -409,15 +409,29 @@ skipped_list() {
 arm_checks() {
   mkdir -p "$G/rc" "$G/agent-factory/.venv/bin"
   # python3: the exit code of `python3 <script> ...` comes from rc/<script basename>
-  printf '#!/usr/bin/env bash\nn="${1##*/}"\n[ -f "%s/rc/$n" ] && exit "$(cat "%s/rc/$n")"\nexit 0\n' "$G" "$G" > "$G/stubbin/python3"
+  # (budget.py also records the baseline it was pinned to, WP-046)
+  {
+    printf '#!/usr/bin/env bash\nn="${1##*/}"\n'
+    printf 'if [ "$n" = budget.py ]; then echo "${GRID_BASELINE-unset}" > "%s/budget.baseline"; fi\n' "$G"
+    printf '[ -f "%s/rc/$n" ] && exit "$(cat "%s/rc/$n")"\nexit 0\n' "$G" "$G"
+  } > "$G/stubbin/python3"
   # the venv python: records its args, fails --lint-roles / --check through rc/lint-roles, rc/compose-check
   printf '#!/usr/bin/env bash\necho "$*" >> "%s/venv.log"\ncase "$*" in\n  *--lint-roles*) [ -f "%s/rc/lint-roles" ] && exit "$(cat "%s/rc/lint-roles")" ;;\n  *--check*) [ -f "%s/rc/compose-check" ] && exit "$(cat "%s/rc/compose-check")" ;;\nesac\nexit 0\n' "$G" "$G" "$G" "$G" "$G" > "$G/agent-factory/.venv/bin/python"
   : > "$G/scripts/budget.py"; : > "$G/scripts/rules.py"; : > "$G/scripts/build-plugins.py"; : > "$G/scripts/grid"
   printf '#!/usr/bin/env bash\n[ -f "%s/rc/personas" ] && exit "$(cat "%s/rc/personas")"\nexit 0\n' "$G" "$G" > "$G/scripts/build-personas.sh"
-  printf '#!/usr/bin/env bash\n[ -f "%s/rc/catalog" ] && exit "$(cat "%s/rc/catalog")"\nexit 0\n' "$G" "$G" > "$G/scripts/catalog.sh"
+  # catalog.sh and sources.sh record the baseline pin / args they were run with (WP-046)
+  {
+    printf '#!/usr/bin/env bash\necho "${GRID_BASELINE-unset} $*" > "%s/catalog.args"\n' "$G"
+    printf '[ -f "%s/rc/catalog" ] && exit "$(cat "%s/rc/catalog")"\nexit 0\n' "$G" "$G"
+  } > "$G/scripts/catalog.sh"
+  {
+    printf '#!/usr/bin/env bash\necho "${GRID_BASELINE-unset} $*" > "%s/sources.args"\n' "$G"
+    printf '[ -f "%s/rc/sources" ] && exit "$(cat "%s/rc/sources")"\nexit 0\n' "$G" "$G"
+  } > "$G/scripts/sources.sh"
   printf '#!/usr/bin/env bash\n[ -f "%s/rc/audit" ] && exit "$(cat "%s/rc/audit")"\nexit 0\n' "$G" "$G" > "$G/scripts/audit.sh"
-  : > "$G/baseline-submodules.txt"
-  chmod +x "$G/stubbin/python3" "$G/agent-factory/.venv/bin/python" "$G/scripts/build-personas.sh" "$G/scripts/catalog.sh" "$G/scripts/audit.sh"
+  # the tracked example baseline: the gate pins catalog, sources and budget to it; there is NO personal one
+  : > "$G/baseline-submodules.example.txt"
+  chmod +x "$G/stubbin/python3" "$G/agent-factory/.venv/bin/python" "$G/scripts/build-personas.sh" "$G/scripts/catalog.sh" "$G/scripts/audit.sh" "$G/scripts/sources.sh"
 }
 
 @test "armed checks: with every check stubbed to pass the gate passes" {
@@ -429,7 +443,7 @@ arm_checks() {
   # `compose` does not hide behind `compose-core`)
   local list n
   list=" $(skipped_list) "
-  for n in lock budget rules catalog plugins personas audit compose; do
+  for n in lock budget rules catalog sources plugins personas audit compose; do
     case "$list" in *" $n "*) echo "check '$n' was skipped, not run: $list" >&3; return 1 ;; esac
   done
 }
@@ -460,6 +474,53 @@ arm_checks() {
   run run_gate
   [ "$status" -eq 1 ]
   [[ "$output" == *"gate: FAIL — catalog"* ]] || false
+}
+
+@test "catalog, sources and budget run on a machine with NO personal baseline, pinned to the example baseline (WP-046)" {
+  arm_checks
+  [ ! -e "$G/baseline-submodules.txt" ]
+  run run_gate
+  [ "$status" -eq 0 ]
+  # the stubs recorded what the gate gave them: the pin is the tracked example file
+  [[ "$(cat "$G/catalog.args")" == *"/baseline-submodules.example.txt --check" ]] || false
+  [[ "$(cat "$G/sources.args")" == *"/baseline-submodules.example.txt --check-drift" ]] || false
+  [[ "$(cat "$G/budget.baseline")" == *"/baseline-submodules.example.txt" ]] || false
+}
+
+@test "a personal baseline on the machine does not change what the gate checks (WP-046)" {
+  arm_checks
+  printf 'something-else\n' > "$G/baseline-submodules.txt"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$G/catalog.args")" == *"/baseline-submodules.example.txt --check" ]] || false
+}
+
+@test "a failing sources drift check fails the gate and names sources" {
+  arm_checks
+  echo 1 > "$G/rc/sources"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — sources"* ]] || false
+}
+
+@test "a missing sources.sh is a loud, recorded skip, not a pass" {
+  arm_checks
+  rm "$G/scripts/sources.sh"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ " $(skipped_list) " == *" sources "* ]] || false
+}
+
+@test "uninitialised submodules still skip catalog loudly" {
+  arm_checks
+  # a gitlink with no checkout shows as '-' in `git submodule status`
+  ( cd "$G" && git config -f .gitmodules submodule.ghost.path repos/ghost \
+      && git config -f .gitmodules submodule.ghost.url https://example.invalid/ghost.git \
+      && git update-index --add --cacheinfo 160000,1111111111111111111111111111111111111111,repos/ghost )
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"uninitialised submodules"* ]] || false
+  [[ " $(skipped_list) " == *" catalog "* ]] || false
 }
 
 @test "a failing plugin bundle check fails the gate and names plugins" {

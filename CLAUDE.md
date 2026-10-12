@@ -55,11 +55,13 @@ submodules into two tiers:
   not tracked** (#24/#39) — personal and not useful to a fork. On machines that want
   it, it's a symlink into a separate private repo; nothing in the-grid requires it
   to exist.
-- `scripts/budget.py` + `docs/budget-target.json` — measures the skill/role description listing (Claude Code shares one small description budget across all skills and drops the overflow silently) and gates it: `--check` runs in `gate.sh` against a committed ratchet (owned skills + roles always; the baseline scope only on a machine with `baseline-submodules.txt` and initialised submodules, else exit 3 = skipped). `--report` shows the numbers. Lowering a number is normal (`--update-target`); raising one needs `--allow-raise` and review.
+- `scripts/budget.py` + `docs/budget-target.json` — measures the skill/role description listing (Claude Code shares one small description budget across all skills and drops the overflow silently) and gates it: `--check` runs in `gate.sh` against a committed ratchet (owned skills + roles always; the baseline scope against the tracked `baseline-submodules.example.txt` once submodules are initialised, else exit 3 = skipped). A target missing `per_entry_max_chars`, `owned.skill_body_max_bytes` or `schema: 1` fails. `--report` shows the numbers. Lowering a number is normal (`--update-target`); raising one needs `--allow-raise` and review.
 - `scripts/usage/weekly.sh` + `scripts/usage/install-schedule.sh` — the weekly usage job (extract, then commit `usage/<host>.json` to the private repo) and the installer that renders its launchd/systemd/cron schedule via `scripts/lib/render-schedule.sh`. The installer only writes files and PRINTS the activation commands; activating is a human step. See `docs/usage.md`.
 - `scripts/prune-report.sh` (wraps `scripts/usage/prune_report.py`; `scripts/usage/aggregate.py` is the importable per-host summer, no CLI) — read-only report that proposes what to drop from the baseline from the per-host usage files (demote a repo, `name-only` a skill, unused agents); `docs/prune-keep.txt` lists names never proposed. Never reads `tokens`/`hooks`. See `docs/usage.md`.
 - `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
-  repos as counts, reference (no-skill) repos in a footer. Deterministic output.
+  repos as counts, reference (no-skill) repos in a footer. Deterministic output. The committed
+  `SKILLS.md` is rendered from the tracked example baseline (`GRID_BASELINE=baseline-submodules.example.txt
+  bash scripts/catalog.sh`; `wire.sh` and the gate pin it), not a machine's personal one.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
 - `scripts/build-plugins.py` + `plugins/` + `docs/PLUGINS.md` — generates the two Claude Code plugin bundles (`grid-core`, `grid-agents`) and `.claude-plugin/marketplace.json` from `plugins/bundles.json`. `plugins/` is generated output: regenerate with `python3 scripts/build-plugins.py` (needs `agent-factory/.venv`), never hand-edit. `gate.sh` runs `--check` and `claude plugin validate --strict`; `audit.sh --owned` scans `plugins/`.
 - `site-files.txt` + `scripts/stage-site.sh` — define what GitHub Pages publishes:
@@ -185,6 +187,7 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
   self-installs `core.hooksPath` on first run. `--pre-commit` aborts on unstaged
   changes. `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
   `--strict` (CI) fails on any skip not named in `GRID_GATE_EXPECT_SKIPPED` (see `.github/workflows/tests.yml`).
+  `catalog`, `sources` (`sources.sh --check-drift`) and `budget` run against the TRACKED `baseline-submodules.example.txt` (`GRID_BASELINE` pin; `wire.sh` pins it for SKILLS.md too), so SKILLS.md, docs/SOURCES.md and the ratchet are machine-independent; a personal baseline is never gated.
   It runs `check-personal.sh` as the `personal` check; with no private denylist on the
   machine (CI, forks) it passes and prints `gate: PASS (skipped: personal-denylist)`.
   It runs `audit.sh --gate --quiet` as the `audit` check (owned assets + the baseline's

@@ -9,6 +9,6 @@
     "skill_body_max_bytes": 4000
   },
   "baseline": {
-    "skills_max_chars": 0
+    "skills_max_chars": 28324
   }
 }

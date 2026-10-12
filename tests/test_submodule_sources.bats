@@ -114,3 +114,57 @@ active_lines() {
   # Numeric compare, not string: 1.100 > 1.91 but "1.100" < "1.91" as text.
   [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 91 ]; }
 }
+
+# --- WP-046: SOURCES.md drift is checked offline, against the tracked example baseline -----------
+# `sources.sh --check-drift` renders to a temp file and diffs docs/SOURCES.md. Exit 0 current,
+# 1 stale, 2 error. It defaults to the example baseline (the only one CI has); GRID_BASELINE pins
+# another. No network (the URL rot check stays in --check).
+
+# sources_fixture — a GRID_DIR holding copies of the three inputs, so a test can edit them
+sources_fixture() {
+  FX="$BATS_TEST_TMPDIR/fx"
+  mkdir -p "$FX/docs"
+  cp "$REPO_ROOT/.gitmodules" "$FX/.gitmodules"
+  cp "$EXAMPLE" "$FX/baseline-submodules.example.txt"
+  cp "$REPO_ROOT/docs/SOURCES.md" "$FX/docs/SOURCES.md"
+}
+
+@test "sources.sh --check-drift exits 0 on the real repo" {
+  cd "$BATS_TEST_TMPDIR"
+  run bash "$REPO_ROOT/scripts/sources.sh" --check-drift
+  echo "$output"
+  [ "$status" -eq 0 ]
+  # a read-only mode: it must not have written a stray file into the cwd
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR")" ]
+}
+
+@test "sources.sh --check-drift exits 1 after docs/SOURCES.md is edited, and writes nothing" {
+  sources_fixture
+  printf 'stale\n' >> "$FX/docs/SOURCES.md"
+  local before; before="$(cksum < "$FX/docs/SOURCES.md")"
+  GRID_DIR="$FX" run bash "$REPO_ROOT/scripts/sources.sh" --check-drift
+  [ "$status" -eq 1 ]
+  [ "$(cksum < "$FX/docs/SOURCES.md")" = "$before" ]
+}
+
+@test "sources.sh --check-drift exits 2 when SOURCES.md or the baseline is missing" {
+  sources_fixture
+  rm "$FX/docs/SOURCES.md"
+  GRID_DIR="$FX" run bash "$REPO_ROOT/scripts/sources.sh" --check-drift
+  [ "$status" -eq 2 ]
+  cp "$REPO_ROOT/docs/SOURCES.md" "$FX/docs/SOURCES.md"
+  GRID_DIR="$FX" GRID_BASELINE="$FX/no-such.txt" run bash "$REPO_ROOT/scripts/sources.sh" --check-drift
+  [ "$status" -eq 2 ]
+}
+
+@test "sources.sh renders its tiers from GRID_BASELINE, and a missing pinned file exits 2" {
+  sources_fixture
+  # personal baseline wires nothing from the example's repos: tiers would differ if it were read
+  printf 'no-such-repo\n' > "$FX/baseline-submodules.txt"
+  GRID_DIR="$FX" GRID_BASELINE="$FX/baseline-submodules.example.txt" run bash "$REPO_ROOT/scripts/sources.sh" "$FX/out.md"
+  [ "$status" -eq 0 ]
+  diff -q "$FX/out.md" "$FX/docs/SOURCES.md"
+  GRID_DIR="$FX" GRID_BASELINE="$FX/no-such.txt" run bash "$REPO_ROOT/scripts/sources.sh" "$FX/out2.md"
+  [ "$status" -eq 2 ]
+  [ ! -e "$FX/out2.md" ]
+}
