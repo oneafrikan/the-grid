@@ -423,11 +423,15 @@ _grid_tk_sep() {
 }
 
 # _grid_is_hookspath <text>
-#   True when <text> starts with core.hooksPath, matched case-insensitively
-#   (git config keys are case-insensitive) without forking tr or needing bash 4.
+#   True when <text> names a config key that can switch git hooks off: core.hooksPath, or
+#   include.path / includeIf.<condition>.path (an included file can set core.hooksPath).
+#   Matched case-insensitively (git config keys are case-insensitive) without forking tr
+#   or needing bash 4. <text> may carry =value.
 _grid_is_hookspath() {
   case "$1" in
     [cC][oO][rR][eE].[hH][oO][oO][kK][sS][pP][aA][tT][hH]|[cC][oO][rR][eE].[hH][oO][oO][kK][sS][pP][aA][tT][hH]=*) return 0 ;;
+    [iI][nN][cC][lL][uU][dD][eE].[pP][aA][tT][hH]|[iI][nN][cC][lL][uU][dD][eE].[pP][aA][tT][hH]=*) return 0 ;;
+    [iI][nN][cC][lL][uU][dD][eE][iI][fF].*.[pP][aA][tT][hH]|[iI][nN][cC][lL][uU][dD][eE][iI][fF].*.[pP][aA][tT][hH]=*) return 0 ;;
   esac
   return 1
 }
@@ -472,12 +476,12 @@ _grid_record_git() {
       -c|--config-env)
         gv="${f[$((gj + 1))]:-}"
         if _grid_is_hookspath "$gv"; then
-          GIT_VIOLATIONS+=("uses $gw core.hooksPath=... (overrides the repo's git hooks)")
+          GIT_VIOLATIONS+=("uses $gw with a hooks or include setting (can disable the repo's git hooks)")
         fi
         gj=$((gj + 2)) ;;
       --config-env=*)
         if _grid_is_hookspath "${gw#--config-env=}"; then
-          GIT_VIOLATIONS+=("uses --config-env=core.hooksPath=... (overrides the repo's git hooks)")
+          GIT_VIOLATIONS+=("uses --config-env with a hooks or include setting (can disable the repo's git hooks)")
         fi
         gj=$((gj + 1)) ;;
       --git-dir) gd="${f[$((gj + 1))]:-}"; gj=$((gj + 2)) ;;

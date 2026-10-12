@@ -93,8 +93,8 @@ for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
           reasons+=("git commit $w includes -n, which is --no-verify")
         fi ;;
       push)
-        # --mirror from 5 characters (--mir): a unique prefix of it
-        if [ "$w" = "--force" ] || { [ "${#w}" -ge 5 ] && [[ "--mirror" == "$w"* ]]; } \
+        # --mirror from 4 characters (--mi): git accepts any unique prefix of it
+        if [ "$w" = "--force" ] || { [ "${#w}" -ge 4 ] && [[ "--mirror" == "$w"* ]]; } \
            || [[ "$w" =~ $re_push_f ]] || [[ "$w" == +* ]]; then
           reasons+=("git push $w is a forced push (use --force-with-lease)")
         fi ;;
@@ -145,12 +145,12 @@ for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
     # Unsetting the hooksPath key switches off the hooks a hooksPath setting pointed at,
     # so it is a write, not a read.
     if [ "$is_unset" = 1 ] && [ "${#pos[@]}" -ge 1 ] && _grid_is_hookspath "${pos[0]}"; then
-      reasons+=("git config unsets core.hooksPath (disables git hooks)")
+      reasons+=("git config unsets core.hooksPath or an include path (can disable git hooks)")
     fi
     # A write has a key AND a value; a lone key is a read.
     if [ "$is_read" = 0 ] && [ "${#pos[@]}" -ge 2 ]; then
       if _grid_is_hookspath "${pos[0]}"; then
-        reasons+=("git config writes core.hooksPath (disables git hooks)")
+        reasons+=("git config writes core.hooksPath or an include path (can disable git hooks)")
       fi
       case "${pos[0]}" in
         [aA][lL][iI][aA][sS].*)

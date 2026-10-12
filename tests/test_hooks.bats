@@ -615,6 +615,27 @@ STUB
   expect_pass 'git --config-env=user.name=VAR commit -m x'
 }
 
+@test "no-bypass: config that pulls in another file (include.path) can switch hooks off and is blocked" {
+  rows=(
+    'git -c include.path=/tmp/x commit -m y'
+    'git -c includeIf.gitdir:/a/.path=/tmp/x commit -m y'
+    'git --config-env=include.path=V commit -m y'
+    'git config include.path /tmp/x'
+    'git config --global includeIf.gitdir:/a/.path /tmp/x'
+    'git config Include.Path /tmp/x'
+    'git config --unset include.path'
+  )
+  for row in "${rows[@]}"; do expect_block "$row"; done
+  expect_pass 'git config --get include.path'
+  expect_pass 'git -c user.name=x commit -m y'
+}
+
+@test "no-bypass: git accepts --mi as --mirror, so the floor is four characters" {
+  expect_block 'git push --mi'
+  expect_block 'git push --mir origin'
+  expect_pass 'git push --m-not-a-prefix'
+}
+
 @test "no-bypass: look-alikes that are not the flag still pass" {
   rows=(
     'git commit -m "fix --no-verify"'
