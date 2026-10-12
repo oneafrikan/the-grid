@@ -499,6 +499,20 @@ STUB
   for row in "${rows[@]}"; do expect_block "$row"; done
 }
 
+@test "no-bypass: a backslash-newline line continuation joins the word (it is not a space)" {
+  rows=(
+    $'git commit --no-\\\nverify -m x'
+    $'g\\\nit commit -n'
+    $'git comm\\\nit -n -m x'
+    $'git commit "--no-\\\nverify"'
+    $'git push --for\\\nce'
+  )
+  for row in "${rows[@]}"; do expect_block "$row"; done
+  # as a separator between words it still just continues the line
+  expect_pass $'git commit \\\n-m x'
+  expect_pass $'git status \\\n  --short'
+}
+
 @test "no-bypass: --config-env with core.hooksPath is a hook-disabling override" {
   expect_block 'git --config-env=core.hooksPath=VAR commit -m x'
   expect_block 'git --config-env core.hooksPath=VAR commit -m x'
@@ -647,6 +661,15 @@ EOF
   scan 'git ad""d .env'
   [ "$status" -eq 2 ] || { echo "ad\"\"d .env: $output" >&2; false; }
   [[ "$output" == *"sensitive-file"* ]] || false
+  # the keyword git itself may be split; so may a line continuation
+  git -C "$R" reset -q
+  stage_line "key = \"$(tok_ghp)\""
+  scan 'g""it commit -m x'
+  [ "$status" -eq 2 ] || { echo "g\"\"it commit: $output" >&2; false; }
+  scan $'git comm\\\nit -m x'
+  [ "$status" -eq 2 ] || { echo "comm<bs-nl>it: $output" >&2; false; }
+  scan $'g\\\nit commit -m x'
+  [ "$status" -eq 2 ] || { echo "g<bs-nl>it: $output" >&2; false; }
 }
 
 # --- the bypass-form table (SEC5): one @test per row so a regression names its form.
