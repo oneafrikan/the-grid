@@ -556,6 +556,9 @@ rule_is_denied() { local r; for r in "${DENY_RULES[@]:-}"; do [ "$r" = "$1" ] &&
 # policy.yaml or python3 blocks like a finding does (exit 3), not a silent skip.
 # Runs BEFORE teardown: a blocked wire changes nothing, so a bad upstream bump
 # can never leave a machine half-wired. audit.sh exit 2 (broken policy) blocks too.
+# Known limits (accepted, D08): the audit is point-in-time (it runs here and in the gate, not
+# between them; --check does not re-audit) and scans skill and agent link targets only, so
+# helper dirs behind a runtime-root link (gstack bin/) are not covered. See CURATION.md.
 # With no manifest file at all, every repos/ skill is selected (legacy wire-all): say so in a block.
 legacy_note=""
 [ "$wire_all_repos" -eq 0 ] || legacy_note=" No manifest file was found, so EVERY repos/ skill was selected: check GRID_BASELINE / baseline-submodules.txt."

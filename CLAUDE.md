@@ -320,7 +320,15 @@ Agents and sessions must not leave stale worktrees or local branches behind.
   `GRID_SKIP_AUDIT=1` is the only bypass (it prints a stderr notice; audit.sh's own dry run
   sets it to avoid recursion), plus every dry run (`GRID_DRY_HOME`, so `--check`'s child
   never audits). `GRID_SKIP_CATALOG` alone no longer skips the audit. A mock grid without a
-  `policy.yaml` must set `GRID_SKIP_AUDIT=1` (the bats `common_setup` does).
+  `policy.yaml` must set `GRID_SKIP_AUDIT=1` (the bats `common_setup` does). The audit is
+  **point-in-time** (runs at wire time and in the gate, not between; `--check` does not
+  re-audit) and covers skill and agent link targets only: runtime-root `bin/` helpers
+  are not scanned (accepted, see `CURATION.md`).
+- **Manifest problems are announced:** a missing baseline file (default path, or
+  `GRID_BASELINE` set and absent) and a `repo`, `repo/skill`, `-repo` or `-repo/skill`
+  entry that names no dir under `repos/` print a stderr warning and add a
+  `manifest` row (`missing` / `unknown`) to `.wired.manifest`; the wire still runs. An
+  absent per-host overlay is normal and silent.
 - **Runtime map:** `scripts/lib/runtimes.txt` (`repo | link | marker | needs | setup`)
   lists wired repos whose skills need more than files on disk (gstack: its browse
   daemon). wire.sh keeps the runtime-root link `$SKILLS_DIR/<link> -> $GRID_DIR/repos/<repo>`
