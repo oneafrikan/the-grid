@@ -25,10 +25,13 @@ Usage (python3 scripts/rules.py ...):
         --out AGENTS.md / GEMINI.md; capped at BLOCK_CAP bytes; text outside the
         markers is never touched; an empty --packs removes the block). Prints
         `wrote <path>` / `removed <path>` per change. --check writes nothing and
-        exits 1 on any difference. Exit 0 done/no drift, 1 drift (--check), 2 usage,
+        exits 1 on any difference (it prints `would write` / `would remove`, not
+        `wrote` / `removed`). Exit 0 done/no drift, 1 drift (--check), 2 usage,
         refusal or I/O error (nothing written, except: emit lints every selected
         pack first; a pack with rule-file findings is excluded and named on stderr,
-        the clean packs are still delivered, and the exit is 2). Every write is atomic (temp file in
+        the clean packs are still delivered, and the exit is 2). Exit 3: the block
+        would be over BLOCK_CAP; nothing is written and any existing block is left
+        as it was, so a caller can tell a skip from a refusal without parsing text. Every write is atomic (temp file in
         the same directory + os.replace), keeps the file mode, never goes through a
         symlink, and breaks hard links (the replace gives the file a new inode).
 
@@ -510,6 +513,10 @@ class Refusal(Exception):
     """A usage error or refusal: reported on stderr, exit 2, nothing written."""
 
 
+class OverCap(Refusal):
+    """The managed block would exceed BLOCK_CAP: reported on stderr, exit 3, nothing written."""
+
+
 def expand_braces(glob):
     """Expand `{a,b}` groups left to right as a cartesian product, in source order.
 
@@ -737,7 +744,8 @@ def render_block(root, packs):
     text = "%s\n%s\n%s%s\n" % (BLOCK_BEGIN, BLOCK_INTRO, "\n".join(sections), BLOCK_END)
     data = text.encode("utf-8")
     if len(data) > BLOCK_CAP:
-        raise Refusal("block is %d bytes, over the %d-byte cap: select fewer packs" % (len(data), BLOCK_CAP))
+        raise OverCap("block is %d bytes, over the %d-byte cap; nothing written, select fewer packs"
+                      % (len(data), BLOCK_CAP))
     return data
 
 
@@ -816,7 +824,7 @@ def apply_block(root, packs, out, check):
         return 0
     if not check:
         atomic_write(out, new)
-    print("wrote %s" % out)
+    print("%s %s" % ("would write" if check else "wrote", out))
     return 1 if check else 0
 
 
@@ -879,7 +887,7 @@ def _emit(root, harness, packs, out, check):
         writes, removals = plan_cursor(root, packs, out)
     except Refusal as exc:
         sys.stderr.write("rules.py emit: %s\n" % exc)
-        return 2
+        return 3 if isinstance(exc, OverCap) else 2
     except OSError as exc:
         # A failed read or write is a refusal with one line, never a traceback (a direct
         # caller must be able to tell it from drift, which is exit 1 under --check).
@@ -891,11 +899,11 @@ def _emit(root, harness, packs, out, check):
         for path, data in writes:
             if not check:
                 atomic_write(path, data)
-            print("wrote %s" % path)
+            print("%s %s" % ("would write" if check else "wrote", path))
         for path in removals:
             if not check:
                 os.remove(path)
-            print("removed %s" % path)
+            print("%s %s" % ("would remove" if check else "removed", path))
     except OSError as exc:
         sys.stderr.write("rules.py emit: %s\n" % exc)
         return 2

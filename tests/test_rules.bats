@@ -592,7 +592,7 @@ write_rule_titled() {
   make_pack sql
   run emit --harness cursor --packs sql --out "$R/out" --check
   [ "$status" -eq 1 ]
-  [ "$output" = "wrote $R/out/grid-sql-style.mdc" ]
+  [ "$output" = "would write $R/out/grid-sql-style.mdc" ]
   [ ! -e "$R/out" ]
 }
 
@@ -758,7 +758,7 @@ PY
   make_pack sql
   run emit --harness agents-md --packs sql --out "$R/AGENTS.md" --check
   [ "$status" -eq 1 ]
-  [ "$output" = "wrote $R/AGENTS.md" ]
+  [ "$output" = "would write $R/AGENTS.md" ]
   [ ! -e "$R/AGENTS.md" ]
 }
 
@@ -796,18 +796,19 @@ PY
   [ "$(wc -c < "$R/at-cap.md")" -eq 12288 ]
   pad_pack pad $((20 + 12289 - base))
   run emit --harness agents-md --packs pad --out "$R/over.md"
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 3 ]
   [ ! -e "$R/over.md" ]
 }
 
-@test "emit agents-md: two packs over the cap exit 2 and leave the file unchanged" {
+@test "emit agents-md: two packs over the cap exit 3 (nothing written) and leave the file unchanged" {
   pad_pack big1 7000
   pad_pack big2 7000
   printf 'user text\n%s\nold\n%s\nmore\n' "$BEGIN_LINE" "$END_LINE" > "$R/AGENTS.md"
   before="$(cksum < "$R/AGENTS.md")"
   run emit --harness agents-md --packs big1,big2 --out "$R/AGENTS.md"
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 3 ]
   [[ "$output" == *"12288"* ]]
+  [[ "$output" == *"nothing written"* ]]
   [ "$(cksum < "$R/AGENTS.md")" = "$before" ]
   # Each pack alone fits.
   run emit --harness agents-md --packs big1 --out "$R/AGENTS.md"
@@ -818,7 +819,7 @@ PY
   pad_pack big1 7000
   pad_pack big2 7000
   run emit --harness gemini --packs big1,big2 --out "$R/deep/GEMINI.md"
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 3 ]
   [ ! -e "$R/deep" ]
 }
 
@@ -1190,6 +1191,27 @@ sys.exit(1)"
   run emit --harness cursor --packs sql --out "$R/out"
   [ "$status" -eq 2 ]
   cmp "$R/out/grid-sql-style.mdc" "$R/mine.orig"
+}
+
+# --- delivery wording and visibility (WP-054) -------------------------------------------------
+
+@test "emit --check says would write / would remove and never wrote / removed" {
+  make_pack sql
+  make_pack bash
+  # cursor: a missing file and a stale one.
+  emit --harness cursor --packs sql,bash --out "$R/out" >/dev/null
+  rm "$R/out/grid-sql-style.mdc"
+  run emit --harness cursor --packs sql --out "$R/out" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"would write $R/out/grid-sql-style.mdc"* ]]
+  [[ "$output" == *"would remove $R/out/grid-bash-style.mdc"* ]]
+  [[ "$output" != *"wrote "* ]]
+  [[ "$output" != *"removed "* ]]
+  # agents-md: block present, empty selection.
+  emit --harness agents-md --packs sql --out "$R/AGENTS.md" >/dev/null
+  run emit --harness agents-md --packs "" --out "$R/AGENTS.md" --check
+  [ "$status" -eq 1 ]
+  [ "$output" = "would write $R/AGENTS.md" ]
 }
 
 # --- the real tree --------------------------------------------------------------------------

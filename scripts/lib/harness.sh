@@ -145,10 +145,22 @@ harness_rules_action() {
   fi
 }
 
+# harness_skip_text <reason>: the operator-facing wording for a `skip:<reason>` action.
+harness_skip_text() {
+  case "$1" in
+    rules-file-absent) echo "file does not exist (create it to opt in)" ;;
+    rules-file-symlink) echo "file is a symlink (never written through)" ;;
+    rules-file-not-regular) echo "path is not a regular file" ;;
+    rules-file-not-allowed) echo "registry row is not an instruction file the grid may write" ;;
+    *) echo "$1" ;;
+  esac
+}
+
 # harness_rules_emit <rules_harness> <csv> <file> [--check]: the one place rules.py is
 # called. rules.py sits next to lib/ (scripts/rules.py); --root points it at the grid whose
 # rules/ it renders (GRID_DIR, set by wire.sh). An empty <csv> is the empty selection, which
-# removes a previous block. rules.py exits 0 done / no drift, 1 drift (--check only), 2 refused.
+# removes a previous block. rules.py exits 0 done / no drift, 1 drift (--check only), 2 refused,
+# 3 block over the cap (nothing written); the caller reads the code, so it passes through.
 harness_rules_emit() {
   python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/rules.py" emit \
     --root "$GRID_DIR" --harness "$1" --packs "$2" --out "$3" ${4:+"$4"}

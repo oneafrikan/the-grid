@@ -175,6 +175,9 @@ fidelity: fetches every cited URL and quotes support for each bullet) and
   (frontmatter, paths, title, style, size, denylist and marker text). A failing pack is
   excluded and named on stderr, the clean packs are still delivered, and the exit is 2 so
   `wire.sh` shows red. If every selected pack fails, nothing is written.
+- **Exit codes:** 0 done or no drift, 1 drift (`--check` only; it prints `would write` /
+  `would remove`), 2 refusal or I/O error, 3 block over the 12288-byte cap (nothing
+  written, an existing block untouched). `wire.sh` treats 3 as a visible skip, not a failure.
 - **Registry limits:** `wire.sh` refuses (exit 2) a registry where two harnesses share a
   `rules_file`, and only writes instruction files named `AGENTS.md`, `GEMINI.md` or
   `CLAUDE.md` under `~/` (otherwise the manifest row says `rules-file-not-allowed`).

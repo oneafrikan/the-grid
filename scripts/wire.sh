@@ -195,14 +195,19 @@ if [ "${1:-}" = "--check" ]; then
       case "$rw_action" in
         emit|remove)
           [ "$rw_action" = remove ] && rw_csv=""
+          rw_rc=0
           if ! command -v python3 >/dev/null 2>&1; then
             echo "wire --check: python3 not found; rules in $rw_file not checked" >&2
-          elif ! rw_out="$(harness_rules_emit "$(harness_field "$rw_name" rules_harness)" "$rw_csv" "$rw_file" --check 2>&1)"; then
-            if [ "$rw_action" = remove ] && [[ "$rw_out" == *"expected exactly one BEGIN"* ]]; then
-              # A damaged block in a file of an inactive harness is a warning, never drift.
-              echo "wire --check: rules ($rw_file): markers unbalanced, not checked" >&2
-              continue
-            fi
+            continue
+          fi
+          rw_out="$(harness_rules_emit "$(harness_field "$rw_name" rules_harness)" "$rw_csv" "$rw_file" --check 2>&1)" || rw_rc=$?
+          if [ "$rw_rc" = 3 ]; then
+            # Over the cap is a skip, not drift (the real run warns and records it).
+            echo "wire --check: rules ($rw_file): ${rw_out#rules.py emit: }" >&2
+          elif [ "$rw_rc" != 0 ] && [ "$rw_action" = remove ] && [[ "$rw_out" == *"expected exactly one BEGIN"* ]]; then
+            # A damaged block in a file of an inactive harness is a warning, never drift.
+            echo "wire --check: rules ($rw_file): markers unbalanced, not checked" >&2
+          elif [ "$rw_rc" != 0 ]; then
             echo "wire --check: rules drift in $rw_file ($rw_name):" >&2
             [ -z "$rw_out" ] || printf '%s\n' "$rw_out" >&2
             rc=1
@@ -846,14 +851,27 @@ while IFS= read -r h_name; do
   rl_action="$(harness_rules_action "$rl_file" "$rl_active" "$rules_csv" "$rl_raw")"
   case "$rl_action" in
     skip:*)
+      echo "warning: rules ($rl_raw): skipped, $(harness_skip_text "${rl_action#skip:}")" >&2
       MANIFEST_ROWS+=("rules@$rl_raw	$h_name	-	skipped	${rl_action#skip:}") ;;
     emit|remove)
       rl_packs="$rules_csv"; [ "$rl_action" = remove ] && rl_packs=""
+      # Codex reads AGENTS.override.md before AGENTS.md, so a block in AGENTS.md is inert.
+      if [ "$h_name" = codex ] && [ -e "$(dirname "$rl_file")/AGENTS.override.md" ]; then
+        echo "warning: rules ($rl_raw): AGENTS.override.md exists beside it; Codex reads that first, so the block has no effect" >&2
+      fi
+      rl_rc=0
       if ! command -v python3 >/dev/null 2>&1; then
         echo "warning: python3 not found; rules in $rl_raw not updated" >&2
         MANIFEST_ROWS+=("rules@$rl_raw	$h_name	-	skipped	python3 not found")
-      elif rl_out="$(harness_rules_emit "$(harness_field "$h_name" rules_harness)" "$rl_packs" "$rl_file" 2>&1)"; then
+        continue
+      fi
+      rl_out="$(harness_rules_emit "$(harness_field "$h_name" rules_harness)" "$rl_packs" "$rl_file" 2>&1)" || rl_rc=$?
+      if [ "$rl_rc" = 0 ]; then
         [ -z "$rl_out" ] || echo "  rules ($rl_raw): $rl_out"
+      elif [ "$rl_rc" = 3 ]; then
+        # Exit 3 = block over the cap: a visible skip, not a failure (the file is untouched).
+        echo "warning: rules ($rl_raw): skipped, ${rl_out#rules.py emit: }" >&2
+        MANIFEST_ROWS+=("rules@$rl_raw	$h_name	-	skipped	over-cap")
       elif [ "$rl_action" = remove ] && [[ "$rl_out" == *"expected exactly one BEGIN"* ]]; then
         # Removal only runs for an inactive harness (or no packs): its damaged file is
         # reported, not a failure, so a stray marker never turns every wire red.

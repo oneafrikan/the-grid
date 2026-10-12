@@ -314,7 +314,7 @@ assert_user_text() {
 
 @test "a rules.py refusal is reported, every other step still runs, then wire exits 1" {
   printf 'rules:fx\nharness:codex\nharness:gemini\n' > "$OVERLAY"
-  # An over-cap pack makes rules.py refuse (exit 2) for both files.
+  # An oversize rule file fails the re-lint, so rules.py refuses (exit 2) for both files.
   printf -- '---\npaths:\n  - "**/*.py"\n---\n# Big\n\n' > "$MOCK_GRID/rules/fx/big.md"
   for i in $(seq 1 400); do printf -- '- Filler rule number %s that pads the block.\n' "$i" >> "$MOCK_GRID/rules/fx/big.md"; done
   make_user_file "$CODEX_MD"
@@ -399,6 +399,74 @@ registry_copy() {
   cmp "$BATS_TEST_TMPDIR/AGENTS.md" "$BATS_TEST_TMPDIR/agents.orig"
   grep -qP '^rules@~/\.bashrc\tcodex\t-\tskipped\trules-file-not-allowed$' "$MANIFEST"
   grep -qP "^rules@.*AGENTS\.md\tgemini\t-\tskipped\trules-file-not-allowed\$" "$MANIFEST"
+}
+
+# ---------------------------------------------------------------- visibility and cap (WP-054)
+
+# pad_packs N: N lint-clean packs (pad1..padN), one ~3.6 KB rule file each, so a few of them
+# together push the managed block past the 12288-byte cap.
+pad_packs() {
+  local n i j
+  for i in $(seq 1 "$1"); do
+    mkdir -p "$MOCK_GRID/rules/pad$i"
+    printf 'name: pad%s\n' "$i" > "$MOCK_GRID/rules/pad$i/pack.yaml"
+    { printf -- '---\npaths:\n  - "**/*.p%s"\n---\n# Pad\n\n' "$i"
+      for j in $(seq 1 17); do printf -- '- %s\n' "$(printf '%*s' 200 '' | tr ' ' x)"; done; } > "$MOCK_GRID/rules/pad$i/pad.md"
+  done
+}
+
+@test "over the cap: wire exits 0, warns on stderr, records a skipped over-cap row, leaves the file unchanged" {
+  pad_packs 5
+  printf 'rules:pad1\nrules:pad2\nrules:pad3\nrules:pad4\nrules:pad5\nharness:codex\n' > "$OVERLAY"
+  make_user_file "$CODEX_MD"
+  cp "$CODEX_MD" "$BATS_TEST_TMPDIR/codex.orig"
+  wire
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"over the 12288-byte cap"* ]]
+  cmp "$CODEX_MD" "$BATS_TEST_TMPDIR/codex.orig"
+  grep -qP '^rules@~/\.codex/AGENTS\.md\tcodex\t-\tskipped\tover-cap$' "$MANIFEST"
+  # --check agrees: an over-cap selection is not drift.
+  wire --check
+  [ "$status" -eq 0 ]
+}
+
+@test "a symlinked, an absent and a directory instruction file each print a skip line and still exit 0" {
+  printf 'rules:fx\nharness:codex\n' > "$OVERLAY"
+  # absent
+  wire
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"rules (~/.codex/AGENTS.md): skipped, file does not exist"* ]]
+  # symlink
+  mkdir -p "$GRID_HARNESS_HOME/.codex"
+  make_user_file "$BATS_TEST_TMPDIR/real.md"
+  ln -s "$BATS_TEST_TMPDIR/real.md" "$CODEX_MD"
+  wire
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"rules (~/.codex/AGENTS.md): skipped, file is a symlink"* ]]
+  # directory
+  rm "$CODEX_MD"
+  mkdir "$CODEX_MD"
+  wire
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"rules (~/.codex/AGENTS.md): skipped, path is not a regular file"* ]]
+  # --check stays silent about skips (absent or symlinked is documented as not drift).
+  wire --check
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"skipped"* ]]
+}
+
+@test "AGENTS.override.md beside the codex file prints the override warning (delivery and removal)" {
+  printf 'rules:fx\nharness:codex\n' > "$OVERLAY"
+  make_user_file "$CODEX_MD"
+  : > "$GRID_HARNESS_HOME/.codex/AGENTS.override.md"
+  wire
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"rules (~/.codex/AGENTS.md): AGENTS.override.md exists beside it; Codex reads that first, so the block has no effect"* ]]
+  # Removal branch: the block is still in the file, the harness is switched off.
+  printf 'rules:fx\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"AGENTS.override.md exists beside it"* ]]
 }
 
 @test "the bash block-begin constant equals rules.py BLOCK_BEGIN" {
