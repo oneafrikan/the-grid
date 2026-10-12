@@ -52,6 +52,21 @@ SECRET_BOUND=(1 0 1 1 1 1 1 0 1 0 1 1 0)
 # Exempt lines (case-insensitive): documentation keys and templated values.
 _SECRET_EXEMPT='grid:allow-secret|example|placeholder|changeme|your[_-]|xxxxxxxx|redacted'
 
+# secret_prefilter_re
+#   Prints one extended regex that matches anything ANY table row could match: the rows
+#   joined with |. Callers run `grep -Ei` with it over a large diff and hand only the hits
+#   to _secret_match, so a 6,000-line diff costs one grep, not 6,000 bash regex calls
+#   (about 1.2 ms each, which blew the 5 s hook timeout). It is a SUPERSET filter: -i
+#   widens the case-sensitive rows, and _secret_match stays the only authority, so a
+#   false hit is dropped there. Derived from the table, so it cannot drift from it.
+secret_prefilter_re() {
+  local i out=""
+  for ((i = 0; i < ${#SECRET_RES[@]}; i++)); do
+    out+="${out:+|}(${SECRET_RES[$i]})"
+  done
+  printf '%s' "$out"
+}
+
 # Set by _secret_match: the matched pattern name and the matched text without its
 # boundary character (callers show only its first four characters).
 SECRET_MATCH_NAME=""

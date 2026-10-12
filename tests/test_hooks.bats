@@ -69,7 +69,7 @@ scan() { run_hook pre-bash-secret-scan "$(hook_payload "$1" "$R")"; }
 run_hook_within() {
   local secs="$1" id="$2" pf="$MOCK_HOOK_ROOT/payload.json"
   hook_payload "$3" "${4:-}" > "$pf"
-  run perl -e 'alarm shift; exec @ARGV' "$secs" bash -c 'bash "$1/hooks/run.sh" "$2" < "$3" 2>&1' _ "$REPO_ROOT" "$id" "$pf"
+  run perl -e 'alarm shift; exec @ARGV' "$secs" bash -c 'exec bash "$1/hooks/run.sh" "$2" < "$3" 2>&1' _ "$REPO_ROOT" "$id" "$pf"
 }
 
 # stage_line <line> [file]: write <line> to a file in $R and stage it.
@@ -750,6 +750,64 @@ STUB
   [[ "$output" == *"GRID_HOOKS=off"* ]] || false
   [[ "$output" == *"install"* ]] || false
   [[ "$output" == *"every Bash call"* ]] || false
+}
+
+# --- WP-019: the scan must finish inside the 5 s hook timeout on a large diff, because a
+# timed-out hook does not block (the commit would go through unscanned).
+
+# The tests use 10,000 lines rather than the 6,000 the audit measured: the old
+# per-line scan took 4.6 s for 6,000 lines on a fast box, which would not fail reliably.
+# big_file <lines> <secret-line-number|0>: write $R/big.txt of filler lines, with one
+# secret on the given line (0 = none), and stage it.
+big_file() {
+  local n="$1" at="$2" i
+  { for ((i = 1; i <= n; i++)); do
+      if [ "$i" = "$at" ]; then echo "key = \"$(tok_ghp)\""; else echo "filler line number $i of the big file"; fi
+    done; } > "$R/big.txt"
+  git -C "$R" add big.txt
+}
+
+@test "secret: staged 10,000-line file with a secret exits 2 within 5 s" {
+  mkrepo
+  big_file 10000 10000
+  run_hook_within 5 pre-bash-secret-scan 'git commit -m x' "$R"
+  [ "$status" -eq 2 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  [[ "$output" == *"big.txt:10000: github-token"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "secret: a large clean (10,000-line) staged file passes within 5 s" {
+  mkrepo
+  big_file 10000 0
+  run_hook_within 5 pre-bash-secret-scan 'git commit -m x' "$R"
+  [ "$status" -eq 0 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; echo "$output" >&2; false; }
+}
+
+@test "secret: a staged .env plus a large diff reports the .env" {
+  mkrepo
+  echo 'A=1' > "$R/.env"
+  git -C "$R" add -f .env
+  # every line of the big file is a finding, so the 10-finding list would fill up
+  # before the .env if the (cheap) name check ran after the diff scan
+  t="$(tok_ghp)"
+  { for ((i = 1; i <= 10000; i++)); do echo "k$i = \"$t\""; done; } > "$R/big.txt"
+  git -C "$R" add big.txt
+  run_hook_within 5 pre-bash-secret-scan 'git commit -m x' "$R"
+  [ "$status" -eq 2 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
+  [[ "$output" == *".env: sensitive-file"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "secret: an over-cap diff exits 2 with the split message" {
+  mkrepo
+  # exempt (documentation) keys: they pass the prefilter, so each costs a loop turn
+  { for ((i = 1; i <= 30; i++)); do echo "k$i = AKIAIOSFODNN7EXAMPLE"; done; } > "$R/many.txt"
+  git -C "$R" add many.txt
+  GRID_SCAN_MAX_LINES=20 run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x' "$R")"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"diff too large to scan"* ]] || false
+  [[ "$output" == *"split the commit"* ]] || false
+  # at or under the cap it passes
+  GRID_SCAN_MAX_LINES=30 run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x' "$R")"
+  [ "$status" -eq 0 ]
 }
 
 @test "secret: a commit command over GRID_GUARD_MAX_CMD exits 2 with the file hint" {

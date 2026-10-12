@@ -76,28 +76,41 @@ add_finding() {
 #   is one added line. Binary notices and /dev/null live in the header and are
 #   ignored. Explicit prefixes keep the parse independent of diff.noprefix and
 #   diff.mnemonicPrefix; quotepath=false keeps non-ASCII names readable.
+#
+#   Speed (WP-019): the diff is read by one awk state machine (file + line number for
+#   every added line, joined with the unit separator), then one `grep -Ei` with the
+#   union of the pattern table keeps only lines some pattern could match, and only
+#   those reach the slow per-line bash matcher. Before this, every added line cost
+#   about 1.2 ms in bash, so a 6,000-line diff outran the 5 s hook timeout and the
+#   commit went through unscanned. More than GRID_SCAN_MAX_LINES candidate lines
+#   (default 3000) sets $too_large instead of scanning on: the caller blocks.
+MAX_SCAN_LINES="${GRID_SCAN_MAX_LINES:-3000}"
+[[ "$MAX_SCAN_LINES" =~ ^[0-9]+$ ]] || MAX_SCAN_LINES=3000
+too_large=0
+PREFILTER_RE="$(secret_prefilter_re)"
+US=$'\037'
 scan_diff() {
-  local out line file="" lineno=0 in_header=0 re_hunk='^@@ -[0-9,]+ \+([0-9]+)'
-  out="$(git -C "$cwd" -c core.quotepath=false diff -U0 --no-color --no-ext-diff \
-          --src-prefix=a/ --dst-prefix=b/ "$@" 2>/dev/null)" || return 0
-  while IFS= read -r line; do
-    if [[ "$line" == "diff --git "* ]]; then
-      in_header=1; file=""
-    elif [ "$in_header" = 1 ]; then
-      if [[ "$line" == "+++ b/"* ]]; then
-        file="${line#+++ b/}"; file="${file%%$'\t'*}"
-      elif [[ "$line" =~ $re_hunk ]]; then
-        in_header=0; lineno="${BASH_REMATCH[1]}"
-      fi
-    elif [[ "$line" =~ $re_hunk ]]; then
-      lineno="${BASH_REMATCH[1]}"
-    elif [[ "$line" == "+"* ]]; then
-      if _secret_match "${line#+}"; then
-        add_finding "$file:$lineno: $SECRET_MATCH_NAME (${SECRET_MATCH_TEXT:0:4}...)"
-      fi
-      lineno=$((lineno + 1))
+  local file lineno content n=0
+  [ "$too_large" = 0 ] || return 0
+  while IFS="$US" read -r file lineno content; do
+    n=$((n + 1))
+    if [ "$n" -gt "$MAX_SCAN_LINES" ]; then too_large=1; return 0; fi
+    if _secret_match "$content"; then
+      add_finding "$file:$lineno: $SECRET_MATCH_NAME (${SECRET_MATCH_TEXT:0:4}...)"
     fi
-  done <<< "$out"
+    # Ten findings fill the list; reading on would only burn the timeout.
+    [ "${#findings[@]}" -lt "$MAX_FINDINGS" ] || return 0
+  done < <(git -C "$cwd" -c core.quotepath=false diff -U0 --no-color --no-ext-diff \
+             --src-prefix=a/ --dst-prefix=b/ "$@" 2>/dev/null \
+           | awk -v sep="$US" '
+               /^diff --git / { hdr = 1; f = ""; next }
+               hdr && substr($0, 1, 6) == "+++ b/" {
+                 f = substr($0, 7); t = index(f, "\t"); if (t > 0) f = substr(f, 1, t - 1); next }
+               /^@@ -[0-9,]+ \+[0-9]+/ {
+                 match($0, /\+[0-9]+/); ln = substr($0, RSTART + 1, RLENGTH - 1) + 0; hdr = 0; next }
+               !hdr && substr($0, 1, 1) == "+" { print f sep ln sep substr($0, 2); ln++ }
+             ' \
+           | grep -Ei -e "$PREFILTER_RE")
 }
 
 # check_sensitive_names <git diff args...>
@@ -157,9 +170,10 @@ for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
       esac
     done
 
-    # 1. what is staged
-    scan_diff --cached
+    # 1. what is staged. The cheap name check runs BEFORE the diff scan: a staged .env
+    #    must be reported even when a large diff then fills the list or the cap.
     check_sensitive_names --cached
+    scan_diff --cached
     # 2. what a pathspec / -a / -i / -o commit would take from the working tree
     if [ "${#pathspecs[@]}" -gt 0 ] || [ "$incl" = 1 ]; then
       if git -C "$cwd" rev-parse --verify -q HEAD >/dev/null 2>&1; then
@@ -168,20 +182,23 @@ for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
         base=4b825dc642cb6eb9a060e54bf8d69288fbee4904   # the empty tree: no HEAD yet
       fi
       if [ "${#pathspecs[@]}" -gt 0 ]; then
-        scan_diff "$base" -- "${pathspecs[@]}"
         check_sensitive_names "$base" -- "${pathspecs[@]}"
+        scan_diff "$base" -- "${pathspecs[@]}"
       else
-        scan_diff "$base"
         check_sensitive_names "$base"
+        scan_diff "$base"
       fi
     fi
   fi
 done
 
-if [ "${#findings[@]}" -gt 0 ]; then
+if [ "${#findings[@]}" -gt 0 ] || [ "$too_large" = 1 ]; then
   {
     echo "BLOCKED by the-grid hook pre-bash-secret-scan: possible secret in this commit (values not shown):"
     for f in "${findings[@]}"; do echo "  $f"; done
+    if [ "$too_large" = 1 ]; then
+      echo "  diff too large to scan (more than $MAX_SCAN_LINES candidate lines): split the commit into smaller ones."
+    fi
     echo "Remove the secret (or unstage the file), then retry."
     echo "Human override: launch claude with GRID_DISABLED_HOOKS=pre-bash-secret-scan"
   } >&2
