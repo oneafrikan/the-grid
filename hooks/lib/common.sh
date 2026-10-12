@@ -37,22 +37,27 @@ grid_require_jq() {
 # grid_check_cmd_cap <hook-name> <command>
 #   Input cap for the guards (WP-019). A timed-out PreToolUse hook does not block, so
 #   a command too large to tokenize inside the hook timeout must be refused, not
-#   waved through. GRID_GUARD_MAX_CMD (bytes, default 100000) is the limit. Exits 2
-#   when over the limit and the command mentions git; the caller's LC_ALL=C makes ${#}
-#   count bytes. The default is 100000, not 200000: many-small-words input costs about
-#   25 ms per KB to tokenize on a loaded 2020s box, and the whole hook must stay well
-#   inside its 5 s timeout.
+#   waved through. Two limits, because cost follows token count as much as size:
+#     GRID_GUARD_MAX_CMD     bytes, default 20000
+#     GRID_GUARD_MAX_TOKENS  blanks and separators (; & | ( ) `), default 2500
+#   Measured on a busy box, a token costs about 0.5 ms to tokenize and each separator
+#   about 1 ms more, so the defaults keep the worst case near 2 s, well inside the 5 s hook
+#   timeout. Both are counted on the text with quotes and backslashes removed (the way the
+#   shell reads it), so quoting `git` cannot dodge the check. Exits 2 when over a limit
+#   and the command mentions git (any case) or HUSKY; anything else passes. The caller's
+#   LC_ALL=C makes ${#} count bytes.
 grid_check_cmd_cap() {
-  local max="${GRID_GUARD_MAX_CMD:-100000}"
-  [[ "$max" =~ ^[0-9]+$ ]] || max=100000
-  [ "${#2}" -gt "$max" ] || return 0
-  # Only a command that could matter to a guard (it mentions git, in any case, or
-  # HUSKY, which the assignment rule reads) is refused; anything else passes.
-  case "$2" in
+  local max="${GRID_GUARD_MAX_CMD:-20000}" maxt="${GRID_GUARD_MAX_TOKENS:-2500}" st t
+  [[ "$max" =~ ^[0-9]+$ ]] || max=20000
+  [[ "$maxt" =~ ^[0-9]+$ ]] || maxt=2500
+  st="${2//$'\\\n'/}"; st="${st//[\"\'\\]/}"
+  case "$st" in
     *[gG][iI][tT]*|*[hH][uU][sS][kK][yY]*) ;;
     *) return 0 ;;
   esac
-  echo "BLOCKED by the-grid hook $1: command too long to inspect (${#2} bytes, limit $max). Write the content to a file with the Write tool and refer to the file in the command." >&2
+  t="${st//[^[:space:];&|()\`]/}"
+  if [ "${#st}" -le "$max" ] && [ "${#t}" -le "$maxt" ]; then return 0; fi
+  echo "BLOCKED by the-grid hook $1: command too long to inspect (${#st} bytes, ${#t} tokens; limits $max and $maxt). Write the content to a file with the Write tool and refer to the file in the command." >&2
   exit 2
 }
 
@@ -345,23 +350,29 @@ _grid_tokenize() {
   fi
 }
 
+# _grid_base <word>: sets _GB to the part after the last /, or to "" for a word of 4 KB
+# or more. No command name is that long, and ${w##*/} on a long word is quadratic.
+_grid_base() {
+  if [ "${#1}" -lt 4096 ]; then _GB="${1##*/}"; else _GB=""; fi
+}
+
 # _grid_tk_seg_has_shell: true when the command being built (words since the last
 # separator, plus the word in progress) names a shell, i.e. `bash <<EOF` feeds the body
 # to a shell. Runs in the tokenizer's scope.
 _grid_tk_seg_has_shell() {
   local k w
-  w="${_TK_FLAG##*/}"
+  _grid_base "$_TK_FLAG"; w="$_GB"
   case "$w" in bash|sh|zsh|dash|ksh|busybox) return 0 ;; esac
   if [ "$_TK_DEFER" = 1 ]; then
     for ((k = ${#D_FLAG[@]} - 1; k >= 0; k--)); do
       [ "${D_SEP[$k]}" = 1 ] && return 1
-      w="${D_FLAG[$k]##*/}"
+      _grid_base "${D_FLAG[$k]}"; w="$_GB"
       case "$w" in bash|sh|zsh|dash|ksh|busybox) return 0 ;; esac
     done
   else
     for ((k = ${#T_FLAG[@]} - 1; k >= 0; k--)); do
       [ "${T_SEP[$k]}" = 1 ] && return 1
-      w="${T_FLAG[$k]##*/}"
+      _grid_base "${T_FLAG[$k]}"; w="$_GB"
       case "$w" in bash|sh|zsh|dash|ksh|busybox) return 0 ;; esac
     done
   fi
@@ -536,7 +547,7 @@ _grid_segment() {
   done
   if [ "$pathhit" = 1 ]; then
     for ((k = 0; k < n; k++)); do
-      w="${f[$k]}"; b="${w##*/}"
+      _grid_base "${f[$k]}"; b="$_GB"
       [[ "${r[$k]}" =~ $re_redir ]] && redir=1
       case "$b" in
         [gG][iI][tT]) hasgit=1 ;;
@@ -555,7 +566,8 @@ _grid_segment() {
   # call is attributed to the repo it will really run in. A destination that cannot be
   # known statically becomes ? (the scan then falls back to the payload cwd). ~ and ~/x
   # expand to $HOME. Options (-P, -L, --) are skipped.
-  case "${f[0]##*/}" in
+  _grid_base "${f[0]}"
+  case "$_GB" in
     cd|pushd)
       for ((k = 1; k < n; k++)); do
         case "${f[$k]}" in
@@ -576,7 +588,7 @@ _grid_segment() {
 
   # Find every git call and every re-scannable wrapper in the segment.
   for ((j = 0; j < n; j++)); do
-    w="${f[$j]}"; b="${w##*/}"
+    _grid_base "${f[$j]}"; b="$_GB"
     case "$b" in
       [gG][iI][tT]) _grid_record_git "$j" ;;
       bash|sh|zsh|dash|ksh|busybox)
