@@ -135,12 +135,14 @@ raw_is_active() {
 # (inactive dirs are only ever touched to tear down stale links, which cannot be done
 # without a home; the Claude dirs do not depend on it.)
 resolve_harness_dirs() {
-  local label="$1" raw dir warned=0; shift
-  HD_RAW=(); HD_DIR=()
+  local label="$1" raw dir warned=0 kind; shift
+  HD_RAW=(); HD_DIR=(); HD_KIND=()
   for raw in "${HARNESS_SKILL_DIRS[@]:-}" "${HARNESS_AGENT_DIRS[@]:-}"; do
     [ -n "$raw" ] || continue
+    # skill / agent: the manifest row kind is skill@<raw> / agent@<raw> (see wire_harness_link).
+    kind=agent; in_list "$raw" "${HARNESS_SKILL_DIRS[@]:-}" && kind=skill
     if dir="$(harness_path "$raw" 2>/dev/null)"; then
-      HD_RAW+=("$raw"); HD_DIR+=("$dir"); continue
+      HD_RAW+=("$raw"); HD_DIR+=("$dir"); HD_KIND+=("$kind"); continue
     fi
     if raw_is_active "$raw" "$@"; then
       echo "$label: cannot resolve harness dir $raw (is HOME set?); nothing was changed" >&2
@@ -615,14 +617,25 @@ trap 'exit 129' HUP
 # Foreign symlinks (target outside GRID_DIR) are never touched. Applied to both
 # the skills dir and the agents dir (composed subagents land in the latter).
 # A failed rm is reported and counted, not fatal (the run ends non-zero after relinking).
+# With a manifest <kind> (skill@<~dir> / agent@<~dir>, harness dirs only), a removed link whose
+# (kind, name) is not a row of the PREVIOUS .wired.manifest is reported on stderr: it is the
+# operator's own link into the grid (D16: report, removal itself is unchanged). An absent
+# manifest counts as empty; a dry run (GRID_DRY_HOME) reports nothing.
+PREV_MANIFEST="$GRID_DIR/.wired.manifest"
+in_prev_manifest() { # $1 = kind, $2 = name
+  [ -f "$PREV_MANIFEST" ] || return 1
+  awk -F'\t' -v k="$1" -v n="$2" '$1 == k && $2 == n { f = 1; exit } END { exit !f }' "$PREV_MANIFEST"
+}
 teardown_grid_links() {
-  local dir="$1" link target
+  local dir="$1" kind="${2:-}" link target
   while IFS= read -r -d '' link; do
     target=$(readlink "$link") || continue
     printf '%s\0%s\0' "$link" "$target" >> "$UNDO_FILE"
     if ! rm "$link"; then
       echo "wire: cannot remove $link" >&2
       TEARDOWN_FAILED=$((TEARDOWN_FAILED + 1))
+    elif [ -n "$kind" ] && [ -z "${GRID_DRY_HOME:-}" ] && ! in_prev_manifest "$kind" "${link##*/}"; then
+      echo "wire: removed link not in the previous manifest: $link" >&2
     fi
   done < <(owned_links "$dir" -maxdepth 1)
 }
@@ -633,9 +646,10 @@ teardown_grid_links "$AGENTS_DIR"
 # function is the same one, so the same ownership test applies: only a symlink into
 # "$GRID_DIR"/ goes; real files, foreign and sibling-prefix links stay. A dir that does
 # not exist is skipped, so nothing is created for a harness nobody uses.
-for h_dir in "${HD_DIR[@]:-}"; do
-  [ -n "$h_dir" ] || continue
-  teardown_grid_links "$h_dir"
+hd_i=0
+while [ "$hd_i" -lt "${#HD_DIR[@]}" ]; do
+  teardown_grid_links "${HD_DIR[$hd_i]}" "${HD_KIND[$hd_i]}@${HD_RAW[$hd_i]}"
+  hd_i=$((hd_i + 1))
 done
 
 # Rules: same ownership test, but the tree is nested ($RULES_DIR/grid/<pack>/<topic>.md)
@@ -823,7 +837,8 @@ CC_OUT="$GRID_DIR/agent-factory/projects"
 if [ -d "$CC_OUT" ]; then
   for proj_dir in "$CC_OUT"/*/; do
     [ -d "$proj_dir" ] || continue
-    proj_name="$(basename "${proj_dir%/}")"
+    proj_dir="${proj_dir%/}"   # the glob's trailing slash would put "//" in every link target
+    proj_name="$(basename "$proj_dir")"
     project_is_wired "$proj_name" || continue
     while IFS= read -r skill_md; do
       wire_skill "$(dirname "$skill_md")"
