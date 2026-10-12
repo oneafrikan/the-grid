@@ -12,13 +12,13 @@
 #   4  same session, no new turns       -> skip   no-new-turns
 #      (GRID_AUTOHANDOFF_FORCE=1 bypasses 2 to 4 only)
 #   5  digest the transcript into a private temp dir; create the fallback dir
-#   6  snapshot .git/config and .git/hooks/, stamp the clock, run `claude -p "/handoff ..."`
-#      in <cwd> (write-only tool set, wall-clock alarm, budget cap)
-#   7  verify what the child wrote: .git untouched, exactly one handoff pair, nothing else new
+#   6  snapshot the watched git state and the scanned dirs, run `claude -p "/handoff ..."`
+#      in <cwd> (write-only tool set, scrubbed env, wall-clock alarm, budget cap)
+#   7  verify what the child wrote: git state untouched, exactly one handoff pair, nothing else changed
 #   8  secret-scan both files (always); a hit quarantines them
 #   9  commit the pair by explicit path, in the repo that holds the files
 #  10  push, but only the private repo and only when that commit is the sole unpushed one
-#  11  write the per-session marker, log, record the run
+#  11  log, record the run (the per-session marker is written just before step 6)
 #
 # The child only WRITES the two files. This script (deterministic shell) checks,
 # scans, commits and pushes, so a model can never be talked into sweeping up the
@@ -26,7 +26,7 @@
 #
 # Log: one line per decision in ${GRID_HOOK_LOG_DIR:-$HOME/.grid/hook-logs}/auto-handoff.log
 #   ts=<UTC> session=<id> action=<skip|spawn|done|error> reason=<token> [turns= commit= push= paths= ...]
-# Env knobs: GRID_AUTOHANDOFF_{MIN_TURNS,MAX_BYTES,TIMEOUT,MAX_USD,FORCE},
+# Env knobs: GRID_AUTOHANDOFF_{MIN_TURNS,MAX_BYTES,TIMEOUT,MAX_USD,FORCE,WAIT,KEEP_ENV},
 #   GRID_HANDOFF_FALLBACK_DIR, GRID_PRIVATE_DIR, GRID_CLAUDE, GRID_HOOK_LOG_DIR,
 #   GRID_HOOK_STATE_DIR, GRID_STATE_DIR (quarantine root).
 #
@@ -72,6 +72,34 @@ cleanup() {
   return 0
 }
 trap cleanup EXIT
+
+# ---- signals and bounded git -------------------------------------------------------
+# The hook's outer alarm sends this process SIGALRM (and a session teardown may send TERM
+# or HUP). The long-running children are started in the background and waited for, so this
+# trap runs at once instead of after them: it stops the child and any git call, unstages
+# the handoff pair if a commit was in flight (git add had already staged it), logs why,
+# and exits through the EXIT trap so temp dirs and locks are released.
+CHILD_PID=""; GIT_PID=""; STAGED=(); STAGED_ROOT=""
+on_signal() {
+  trap '' TERM ALRM HUP
+  [ -n "$CHILD_PID" ] && kill -TERM "$CHILD_PID" 2>/dev/null
+  [ -n "$GIT_PID" ] && kill -TERM "$GIT_PID" 2>/dev/null
+  if [ "${#STAGED[@]}" -gt 0 ]; then
+    git -C "$STAGED_ROOT" reset -q -- "${STAGED[@]}" >/dev/null 2>&1
+  fi
+  finish_error terminated
+}
+trap on_signal TERM ALRM HUP
+# run_bounded <seconds> <cmd...>: the command with a wall-clock alarm (exit 142 on expiry),
+# in the background so on_signal can stop it; its pid is GIT_PID meanwhile.
+run_bounded() {
+  local rc
+  perl -e 'alarm shift; exec @ARGV or exit 127' "$@" &
+  GIT_PID=$!
+  wait "$GIT_PID"; rc=$?
+  GIT_PID=""
+  return "$rc"
+}
 
 # ---- logging and the run record ---------------------------------------------------
 # log <action> <reason> [extra key=value tokens]
@@ -511,7 +539,29 @@ done
 CHILD_ENV+=("PATH=$PATH" "HOME=$HOME" "GRID_AUTOHANDOFF_CHILD=1")
 PERL_BIN="$(command -v perl || printf perl)"
 
-env -i "${CHILD_ENV[@]}" "$PERL_BIN" -e 'alarm shift; exec @ARGV or exit 127' "$TIMEOUT" \
+# Timeout wrapper (perl, because setsid(1) is not on macOS): the child runs in its own
+# session and process group; on the alarm (or a TERM sent to the wrapper) the whole GROUP
+# gets TERM, then KILL, so grandchildren do not outlive the timeout, and the wrapper exits
+# 142 (the "timeout" outcome). A failed exec is 127. Otherwise it passes the exit status on.
+TIMEOUT_PL='
+use POSIX qw(setsid);
+my $t = shift @ARGV;
+my $pid = fork();
+exit 127 unless defined $pid;
+if (!$pid) { setsid(); exec @ARGV; exit 127; }
+my $reap = sub { kill "TERM", -$pid; select(undef, undef, undef, 1.5); kill "KILL", -$pid; waitpid($pid, 0); };
+$SIG{ALRM} = sub { $reap->(); exit 142; };
+$SIG{TERM} = sub { $reap->(); exit 143; };
+alarm $t;
+waitpid($pid, 0);
+my $st = $?;
+exit($st & 127 ? 128 + ($st & 127) : $st >> 8);
+'
+# The child runs in the BACKGROUND and the worker waits for it: bash defers a trap until a
+# foreground command ends, so a SIGALRM from the hook's outer alarm would otherwise sit
+# unhandled for up to the whole timeout. With `wait`, the trap (on_signal) runs at once.
+CHILD_PID=""
+env -i "${CHILD_ENV[@]}" "$PERL_BIN" -e "$TIMEOUT_PL" "$TIMEOUT" \
   "${GRID_CLAUDE:-claude}" -p "$PROMPT" \
   --model sonnet --max-turns 25 --max-budget-usd "$MAX_USD" \
   --permission-mode default --setting-sources user --strict-mcp-config \
@@ -520,8 +570,11 @@ env -i "${CHILD_ENV[@]}" "$PERL_BIN" -e 'alarm shift; exec @ARGV or exit 127' "$
   --disallowedTools "${DENY[@]}" \
   --add-dir "$DIGEST_DIR" --add-dir "$FALLBACK" \
   --append-system-prompt-file "$HERE/auto-handoff-system.md" \
-  < /dev/null > "$OUT" 2>&1
+  < /dev/null > "$OUT" 2>&1 &
+CHILD_PID=$!
+wait "$CHILD_PID"
 rc=$?
+CHILD_PID=""
 
 # Child output into the log, truncated to 4000 bytes and prefixed so it never reads
 # as a decision line.
@@ -642,14 +695,19 @@ else
   for f in "${PAIR[@]}"; do RELS+=("${f#"$T"/}"); done
   prefix="$(basename "$HF")"; prefix="${prefix%-handoff.md}"
   # add then commit with the same pathspec: only these files, never the operator's
-  # other staged work.
-  if cout="$(git -C "$T" add -- "${RELS[@]}" 2>&1 \
-        && git -C "$T" commit -q -m "docs: auto-handoff $prefix" -- "${RELS[@]}" 2>&1)"; then
+  # other staged work. Each git call is bounded (60 s: a hung hook must not outlive the
+  # hook's outer alarm), and what is staged is remembered so on_signal can unstage it.
+  GOUT="$SNAP_DIR/git.out"
+  STAGED_ROOT="$T"; STAGED=("${RELS[@]}")
+  if run_bounded 60 git -C "$T" add -- "${RELS[@]}" > "$GOUT" 2>&1 \
+        && run_bounded 60 git -C "$T" commit -q -m "docs: auto-handoff $prefix" -- "${RELS[@]}" >> "$GOUT" 2>&1; then
     COMMIT="$(git -C "$T" rev-parse --short HEAD 2>/dev/null)"
+    STAGED=()
   else
     # Leave the files on disk; unstage them so the next commit does not pick them up.
     git -C "$T" reset -q -- "${RELS[@]}" >/dev/null 2>&1
-    printf 'child| commit failed: %s\n' "$(printf '%s' "$cout" | head -c 400 | tr '\n' ' ')" >> "$LOG" 2>/dev/null
+    STAGED=()
+    printf 'child| commit failed: %s\n' "$(head -c 400 "$GOUT" | tr '\n' ' ')" >> "$LOG" 2>/dev/null
     finish_error commit-failed
   fi
 fi
@@ -664,7 +722,7 @@ if [ "$COMMIT" != "none" ]; then
   elif [ "$(git -C "$T" rev-list --count '@{u}..HEAD' 2>/dev/null)" != "1" ]; then
     # A push sends every unpushed commit; only a handoff-only push is safe unattended.
     PUSH="no-other-commits"
-  elif git -C "$T" push -q >/dev/null 2>&1; then
+  elif run_bounded 60 git -C "$T" push -q >/dev/null 2>&1; then
     PUSH="yes"
   else
     PUSH="failed"
