@@ -1142,6 +1142,18 @@ big_file() {
   [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
 }
 
+@test "secret: a control byte at the start of a line cannot hide it from the chained-add scan" {
+  mkrepo
+  # 0x1E and 0x1F are the scan's own stream separators: content must not be able to forge them
+  printf '\036key = "%s"\n' "$(tok_ghp)" > "$R/rs.txt"
+  printf '\037\037key = "%s"\n' "$(tok_ghp)" > "$R/us.txt"
+  scan 'git add rs.txt && git commit -m x'
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
+  [[ "$output" == *"rs.txt:1: github-token"* ]] || { echo "$output" >&2; false; }
+  scan 'git add us.txt && git commit -m x'
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
+}
+
 @test "secret: a chained add of a sensitive name is blocked, an unrelated add is not" {
   mkrepo
   echo 'A=1' > "$R/.env"

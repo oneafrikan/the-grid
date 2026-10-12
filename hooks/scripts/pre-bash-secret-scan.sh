@@ -174,7 +174,9 @@ consume_stream() {
 #   --text: without it git prints "Binary files differ" for a file with a NUL byte, a
 #   UTF-16 file or a path an attribute marks -diff, and the file is never scanned (a
 #   cloned repo can ship the attribute). NUL bytes are then deleted (tr), which also turns
-#   UTF-16 text back into ASCII-looking text the patterns can match.
+#   UTF-16 text back into ASCII-looking text the patterns can match. Every other control
+#   byte except tab and newline is deleted too: 0x1E and 0x1F are this scan's own stream
+#   separators, and content must never be able to forge one.
 #
 #   Speed (WP-019): one awk state machine reads the diff, then one `grep -Ei` with the
 #   union of the pattern table keeps only lines some pattern could match, and only those
@@ -182,7 +184,7 @@ consume_stream() {
 scan_diff() {
   consume_stream < <(git "${GITARGS[@]}" -c core.quotepath=false diff -U0 --no-color --no-ext-diff --text \
                        --src-prefix=a/ --dst-prefix=b/ "$@" 2>/dev/null \
-                     | tr -d '\000' \
+                     | tr -d '\000-\010\013-\037' \
                      | awk -v sep="$US" '
                          /^diff --git / { hdr = 1; f = ""; next }
                          hdr && substr($0, 1, 6) == "+++ b/" {
@@ -242,7 +244,7 @@ scan_chained_add() {
                        for path in "${files[@]}"; do
                          if [ -f "$path" ] && [ ! -L "$path" ]; then
                            printf '%s%s\n' "$RS" "$path"
-                           tr -d '\000' < "$path"
+                           tr -d '\000-\010\013-\037' < "$path"
                            printf '\n'
                          fi
                        done
