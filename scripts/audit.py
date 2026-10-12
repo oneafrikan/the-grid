@@ -77,8 +77,17 @@ BUILTIN_MESSAGES = {
 }
 
 DOWNGRADE_CONTEXTS = ("test", "negation", "comment")
-SHELL_FENCE_WORDS = {"bash", "sh", "zsh", "shell", "console"}
-COMMENT_PREFIXES = ("#", "//", "*", "/*", "<!--")
+# What starts a comment depends on the language, so a `comment` downgrade looks
+# the prefixes up by file extension. `*` and `<!--` are never comment starters
+# for executable text (`*)` is a shell case branch), and `//` is not one in shell
+# (`//usr/bin/curl` is a path). Anything not listed (shell, python, ruby, yaml,
+# powershell, markdown fences, frontmatter hooks, extensionless) uses `#` only;
+# JSON has no comments at all.
+COMMENT_PREFIXES_BY_EXT = {
+    ".js": ("//", "/*"), ".mjs": ("//", "/*"), ".cjs": ("//", "/*"),
+    ".ts": ("//", "/*"), ".json": (),
+}
+DEFAULT_COMMENT_PREFIXES = ("#",)
 EXCERPT_MAX = 120
 BINARY_SNIFF = 8192
 
@@ -322,8 +331,22 @@ class Policy:
         self.known_ids = set(ids) | set(self.builtin)
 
     def file_class(self, rel_target, rel_root):
-        """First class (policy order) with a glob matching either path; else 'other'."""
+        """First class (policy order) with a glob matching either path; else 'other'.
+
+        The `test` class is special-cased because it lowers severity and its
+        trigger is a path the content's author chooses: it is matched against the
+        target-relative path only (a directory called `test` ABOVE the scan target
+        proves nothing), and a file the agent loads or the harness reads
+        (SKILL.md, an agent .md, .mcp.json, hooks.json) is never `test`."""
+        base = rel_target.rsplit("/", 1)[-1]
+        loaded = base in ("SKILL.md", ".mcp.json", "hooks.json") or _is_agent_md(rel_target, rel_root, base)
         for name, globs in self.classes:
+            if name == "test":
+                if loaded:
+                    continue
+                if any(rx.match(rel_target) for rx in globs):
+                    return name
+                continue
             for rx in globs:
                 if rx.match(rel_target) or (rel_root is not None and rx.match(rel_root)):
                     return name
@@ -351,6 +374,14 @@ class AllowEntry:
         if not isinstance(reason, str) or len(reason.strip()) < 10:
             raise UsageError("%s: reason is required (at least 10 characters)" % where)
         self.contains = d.get("contains")
+        # Default: `contains` must equal the whole line (surrounding whitespace
+        # ignored), so a reviewed line cannot carry an appended payload. The
+        # legacy substring match is an explicit, per-entry opt-in.
+        self.contains_substring = d.get("contains_substring", False)
+        if not isinstance(self.contains_substring, bool):
+            raise UsageError("%s: contains_substring must be true or false" % where)
+        if self.contains_substring and d.get("contains") is None:
+            raise UsageError("%s: contains_substring needs `contains`" % where)
         self.sha256 = d.get("sha256")
         is_builtin = self.rule in policy.builtin
         if self.contains is not None:
@@ -374,8 +405,11 @@ class AllowEntry:
         if f["rule"] != self.rule or not self.path_rx.match(f["path"]):
             return False
         if self.contains is not None:
-            return (self.contains in f["_line"]
-                    or self.contains in f["_line_escaped"])
+            if self.contains_substring:
+                return (self.contains in f["_line"]
+                        or self.contains in f["_line_escaped"])
+            want = self.contains.strip()
+            return want in (f["_line"].strip(), f["_line_escaped"].strip())
         return f["sha256"] == self.sha256
 
 
@@ -589,17 +623,19 @@ class Scan:
             text = data.decode("utf-8", errors="replace")
         lines = text.split("\n")
         classes = self._line_classes(lines, fclass, name, rel_target, rel_root)
+        ext = os.path.splitext(name)[1].lower()
         for idx, raw in enumerate(lines):
             line = raw.rstrip("\r")
             if line == "":
                 continue
-            self._scan_line(line, idx + 1, classes[idx], display, tier, file_sha)
+            self._scan_line(line, idx + 1, classes[idx], display, tier, file_sha, ext)
 
     def _line_classes(self, lines, fclass, name, rel_target, rel_root):
         """Class of each line: the file's class, except (1) frontmatter `hooks:`
-        blocks of SKILL.md/agent .md are `hook`, and (2) lines inside untagged
-        or shell-tagged fenced blocks of .md/.mdx doc files are `script`
-        (design rule 1: prose negation must not excuse a copy-paste command)."""
+        blocks of SKILL.md/agent .md are `hook`, and (2) lines inside ANY fenced
+        block of .md/.mdx doc files are `script`, whatever its info string (a
+        fence tagged `python` or `text` is still copy-pasted; design rule 1:
+        prose negation must not excuse a command)."""
         classes = [fclass] * len(lines)
         ext = os.path.splitext(name)[1].lower()
 
@@ -622,7 +658,7 @@ class Scan:
 
         # (2) fenced code blocks in markdown docs
         if fclass == "doc" and ext in (".md", ".mdx"):
-            fence = None                      # (char, length, is_shell) while inside one
+            fence = None                      # (char, length) while inside one
             for i, raw in enumerate(lines):
                 text = raw.rstrip("\r")
                 m = re.match(r"^\s*(`{3,}|~{3,})(.*)$", text)
@@ -632,21 +668,18 @@ class Scan:
                     marker, info = m.group(1), m.group(2).strip()
                     if marker[0] == "`" and "`" in info:
                         continue              # inline code like ```x```, not a fence
-                    words = info.split()
-                    first_word = words[0].lower() if words else ""
-                    fence = (marker[0], len(marker),
-                             first_word == "" or first_word in SHELL_FENCE_WORDS)
+                    fence = (marker[0], len(marker))
                 else:
-                    char, length, shell = fence
+                    char, length = fence
                     # Closes at a line holding only the same fence char, at least as long.
                     if m and m.group(1)[0] == char and len(m.group(1)) >= length \
                             and m.group(2).strip() == "":
                         fence = None
-                    elif shell:
+                    else:
                         classes[i] = "script"
         return classes
 
-    def _scan_line(self, line, lineno, cls, display, tier, file_sha):
+    def _scan_line(self, line, lineno, cls, display, tier, file_sha, ext=""):
         pol = self.policy
 
         # Built-in: hidden Unicode. One finding per line however many characters.
@@ -678,22 +711,32 @@ class Scan:
                 sev = rule.owned_severity
             down = None
             if sev == "high":
-                down = self._downgrade_context(rule, line, cls)
+                down = self._downgrade_context(rule, line, cls, ext)
                 if down:
                     sev = "low"
             self._add(rule.id, sev, display, lineno, cls, tier, rule.message,
                       excerpt=line, downgraded=down, raw_line=line)
 
-    def _downgrade_context(self, rule, line, cls):
-        """Name of the first listed context that excuses a high finding, else None."""
+    def _downgrade_context(self, rule, line, cls, ext=""):
+        """Name of the first listed context that excuses a high finding, else None.
+
+        Each context is something the AUTHOR of the scanned text could otherwise
+        pick to make a command look harmless, so each is narrow:
+          test      the file is in the test class (the policy keeps it off the
+                    exec/exfil rules; see `downgrade:` in policy.yaml)
+          negation  prose only (class doc), and only when the negation word comes
+                    BEFORE the match on the same line ("never run `...`")
+          comment   the line starts with this file type's own comment marker"""
         for ctx in rule.downgrade:
             if ctx == "test" and cls == "test":
                 return ctx
-            if (ctx == "negation" and self.policy.negation is not None
-                    and cls in ("doc", "other") and self.policy.negation.search(line)):
-                return ctx                    # prose only: a script cannot "warn" its way out
+            if (ctx == "negation" and self.policy.negation is not None and cls == "doc"):
+                m = rule.regex.search(line)
+                if m and self.policy.negation.search(line[:m.start()]):
+                    return ctx
             if (ctx == "comment" and cls in ("script", "hook", "config")
-                    and line.lstrip().startswith(COMMENT_PREFIXES)):
+                    and line.lstrip().startswith(
+                        COMMENT_PREFIXES_BY_EXT.get(ext, DEFAULT_COMMENT_PREFIXES))):
                 return ctx
         return None
 
