@@ -480,4 +480,12 @@ Every entry is a line the scanner flags that was read in context and judged to b
   path: repos/gstack/plan-ceo-review/SKILL.md
   contains: 'command: "bash -c ''S=\"$HOME/.claude/skills/gstack/plan-ceo-review/bin/mode-handoff-hook\"\nif [ -f \"$S\" ]; then exec bash \"$S\"; fi\nexit 0''"'
   reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
+- rule: runner-unpinned
+  path: repos/gstack/browse/test/xprotect-heal.test.ts
+  contains: 'expect(thrown!.message).toContain(''bunx playwright install chromium'');'
+  reason: assertion in gstack's unit test for its Playwright repair helper; the string is the expected guidance text, not a command the test runs; accepted with the gstack source trust
+- rule: runner-unpinned
+  path: repos/gstack/browse/test/xprotect-heal.test.ts
+  contains: 'expect(out).toContain(''bunx playwright install chromium'');'
+  reason: assertion in gstack's unit test for its Playwright repair helper; the string is the expected guidance text, not a command the test runs; accepted with the gstack source trust
 ```

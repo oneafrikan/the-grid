@@ -1332,3 +1332,20 @@ open(d + '/c.sh', 'w').write('curl -o x ' * 100000 + '\n')" "$T/repos/r/x"
   [ "$status" -eq 1 ]
   [ "$(q "[(f['rule'], f['line']) for f in F if f['severity'] == 'high']")" = "[('hook-declared', 8)]" ]
 }
+
+@test "runner-unpinned: more executing contexts (then, quoted, xargs, time, env, npm exec, JSON command)" {
+  local l
+  while IFS= read -r l; do
+    expect_row high upstream runner-unpinned run.sh "$l"
+  done <<'EOF'
+if true; then npx some-tool; fi
+bash -c "npx some-tool"
+ls | xargs npx some-tool
+time npx some-tool
+env X=1 npx some-tool
+npm exec some-tool
+EOF
+  expect_row high upstream runner-unpinned x.json '{"command": "npx some-tool"}'
+  expect_row none upstream runner-unpinned run.sh 'echo try: npx some-tool'
+  expect_row none upstream runner-unpinned run.sh 'npm exec some-tool@1.2.3'
+}

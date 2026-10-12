@@ -163,8 +163,8 @@ rules:
     severity: low
     severity_by_class: {script: high, hook: high, config: high, test: high}
     message: package runner without a pinned version
-    regex: '(?:^\s*(?:\$\s+)?|[;&|(]\s*|\brun:\s*|\$\(\s*|\bexec\s+|\bsudo\s+)(?:npx|bunx|pnpm\s+dlx|yarn\s+dlx)\s+(?:--?[A-Za-z][\w-]*(?:=\S+)?\s+)*@?[\w.][\w./-]*'
-    ignore_regex: '(?:^\s*(?:\$\s+)?|[;&|(]\s*|\brun:\s*|\$\(\s*|\bexec\s+|\bsudo\s+)(?:npx|bunx|pnpm\s+dlx|yarn\s+dlx)\s+(?:--?[A-Za-z][\w-]*(?:=\S+)?\s+)*@?[\w./-]+@(?:\d|latest\b)|\bnpx\s+(?:--?\S+\s+)*(?:-y|--yes)\b'
+    regex: '(?:^\s*(?:\$\s+)?|[;&|(]\s*|\brun:\s*|\$\(\s*|[\"\x27]\s*|\b(?:then|do|else|xargs|time|nohup|exec|sudo|command|env(?:\s+\w+=\S+)*)\s+)(?:npx|bunx|pnpm\s+dlx|yarn\s+dlx|npm\s+exec)\s+(?:--?[A-Za-z][\w-]*(?:=\S+)?\s+)*@?[\w.][\w./-]*'
+    ignore_regex: '(?:^\s*(?:\$\s+)?|[;&|(]\s*|\brun:\s*|\$\(\s*|[\"\x27]\s*|\b(?:then|do|else|xargs|time|nohup|exec|sudo|command|env(?:\s+\w+=\S+)*)\s+)(?:npx|bunx|pnpm\s+dlx|yarn\s+dlx|npm\s+exec)\s+(?:--?[A-Za-z][\w-]*(?:=\S+)?\s+)*@?[\w./-]+@(?:\d|latest\b)|\bnpx\s+(?:--?\S+\s+)*(?:-y|--yes)\b'
     downgrade: [comment]
   - id: exfil-pipe
     severity: low
