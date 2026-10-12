@@ -466,6 +466,6 @@ Every entry is a line the scanner flags that was read in context and judged to b
   reason: assertion in gstack's unit test for its Playwright repair helper; the string is the expected guidance text, not a command the test runs; accepted with the gstack source trust
 - rule: credential-read
   path: hooks/README.md
-  contains: 'fallback repo; or to shell startup files, `~/.ssh/{authorized_keys,config,rc}`,'
+  contains: 'fallback repo; or to shell startup files, `~/.ssh/{authorized_keys,config,config.d,rc}`,'
   reason: documentation of which paths the auto-handoff guard watches (a brace-expanded list that names the ssh files); prose in the hooks README, not a command, pinned by this whole-line entry so any change to the line is flagged again
 ```
