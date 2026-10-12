@@ -418,7 +418,15 @@ def merge_owned(settings: dict, desired: list[tuple]) -> dict:
             del out["hooks"]
 
     # -- 2. add: each desired handler into the entry with the same matcher ----------
+    # The sweep keeps an owned handler wherever it already sits. Without this check the
+    # add step looked only at the FIRST entry with the matcher, so a generated handler in
+    # a later entry was kept by the sweep and appended again (two SessionEnd runs, two
+    # model calls, until later runs happened to converge). "Present anywhere under the
+    # same event and matcher" also never moves a handler into a user's own entry.
+    present = {(event, matcher, h["command"]) for event, matcher, h in iter_owned(out)}
     for event, matcher, command, timeout, on_failure in desired:
+        if (event, matcher, command) in present:
+            continue
         if "hooks" in out and not isinstance(out["hooks"], dict):
             raise SettingsError("'hooks' is not an object")
         hooks = out.setdefault("hooks", {})
