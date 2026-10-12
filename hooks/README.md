@@ -231,7 +231,15 @@ proven live (operator check B1), so the rules are not the only barrier:
    every path logged, nothing moved or deleted); no handoff file at all is
    `no-handoff-file`.
 3. Both files are scanned with the secret table (`lib/secret-patterns.sh`), whatever the
-   project profile says. A hit is `secret`: both files move to
+   project profile says, in strict mode: the "example"/placeholder exemptions do not
+   apply (a model can add the word to any line), and four extra shapes count: a run of
+   64 or more base64 characters, `Bearer <20+ chars>`, a URL password
+   (`scheme://user:secret@host`) and `pass`/`pwd`/`password` assigned a value of 6 or
+   more characters. A long hex digest in a handoff is therefore quarantined too. The same
+   scan runs first on the timeout, child-failure and `unexpected-file` paths: a NEW file
+   with a hit moves to the quarantine directory (the reason stays `timeout` and so on,
+   with `secret=` and `quarantine=` added); a pre-existing file the child changed is only
+   reported. A hit is `secret`: both files move to
    `${GRID_STATE_DIR:-$HOME/.grid}/handoff-quarantine/<session>/` (outside every repo),
    nothing is committed, and only names and line numbers are logged. Review and delete
    them.
@@ -241,6 +249,14 @@ proven live (operator check B1), so the rules are not the only barrier:
 5. It pushes only when that repository is the private repo
    (`${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}`), its branch has an upstream, and the
    handoff commit is the only unpushed one. A plain `git push`, nothing else.
+
+**What the model sees and what the log keeps.** The digest the child reads is scanned
+with the same strict table before the child starts: a matching line becomes
+`[line redacted: <pattern>]` (the spawn log line says `redacted=<n>`), so a secret in the
+transcript is never in front of the model. Child output and git's error text are masked
+the same way before they are written to the log (`child| [masked: <pattern>]`). Each
+message in the digest is cut to the size cap before it is measured, so one huge message
+cannot exhaust memory.
 
 **Fallback directory.**
 `${GRID_HANDOFF_FALLBACK_DIR:-${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}/handoffs}/<basename of the session directory>/`.

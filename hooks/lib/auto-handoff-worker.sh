@@ -44,6 +44,10 @@ GRID_ROOT="$(cd "$HERE/../.." && pwd -P)"
 . "$HERE/common.sh"
 # shellcheck source=secret-patterns.sh
 . "$HERE/secret-patterns.sh"
+# Everything this worker scans is model input or model output: no exemption words (a model
+# can add "example" to any line), plus the extra strict shapes (secret-patterns.sh).
+# shellcheck disable=SC2034  # read by secret-patterns.sh
+SECRET_STRICT=1
 
 # ---- knobs (a non-numeric value falls back to the default) -----------------------
 num() { if [[ "${1:-}" =~ ^[0-9]+$ ]]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
@@ -251,6 +255,11 @@ DIGEST_DIR="$(mktemp -d)" || finish_error digest-failed
 SNAP_DIR="$(mktemp -d)" || finish_error digest-failed
 DIGEST="$DIGEST_DIR/session-digest.md"
 bash "$HERE/transcript-digest.sh" "$TRANSCRIPT" "$DIGEST" "$MAX_BYTES" 2>/dev/null || finish_error digest-failed
+# The model reads this digest, so a secret in the transcript must not be in it: otherwise it
+# can copy it into the handoff or repeat it in a tool call. Matching lines are replaced.
+REDACTED="$(secret_redact_file "$DIGEST")"
+[[ "$REDACTED" =~ ^[0-9]+$ ]] || REDACTED=0
+REDACTED_TOKEN=""; [ "$REDACTED" -gt 0 ] && REDACTED_TOKEN=" redacted=$REDACTED"
 
 # The child writes into <fallback>/<basename of cwd>; the worker creates it (the child
 # has no mkdir). A failure to create it is not fatal: the child may still use <target>.
@@ -478,6 +487,41 @@ fs_snapshot() {
 }
 fs_snapshot > "$SNAP_DIR/fs.before"
 
+# scan_new_and_quarantine: the error paths that end before the normal secret scan (timeout,
+# child failure, unexpected-file) used to leave a handoff pair the child had already
+# written in the working tree, unscanned, for a later `git add -A` to sweep up. This scans
+# every file that is new or changed since the before-snapshot (regular files up to 1 MB,
+# at most 200 of them): a NEW file with a hit moves to the quarantine dir; a pre-existing
+# file the child changed is reported but never moved (it is the operator's). Sets QNOTE to
+# "secret=<file:line:name,...>[ quarantine=<dir>]", or "" when everything is clean.
+QNOTE=""
+scan_new_and_quarantine() {
+  local f ty _mt sz l n=0 moved=0 qdir="$QUARANTINE/$SID" dest hits=() found
+  QNOTE=""
+  fs_snapshot > "$SNAP_DIR/fs.scan"
+  while IFS=$'\t' read -r f ty _mt sz; do
+    [ "$ty" = F ] || continue
+    [[ "$sz" =~ ^[0-9]+$ ]] && [ "$sz" -le 1048576 ] || continue
+    n=$((n + 1)); [ "$n" -le 200 ] || break
+    found=0
+    while IFS= read -r l; do
+      [ -n "$l" ] || continue
+      # "<path>:<line>: <name> (abcd...)" -> "<file>:<line>:<name>"; never the value.
+      l="${l% (*}"; l="${l##*/}"; hits+=("${l// /}"); found=1
+    done < <(secret_scan_file "$f")
+    [ "$found" = 1 ] || continue
+    if ! awk -F'\t' -v p="$f" '$1 == p { hit = 1 } END { exit !hit }' "$SNAP_DIR/fs.before"; then
+      mkdir -p "$qdir" || continue
+      dest="$qdir/$(basename "$f")"; [ -e "$dest" ] && dest="$qdir/$moved-$(basename "$f")"
+      mv -- "$f" "$dest" && moved=$((moved + 1))
+    fi
+  done < <(comm -13 "$SNAP_DIR/fs.before" "$SNAP_DIR/fs.scan")
+  [ "${#hits[@]}" -gt 0 ] || return 0
+  QNOTE="secret=$(join_csv "${hits[@]}")"
+  [ "$moved" -gt 0 ] && QNOTE="$QNOTE quarantine=$qdir"
+  return 0
+}
+
 TARGET_TEXT="${TARGET:-none (use the fallback directory)}"
 PROMPT="/handoff Source conversation is the digest file $DIGEST, not this session. Target directory: $TARGET_TEXT. Fallback directory: $FALLBACK."
 
@@ -485,7 +529,7 @@ PROMPT="/handoff Source conversation is the digest file $DIGEST, not this sessio
 # is not paid for again until it gains MIN_TURNS new turns (an error outcome used to leave
 # no marker, so every later SessionEnd of the session ran the model again).
 printf '%s\n' "$TURNS" > "$STATE/$SID" 2>/dev/null
-log spawn ok "turns=$TURNS${END_REASON:+ end=${END_REASON//[^A-Za-z0-9_-]/}}${TARGET_WHY:+ target-refused=$TARGET_WHY}"
+log spawn ok "turns=$TURNS${END_REASON:+ end=${END_REASON//[^A-Za-z0-9_-]/}}${TARGET_WHY:+ target-refused=$TARGET_WHY}${REDACTED_TOKEN}"
 cd "$CWD" || finish_skip bad-payload
 OUT="$SNAP_DIR/child.out"
 # GRID_AUTOHANDOFF_CHILD=1 is the recursion guard (the child's own SessionEnd hook
@@ -577,14 +621,20 @@ rc=$?
 CHILD_PID=""
 
 # Child output into the log, truncated to 4000 bytes and prefixed so it never reads
-# as a decision line.
+# as a decision line. It is model output, so it goes through the secret mask first: a
+# matching line is replaced, never logged. When the cut falls mid-line that last (partial)
+# line is dropped, so half a token cannot slip past the patterns.
 if [ -s "$OUT" ]; then
-  { head -c 4000 "$OUT" | sed 's/^/child| /'; echo; } >> "$LOG" 2>/dev/null
+  if [ "$(wc -c < "$OUT")" -gt 4000 ]; then
+    { head -c 4000 "$OUT" | sed '$d' | secret_mask_stream | sed 's/^/child| /'; echo; } >> "$LOG" 2>/dev/null
+  else
+    { secret_mask_stream < "$OUT" | sed 's/^/child| /'; echo; } >> "$LOG" 2>/dev/null
+  fi
 fi
 case "$rc" in
   0) ;;
-  142) finish_error timeout ;;
-  *) finish_error "claude-exit-$rc" ;;
+  142) scan_new_and_quarantine; finish_error timeout "$QNOTE" ;;
+  *) scan_new_and_quarantine; finish_error "claude-exit-$rc" "$QNOTE" ;;
 esac
 
 # ---- 7: verify what the child wrote -------------------------------------------------
@@ -605,7 +655,8 @@ done
 while IFS= read -r p; do [ -n "$p" ] && CHANGED+=("$p"); done < <(home_watch | state_lines | state_diff "$SNAP_DIR/home.state")
 if [ "${#CHANGED[@]}" -gt 0 ]; then
   DISP=(); for p in "${CHANGED[@]}"; do DISP+=("$(disp "$p")"); done
-  finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")"
+  scan_new_and_quarantine
+  finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")${QNOTE:+ $QNOTE}"
 fi
 
 # 7b. what changed under the roots DURING the child run: entries in the after-snapshot that
@@ -629,7 +680,8 @@ done < <({ fs_snapshot > "$SNAP_DIR/fs.after"; comm -13 "$SNAP_DIR/fs.before" "$
            awk -F'\t' '$2 == "L" && ($1 ~ /-handoff\.md$/ || $1 ~ /-context\.md$/)' "$SNAP_DIR/fs.after"; })
 if [ "${#SYMS[@]}" -gt 0 ]; then
   DISP=(); for p in "${SYMS[@]}"; do DISP+=("$(disp "$p")"); done
-  finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")"
+  scan_new_and_quarantine
+  finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")${QNOTE:+ $QNOTE}"
 fi
 
 HANDOFFS=()   # indexes into NEW
@@ -662,7 +714,8 @@ for r in "${NEW[@]}"; do
 done
 if [ "${#UNEXP[@]}" -gt 0 ]; then
   # Detect only: nothing is moved or deleted, every unexpected path is named.
-  finish_error unexpected-file "paths=$(join_csv "${UNEXP[@]}")"
+  scan_new_and_quarantine
+  finish_error unexpected-file "paths=$(join_csv "${UNEXP[@]}")${QNOTE:+ $QNOTE}"
 fi
 PAIR=("$HF"); [ -n "$CTX" ] && PAIR+=("$CTX")
 
@@ -707,7 +760,7 @@ else
     # Leave the files on disk; unstage them so the next commit does not pick them up.
     git -C "$T" reset -q -- "${RELS[@]}" >/dev/null 2>&1
     STAGED=()
-    printf 'child| commit failed: %s\n' "$(head -c 400 "$GOUT" | tr '\n' ' ')" >> "$LOG" 2>/dev/null
+    printf 'child| commit failed: %s\n' "$(head -c 400 "$GOUT" | secret_mask_stream | tr '\n' ' ')" >> "$LOG" 2>/dev/null
     finish_error commit-failed
   fi
 fi

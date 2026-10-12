@@ -1107,3 +1107,154 @@ cwd_lock() { printf '%s/handoff/cwd-%s.lock\n' "$GRID_HOOK_STATE_DIR" "$(printf 
   [ -z "$(ls -A "$TMPDIR")" ]
   kill "$(cat "$STUB_DIR/claude.pid")" 2>/dev/null || true
 }
+
+# ---------------------------------------------------------------------------
+# WP-018: secrets and logging (hardening, refs private WP-018). Every secret-shaped value
+# below is assembled at run time from fragments; none is a real credential.
+# ---------------------------------------------------------------------------
+
+# quarantine_has <file>: the quarantined copy of a file for the current session.
+quarantine_has() { [ -f "$GRID_STATE_DIR/handoff-quarantine/$SID/$1" ]; }
+
+# The output scan used to honour the "example" exemption, so a model could pass any line by
+# adding that word; and it only knew the table's token shapes. The worker's scan is strict:
+# no exemptions, plus a few shapes the table does not cover.
+@test "strict output scan: six evasion shapes are each quarantined" {
+  local pem b64 tok
+  pem="$(printf '%s%s' '-----BEGIN RSA PRIV' 'ATE KEY----- (example)')"
+  b64="$(printf 'Ab1+%.0s' $(seq 20))"
+  tok="$(fake_token)"
+  local bodies=("$pem" "$b64" "$tok # example" "DB_PASS=s3cretvalue1" \
+                "Authorization: Bearer abcdefghijklmnopqrstuvwxyz" "postgres://admin:s3cr3tpw@db.internal/app")
+  local n=0 body
+  export STUB_CLAUDE_MODE=handoff-logs
+  for body in "${bodies[@]}"; do
+    n=$((n + 1))
+    mk_tx 6
+    SID="11111111-1111-4111-8111-44444444444$n"
+    export STUB_HANDOFF_BODY="$body"
+    clear_run
+    run_worker
+    log_has "action=error reason=secret" || { echo "row $n not quarantined: $body" >&2; cat "$LOG" >&2; return 1; }
+    quarantine_has 2026-01-01-testhost-stub-handoff.md
+    quarantine_has 2026-01-01-testhost-stub-context.md
+    [ ! -e "$P/LOGS/2026-01-01-testhost-stub-handoff.md" ]
+    # the value never reaches the log
+    refute grep -qF -- "$body" "$LOG"
+  done
+}
+
+@test "a clean handoff is still committed under the strict scan" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs STUB_HANDOFF_BODY="Decisions: use the cache. Next: wire the endpoint."
+  before="$(commits "$P")"
+  run_worker
+  log_has "action=done"
+  [ "$(commits "$P")" -eq $((before + 1)) ]
+}
+
+# What the model is shown is redacted first: a secret in the transcript would otherwise be
+# copied by the model into the handoff, or echoed in a tool call.
+@test "digest redacted: a token in a tool input and a Bearer value in user text never reach the child" {
+  tok="$(fake_token)"
+  : > "$TXN"
+  tx human-string "call it with Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123 please" >> "$TXN"
+  tx assistant-bash-tool "uses $tok for the call" >> "$TXN"
+  local i
+  for ((i = 3; i <= 6; i++)); do tx human-string "question $i" >> "$TXN"; done
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=done"
+  refute grep -qF -- "$tok" "$STUB_DIR/claude.digest"
+  refute grep -qF -- "abcdefghijklmnopqrstuvwxyz0123" "$STUB_DIR/claude.digest"
+  grep -q '^\[line redacted: ' "$STUB_DIR/claude.digest"
+  grep -q "question 3" "$STUB_DIR/claude.digest"           # ordinary lines are untouched
+  log_has "redacted=2"
+}
+
+# Early exits used to leave an unscanned pair in the tree (the scan came later).
+@test "secret-third: an unexpected extra file still quarantines the secret pair" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-secret-third STUB_HANDOFF_BODY="$(fake_token)"
+  before="$(commits "$P")"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  quarantine_has 2026-01-01-testhost-stub-handoff.md
+  quarantine_has 2026-01-01-testhost-stub-context.md
+  [ ! -e "$P/LOGS/2026-01-01-testhost-stub-handoff.md" ]
+  [ -f "$P/LOGS/third.md" ]                                 # clean extra files are reported, not moved
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "secret="
+  [ "$(commits "$P")" -eq "$before" ]
+}
+
+@test "timeout with a secret pair on disk quarantines it; the reason stays timeout" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs STUB_HANDOFF_BODY="$(fake_token)" STUB_CLAUDE_SLEEP_AFTER=30 GRID_AUTOHANDOFF_TIMEOUT=2
+  run_worker
+  log_has "action=error reason=timeout"
+  quarantine_has 2026-01-01-testhost-stub-handoff.md
+  [ ! -e "$P/LOGS/2026-01-01-testhost-stub-handoff.md" ]
+}
+
+@test "a child failure with a secret pair on disk quarantines it too" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs STUB_HANDOFF_BODY="$(fake_token)" STUB_CLAUDE_EXIT=3
+  run_worker
+  log_has "action=error reason=claude-exit-3"
+  quarantine_has 2026-01-01-testhost-stub-handoff.md
+}
+
+@test "a pre-existing file the child modified is reported with its secret but never moved" {
+  mk_tx 6
+  tok="$(fake_token)"
+  # the "child" appends a secret to a tracked file (handoff-modify appends a plain line, so
+  # pre-seed the line it will be compared against: the file must already contain the token)
+  printf 'api_key = %s\n' "$tok" > "$P/base.txt"
+  touch -t 202001010000 "$P/base.txt"
+  export STUB_CLAUDE_MODE=handoff-modify
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "secret="
+  [ -f "$P/base.txt" ]                                      # reported, never moved
+  refute grep -qF -- "$tok" "$LOG"
+}
+
+@test "a token printed by the child is masked in the log" {
+  mk_tx 6
+  tok="$(fake_token)"
+  export STUB_CLAUDE_MODE=handoff-logs STUB_CLAUDE_PRINT="the key is $tok ok"
+  run_worker
+  log_has "action=done"
+  refute grep -qF -- "$tok" "$LOG"
+  log_has "child| [masked: github-token]"
+}
+
+@test "a commit failure text is masked in the log" {
+  mk_tx 6
+  tok="$(fake_token)"
+  printf '#!/bin/sh\necho "hook says %s" >&2\nexit 1\n' "$tok" > "$P/.git/hooks/pre-commit"
+  chmod +x "$P/.git/hooks/pre-commit"
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=error reason=commit-failed"
+  refute grep -qF -- "$tok" "$LOG"
+}
+
+# 20 MB in ONE message: the digest used to explode the string to code points to measure it
+# (about 47 x the message), so it needed roughly a gigabyte.
+@test "a 20 MB single-message transcript digests within a memory cap, quickly" {
+  [ "$(uname -s)" = Linux ] || skip "ulimit -v is not reliable off Linux"
+  # 20 MB cannot go through `tx` (one argv string is capped near 128 KB): read it from a file.
+  head -c 20000000 /dev/zero | tr '\0' 'a' > "$BATS_TEST_TMPDIR/big.txt"
+  jq -c --rawfile t "$BATS_TEST_TMPDIR/big.txt" 'walk(if . == "__TEXT__" then $t else . end)' \
+    "$HOOK_FIXTURES/shapes/human-string.json" > "$TXN"
+  tx assistant-text "answer" >> "$TXN"
+  local start end
+  start="$(date +%s)"
+  run bash -c 'ulimit -v 400000; exec bash "$1" "$2" "$3" 300000' _ "$REPO_ROOT/hooks/lib/transcript-digest.sh" "$TXN" "$BATS_TEST_TMPDIR/big-digest.md"
+  end="$(date +%s)"
+  [ "$status" -eq 0 ]
+  [ "$(wc -c < "$BATS_TEST_TMPDIR/big-digest.md")" -le 300400 ]
+  grep -q "answer" "$BATS_TEST_TMPDIR/big-digest.md"
+  [ $((end - start)) -lt 15 ]
+}

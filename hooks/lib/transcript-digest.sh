@@ -36,8 +36,12 @@ jq -R -c 'fromjson? | select(type == "object" and .isSidechain != true)' "$trans
   # byte length of a string once encoded as UTF-8
   def blen: explode | map(if . < 128 then 1 elif . < 2048 then 2 elif . < 65536 then 3 else 4 end) | add // 0;
   # text of a content value: a string, or the joined text blocks of an array
-  def texts: if type == "string" then .
-             elif type == "array" then [.[] | select(type == "object" and .type == "text") | .text // ""] | join("\n")
+  # Every message is cut to $cap + 1 characters BEFORE it is measured: blen explodes a string
+  # into one number per character (about 47 bytes each), so a single 20 MB message needed
+  # roughly a gigabyte. One character over the cap still tells the cap logic the entry is
+  # too big (and the first and last human turns are cut to cap/16 later anyway).
+  def texts: if type == "string" then .[0:$cap + 1]
+             elif type == "array" then [.[] | select(type == "object" and .type == "text") | (.text // "") | .[0:$cap + 1]] | join("\n") | .[0:$cap + 1]
              else "" end;
   # a human turn: non-meta user line, non-empty string, or text blocks with no tool_result
   def human: .type == "user" and (.isMeta != true)
@@ -51,7 +55,7 @@ jq -R -c 'fromjson? | select(type == "object" and .isSidechain != true)' "$trans
       elif .type == "assistant" then
         (.message.content // []) | if type == "array" then
           .[] | select(type == "object")
-              | if .type == "text" then {h: false, s: ("## Assistant\n" + (.text // ""))}
+              | if .type == "text" then {h: false, s: ("## Assistant\n" + ((.text // "") | .[0:$cap + 1]))}
                 elif .type == "tool_use" then {h: false, s: ("tool: " + (.name // "?") + " " + ((.input // {}) | tojson | .[0:200]))}
                 else empty end
           else empty end
