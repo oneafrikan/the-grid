@@ -99,7 +99,7 @@ sys.exit(0 if got == want else "got %r" % got)
 }
 
 # (d) Pin the shape of the real policy without needing PyYAML.
-@test "policy.yaml has exactly the 11 expected rule ids in order, negation (?i), first class test" {
+@test "policy.yaml has exactly the 11 expected rule ids in order, negation (?i), first class hook" {
   run python3 -c '
 import sys
 sys.path.insert(0, sys.argv[1])
@@ -112,7 +112,7 @@ print(d["classes"][0]["name"])
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "curl-pipe-shell npx-unpinned latest-tag uvx-unpinned secret-shape home-path ssh-write shell-rc-write prompt-injection hook-network credential-read" ]
   [ "${lines[1]}" = "True" ]
-  [ "${lines[2]}" = "test" ]
+  [ "${lines[2]}" = "hook" ]    # WP-036: hook is listed before test
 }
 
 # (e) The audit-allow shape: a list of maps, with a quoted `contains` that holds
