@@ -5,7 +5,7 @@ paths:
 # Rust patterns
 
 ## Errors
-- Return `Result` from functions that can fail instead of calling `unwrap` or `expect`; a panic cannot be recovered, so it makes that decision on behalf of the calling code. Keep `unwrap` for tests, examples and prototypes.
+- Return `Result` from fallible functions instead of calling `unwrap` or `expect`; a panic cannot be recovered, so it decides for the caller. Keep `unwrap` for tests, examples, prototypes, or when you have information the compiler lacks.
 - Implement `std::error::Error` for error types and make them `Send` and `Sync`; do not use `()` as an error type, because it carries nothing for callers to inspect.
 
 ## Types

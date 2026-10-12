@@ -7,6 +7,7 @@ Go conventions: error wrapping, context and goroutine lifetimes, standard-librar
 - `style.md`, `patterns.md` and `security.md` load on `**/*.go`; every bullet applies to any Go source file.
 - `testing.md` loads on `*_test.go` only.
 - `modules.md` loads on `go.mod` only; its bullets do not apply to source files. `go.sum` is not matched.
+- `**/*.go` also loads on vendored code and on `_test.go` files, so the style, patterns and security bullets apply there too. `go.work` is not matched.
 - Framework and application-layout rules (HTTP routers, ORMs) are not covered.
 
 ## Sources
