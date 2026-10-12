@@ -1136,18 +1136,34 @@ def _store_pathspec(priv: Path) -> str:
         return "learning/instincts"
 
 
-def _unstage_large(priv: Path, pathspec: str) -> None:
-    """Unstage any file under the pathspec bigger than MAX_SYNC_FILE_BYTES, with a warning
-    (a 60 MB junk file once went into a private repo through a bare `git add`)."""
+def _unstage_large(priv: Path, pathspec: str) -> bool:
+    """Guard the size of what is about to be committed; return True to REFUSE the commit.
+
+    A NEW file over MAX_SYNC_FILE_BYTES is unstaged (with a warning) and the rest is
+    committed (a 60 MB junk file once went into a private repo through a bare `git add`).
+    A file that is already TRACKED is different: the commit below is `git commit -- <path>`,
+    which re-takes the working-tree content of every tracked file under the path, so
+    unstaging it would not keep it out. Then the whole commit is refused and everything this
+    run staged is unstaged again, so the warning is true: nothing over the cap is committed."""
     r = _private_git(priv, "diff", "--cached", "--name-only", "-z", "--", pathspec)
+    refuse = False
     for name in filter(None, r.stdout.split("\0")):
         try:
             size = (priv / name).stat().st_size
         except OSError:
             continue   # staged deletion: nothing on disk to measure
         if size > MAX_SYNC_FILE_BYTES:
-            _private_git(priv, "reset", "-q", "HEAD", "--", name)
-            _sync_warn(f"not committing {name}: {size} bytes is over the {MAX_SYNC_FILE_BYTES} byte limit")
+            tracked = _private_git(priv, "cat-file", "-e", "HEAD:" + name).returncode == 0
+            if tracked:
+                refuse = True
+                _sync_warn(f"not committing anything: tracked file {name} is {size} bytes, over the "
+                           f"{MAX_SYNC_FILE_BYTES} byte limit")
+            else:
+                _private_git(priv, "reset", "-q", "HEAD", "--", name)
+                _sync_warn(f"not committing {name}: {size} bytes is over the {MAX_SYNC_FILE_BYTES} byte limit")
+    if refuse:
+        _private_git(priv, "reset", "-q", "HEAD", "--", pathspec)
+    return refuse
 
 
 GUARD = Path(__file__).resolve().parent.parent / "lib" / "private-git-guard.sh"
@@ -1191,6 +1207,7 @@ def run_sync() -> int:
         if busy.returncode != 0:
             print(f"instincts: sync skipped: private repo busy ({busy.stdout.strip()})")
             return 0
+        refuse = False
         # On a machine that has produced no instincts yet the path does not exist and
         # `git add` would fail on it; there is simply nothing to stage then.
         if (priv / pathspec).exists():
@@ -1198,10 +1215,12 @@ def run_sync() -> int:
             if r.returncode != 0:
                 _sync_warn("git add failed: " + r.stderr.strip())
                 return 0
-            _unstage_large(priv, pathspec)
+            refuse = _unstage_large(priv, pathspec)
         # diff --cached --quiet: exit 0 = nothing staged, 1 = staged change.
         staged = _private_git(priv, "diff", "--cached", "--quiet", "--", pathspec)
-        if staged.returncode == 0:
+        if refuse:
+            pass   # warned above; nothing is committed this run
+        elif staged.returncode == 0:
             print("instincts: sync: no changes to commit")
         elif staged.returncode == 1:
             # Commit only our path so anything else already staged in the private repo is left alone.
