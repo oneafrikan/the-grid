@@ -63,7 +63,7 @@ day() { jget "d['harnesses']['claude-code']['days']['$1'].get('$2')"; }
   [ "$status" -eq 0 ]
   [ "$(day 2026-10-07 skills)" = '{"handoff": 1}' ]
   [ "$(day 2026-10-07 agents)" = '{"grid-qa-engineer": 1}' ]
-  [ "$(day 2026-10-07 slash)" = '{"model": 1}' ]
+  [ "$(day 2026-10-07 slash)" = '{"other": 1}' ]   # /model is not a wired skill: bucketed (WP-059)
   [ "$(day 2026-10-08 skills)" = '{"handoff": 1, "tdd": 2}' ]
   [ "$(day 2026-10-08 agents)" = '{"(default)": 1, "grid-qa-engineer": 1}' ]
   [ "$(day 2026-10-08 slash)" = '{"handoff": 1}' ]
@@ -324,7 +324,7 @@ JSON
   extract
   [ "$status" -eq 0 ]
   [ "$(jget "sorted(d)")" = '["harnesses", "host", "schema", "updated"]' ]
-  [ "$(jget "sorted(d['harnesses']['claude-code'])")" = '["days", "listing", "wired"]' ]
+  [ "$(jget "sorted(d['harnesses']['claude-code'])")" = '["days", "listing", "wired", "wired_first_seen"]' ]
   [[ "$stderr" == *"dropped"* ]]
   run ! grep -E 'a string|999999|not-a-day|bad name|unknown_bucket|top-level extra' "$F"
   # A well-formed value from the old file survives (max-merge keeps the larger).
@@ -473,4 +473,132 @@ PY
   [ "$status" -eq 0 ]
   run ! grep -F 'evil' "$F"
   [ "$(jget "d['harnesses']['claude-code']['wired']")" = '{"agents": ["grid-qa-engineer"], "skills": ["handoff", "tdd"]}' ]
+}
+
+# --- merge, retention, bucketing, schema (WP-059) -----------------------------------
+
+@test "rescanning a SUBSET of history never lowers a stored count (the max-merge invariant)" {
+  rm -rf "$T/projects"; mkdir -p "$T/projects/p"
+  { rec_skill 2026-10-08T10:00:00Z a1; rec_skill 2026-10-08T10:00:01Z a2; } > "$T/projects/p/s.jsonl"
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(day 2026-10-08 skills)" = '{"tdd": 2}' ]
+  cp "$F" "$T/first.json"
+  # The transcript shrinks (expiry, truncation): the new scan sees one call, not two.
+  rec_skill 2026-10-08T10:00:00Z a1 > "$T/projects/p/s.jsonl"
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(day 2026-10-08 skills)" = '{"tdd": 2}' ]
+  cmp "$F" "$T/first.json"
+}
+
+@test "the retention warning fires at 44 and not at 45 (exact boundary)" {
+  printf '{"cleanupPeriodDays": 44}\n' > "$CLAUDE_SETTINGS"
+  extract
+  [[ "$stderr" == *cleanupPeriodDays* ]]
+  printf '{"cleanupPeriodDays": 45}\n' > "$CLAUDE_SETTINGS"
+  extract
+  [[ "$stderr" != *cleanupPeriodDays* ]]
+}
+
+@test "the skill listing of a day keeps the field-wise max across sessions" {
+  mkdir -p "$T/projects/p-x"
+  {
+    printf '{"type":"attachment","uuid":"l1","timestamp":"2026-10-06T10:00:00Z","attachment":{"type":"skill_listing","isInitial":true,"skillCount":3,"content":"%s"}}\n' "12345678901234567890"
+    printf '{"type":"attachment","uuid":"l2","timestamp":"2026-10-06T11:00:00Z","attachment":{"type":"skill_listing","isInitial":true,"skillCount":9,"content":"%s"}}\n' "12345"
+  } > "$T/projects/p-x/listing.jsonl"
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(jget "d['harnesses']['claude-code']['listing']['2026-10-06']")" = '{"chars": 20, "skills": 9}' ]
+}
+
+@test "the output keeps to the documented key set: nothing else can slip in" {
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(jget "sorted(d)")" = '["harnesses", "host", "schema", "updated"]' ]
+  [ "$(jget "sorted({k for day in d['harnesses']['claude-code']['days'].values() for k in day})")" \
+     = '["agents", "hooks", "skills", "slash", "tokens"]' ]
+  [ "$(jget "sorted(d['harnesses']['claude-code'])")" = '["days", "listing", "wired", "wired_first_seen"]' ]
+}
+
+@test "a skill, agent or slash name that is not wired is stored under other; wired names are unchanged" {
+  mkdir -p "$T/projects/p-x"
+  python3 - "$T/projects/p-x/priv.jsonl" <<'PY'
+import json, sys
+recs = [
+  {"type": "assistant", "uuid": "k1", "timestamp": "2026-10-08T10:00:00Z", "message": {"content": [
+     {"type": "tool_use", "id": "tk1", "name": "Skill", "input": {"skill": "client-acme-secret"}},
+     {"type": "tool_use", "id": "tk2", "name": "Task", "input": {"subagent_type": "client-private-agent"}}]}},
+  {"type": "user", "uuid": "k2", "timestamp": "2026-10-08T10:00:02Z",
+   "message": {"role": "user", "content": "<command-name>/client-acme-secret</command-name>"}},
+]
+open(sys.argv[1], "w").write("\n".join(json.dumps(r) for r in recs) + "\n")
+PY
+  extract
+  [ "$status" -eq 0 ]
+  run ! grep -F 'client-' "$F"
+  [ "$(day 2026-10-08 skills)" = '{"handoff": 1, "other": 1, "tdd": 2}' ]
+  [ "$(day 2026-10-08 agents)" = '{"(default)": 1, "grid-qa-engineer": 1, "other": 1}' ]
+  [ "$(day 2026-10-08 slash)" = '{"handoff": 1, "other": 1}' ]
+}
+
+@test "with nothing wired (empty known set) names are stored as seen, not bucketed" {
+  rm -rf "$T/skills" "$T/agents"
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(day 2026-10-08 skills)" = '{"handoff": 1, "tdd": 2}' ]
+}
+
+@test "an existing file whose harnesses is a list exits 1 and stays untouched; an unknown schema too" {
+  mkdir -p "$OUT"
+  printf '{"schema": 1, "host": "testhost", "updated": null, "harnesses": []}\n' > "$F"
+  cp "$F" "$T/list.json"
+  extract
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"harnesses"* ]]
+  cmp "$F" "$T/list.json"
+  printf '{"schema": 1, "host": "testhost", "updated": null, "harnesses": {"claude-code": []}}\n' > "$F"
+  cp "$F" "$T/block.json"
+  extract
+  [ "$status" -eq 1 ]
+  cmp "$F" "$T/block.json"
+  printf '{"schema": 99, "host": "testhost", "harnesses": {}}\n' > "$F"
+  cp "$F" "$T/s99.json"
+  extract
+  [ "$status" -eq 1 ]
+  cmp "$F" "$T/s99.json"
+}
+
+@test "wired_first_seen records today for a name once and keeps the first day on a rescan" {
+  today="$(date -u +%Y-%m-%d)"
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(jget "d['harnesses']['claude-code']['wired_first_seen']['skills']['tdd']")" = "\"$today\"" ]
+  # Pretend tdd was seen long ago; a rescan must not move it forward.
+  python3 - "$F" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+doc["harnesses"]["claude-code"]["wired_first_seen"]["skills"]["tdd"] = "2026-09-01"
+json.dump(doc, open(sys.argv[1], "w"), sort_keys=True, indent=2)
+PY
+  mkdir -p "$T/skills/brand-new"
+  extract
+  [ "$status" -eq 0 ]
+  [ "$(jget "d['harnesses']['claude-code']['wired_first_seen']['skills']['tdd']")" = '"2026-09-01"' ]
+  [ "$(jget "d['harnesses']['claude-code']['wired_first_seen']['skills']['brand-new']")" = "\"$today\"" ]
+}
+
+@test "a pre-existing host file without wired_first_seen is seeded with its own first stored day, not today" {
+  extract
+  [ "$status" -eq 0 ]
+  python3 - "$F" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+del doc["harnesses"]["claude-code"]["wired_first_seen"]
+json.dump(doc, open(sys.argv[1], "w"), sort_keys=True, indent=2)
+PY
+  extract
+  [ "$status" -eq 0 ]
+  # The earliest stored day of the fixture is 2026-10-07: skills already wired are "old".
+  [ "$(jget "d['harnesses']['claude-code']['wired_first_seen']['skills']['tdd']")" = '"2026-10-07"' ]
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # prune-report.sh - thin wrapper around scripts/usage/prune_report.py.
 #
-#   scripts/prune-report.sh [--window-days 90] [--rare 2] [--min-days 28]
+#   scripts/prune-report.sh [--window-days 90] [--rare 2] [--min-days 14]
 #                           [--usage-dir DIR] [--out FILE] [--json]
 #
 # Read-only: prints a report on stdout (or --out) proposing what to drop from the

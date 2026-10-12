@@ -17,10 +17,13 @@ inflated value, which is why the adapter's de-duplication must be right.
 Exit codes: 0 ok (including "no adapters available"), 1 existing host file is
 unusable (left untouched), 2 refused (bad host name or --since-day, --out inside
 the repo, or --out / the host file is a symlink).
-Output holds counts only: no prompt text, paths, project names or ids.
+Output holds counts, plus the NAMES of wired skills and agents and of hooks and
+models. A skill, agent or slash name that is not wired on this machine is stored as
+`other` (a private name must not reach the remote), except when nothing is wired.
+No prompt text, paths, project names or ids.
 
 Writes: the document is REBUILT from a whitelist (schema, host, updated,
-harnesses.<name>.{days,listing,wired}); anything else in an existing host file
+harnesses.<name>.{days,listing,wired,wired_first_seen}); anything else in an existing host file
 (extra keys, strings, odd names) is dropped with one stderr note, so a tampered or
 hand-edited file self-heals instead of being re-published. Adding a new field to the
 output therefore needs an edit to `sanitize_old` below. The file is written through a
@@ -39,10 +42,13 @@ import socket
 import sys
 import tempfile
 
-# Never leave __pycache__ in the checkout (set before the adapters are imported).
+# Never leave __pycache__ in the checkout (set before anything of ours is imported).
 sys.dont_write_bytecode = True
 
-SCHEMA = 1
+# usage_schema.py (next to this file) holds the one SCHEMA constant.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from usage_schema import SCHEMA  # noqa: E402
+
 # Below this the transcripts may expire before a missed weekly run catches up.
 MIN_RETENTION_DAYS = 45
 TOKEN_FIELDS = ("in", "out", "cache_read", "cache_write")
@@ -165,7 +171,7 @@ def sanitize_old(old, host, drops):
             drops[0] += 1
             continue
         h = {"days": {}, "listing": {}}
-        drops[0] += len(set(blk) - {"days", "listing", "wired"})
+        drops[0] += len(set(blk) - {"days", "listing", "wired", "wired_first_seen"})
         days = blk.get("days")
         for day, b in (days.items() if isinstance(days, dict) else ()):
             if isinstance(day, str) and DAY_RE.fullmatch(day):
@@ -192,15 +198,38 @@ def sanitize_old(old, host, drops):
                     drops[0] += 1
             if w:
                 h["wired"] = w
+        first_seen = blk.get("wired_first_seen")
+        if isinstance(first_seen, dict):
+            fs = {}
+            for kind, names in first_seen.items():
+                if kind in ("skills", "agents") and isinstance(names, dict):
+                    fs[kind] = {n: d for n, d in names.items()
+                                if isinstance(n, str) and NAME_RE.fullmatch(n)
+                                and isinstance(d, str) and DAY_RE.fullmatch(d)}
+                    drops[0] += len(names) - len(fs[kind])
+                else:
+                    drops[0] += 1
+            if fs:
+                h["wired_first_seen"] = fs
         clean["harnesses"][name] = h
     return clean
 
 
-def sum_events(events):
+OTHER = "other"   # where a name that is not wired on this machine is counted
+
+
+def sum_events(events, known=None):
     """Fold events into {"days": {...}, "listing": {...}} (the adapter already
-    de-duplicated, so every event is one occurrence)."""
+    de-duplicated, so every event is one occurrence).
+
+    known: {"skill"|"agent"|"slash": set of names or None}. A skill, agent or slash
+    name outside a non-empty set is counted under OTHER, so a private name (a client
+    or project) never reaches the host file. None or an empty set stores names as seen
+    (a machine with nothing wired would otherwise lose every name). Hook and model
+    names are not bucketed: they come from a fixed vocabulary, not from the user."""
     days, listing = {}, {}
     count = 0
+    known = known or {}
     for ev in events:
         count += 1
         day, kind = ev["day"], ev["kind"]
@@ -209,7 +238,10 @@ def sum_events(events):
         if kind in ("skill", "agent", "hook", "slash"):
             bucket = {"skill": "skills", "agent": "agents", "hook": "hooks", "slash": "slash"}[kind]
             counts = d.setdefault(bucket, {})
-            counts[ev["name"]] = counts.get(ev["name"], 0) + 1
+            name = ev["name"]
+            if known.get(kind) and name not in known[kind]:
+                name = OTHER
+            counts[name] = counts.get(name, 0) + 1
         elif kind == "tokens":
             tok = d.setdefault("tokens", {}).setdefault(
                 ev["model"], {"msgs": 0, "in": 0, "out": 0, "cache_read": 0, "cache_write": 0})
@@ -278,6 +310,12 @@ def main():
             old = None
         if not isinstance(old, dict) or old.get("schema") != SCHEMA:
             die(1, "existing %s is unparseable or has an unknown schema; left untouched" % target)
+        # A wrong container shape (e.g. "harnesses": []) means the file was edited by hand
+        # or by something else; refuse rather than guess what to keep.
+        hs = old.get("harnesses")
+        if not isinstance(hs, dict) or any(not isinstance(b, dict) for b in hs.values()):
+            die(1, "existing %s has an unexpected shape (harnesses must be an object of objects); "
+                   "left untouched" % target)
 
     adapters = [cls() for cls in load_registry(args.registry)]
     adapters = [a for a in adapters if a.available()]
@@ -299,20 +337,43 @@ def main():
         doc = {"schema": SCHEMA, "host": host, "updated": None, "harnesses": {}}
     harnesses = doc.setdefault("harnesses", {})
     total, notes, warnings = 0, [], []
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
     for a in adapters:
+        block_existed = a.name in harnesses
+        h = harnesses.setdefault(a.name, {})
+        # What is wired now (this scan) plus what earlier scans stored: the names that may
+        # be stored as seen. Computed BEFORE the scan so the scan can bucket against it.
+        wired = a.wired() or {}
+        stored_wired = h.get("wired", {})
+        skills_known = set(wired.get("skills", [])) | set(stored_wired.get("skills", []))
+        agents_known = set(wired.get("agents", [])) | set(stored_wired.get("agents", [])) | {DEFAULT_AGENT}
+        if not (wired.get("agents") or stored_wired.get("agents")):
+            agents_known = set()        # nothing known about agents: no bucketing
+        known = {"skill": skills_known, "agent": agents_known, "slash": skills_known | agents_known}
         try:
-            scan, n = sum_events(a.events(args.since_day))
+            scan, n = sum_events(a.events(args.since_day), known)
         except OSError as exc:
             # e.g. the projects root exists but cannot be read: not "no usage".
             die(1, "cannot read %s transcripts (%s); the host file is left untouched" % (a.name, exc))
         total += n
-        h = harnesses.setdefault(a.name, {})
+        had_first_seen = "wired_first_seen" in h
         h["days"] = merge_max(h.get("days", {}), scan["days"])
         h["listing"] = merge_max(h.get("listing", {}), scan["listing"])
         # wired: replace only the lists this scan produced (a missing dir keeps the old one).
-        wired = a.wired() or {}
         if wired:
             h.setdefault("wired", {}).update(wired)
+            # First UTC day each wired name was seen (min-merged, so it never moves forward):
+            # the prune report must not call a skill wired yesterday "never used". A host file
+            # that predates this key is seeded with its own earliest stored day instead of
+            # today, so upgrading does not make every skill look new.
+            seed = today
+            if block_existed and not had_first_seen and h.get("days"):
+                seed = min(min(h["days"]), today)
+            first_seen = h.setdefault("wired_first_seen", {})
+            for kind, names in wired.items():
+                slot = first_seen.setdefault(kind, {})
+                for nm in names:
+                    slot[nm] = min(slot.get(nm, seed), seed)
         st = getattr(a, "stats", None)
         if st:
             notes.append("%s %s" % (a.name, " ".join("%s=%s" % kv for kv in st.items())))
