@@ -25,8 +25,10 @@ Usage (python3 scripts/rules.py ...):
         --out AGENTS.md / GEMINI.md; capped at BLOCK_CAP bytes; text outside the
         markers is never touched; an empty --packs removes the block). Prints
         `wrote <path>` / `removed <path>` per change. --check writes nothing and
-        exits 1 on any difference. Exit 0 done/no drift, 1 drift (--check), 2 usage
-        or refusal (nothing written).
+        exits 1 on any difference. Exit 0 done/no drift, 1 drift (--check), 2 usage,
+        refusal or I/O error (nothing written). Every write is atomic (temp file in
+        the same directory + os.replace), keeps the file mode, never goes through a
+        symlink, and breaks hard links (the replace gives the file a new inode).
 
 Finding codes (stable): E_FRONTMATTER E_PATHS E_TITLE E_STYLE E_FILE_SIZE
 E_PACK_SIZE E_OPINION E_PACK_META E_SOURCES E_ATTRIBUTION E_NAME E_URL.
@@ -44,7 +46,9 @@ import itertools
 import json
 import os
 import re
+import stat
 import sys
+import tempfile
 
 # Never leave a __pycache__ behind (this file is run, not imported, but be safe).
 sys.dont_write_bytecode = True
@@ -539,10 +543,57 @@ def render_mdc(rel, path):
 
 
 def is_generated(path):
-    """True when `path` is a regular file carrying the generated-file marker."""
-    if not os.path.isfile(path):
+    """True when `path` is a regular file (never a symlink) carrying the generated-file marker.
+
+    A symlink is "not generated" even when its target holds the marker: otherwise a
+    planted link would make emit overwrite or delete whatever it points at.
+    """
+    if os.path.islink(path) or not os.path.isfile(path):
         return False
     return any(ln.startswith(MDC_MARKER_PREFIX) for ln in read_lines(path))
+
+
+def atomic_write(path, data):
+    """Write `data` to `path` via a temp file in the same directory, then os.replace.
+
+    The old file is never truncated, so a failed write (disk full, size limit, kill)
+    leaves it byte-identical. The mode (and, best effort, the owner) of an existing
+    file is kept. os.replace swaps the inode, so a second hard link to the file keeps
+    the OLD content (documented in rules/README.md); a symlink is never followed
+    because callers refuse one first. A read-only existing file is refused: the
+    rename would otherwise succeed in a writable directory and override the operator.
+    """
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, exist_ok=True)
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        st = None
+    if st is not None and not os.access(path, os.W_OK):
+        raise OSError("%s is not writable" % path)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix="." + os.path.basename(path) + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if st is not None:
+            os.chmod(tmp, stat.S_IMODE(st.st_mode))
+            try:
+                os.chown(tmp, st.st_uid, st.st_gid)
+            except (OSError, AttributeError):
+                pass                        # best effort: only root can give files away
+        else:
+            um = os.umask(0)
+            os.umask(um)
+            os.chmod(tmp, 0o666 & ~um)      # mkstemp makes 0600; a new file gets the normal default
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def plan_cursor(root, packs, out):
@@ -650,6 +701,8 @@ def plan_block(root, packs, out):
     Returns (old, new): bytes or None for "file absent" / "file to be deleted".
     Raises Refusal on any problem, before any write.
     """
+    if os.path.islink(out):
+        raise Refusal("--out %s is a symlink; refusing to write through it" % out)
     if os.path.lexists(out) and not os.path.isfile(out):
         raise Refusal("--out %s exists and is not a regular file (agents-md/gemini write a file)" % out)
     old = None
@@ -694,9 +747,7 @@ def apply_block(root, packs, out, check):
         if new is None:
             os.remove(out)
         else:
-            os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-            with open(out, "wb") as fh:
-                fh.write(new)
+            atomic_write(out, new)
     print(("removed %s" if new is None else "wrote %s") % out)
     return 1 if check else 0
 
@@ -713,18 +764,25 @@ def cmd_emit(root, harness, packs_arg, out, check):
     except Refusal as exc:
         sys.stderr.write("rules.py emit: %s\n" % exc)
         return 2
+    except OSError as exc:
+        # A failed read or write is a refusal with one line, never a traceback (a direct
+        # caller must be able to tell it from drift, which is exit 1 under --check).
+        sys.stderr.write("rules.py emit: %s\n" % exc)
+        return 2
 
     # Validation is complete; from here on we either report (--check) or apply.
-    for path, data in writes:
-        if not check:
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            with open(path, "wb") as fh:
-                fh.write(data)
-        print("wrote %s" % path)
-    for path in removals:
-        if not check:
-            os.remove(path)
-        print("removed %s" % path)
+    try:
+        for path, data in writes:
+            if not check:
+                atomic_write(path, data)
+            print("wrote %s" % path)
+        for path in removals:
+            if not check:
+                os.remove(path)
+            print("removed %s" % path)
+    except OSError as exc:
+        sys.stderr.write("rules.py emit: %s\n" % exc)
+        return 2
     return 1 if (check and (writes or removals)) else 0
 
 
