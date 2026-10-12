@@ -83,7 +83,7 @@ assert_sandboxed() {
   real="$(cd "$real" 2>/dev/null && pwd -P || echo "$real")"
   for d in "${SKILLS_DIR:-}" "${AGENTS_DIR:-}" "${RULES_DIR:-}"; do
     [ -n "$d" ] || continue
-    case "$(cd "$d" 2>/dev/null && pwd -P)" in
+    case "$(cd "$d" 2>/dev/null && pwd -P || echo "$d")" in
       "$real"|"$real"/*) echo "REFUSING: test target $d is inside the real $real" >&2; return 1 ;;
     esac
   done
