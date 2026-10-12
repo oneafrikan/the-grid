@@ -400,6 +400,18 @@ PY
   [ "$status" -eq 0 ]
 }
 
+@test "a symlinked host file and an oversized host file are ignored, not read" {
+  # A symlink to a perfectly valid host file: still not a regular file in the usage dir.
+  cp "$FIX/hostA.json" "$OTHER_DIR/elsewhere.json"
+  ln -s "$OTHER_DIR/elsewhere.json" "$USAGE/linked.json"
+  # A regular file over the size cap (valid JSON, so only its size can disqualify it).
+  python3 -c 'import sys; sys.stdout.write("{\"schema\":1,\"harnesses\":{},\"pad\":\"" + "a" * 9000000 + "\"}")' > "$USAGE/huge.json"
+  [ "$(agg "a['ignored']")" = '["huge.json", "linked.json"]' ]
+  prune
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^## Proposals (5: A 1, B 2, C 2)'
+}
+
 # --- the documented read recipe -------------------------------------------------
 
 @test "usage docs recipe runs against the fixtures" {

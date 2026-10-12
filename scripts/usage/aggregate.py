@@ -42,6 +42,7 @@ import datetime
 import json
 import os
 import re
+import stat
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -52,6 +53,7 @@ NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_.-]{0,63}\Z", re.ASCII)
 DAY_SHAPE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z", re.ASCII)
 MIN_DAY = datetime.date(2024, 1, 1)   # earlier days are bogus (same bound as the extractor)
 MAX_WIRED_NAMES = 500                 # per list, per host file
+MAX_HOST_FILE_BYTES = 8 * 1024 * 1024  # a real host file is tens of KB; anything bigger is not one
 TOKEN_FIELDS = ("msgs", "in", "out", "cache_read", "cache_write")
 COUNT_KINDS = ("skills", "agents", "slash", "hooks")
 
@@ -66,6 +68,14 @@ def _int(value) -> int:
 
 def _load(path: str):
     """The parsed host file, or None when it must be ignored."""
+    # The usage dir is a checkout of a remote: a committed symlink (to /dev/zero, a FIFO, a
+    # huge file) must never be opened. Only a regular, reasonably sized file is read.
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return None
+    if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_HOST_FILE_BYTES:
+        return None
     try:
         with open(path, encoding="utf-8") as fh:
             doc = json.load(fh)
