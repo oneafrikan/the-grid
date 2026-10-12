@@ -1386,7 +1386,8 @@ open(sys.argv[1] + "/forged.sh", "wb").write(body)' "$T/repos/r/x"
     printf -- "${base}%s\n---\nbody\n" "$ins" > "$d/SKILL.md"
     audit_json "$d"
     [ "$status" -eq 1 ] || { echo "not flagged: $ins" >&2; return 1; }
-    [ "$(q "sorted(set(f['rule'] for f in F if f['severity'] == 'high'))")" = "['hook-declared']" ]
+    # (a flow mapping is also outside the plain frontmatter shape: frontmatter-complex may join it)
+    [ "$(q "'hook-declared' in set(f['rule'] for f in F if f['severity'] == 'high')")" = "True" ] || { echo "no hook-declared: $ins" >&2; return 1; }
   done
 }
 
@@ -1736,7 +1737,7 @@ PY
 @test "fail closed: a frontmatter that cannot be parsed is HIGH, never skipped" {
   fm_case 'name: x\ndescription: a: b'                                # a mapping value where none is allowed
   [ "$status" -eq 1 ]
-  [ "$(q "[(f['rule'], f['excerpt']) for f in F if f['severity'] == 'high']")" = "[('hook-declared', 'frontmatter not parsed: mapping values are not allowed here')]" ]
+  [ "$(q "('hook-declared', 'frontmatter not parsed: mapping values are not allowed here') in [(f['rule'], f['excerpt']) for f in F if f['severity'] == 'high']")" = "True" ]
   fm_case 'name: x\nhooks:\n\tPreToolUse: []'                         # a tab in the indentation
   [ "$status" -eq 1 ]
   fm_case 'name: [unterminated\nhooks: {}'
@@ -1776,7 +1777,8 @@ PY
   [ "$status" -eq 1 ]
   printf '%s' "$output" | grep -q 'too many nodes'
   run timeout 60 python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/bomb"
-  [ "$status" -eq 0 ]                                     # parses, holds no hooks key, nothing expanded
+  [ "$status" -eq 1 ]                                     # no hooks key and nothing expanded, but anchors/flow are outside the plain shape
+  printf '%s' "$output" | grep -q 'frontmatter-complex'
   [ $((SECONDS - t0)) -lt 30 ]
 }
 
@@ -1793,7 +1795,7 @@ PY
     run timeout 60 python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/x"
     [ "$status" -eq 1 ] || { echo "n=$n: status $status" >&2; return 1; }
     [ $((SECONDS - t0)) -lt 30 ] || { echo "n=$n took $((SECONDS - t0))s" >&2; return 1; }
-    [ "$(q "sorted(set(f['rule'] for f in F if f['severity'] == 'high'))")" = "['hook-declared']" ]
+    [ "$(q "'hook-declared' in set(f['rule'] for f in F if f['severity'] == 'high')")" = "True" ]
   done
 }
 
