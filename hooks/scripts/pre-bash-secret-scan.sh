@@ -73,7 +73,7 @@ grid_check_cmd_cap pre-bash-secret-scan "$command"
 [ -n "$cwd" ] && [ -d "$cwd" ] || exit 0
 
 grid_git_segments "$command"
-grid_check_balanced pre-bash-secret-scan
+grid_check_balanced pre-bash-secret-scan "$command"
 
 US=$'\037'
 RS=$'\036'
@@ -103,6 +103,10 @@ MAX_GIT_CALLS="$(num_or "${GRID_GUARD_MAX_GIT_CALLS:-}" 40)"
 work=0
 MAX_SCAN_FILES="$(num_or "${GRID_SCAN_MAX_FILES:-}" 500)"
 MAX_SCAN_BYTES="$(num_or "${GRID_SCAN_MAX_BYTES:-}" 5242880)"
+MAX_MATCH_BYTES="$(num_or "${GRID_SCAN_MAX_MATCH_BYTES:-}" 1048576)"
+MATCH_SECONDS=3
+match_bytes=0
+scan_t0=$SECONDS
 too_large=0          # more candidate lines than MAX_SCAN_LINES
 add_too_big=0        # a chained add would stage more than MAX_SCAN_FILES / MAX_SCAN_BYTES
 PREFILTER_RE="$(secret_prefilter_re)"
@@ -150,13 +154,22 @@ segment_targets() {
 
 # consume_stream: read "file US line US content" records from stdin (the output of the
 # producers below, already filtered to candidate lines) and run the exact matcher on
-# each. More than MAX_SCAN_LINES candidates sets $too_large and stops.
+# each. More than MAX_SCAN_LINES candidates sets $too_large and stops. So does the scan
+# budget: the matcher's cost is per byte and varies about threefold with the text, so a
+# line count alone does not bound it. The whole scan may feed it MAX_MATCH_BYTES in total
+# and may run MATCH_SECONDS (whole seconds, from $SECONDS); past either the scan stops
+# with a finding named oversize-scan instead of being killed by the hook timeout.
 consume_stream() {
   local file lineno content n=0
   [ "$too_large" = 0 ] || return 0
   while IFS="$US" read -r file lineno content; do
     n=$((n + 1))
     if [ "$n" -gt "$MAX_SCAN_LINES" ]; then too_large=1; return 0; fi
+    match_bytes=$((match_bytes + ${#content}))
+    if [ "$match_bytes" -gt "$MAX_MATCH_BYTES" ] || [ $((SECONDS - scan_t0)) -ge "$MATCH_SECONDS" ]; then
+      add_finding "scan budget: oversize-scan (...)"
+      too_large=1; return 0
+    fi
     if secret_match_long "$content"; then
       add_finding "$(clean_name "$file"):$lineno: $SECRET_MATCH_NAME (${SECRET_MATCH_TEXT:0:4}...)"
     fi
@@ -417,7 +430,7 @@ if [ "${#findings[@]}" -gt 0 ] || [ "$too_large" = 1 ] || [ "$add_too_big" = 1 ]
     echo "BLOCKED by the-grid hook pre-bash-secret-scan: possible secret in this commit (values not shown):"
     for f in "${findings[@]}"; do echo "  $f"; done
     if [ "$too_large" = 1 ]; then
-      echo "  diff too large to scan (more than $MAX_SCAN_LINES candidate lines): split the commit into smaller ones."
+      echo "  diff too large to scan (more than $MAX_SCAN_LINES candidate lines, or past the scan budget): split the commit into smaller ones."
     fi
     if [ "$add_too_big" = 1 ]; then
       echo "  the add in this command would stage more than $MAX_SCAN_FILES files or $MAX_SCAN_BYTES bytes: stage in a separate call so the scan can see it."

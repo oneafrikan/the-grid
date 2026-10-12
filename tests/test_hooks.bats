@@ -76,6 +76,14 @@ run_hook_within() {
   run perl -e 'alarm shift; exec @ARGV' "$secs" bash -c 'exec bash "$1/hooks/run.sh" "$2" < "$3" 2>&1' _ "$REPO_ROOT" "$id" "$pf"
 }
 
+# run_hook_cpu <cpu-secs> <id> <command> [cwd]: run the hook with a CPU-time limit (ulimit -t),
+# so a slow tokenizer fails here however busy the machine is. Killed by the limit = status 152.
+run_hook_cpu() {
+  local secs="$1" id="$2" pf="$MOCK_HOOK_ROOT/payload.json"
+  hook_payload "$3" "${4:-}" > "$pf"
+  run bash -c 'ulimit -t "$4"; exec bash "$1/hooks/run.sh" "$2" < "$3" 2>&1' _ "$REPO_ROOT" "$id" "$pf" "$secs"
+}
+
 # stage_line <line> [file]: write <line> to a file in $R and stage it.
 stage_line() {
   printf '%s\n' "$1" > "$R/${2:-f.txt}"
@@ -599,6 +607,149 @@ STUB
   done
 }
 
+# --- heredoc rules (round 3): the conservative direction is always "read it as code".
+
+@test "no-bypass: << in arithmetic, here-strings and a stray << never hide the next command" {
+  rows=(
+    $'echo $((1<<2))\ngit commit -n'
+    $'x=$((1<<3))\ngit commit -n'
+    $'((y = 1<<2))\ngit commit -n'
+    $'echo $((1 << 2))\ngit commit -n'
+    $'let x=1<<2\ngit commit -n'
+    $'echo $[1<<2]\ngit commit -n'
+    $'echo $((1<<2)) | cat\ngit commit -n'
+    $'((y = 1 << 2)); cat f\ngit commit -n'
+    $'cat <<<hello\ngit commit -n'
+    $'cat <<-\ngit commit -n'
+    $'x=$((1<<-2))\ngit commit -n'
+  )
+  for row in "${rows[@]}"; do
+    expect_block "$row"
+    [[ "$output" != *"not closed"* && "$output" != *"too complex"* ]] || { echo "wrong reason for: $row" >&2; false; }
+  done
+}
+
+@test "secret: << in arithmetic does not hide a later commit from the scan" {
+  mkrepo
+  stage_line "key = \"$(tok_ghp)\""
+  for row in $'x=$((1<<3))\ngit commit -m x' $'echo $((1<<2)) | cat\ngit commit -m x' $'((y = 1 << 2)); cat f\ngit commit -m x'; do
+    scan "$row"
+    [ "$status" -eq 2 ] || { echo "expected BLOCK for: $row: $output" >&2; false; }
+    [[ "$output" == *"f.txt:1: github-token"* ]] || { echo "no finding for: $row: $output" >&2; false; }
+  done
+}
+
+@test "no-bypass: a heredoc whose body a shell may run is code, wherever the shell is named" {
+  rows=(
+    $'cat <<\'EOF\' | sh\ngit commit -n\nEOF'
+    $'cat <<\'EOF\' | bash -s\ngit commit -n\nEOF'
+    $'source /dev/stdin <<\'EOF\'\ngit commit -n\nEOF'
+    $'. /dev/stdin <<EOF\ngit commit -n\nEOF'
+    $'cat <<EOF | ssh host\ngit commit -n\nEOF'
+    $'cat <<EOF | xargs -0 sh -c\ngit commit -n\nEOF'
+    $'foo <<\'EOF\'\ngit commit -n\nEOF'
+    $'bash <<EOF\ngit commit -n\nEOF'
+  )
+  for row in "${rows[@]}"; do
+    expect_block "$row"
+    [[ "$output" != *"not closed"* && "$output" != *"too complex"* ]] || { echo "wrong reason for: $row" >&2; false; }
+  done
+}
+
+@test "no-bypass: a plain heredoc to a data sink stays data, so a commit message may say anything" {
+  rows=(
+    $'cat <<\'EOF\'\ngit commit -n and git push --force\nEOF'
+    $'cat > notes.txt <<\'EOF\'\ngit commit -n\nEOF'
+    $'tee notes.txt <<\'EOF\'\ngit push -f\nEOF'
+    $'git commit -F - <<\'EOF\'\nfix: stop using git commit -n\nEOF'
+    $'git commit -m "$(cat <<\'EOF\'\nfix: the user\'s git push --force habit\n\nbody\nEOF\n)"'
+    $'gh pr create --title t --body "$(cat <<\'EOF\'\n## Summary\n- never git commit -n\nEOF\n)"'
+    $'gh pr create --body-file - <<\'EOF\'\nit\'s git push --force text\nEOF'
+    $'read x <<\'EOF\'\ngit commit -n\nEOF'
+    $'cat <<EOF\nplain prose with git commit -n\nEOF'
+  )
+  for row in "${rows[@]}"; do expect_pass "$row"; done
+}
+
+@test "no-bypass: a heredoc delimiter the guard cannot match exactly fails closed" {
+  expect_block $'cat <<E\\OF\nx\nEOF\ngit status'
+  [[ "$output" == *"unsupported heredoc delimiter"* ]] || { echo "$output" >&2; false; }
+  expect_block $'cat <<EO\'F\nx\nEOF\ngit status'
+  [[ "$output" == *"unsupported heredoc delimiter"* ]] || { echo "$output" >&2; false; }
+  # a matching pair around the whole word is fine, and so is a command that never names git
+  expect_pass $'cat <<"EOF"\nx\nEOF\ngit status'
+  expect_pass $'cat <<E\\OF\nx\nEOF\nls'
+}
+
+@test "no-bypass: more than 8 heredocs or 16 nested substitutions are refused as too complex, within 2 s CPU" {
+  run_hook_cpu 2 pre-bash-no-bypass "git status; $(rep 'x <<b ' 800)"
+  [ "$status" -eq 2 ] || { echo "status $status (152 = CPU limit)" >&2; false; }
+  [[ "$output" == *"too complex"* ]] || { echo "$output" >&2; false; }
+  run_hook_cpu 2 pre-bash-no-bypass "git status; $(rep 'a <<b ' 400)"
+  [ "$status" -eq 2 ] || { echo "status $status (152 = CPU limit)" >&2; false; }
+  open="$(rep '"$(' 1200)"; close="$(rep ')"' 1200)"
+  run_hook_cpu 2 pre-bash-no-bypass "echo ${open} git commit --no-verify ${close}"
+  [ "$status" -eq 2 ] || { echo "status $status (152 = CPU limit)" >&2; false; }
+  [[ "$output" == *"too complex"* ]] || { echo "$output" >&2; false; }
+  # no git named: not our business, and just as cheap
+  run_hook_cpu 2 pre-bash-no-bypass "echo $(rep 'x <<b ' 800)"
+  [ "$status" -eq 0 ] || { echo "status $status (152 = CPU limit)" >&2; false; }
+  # up to the caps it still works
+  open="$(rep '"$(' 10)"; close="$(rep ')"' 10)"
+  run_hook_cpu 2 pre-bash-no-bypass "echo ${open} git commit --no-verify ${close}"
+  [ "$status" -eq 2 ] || { echo "status $status" >&2; false; }
+  [[ "$output" == *"skips git hooks"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "no-bypass: ordinary agent commands give the same answer (corpus)" {
+  rows=(
+    'git status'
+    'git log --oneline -n 5'
+    'git diff --stat HEAD~1'
+    'git commit -m "feat: add x"'
+    $'git commit -m "$(cat <<\'EOF\'\nfeat: x\n\nCo-Authored-By: someone <a@b.c>\nEOF\n)"'
+    $'git commit -m "$(cat <<EOF\nfix: the $(date +%Y) release\nEOF\n)"'
+    'git push origin feature/x'
+    'git push --force-with-lease origin next'
+    'git checkout -b fix/x && git add -A && git commit -m x'
+    'cd /tmp && ls -la'
+    $'cat > f.sh <<\'EOF\'\n#!/bin/sh\necho "it\'s done"\nEOF\nchmod +x f.sh'
+    'echo "a $(date) b" && git status'
+    'for f in *.txt; do git add "$f"; done'
+    'git log --format="%h %s" | head -5'
+    'x=$((1 + 2)); echo $x; git status'
+    'if [ -f a ]; then git diff; fi'
+    'git stash push -m "wip: it'"'"'s fine"'
+    'git config user.name'
+    'git -C sub status'
+    'gh pr view 12 --json title'
+    'git rebase -i HEAD~3'
+    'git remote -v | grep origin'
+    'git tag -a v1 -m "release v1"'
+    $'python3 - <<\'EOF\'\nprint("hi")\nEOF'
+    'echo done # git push -f'
+  )
+  for row in "${rows[@]}"; do expect_pass "$row"; done
+}
+
+@test "secret: ordinary agent commands pass the scan in a clean repo (corpus)" {
+  mkrepo
+  stage_line 'harmless line'
+  rows=(
+    'git status'
+    'git commit -m "feat: add x"'
+    $'git commit -m "$(cat <<\'EOF\'\nfeat: x\n\nthe user\'s notes\nEOF\n)"'
+    $'gh pr create --title t --body "$(cat <<\'EOF\'\n## Summary\n- it\'s fine\nEOF\n)"'
+    'git add -A && git commit -m x'
+    'x=$((1<<3)); git commit -m x'
+    'git log --oneline | head -3'
+  )
+  for row in "${rows[@]}"; do
+    scan "$row"
+    [ "$status" -eq 0 ] || { echo "expected PASS for: $row: $output" >&2; false; }
+  done
+}
+
 @test "no-bypass: a backtick command substitution is read like a subshell" {
   rows=(
     '`git commit --no-verify -m x`'
@@ -630,7 +781,8 @@ STUB
   expect_pass 'git -c user.name=x commit -m y'
 }
 
-@test "no-bypass: git accepts --mi as --mirror, so the floor is four characters" {
+@test "no-bypass: git accepts --m as --mirror, so the floor is three characters" {
+  expect_block 'git push --m'
   expect_block 'git push --mi'
   expect_block 'git push --mir origin'
   expect_pass 'git push --m-not-a-prefix'
@@ -1491,6 +1643,20 @@ tok_pgp()       { printf '%s' "-----BEGIN PGP PRIV""ATE KEY BLOCK-----"; }
   run_hook_within 5 pre-bash-secret-scan 'git commit -m x' "$R"
   [ "$status" -eq 2 ] || { echo "status $status: $output" >&2; false; }
   [[ "$output" == *"wide.txt:1: github-token"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "secret: the matcher's total input is budgeted, so many candidate lines end as oversize-scan" {
+  mkrepo
+  # 200 lines that all reach the bash matcher (a key word) but hold no secret
+  { for ((i = 1; i <= 200; i++)); do echo "x_token=a1 line $i"; done; } > "$R/dense.txt"
+  git -C "$R" add dense.txt
+  GRID_SCAN_MAX_MATCH_BYTES=500 run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x' "$R")"
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
+  [[ "$output" == *"oversize-scan"* ]] || { echo "$output" >&2; false; }
+  [[ "$output" == *"diff too large to scan"* ]] || { echo "$output" >&2; false; }
+  # with the default budget the same file is fine
+  run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x' "$R")"
+  [ "$status" -eq 0 ] || { echo "$output" >&2; false; }
 }
 
 @test "secret: a candidate line over 256 KB blocks as oversize-line instead of being skipped" {

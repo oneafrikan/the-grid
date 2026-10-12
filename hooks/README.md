@@ -95,16 +95,20 @@ Tuning (read by the two guards; defaults are fine for normal use):
 | `GRID_GUARD_MAX_TOKENS` | 2500 | blanks and separators in the command (cost follows token count as much as size); the same block when over |
 | `GRID_GUARD_MAX_GIT_CALLS` | 40 | secret scan only: git calls that need a repository check (plain ones such as `git status` are free); more than this blocks with the same message |
 | `GRID_SCAN_MAX_LINES` | 1000 | secret scan only: more candidate lines (lines some pattern could match) than this blocks with "diff too large to scan; split the commit" |
+| `GRID_SCAN_MAX_MATCH_BYTES` | 1048576 | secret scan only: total bytes the exact matcher may read in one scan; past this, or past a 3 s time budget, the scan stops with a finding named `oversize-scan` |
 | `GRID_SCAN_MAX_FILES` | 500 | secret scan only: a `git add ... && git commit` in one command that would stage more files than this blocks with "stage in a separate call so the scan can see it" |
 | `GRID_SCAN_MAX_BYTES` | 5242880 | secret scan only: the same block when the files the add would stage hold more bytes than this |
 
 ## Timeouts
 
 Claude Code treats a hook that times out as non-blocking, so a slow guard is an
-absent guard. Both guards therefore keep their work bounded: the tokenizer is linear in
-the command size, an oversized or token-dense command is refused instead of scanned, the
-secret scan refuses a diff it cannot read inside its budget, and a candidate line over
-256 KB blocks as `oversize-line`. Both catalogue entries carry
+absent guard. Both guards therefore bound their work with caps rather than rely on the
+tokenizer being fast on every input: a command over the byte or token cap, with more
+than 8 heredocs, or with substitutions nested deeper than 16, is refused instead of
+tokenized (the cost at the caps is about 1 to 2 s of CPU on a busy machine, not zero);
+the secret scan stops at its line cap, its 1 MB matcher-input cap or a 3 s time budget
+(`oversize-scan`), and a candidate line over 256 KB blocks as `oversize-line`. These
+are bounds, not a proof: an unusual input can still cost more than measured. Both catalogue entries carry
 `"on_failure": "block"`, which `deploy_hooks.py` emits as `"onFailure": "block"` in the
 generated handler so Claude Code itself blocks when the guard fails or times out.
 Claude Code 2.1.295 or later is a hard requirement for that guarantee: an older version
@@ -290,8 +294,9 @@ The guards do not inspect:
 - other shell expansions that build a word: brace expansion (`{git,commit,-n}`,
   `--no-{verify,x}`), pathname globs in a command word (`/usr/bin/g?t commit -n`), and
   `${x}` / `$((..))` results,
-- a heredoc fed to something that is not named as a shell (a remote shell, an interpreter
-  that reads its program from stdin): the body is data to the guard,
+- a heredoc opened inside backticks or `$( )` and closed before its terminator, and a
+  heredoc delimiter that contains a quote or backslash (that one fails closed, see below),
+- nested escaped backticks (`` `echo \`git commit -n\`` ``),
 - `cp`, `ln -sf`, `dd`, `install`, `unlink` and `find -delete` are read as writers, but a
   hook file changed by a program the guard does not know (a script, `git` itself via
   `core.hooksPath`) is not,
@@ -309,13 +314,24 @@ Parentheses end a segment and a word-initial `#` starts a comment, so `git commi
 just `git commit`. A backslash-newline joins a word (`git commit --no-\<newline>verify` is
 `--no-verify`).
 
-Quote state is tracked so that one quote cannot hide a later command: a heredoc body is
-data, not code, for quote tracking; `$'..'` strings end at an unescaped `'`; `$( )` inside
-double quotes has its own quotes. A heredoc body is read as code only when the heredoc
-feeds a shell (`bash <<EOF`) or when a body line holds `$(` or a backtick under an unquoted
-delimiter (the shell would run it); other body lines are skipped, so a commit message that
-says "git push --force" does not block. If a quote or substitution is still open at the
-end of the command, the guard blocks with "a quote or substitution in this command is not
+Quote state is tracked so that one quote cannot hide a later command: a heredoc body never
+drives quote tracking (each body line starts with fresh quote state); `$'..'` strings end
+at an unescaped `'`; `$( )` inside double quotes has its own quotes.
+
+Heredoc bodies default to CODE. The decision is made when the body starts, from the whole
+line that holds `<<`: the body is skipped as data only when nothing on that line is a shell
+or interpreter (`sh`, `bash`, `eval`, `source`, `.`, `xargs`, `env`, `sudo`, `ssh`,
+`python`, `perl`, `ruby`, `node`, `-c`), the delimiter is a plain word (`[A-Za-z0-9_]+`,
+optionally in one matching pair of quotes), and a data sink is on the line (`cat`, `tee`,
+`read`, `git ... -F`, `gh ... --body-file`). That keeps a commit message or PR body that
+says "git push --force" from blocking, while `cat <<'EOF' | sh`, `source /dev/stdin <<EOF`
+and `bash -s` bodies are read. Under an unquoted delimiter a data body line holding `$(`
+or a backtick is read too (the shell runs it). `<<` is not a heredoc inside `(( ))`, right
+after a digit, `)` or `]`, as `<<<`, or as `<<-` followed by a blank or digit: the text
+stays code. A heredoc delimiter with a backslash or a stray quote, more than 8 heredocs,
+or substitutions nested deeper than 16 block with "command too complex to inspect"
+(only for a command that names git). If a quote or substitution is still open at the end
+of the command, the guard blocks with "a quote or substitution in this command is not
 closed": it cannot tell where later commands start, so it fails closed.
 
 Accepted false blocks (a mistake-catcher errs towards blocking):
@@ -342,8 +358,8 @@ value word of an option such as `-m`, `--message` or `--author` is skipped, whic
 commit message that only mentions a flag from blocking. A flag-looking word that is the
 value of an option the guard does not list (`git log --grep "--no-verify"`) is blocked:
 a known, accepted false positive. git accepts any unique prefix of a long option, so
-`--no-verify` is blocked from 7 characters (`--no-ve`) and `git push --mirror` from 4
-(`--mi`); `--force` has no valid abbreviation.
+`--no-verify` is blocked from 7 characters (`--no-ve`) and `git push --mirror` from 3
+(`--m`); `--force` has no valid abbreviation.
 
 The secret scan covers the patterns in `lib/secret-patterns.sh` and nothing else: no
 entropy scoring, no token split over several lines, and an unquoted assigned value that
