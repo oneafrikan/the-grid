@@ -355,7 +355,19 @@ def iter_owned(settings: dict):
                         yield event, entry.get("matcher"), h
 
 
-def merge_owned(settings: dict, desired: list[tuple]) -> dict:
+def sweep_scope(catalogue: list[dict], scope: str):
+    """Predicate "may this mode sweep (remove) an owned handler with this id?".
+
+    OWNED_RE ownership is agent-wide, so with the user file and a project's settings file
+    being the same path (project dir = a home, or CLAUDE_CONFIG_DIR at a project's .claude)
+    each mode would otherwise sweep the OTHER mode's handlers (R02.qa.F3). A mode sweeps
+    its own scope's ids plus ids the catalogue no longer knows (a retired hook must still
+    go away); it never touches an id the catalogue assigns to the other scope."""
+    other = {h["id"] for h in catalogue if h["scope"] != scope}
+    return lambda hid: hid not in other
+
+
+def merge_owned(settings: dict, desired: list[tuple], sweeps=None) -> dict:
     """Return a copy of `settings` whose owned hook handlers are exactly `desired`.
 
     desired: [(event, matcher|None, command, timeout, on_failure|None)]. Semantics are those of the
@@ -367,8 +379,9 @@ def merge_owned(settings: dict, desired: list[tuple]) -> dict:
       - only the containers that removal emptied are pruned (entry, event, "hooks");
         an empty container the user left behind is not ours to tidy
       - running it twice is a no-op, and key order of everything untouched is kept
-    Hand-written handlers are never edited, reordered or removed. Raises SettingsError
-    when something must be added into a container of the wrong type."""
+    Hand-written handlers are never edited, reordered or removed. `sweeps` (see
+    sweep_scope) limits which owned ids this call may remove; None means all of them.
+    Raises SettingsError when something must be added into a container of the wrong type."""
     out = copy.deepcopy(settings)
     wanted = {(event, matcher, command): (timeout, on_failure)
               for event, matcher, command, timeout, on_failure in desired}
@@ -389,8 +402,8 @@ def merge_owned(settings: dict, desired: list[tuple]) -> dict:
                 matcher = entry.get("matcher")
                 kept, removed = [], False
                 for h in entry["hooks"]:
-                    if not is_owned(h):
-                        kept.append(h)  # hand-written: untouched, in place
+                    if not is_owned(h) or (sweeps is not None and not sweeps(hook_id(h["command"]))):
+                        kept.append(h)  # hand-written, or the other scope's: untouched, in place
                         continue
                     key = (event, matcher, h["command"])
                     if key in wanted and key not in seen:
@@ -511,10 +524,12 @@ def hook_id(command: str) -> str:
     return m.group(1) if m else command
 
 
-def describe(current: dict, desired: list[tuple], rel: Path) -> list[str]:
+def describe(current: dict, desired: list[tuple], rel: Path, sweeps=None) -> list[str]:
     """One line per drifting hook id for a settings file: missing, stale (timeout), or
-    to be removed. Empty when the owned handlers already match `desired`."""
-    have = {(e, m, h["command"]): (h.get("timeout"), h.get("onFailure")) for e, m, h in iter_owned(current)}
+    to be removed. Empty when the owned handlers already match `desired`. `sweeps` is the
+    scope predicate merge_owned takes: the other scope's handlers are not drift."""
+    have = {(e, m, h["command"]): (h.get("timeout"), h.get("onFailure")) for e, m, h in iter_owned(current)
+            if sweeps is None or sweeps(hook_id(h["command"]))}
     want = {(e, m, c): (t, o) for e, m, c, t, o in desired}
     lines = []
     for key in sorted(want, key=lambda k: (k[0], str(k[1]), k[2])):
@@ -541,12 +556,13 @@ def run_user(args, catalogue: list[dict]) -> None:
     settings = user_settings_path()
     check_user_no_symlinks(settings)
     original, text = read_settings(settings)
+    sweeps = sweep_scope(catalogue, "user")   # never sweep the project-scope guards
     try:
-        merged = merge_owned(original, desired)
+        merged = merge_owned(original, desired, sweeps)
     except SettingsError as exc:
         die(f"{settings}: {exc}; nothing was written")
 
-    problems = describe(original, desired, settings)
+    problems = describe(original, desired, settings, sweeps)
     if merged != original and not problems:
         problems = [f"differs    {settings}  (duplicate generated entries)"]
 
@@ -621,11 +637,12 @@ def main() -> None:
     # --- plan every file before touching any: both settings files are swept; only the
     # target gets additions, so a target change moves entries instead of duplicating them.
     plan = []  # (rel path, original dict, original text, merged dict, desired for this file)
+    sweeps = sweep_scope(catalogue, "project")  # never sweep a user-scope handler sharing the file
     for name, rel in SETTINGS_REL.items():
         want = desired if name == target else []
         original, text = read_settings(project / rel)
         try:
-            merged = merge_owned(original, want)
+            merged = merge_owned(original, want, sweeps)
         except SettingsError as exc:
             die(f"{project / rel}: {exc}; nothing was written")
         plan.append((rel, original, text, merged, want))
@@ -633,7 +650,7 @@ def main() -> None:
     # --- drift lines (used by --check and --dry-run) ---------------------------------
     problems = []
     for rel, original, _text, merged, want in plan:
-        lines = describe(original, want, rel)
+        lines = describe(original, want, rel, sweeps)
         if merged != original and not lines:
             lines = [f"differs    {rel}  (duplicate generated entries)"]
         problems += lines
