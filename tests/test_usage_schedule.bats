@@ -442,7 +442,8 @@ mode_of() { python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 
   chmod +x "$T/probe/uname" "$T/probe/systemctl"
   run --separate-stderr env -u GRID_SCHEDULER PATH="$T/probe:$BIN" DISPLAY=:0 "$(command -v bash)" "$INSTALL"
   [ "$status" -eq 0 ]
-  [ -f "$SYSTEMD_USER_DIR/grid-usage.service" ] && [ -f "$SYSTEMD_USER_DIR/grid-usage.timer" ]
+  [ -f "$SYSTEMD_USER_DIR/grid-usage.service" ]
+  [ -f "$SYSTEMD_USER_DIR/grid-usage.timer" ]
   # Now the probe fails (no systemctl on PATH): detection falls back to cron.
   run --separate-stderr env -u GRID_SCHEDULER PATH="$T/probe-less:$BIN" DISPLAY=:0 "$(command -v bash)" "$INSTALL" --uninstall
   [ "$status" -eq 0 ]
@@ -528,7 +529,8 @@ mode_of() { python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 
   git -C "$T/other" push -q origin main
   run bash "$WEEKLY"
   [ "$status" -eq 0 ]
-  [ ! -d "$GRID_PRIVATE_DIR/.git/rebase-merge" ] && [ ! -d "$GRID_PRIVATE_DIR/.git/rebase-apply" ]
+  [ ! -d "$GRID_PRIVATE_DIR/.git/rebase-merge" ]
+  [ ! -d "$GRID_PRIVATE_DIR/.git/rebase-apply" ]
   grep -q 'rebase aborted' "$T/state/usage.log"
   grep -q 'git pull rc=[1-9]' "$T/state/usage.log"
   # The local commit survived the abort.
