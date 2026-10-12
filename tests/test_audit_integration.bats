@@ -202,25 +202,85 @@ wire_repo() { # $1 = repo name, $2 = skill body
   [ "$status" -eq 1 ]
 }
 
-@test "--gate with an uninitialised submodule prints the notice and scans owned only" {
-  mk_skill "$T/repos/ex" s "$BAD"            # would fail if the wired part ran
-  printf 'ex\n' > "$T/baseline-submodules.example.txt"
-  mk_skill "$T/skills" x
-  # git stub: report an uninitialised submodule, otherwise defer to the real git.
+# submodule_stub UNINIT... -> a `git` on PATH whose `submodule status -- repos/<n>` reports
+# <n> uninitialised ("-" prefix) when <n> is one of the arguments, initialised otherwise;
+# everything else goes to the real git.
+submodule_stub() {
+  local real_git names="$*"
   real_git="$(command -v git)"
   mkdir -p "$BATS_TEST_TMPDIR/stub"
   cat > "$BATS_TEST_TMPDIR/stub/git" <<STUB
 #!/usr/bin/env bash
 if [ "\${1:-}" = submodule ] && [ "\${2:-}" = status ]; then
-  echo "-0000000000000000000000000000000000000000 repos/x"; exit 0
+  for a in "\$@"; do
+    case "\$a" in
+      repos/*)
+        n="\${a#repos/}"
+        case " $names " in
+          *" \$n "*) echo "-0000000000000000000000000000000000000000 \$a" ;;
+          *)         echo " 0000000000000000000000000000000000000000 \$a (heads/main)" ;;
+        esac ;;
+    esac
+  done
+  exit 0
 fi
 exec "$real_git" "\$@"
 STUB
   chmod +x "$BATS_TEST_TMPDIR/stub/git"
+}
+
+@test "--gate: an uninitialised BASELINE submodule exits 2 and says the wired set was NOT scanned" {
+  mk_skill "$T/repos/ex" s "$BAD"            # would fail if the wired part ran
+  printf 'ex\n' > "$T/baseline-submodules.example.txt"
+  mk_skill "$T/skills" x
+  submodule_stub ex
+  PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$AUDIT" --gate
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"audit: wired set NOT scanned (uninitialised baseline submodules: ex)"* ]]
+  [[ "$output" != *"repos/ex"*"curl-pipe-shell"* ]]
+}
+
+@test "--gate --allow-partial: scans owned only, exits 0, and the LAST line still says NOT scanned" {
+  mk_skill "$T/repos/ex" s "$BAD"
+  printf 'ex\n' > "$T/baseline-submodules.example.txt"
+  mk_skill "$T/skills" x
+  submodule_stub ex
+  PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$AUDIT" --gate --allow-partial
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"repos/ex/s"* ]]
+  [[ "$output" == *"-> ok"* ]]
+  [ "${lines[-1]}" = "audit: wired set NOT scanned" ]
+}
+
+@test "--gate: an uninitialised LIBRARY-only submodule does not matter" {
+  mk_skill "$T/repos/ex" s "Plain prose."
+  printf 'ex\n' > "$T/baseline-submodules.example.txt"
+  mk_skill "$T/skills" x
+  submodule_stub lib                          # lib is not in the baseline
   PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$AUDIT" --gate
   [ "$status" -eq 0 ]
-  [[ "$output" == *"audit: wired set not scanned (uninitialised submodules)"* ]]
-  [[ "$output" != *"repos/ex"* ]]
+  [[ "$output" != *"NOT scanned"* ]]
+  [[ "$output" == *"-> ok"* ]]
+}
+
+@test "--gate: the baseline check reads repo names like wire.sh (comments, subtractions and typed entries skipped)" {
+  mk_skill "$T/repos/ex" s "Plain prose."
+  printf '# a comment\nproject:grid\n-gone/skill\nex/s  # trailing\n' > "$T/baseline-submodules.example.txt"
+  mk_skill "$T/skills" x
+  submodule_stub project gone                 # neither is a baseline REPO
+  PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$AUDIT" --gate
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"NOT scanned"* ]]
+}
+
+@test "--gate scans dist/: a probe in dist/personas is picked up" {
+  mk_skill "$T/skills" x
+  printf 'ex\n' > "$T/baseline-submodules.example.txt"
+  mkdir -p "$T/repos/ex" "$T/dist/personas"
+  printf '%s\n' "$BAD" > "$T/dist/personas/zz-probe.md"
+  run bash "$AUDIT" --gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"dist/personas/zz-probe.md"* ]]
 }
 
 # ---------------------------------------------------------------- targets

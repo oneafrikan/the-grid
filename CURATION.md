@@ -25,6 +25,16 @@ them, and `wire.sh --check` does not re-audit. At wire time it covers the skill 
 link targets only; helper directories behind a runtime-root link (for example gstack's
 `bin/`) are not scanned, which is accepted per source below.
 
+Accepted coverage limits (runtime-root repos, point-in-time): the audit reads the skill
+directories a repo wires, not the whole repository. A repo that is wired as a runtime root
+(gstack: `bin/`, `lib/`, `scripts/`, `setup*`, `hosts/`) keeps those directories outside every
+scanned target, so a payload there is not seen by the scanner. The audit is also a point in time:
+it runs when the gate or a wire runs and when a bump is reviewed, not on `--check`. For every
+bump of such a repo, review the unscanned part by hand:
+`git -C repos/gstack diff --stat <old>..<new> -- bin lib scripts 'setup*' hosts`.
+Per decision D08 this is documented, not closed; extending the scan to those directories, or
+pinning a per-repo tree hash in `policy.yaml`, is the open alternative.
+
 ## Trusted sources
 
 ### repos/anthropic

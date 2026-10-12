@@ -2,7 +2,7 @@
 version: 1
 
 # Directories (relative to --root) whose content the-grid owns; everything else is upstream tier.
-owned_roots: [skills, agents, rules, hooks, agent-factory, plugins]
+owned_roots: [skills, agents, rules, hooks, agent-factory, plugins, dist]
 skip_dirs: ['.git']          # node_modules is NOT skipped: it is reported as builtin vendored-deps
 
 sources:
