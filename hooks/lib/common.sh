@@ -88,6 +88,12 @@ grid_log() {
 #                   or escaping part of a flag cannot hide it. The guards skip the
 #                   value word of an option such as -m, so a message that merely
 #                   MENTIONS --no-verify never matches.
+#   GIT_CD[i]       directories entered by cd/pushd earlier in the command, in order,
+#                   each preceded by the unit separator ($'\037'); a directory that
+#                   cannot be known statically ($VAR, cd -) is the single word ?
+#   GIT_C[i]        the same for git's own -C <dir> options (relative to the cd chain)
+#   GIT_GITDIR[i]   the last --git-dir value ("" when none)
+#   GIT_WORKTREE[i] the last --work-tree value ("" when none)
 #   GIT_VIOLATIONS  reasons found outside any one subcommand: -c core.hooksPath=,
 #                   GIT_CONFIG_* / HUSKY=0 assignments
 # ---------------------------------------------------------------------------
@@ -112,7 +118,7 @@ _grid_tokenize() {
   #      refilled when fewer than 4 characters remain (the longest look-ahead is 1).
   #   2. runs of ordinary characters are consumed with one anchored regex (O(256) slice)
   #      instead of one loop iteration each.
-  # Ordinary = not a quote, backslash, blank, newline or one of ; & | (the characters the
+  # Ordinary = not a quote, backslash, blank, newline or one of ; & | ( ) (the characters the
   # per-character cases below handle). In a bracket expression a backslash is literal.
   local _TK_ORD=$'^([^\'"\\ \t\n;&|()]+)([ \t]?)' _TK_Q1=$'^[^\']+' _TK_Q2=$'^[^"\\]+' _TK_CM=$'^[^\n]+'
   T_RAW=(); T_MASK=(); T_FLAG=(); T_SEP=()
@@ -261,11 +267,11 @@ _grid_scan() {
 #   --config-env=<key>=<ENVVAR> is -c with the value taken from the environment, so a
 #   hooksPath key is the same override.
 _grid_record_git() {
-  local gj=$(($1 + 1)) gk gw gv
+  local gj=$(($1 + 1)) gk gw gv gc="" gd="" gt=""
   while [ "$gj" -lt "$n" ]; do
     gw="${f[$gj]}"
     case "$gw" in
-      -C) gj=$((gj + 2)) ;;
+      -C) gc+=$'\037'"${f[$((gj + 1))]:-}"; gj=$((gj + 2)) ;;
       -c|--config-env)
         gv="${f[$((gj + 1))]:-}"
         if _grid_is_hookspath "$gv"; then
@@ -277,7 +283,11 @@ _grid_record_git() {
           GIT_VIOLATIONS+=("uses --config-env=core.hooksPath=... (overrides the repo's git hooks)")
         fi
         gj=$((gj + 1)) ;;
-      --git-dir|--work-tree|--namespace) gj=$((gj + 2)) ;;
+      --git-dir) gd="${f[$((gj + 1))]:-}"; gj=$((gj + 2)) ;;
+      --work-tree) gt="${f[$((gj + 1))]:-}"; gj=$((gj + 2)) ;;
+      --git-dir=*) gd="${gw#--git-dir=}"; gj=$((gj + 1)) ;;
+      --work-tree=*) gt="${gw#--work-tree=}"; gj=$((gj + 1)) ;;
+      --namespace) gj=$((gj + 2)) ;;
       -*) gj=$((gj + 1)) ;;
       *) break ;;
     esac
@@ -285,6 +295,7 @@ _grid_record_git() {
   [ "$gj" -lt "$n" ] || return 0
 
   GIT_SUB+=("${f[$gj]}")
+  GIT_CD+=("$_GRID_CD"); GIT_C+=("$gc"); GIT_GITDIR+=("$gd"); GIT_WORKTREE+=("$gt")
   GIT_START+=("${#GIT_RAW[@]}")
   GIT_LEN+=($((n - gj - 1)))
   for ((gk = gj + 1; gk < n; gk++)); do
@@ -307,7 +318,7 @@ _grid_segment() {
   local depth="$1" n="$2"
   shift 2
   local -a r=("${@:1:$n}") m=("${@:$((n + 1)):$n}") f=("${@:$((2 * n + 1)):$n}")
-  local k j w b joined hasgit=0 redir=0 cmdw=0 sedc=0 inplace=0 pathhit=0
+  local k j w b v joined hasgit=0 redir=0 cmdw=0 sedc=0 inplace=0 pathhit=0
   # Always a violation, whatever the value: these switch hooks off or move git's config.
   local re_assign='^(GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS|GIT_CONFIG_KEY_[0-9]+|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_CONFIG_NOSYSTEM|GIT_DIR|GIT_WORK_TREE|GIT_EXEC_PATH|GIT_TEMPLATE_DIR|HUSKY_SKIP_HOOKS|LEFTHOOK_EXCLUDE|PRE_COMMIT_ALLOW_NO_CONFIG)='
   local re_redir='^(&|[0-9]*)>>?([^&]|$)'
@@ -354,6 +365,29 @@ _grid_segment() {
     fi
   fi
 
+  # Keep a running directory for `cd <dir>` / `pushd <dir>` segments, so a later git
+  # call is attributed to the repo it will really run in. A destination that cannot be
+  # known statically becomes ? (the scan then falls back to the payload cwd). ~ and ~/x
+  # expand to $HOME. Options (-P, -L, --) are skipped.
+  case "${f[0]##*/}" in
+    cd|pushd)
+      for ((k = 1; k < n; k++)); do
+        case "${f[$k]}" in
+          --) ;;
+          -[!-]*) ;;
+          *) v="${f[$k]}"
+             case "$v" in
+               -) v="?" ;;
+               \~) v="$HOME" ;;
+               \~/*) v="$HOME/${v#\~/}" ;;
+               \~*|*'$'*|*'`'*) v="?" ;;
+             esac
+             _GRID_CD+=$'\037'"$v"
+             break ;;
+        esac
+      done ;;
+  esac
+
   # Find every git call and every re-scannable wrapper in the segment.
   for ((j = 0; j < n; j++)); do
     w="${f[$j]}"; b="${w##*/}"
@@ -395,5 +429,6 @@ _grid_segment() {
 # shellcheck disable=SC2034
 grid_git_segments() {
   GIT_SUB=(); GIT_START=(); GIT_LEN=(); GIT_RAW=(); GIT_MASK=(); GIT_FLAG=(); GIT_VIOLATIONS=()
+  GIT_CD=(); GIT_C=(); GIT_GITDIR=(); GIT_WORKTREE=(); _GRID_CD=""
   _grid_scan "$1" 0
 }

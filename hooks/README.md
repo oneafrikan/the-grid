@@ -92,7 +92,9 @@ Tuning (read by the two guards; defaults are fine for normal use):
 | Variable | Default | Effect |
 |---|---|---|
 | `GRID_GUARD_MAX_CMD` | 100000 | bytes; a command over this size that mentions git is blocked ("command too long to inspect"), because a guard that cannot finish inside its 5 s timeout silently stops guarding |
-| `GRID_SCAN_MAX_LINES` | 3000 | secret scan only: more added lines than this blocks with "diff too large to scan; split the commit" |
+| `GRID_SCAN_MAX_LINES` | 3000 | secret scan only: more candidate lines (lines some pattern could match) than this blocks with "diff too large to scan; split the commit" |
+| `GRID_SCAN_MAX_FILES` | 500 | secret scan only: a `git add ... && git commit` in one command that would stage more files than this blocks with "stage in a separate call so the scan can see it" |
+| `GRID_SCAN_MAX_BYTES` | 5242880 | secret scan only: the same block when the files the add would stage hold more bytes than this |
 
 ## Timeouts
 
@@ -310,7 +312,27 @@ a known, accepted false positive. git accepts any unique prefix of a long option
 (`--mir`); `--force` has no valid abbreviation.
 
 The secret scan covers the patterns in `lib/secret-patterns.sh` only (no entropy
-scoring), and it scans the repository in the payload's `cwd`.
+scoring). What it reads for a command:
+
+- the repository the command targets: `-C <dir>`, `--git-dir`, `--work-tree` and a
+  preceding `cd <dir>` are followed (a `cd` that cannot be known, such as `cd $VAR`, falls
+  back to the payload's `cwd`; the `cwd` repo is also scanned after any `cd`),
+- the staged diff for `git commit`, `commit-tree`, `merge`, `cherry-pick`, `revert`, `am`,
+  `rebase` and a git alias for `commit`; the working-tree diff too for `-a`, `-i`, `-o`,
+  `-p`, `--interactive`, `--pathspec-from-file` or named pathspecs,
+- files git calls binary (a NUL byte, UTF-16, a path an attribute marks `-diff`): the diff
+  is read with `--text` and NUL bytes are dropped, so UTF-16 text is matched as text,
+- a `git add ... && git commit` in one command: the add has not run when the hook runs, so
+  the files the add would stage are listed (`git status` for its pathspecs) and read from
+  the working tree. `git add -f` of an ignored file is not listed (the literal name is still
+  checked),
+- the text of a commit command, which covers the message and a same-command
+  `echo key=... >> file && git commit -am x`.
+
+Not covered: `git commit -F <file>` (the message file), a secret split across lines or
+encoded, and anything git does not show as an added line. Names in the block message are
+cut at 100 characters and control characters are shown as `?`, so a hostile file name
+cannot inject text into the agent's view.
 
 ## The `grid:allow-secret` pragma (for humans)
 
