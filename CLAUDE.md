@@ -184,6 +184,7 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 - `scripts/gate.sh` — commit gate; `.githooks/pre-commit` delegates to it and it
   self-installs `core.hooksPath` on first run. `--pre-commit` aborts on unstaged
   changes. `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
+  `--strict` (CI) fails on any skip not named in `GRID_GATE_EXPECT_SKIPPED` (see `.github/workflows/tests.yml`).
   It runs `check-personal.sh` as the `personal` check; with no private denylist on the
   machine (CI, forks) it passes and prints `gate: PASS (skipped: personal-denylist)`.
   It runs `audit.sh --gate --quiet` as the `audit` check (owned assets + the baseline's
@@ -274,7 +275,7 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint + `compose.py --check`, `check-personal.sh`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`. Venv-gated tests (`agent-factory/.venv` with PyYAML) skip on a plain `bats` run, but FAIL when `GRID_REQUIRE_VENV=1` or `CI=true` (the gate sets the former). In a `@test`, write `! cmd || false` and one `[ ]` per line: a bare mid-test `! cmd` or `[ A ] && [ B ]` can never fail (`test_repo_health.bats` lints this).
+All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint (`compose.py --lint-roles`), `compose.py --check` per composed project (local only: composed output is gitignored, so CI runs the lint and lists the uncomposed projects as `compose-<name>` skips), `check-personal.sh`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`. Venv-gated tests (`agent-factory/.venv` with PyYAML) skip on a plain `bats` run, but FAIL when `GRID_REQUIRE_VENV=1` or `CI=true` (the gate sets the former). In a `@test`, write `! cmd || false` and one `[ ]` per line: a bare mid-test `! cmd` or `[ A ] && [ B ]` can never fail (`test_repo_health.bats` lints this).
 
 ## Worktree hygiene
 

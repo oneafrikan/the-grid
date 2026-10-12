@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Shared test helpers — sourced by each .bats file via `load helpers/setup`
 
+# shellcheck disable=SC2034  # read by the .bats files that load this helper
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
 common_setup() {

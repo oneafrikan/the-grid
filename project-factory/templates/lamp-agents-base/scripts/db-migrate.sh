@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # db-migrate.sh — applies db/schema.sql against this worktree's isolated schema.
 # Run scripts/worktree-setup.sh first so .env.local (DB_NAME) exists.
+# The env file path is computed at run time, so shellcheck cannot follow `source` (file-wide:
+# a directive before `set -a; source ...` would only cover `set -a`).
+# shellcheck disable=SC1090
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

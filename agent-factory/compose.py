@@ -1480,7 +1480,10 @@ def lint_authoring(role: str) -> list[str]:
     if not agents.is_file():
         return [f"E_SECTION_MISSING: {role}/AGENTS.md: required for authored roles"]
     text = agents.read_text(encoding="utf-8")
-    meta = role_meta(role)
+    try:
+        meta = role_meta(role)
+    except yaml.YAMLError:
+        meta = {}   # lint_role already reports E_YAML_PARSE for this file; don't crash a second time
     orchestrator = bool(meta.get("orchestrator", False))   # orchestrator variant: gates others' work; no 'Receiving work', bigger cap
     max_bytes = ORCHESTRATOR_MAX_BYTES if orchestrator else AGENTS_MAX_BYTES
     if len(text.encode("utf-8")) > max_bytes:

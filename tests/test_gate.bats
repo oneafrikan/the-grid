@@ -28,7 +28,9 @@ teardown() {
   common_teardown
 }
 
-run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" bash scripts/gate.sh "$@" ); }
+# GATE_ENV: extra VAR=value pairs a test wants the gate to see (the gate runs under env -i).
+GATE_ENV=()
+run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GATE_ENV[@]}"} bash scripts/gate.sh "$@" ); }
 
 @test "missing shellcheck, venv and baseline are skipped LOUDLY, not failed" {
   run run_gate
@@ -335,4 +337,305 @@ mk_plugin_tree() {
   grep -qx 'automation-factory/patterns/p/d.sh' "$G/shellcheck.args"
   # last, so the negation is the test's final (and deciding) command
   ! grep -q '_retired' "$G/shellcheck.args"
+}
+
+# --- strict mode (WP-045, D65) ---------------------------------------------------------------
+# A skip that is not on the allowlist must fail CI. The gate runs under env -i, so a test hands
+# the allowlist in through GATE_ENV.
+
+# skipped_list — the skipped names from the last line of a PASSING gate run's output
+skipped_list() {
+  printf '%s\n' "$output" | tail -n 1 | sed -e 's/^gate: PASS (skipped: //' -e 's/)$//'
+}
+
+@test "strict: an unexpected skip fails the gate and names it" {
+  run run_gate --strict
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL (unexpected skip:"* ]] || false
+  [[ "$output" == *"shellcheck"* ]] || false
+}
+
+@test "strict: the same skips pass when they are on GRID_GATE_EXPECT_SKIPPED" {
+  run run_gate
+  [ "$status" -eq 0 ]
+  local all; all="$(skipped_list)"
+  [ -n "$all" ]
+  GATE_ENV=(GRID_GATE_EXPECT_SKIPPED="$all")
+  run run_gate --strict
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gate: PASS (skipped: $all)"* ]] || false
+  # drop one name from the allowlist: that skip alone is now unexpected
+  GATE_ENV=(GRID_GATE_EXPECT_SKIPPED="${all#shellcheck }")
+  run run_gate --strict
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected skip: shellcheck"* ]] || false
+}
+
+@test "strict: --strict and --pre-commit combine in either order" {
+  run run_gate --pre-commit --strict
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected skip"* ]] || false
+  run run_gate --strict --pre-commit
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected skip"* ]] || false
+}
+
+@test "strict: a missing audit script is an unexpected skip, a present one is not" {
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$G/scripts/audit.sh"
+  run run_gate
+  [ "$status" -eq 0 ]
+  GATE_ENV=(GRID_GATE_EXPECT_SKIPPED="$(skipped_list)")
+  run run_gate --strict
+  [ "$status" -eq 0 ]
+  # remove the script: the same allowlist no longer covers the (new) skip
+  rm "$G/scripts/audit.sh"
+  run run_gate --strict
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected skip:"*"audit"* ]] || false
+}
+
+@test "an unknown argument is a usage error, not a silent full run" {
+  run run_gate --strcit
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"usage"* ]] || false
+}
+
+# --- every check body is pinned (WP-045): a failing check fails the gate and is named ----------
+# arm_checks gives every check a stub that RUNS and passes; a test then flips ONE stub to fail
+# through $G/rc/<name>. This kills mutants that swallow a failure (`|| true`, `; true`, `return 0`)
+# or replace a check body with `true`.
+arm_checks() {
+  mkdir -p "$G/rc" "$G/agent-factory/.venv/bin"
+  # python3: the exit code of `python3 <script> ...` comes from rc/<script basename>
+  printf '#!/usr/bin/env bash\nn="${1##*/}"\n[ -f "%s/rc/$n" ] && exit "$(cat "%s/rc/$n")"\nexit 0\n' "$G" "$G" > "$G/stubbin/python3"
+  # the venv python: records its args, fails --lint-roles / --check through rc/lint-roles, rc/compose-check
+  printf '#!/usr/bin/env bash\necho "$*" >> "%s/venv.log"\ncase "$*" in\n  *--lint-roles*) [ -f "%s/rc/lint-roles" ] && exit "$(cat "%s/rc/lint-roles")" ;;\n  *--check*) [ -f "%s/rc/compose-check" ] && exit "$(cat "%s/rc/compose-check")" ;;\nesac\nexit 0\n' "$G" "$G" "$G" "$G" "$G" > "$G/agent-factory/.venv/bin/python"
+  : > "$G/scripts/budget.py"; : > "$G/scripts/rules.py"; : > "$G/scripts/build-plugins.py"; : > "$G/scripts/grid"
+  printf '#!/usr/bin/env bash\n[ -f "%s/rc/personas" ] && exit "$(cat "%s/rc/personas")"\nexit 0\n' "$G" "$G" > "$G/scripts/build-personas.sh"
+  printf '#!/usr/bin/env bash\n[ -f "%s/rc/catalog" ] && exit "$(cat "%s/rc/catalog")"\nexit 0\n' "$G" "$G" > "$G/scripts/catalog.sh"
+  printf '#!/usr/bin/env bash\n[ -f "%s/rc/audit" ] && exit "$(cat "%s/rc/audit")"\nexit 0\n' "$G" "$G" > "$G/scripts/audit.sh"
+  : > "$G/baseline-submodules.txt"
+  chmod +x "$G/stubbin/python3" "$G/agent-factory/.venv/bin/python" "$G/scripts/build-personas.sh" "$G/scripts/catalog.sh" "$G/scripts/audit.sh"
+}
+
+@test "armed checks: with every check stubbed to pass the gate passes" {
+  arm_checks
+  run run_gate
+  echo "$output"
+  [ "$status" -eq 0 ]
+  # every armed check really ran: none of them is on the skipped list (word match, so
+  # `compose` does not hide behind `compose-core`)
+  local list n
+  list=" $(skipped_list) "
+  for n in lock budget rules catalog plugins personas audit compose; do
+    case "$list" in *" $n "*) echo "check '$n' was skipped, not run: $list" >&3; return 1 ;; esac
+  done
+}
+
+@test "a failing budget check fails the gate and names budget; exit 3 only skips the baseline half" {
+  arm_checks
+  echo 1 > "$G/rc/budget.py"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — budget"* ]] || false
+  echo 3 > "$G/rc/budget.py"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"budget-baseline"* ]] || false
+}
+
+@test "a failing rules lint fails the gate and names rules" {
+  arm_checks
+  echo 1 > "$G/rc/rules.py"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — rules"* ]] || false
+}
+
+@test "a failing catalog check fails the gate and names catalog" {
+  arm_checks
+  echo 1 > "$G/rc/catalog"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — catalog"* ]] || false
+}
+
+@test "a failing plugin bundle check fails the gate and names plugins" {
+  arm_checks
+  echo 1 > "$G/rc/build-plugins.py"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — plugins"* ]] || false
+}
+
+@test "a failing personas check fails the gate and names personas" {
+  arm_checks
+  echo 1 > "$G/rc/personas"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — personas"* ]] || false
+}
+
+@test "a failing compose lint-roles fails the gate and names compose" {
+  arm_checks
+  echo 1 > "$G/rc/lint-roles"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — compose"* ]] || false
+}
+
+@test "a failing compose --check on a composed project fails the gate and names compose" {
+  arm_checks
+  mkdir -p "$G/agent-factory/projects/core"
+  echo 1 > "$G/rc/compose-check"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — compose"* ]] || false
+  grep -q 'agent-factory/examples/core.yaml --target claude-code --check' "$G/venv.log"
+}
+
+@test "an uncomposed project is a recorded skip compose-<name>, learning-desk included" {
+  arm_checks
+  mkdir -p "$G/agent-factory/projects/core"
+  run run_gate
+  [ "$status" -eq 0 ]
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == *"compose-grid"* ]] || false
+  [[ "$last" == *"compose-finance-desk"* ]] || false
+  [[ "$last" == *"compose-learning-desk"* ]] || false
+  # the composed project is checked, not listed as skipped
+  [[ "$last" != *"compose-core"* ]] || false
+}
+
+# --- the real pre-commit hook (WP-045) ----------------------------------------------------------
+# The shim is the one place GRID_SKIP_HOOK lives. Copy the REAL hook into the stub repo (the
+# default stub is `exit 0`) and commit it, so the tracked tree is clean.
+install_real_hook() {
+  cp "$REPO_ROOT/.githooks/pre-commit" "$G/.githooks/pre-commit"
+  ( cd "$G" && git add -A && git commit -q -m "real hook" )
+}
+run_hook() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GATE_ENV[@]}"} bash .githooks/pre-commit ); }
+
+@test "the real pre-commit hook: GRID_SKIP_HOOK=1 skips the gate entirely" {
+  install_real_hook
+  GATE_ENV=(GRID_SKIP_HOOK=1)
+  run run_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pre-commit: skipped"* ]] || false
+  [[ "$output" != *"==>"* ]] || false
+}
+
+@test "the real pre-commit hook runs gate.sh --pre-commit and aborts on an unstaged change" {
+  install_real_hook
+  run run_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"==> bats"* ]] || false
+  echo x >> "$G/scripts/catalog.sh"
+  run run_hook
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ABORT"* ]] || false
+}
+
+# --- lint coverage (WP-045) -----------------------------------------------------------------------
+@test "lint check: shellcheck also gets the factory scripts, lamp templates and test helpers; python is not handed to it" {
+  mkdir -p "$G/agent-factory/scripts" "$G/project-factory/scripts" "$G/project-factory/templates/lamp-agents-base/scripts" "$G/tests/helpers"
+  : > "$G/agent-factory/scripts/deploy_openclaw.sh"; : > "$G/project-factory/scripts/cut-project.sh"
+  : > "$G/project-factory/templates/lamp-agents-base/scripts/m.sh"; : > "$G/tests/helpers/h.bash"
+  : > "$G/scripts/grid"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/shellcheck.args"\nexit 0\n' "$G" > "$G/stubbin/shellcheck"
+  chmod +x "$G/stubbin/shellcheck"
+  run run_gate
+  [ "$status" -eq 0 ]
+  grep -qx 'agent-factory/scripts/deploy_openclaw.sh' "$G/shellcheck.args"
+  grep -qx 'project-factory/scripts/cut-project.sh' "$G/shellcheck.args"
+  grep -qx 'project-factory/templates/lamp-agents-base/scripts/m.sh' "$G/shellcheck.args"
+  grep -qx 'tests/helpers/h.bash' "$G/shellcheck.args"
+  ! grep -qx 'scripts/grid' "$G/shellcheck.args"
+}
+
+@test "pysyntax: tracked *.py and scripts/grid are syntax-checked; a broken one fails the gate and names pysyntax" {
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+  printf 'x = 1\n' > "$G/ok.py"
+  # scripts/grid is the python CLI with no .py extension; exit 3 = "a locked source is not checked out" (lock skipped)
+  printf 'import sys\nsys.exit(3)\n' > "$G/scripts/grid"
+  ( cd "$G" && git add ok.py )
+  run run_gate
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"==> pysyntax"* ]] || false
+  printf 'def (:\n' > "$G/broken.py"
+  ( cd "$G" && git add broken.py )
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL"*"pysyntax"* ]] || false
+  [[ "$output" == *"broken.py"* ]] || false
+  rm "$G/broken.py"; ( cd "$G" && git rm -q --cached broken.py )
+  printf 'def (:\n' > "$G/scripts/grid"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"scripts/grid"* ]] || false
+}
+
+# --- fresh worktree: initialise the bats submodule once (WP-045) -------------------------------------
+# A stub git logs every call; on `submodule update --init tests/lib/bats-core` it restores the bats
+# stub (as a real update would), unless a no-restore marker file says the update does nothing.
+stub_git_with_bats_restore() {
+  local real chm; real="$(command -v git)"; chm="$(command -v chmod)"
+  cp "$G/tests/lib/bats-core/bin/bats" "$G/bats.restore"
+  rm "$G/tests/lib/bats-core/bin/bats" "$G/stubbin/git"
+  # nested ifs, not `[ A ] && [ B ]`: the repo-health lint rejects that shape anywhere in a test file
+  {
+    printf '#!/usr/bin/env bash\necho "$*" >> "%s/git.log"\n' "$G"
+    printf 'if [ "$1 $2 $3 $4" = "submodule update --init tests/lib/bats-core" ]; then\n'
+    printf '  if [ ! -f "%s/no-restore" ]; then\n' "$G"
+    printf '    cat "%s/bats.restore" > "%s/tests/lib/bats-core/bin/bats"; %s +x "%s/tests/lib/bats-core/bin/bats"\n' "$G" "$G" "$chm" "$G"
+    printf '  fi\nfi\nexec %s "$@"\n' "$real"
+  } > "$G/stubbin/git"
+  chmod +x "$G/stubbin/git"
+}
+
+@test "a missing bats is initialised once with git submodule update --init tests/lib/bats-core, then runs" {
+  stub_git_with_bats_restore
+  run run_gate
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^submodule update --init tests/lib/bats-core$' "$G/git.log")" -eq 1 ]
+}
+
+@test "a missing bats that the one init attempt does not restore still FAILS with the hint" {
+  stub_git_with_bats_restore
+  : > "$G/no-restore"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [ "$(grep -c '^submodule update --init tests/lib/bats-core$' "$G/git.log")" -eq 1 ]
+  [[ "$output" == *"git submodule update --init"* ]] || false
+  [[ "$output" == *"gate: FAIL"*"bats"* ]] || false
+}
+
+# --- leak diagnostics must not leak secrets (NF-005) ----------------------------------------------------
+# The block that explains a leaked TMPDIR entry runs on CI, whose log is public. It may print names,
+# sizes and process names; it must never print file CONTENTS or process ARGUMENTS (either can hold
+# a token).
+@test "leak diagnostics name the leaked entry and running processes but print no file contents or process args" {
+  for t in ls find head cut mkdir; do ln -s "$(command -v $t)" "$G/stubbin/$t" 2>/dev/null || true; done
+  # a ps stub: one process whose full command line carries a secret; the bare name does not
+  printf '#!/usr/bin/env bash\ncase "$*" in\n  *args*) echo "  PID     ELAPSED ARGS"; echo "   42       00:01 sleep --token=SECRET-ARG" ;;\n  *) echo "  PID     ELAPSED COMMAND"; echo "   42       00:01 sleep" ;;\nesac\n' > "$G/stubbin/ps"
+  chmod +x "$G/stubbin/ps"
+  # a test that leaks a file whose contents are a secret, and a directory holding one
+  printf '#!/usr/bin/env bash\nprintf "SECRET-CONTENT\\n" > "$TMPDIR/leaked-file"\nmkdir -p "$TMPDIR/leaked-dir"\nprintf "SECRET-INNER\\n" > "$TMPDIR/leaked-dir/inner"\necho "1..0"\nexit 0\n' > "$G/tests/lib/bats-core/bin/bats"
+  run run_gate
+  echo "$output"
+  [ "$status" -eq 1 ]
+  # the diagnostic block ran and says what leaked and who is running
+  [[ "$output" == *"tests leaked temp files"* ]] || false
+  [[ "$output" == *"leaked-file"* ]] || false
+  [[ "$output" == *"leaked-dir"* ]] || false
+  [[ "$output" == *"processes still running"* ]] || false
+  [[ "$output" == *"sleep"* ]] || false
+  # ... and printed neither contents nor arguments
+  [[ "$output" != *"SECRET-CONTENT"* ]] || false
+  [[ "$output" != *"SECRET-INNER"* ]] || false
+  [[ "$output" != *"SECRET-ARG"* ]] || false
 }

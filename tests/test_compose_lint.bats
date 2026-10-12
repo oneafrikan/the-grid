@@ -252,3 +252,20 @@ EOT
   ! grep -q 'dev-team feature' "$out/dd/_claude-code/skills/dd-morpheus/SKILL.md" || false
   rm -rf "$cfg" "$out"
 }
+
+# An authored role (listed in the authored-roles file) with a malformed role.yaml: lint_role
+# reports E_YAML_PARSE, and lint_authoring must not crash on the same file with a traceback
+# (it re-reads role.yaml via role_meta). Injected through the private tree and the
+# GRID_AUTHORED_ROLES_FILE override so the real roles and authored list are untouched.
+@test "lint-roles: an authored role with malformed role.yaml reports E_YAML_PARSE, no traceback" {
+  make_role broken
+  printf '# agents\n' > "$PRIV/broken/AGENTS.md"
+  printf 'name: [\n' > "$PRIV/broken/role.yaml"
+  printf 'broken\n' > "$PRIV/authored.txt"
+  export GRID_AUTHORED_ROLES_FILE="$PRIV/authored.txt"
+  run "$PY" "$COMPOSE" --lint-roles
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_YAML_PARSE"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+}
