@@ -14,6 +14,6 @@ paths:
 - Use a stable id such as `key={item.id}`; an array index breaks when items are inserted, deleted or reordered, and `Math.random()` remounts every item.
 
 ## Server Components
-- When the project uses React Server Components, put `'use client'` at the very top of any file that uses `useState` or an event handler such as `onClick`.
+- With React Server Components, put `'use client'` at the very top of a file (above imports) where a Server Component meets client code, such as one using `useState` or `onClick`; it marks that module and its dependencies as client code.
 - Pass only serializable props from a Server Component to a Client Component; class instances and non-global `Symbol` values are not supported.
 - Make a Server Component `async` and `await` its data in render; async components are not supported on the client.

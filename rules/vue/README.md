@@ -6,6 +6,8 @@ Vue 3 conventions: `<script setup>`, style guide essentials, reactivity, composa
 
 - `style.md`, `reactivity.md`, `patterns.md` and `security.md` load on `.vue` files only. Composables in plain `.ts` or `.js` files are not matched.
 - `testing.md` loads on `*.test.*` and `*.spec.*` files with a `.ts` or `.js` extension, which also matches non-Vue tests. Each bullet therefore opens with its trigger ("When a test mounts a component with `@vue/test-utils`") or names a Vue API, so it does not apply to other tests.
+- Bullets about writing a composable (Hook) load only when a `.vue` file is open, so they reach the author only while consuming it.
+- Bullets name a minimum version where the cited page gives one.
 - Vue 3 only. Vue 2 and the Options API are not covered.
 
 ## Sources
