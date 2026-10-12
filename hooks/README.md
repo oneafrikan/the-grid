@@ -290,8 +290,8 @@ The guards do not inspect:
 - other shell expansions that build a word: brace expansion (`{git,commit,-n}`,
   `--no-{verify,x}`), pathname globs in a command word (`/usr/bin/g?t commit -n`), and
   `${x}` / `$((..))` results,
-- a heredoc fed to something that is not named as a shell (`ssh host <<EOF`, a script that
-  reads stdin): the body is data to the guard,
+- a heredoc fed to something that is not named as a shell (a remote shell, an interpreter
+  that reads its program from stdin): the body is data to the guard,
 - `cp`, `ln -sf`, `dd`, `install`, `unlink` and `find -delete` are read as writers, but a
   hook file changed by a program the guard does not know (a script, `git` itself via
   `core.hooksPath`) is not,
