@@ -39,7 +39,8 @@ command="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')"
 # the text test cannot see, so it always goes to the tokenizer. (A name spliced in
 # from ${x} is a documented gap.)
 # Matched case-insensitively (GIT, Git: a case-insensitive filesystem runs them as git).
-stripped="${command//[\"\'\\]/}"
+stripped="${command//$'\\\n'/}"           # a backslash-newline continuation joins the word
+stripped="${stripped//[\"\'\\]/}"
 shopt -s nocasematch
 case "$stripped" in
   *git*|*GIT_CONFIG*|*HUSKY*|*LEFTHOOK*|*PRE_COMMIT*) hit=1 ;;

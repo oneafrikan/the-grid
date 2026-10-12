@@ -52,7 +52,8 @@ cwd="$(printf '%s' "$payload" | jq -r '.cwd // empty')"
 # and backslashes removed, as the shell would (g""it, g\it are git), case-insensitively;
 # a command holding $ or a backtick may build a word the text test cannot see, so it
 # always goes to the tokenizer.
-stripped="${command//[\"\'\\]/}"
+stripped="${command//$'\\\n'/}"           # a backslash-newline continuation joins the word
+stripped="${stripped//[\"\'\\]/}"
 shopt -s nocasematch
 case "$stripped" in
   *git*) hit=1 ;;

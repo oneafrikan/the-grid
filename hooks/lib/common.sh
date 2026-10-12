@@ -151,7 +151,9 @@ _grid_tokenize() {
         if [ "$c" = '"' ]; then
           q=0
         elif [ "$c" = '\' ]; then
-          i=$((i + 1)); _TK_RAW+="${buf:$i:1}"; _TK_FLAG+="${buf:$i:1}"
+          i=$((i + 1))
+          # backslash-newline inside double quotes is a line continuation too: deleted
+          if [ "${buf:$i:1}" != $'\n' ]; then _TK_RAW+="${buf:$i:1}"; _TK_FLAG+="${buf:$i:1}"; fi
         elif [[ "${buf:$i:256}" =~ $_TK_Q2 ]]; then
           run="${BASH_REMATCH[0]}"; _TK_RAW+="$run"; _TK_FLAG+="$run"; i=$((i + ${#run})); continue
         else
@@ -176,7 +178,7 @@ _grid_tokenize() {
           '\')
             nx="${buf:$((i + 1)):1}"
             if [ "$nx" = $'\n' ]; then
-              _grid_tk_word            # backslash-newline: a line continuation, acts as a space
+              :                        # backslash-newline: a line continuation, deleted (it joins the word)
             else
               # FLAG drops the backslash: the shell passes the next character through
               _TK_RAW+="$c$nx"; _TK_MASK+="$c$nx"; _TK_FLAG+="$nx"; _TK_IN=1
