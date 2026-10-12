@@ -203,6 +203,50 @@ PY
   [ "$status" -eq 3 ]
 }
 
+# --- exact limits (WP-059): the boundary itself passes, one more fails --------------
+
+@test "a description of exactly 250 chars passes the per-entry limit; 251 fails" {
+  skill_raw edge "name: edge" "description: $(head -c 250 /dev/zero | tr '\0' d)"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  [ "$status" -eq 3 ]                      # owned scope ok; baseline not measurable here
+  skill_raw edge "name: edge" "description: $(head -c 251 /dev/zero | tr '\0' d)"
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/edge/SKILL.md: description is 251 chars (max 250)"* ]] || false
+}
+
+@test "a SKILL.md of exactly 4000 bytes passes the body limit; 4001 fails" {
+  skill_raw body "name: body" "description: x"
+  f="$MOCK_GRID/skills/body/SKILL.md"
+  size="$(wc -c < "$f" | tr -d ' ')"
+  head -c $((4000 - size)) /dev/zero | tr '\0' y >> "$f"
+  [ "$(wc -c < "$f" | tr -d ' ')" = 4000 ]
+  write_target 1000 0 0 0 5000 4000
+  budget --check
+  [ "$status" -eq 3 ]
+  printf 'y' >> "$f"
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/body/SKILL.md: SKILL.md is 4001 bytes"* ]] || false
+}
+
+@test "the wire.sh child of a baseline measurement does not inherit the caller's environment" {
+  # A stub wire.sh that records its environment.
+  printf '#!/usr/bin/env bash\nenv > "$GRID_ENVDUMP"\n' > "$MOCK_GRID/scripts/wire.sh"
+  printf 'x\n' > "$OTHER_DIR/baseline.txt"
+  export GRID_BASELINE="$OTHER_DIR/baseline.txt" GRID_ENVDUMP="$OTHER_DIR/env.dump"
+  export CANARY_TOKEN=canary-secret-value ANOTHER_SECRET=also-secret
+  run python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1] + "/scripts/lib")
+from baseline_wired import baseline_wired
+baseline_wired(sys.argv[2])' "$REPO_ROOT" "$MOCK_GRID"
+  [ "$status" -eq 0 ]
+  [ -s "$GRID_ENVDUMP" ]
+  grep -q '^PATH=' "$GRID_ENVDUMP"
+  grep -q '^GRID_DRY_HOME=' "$GRID_ENVDUMP"
+  [ -z "$(grep -E 'CANARY_TOKEN|ANOTHER_SECRET' "$GRID_ENVDUMP")" ]
+}
+
 # --- sections/ integrity (budget-and-usage group 4) ------------------------------
 
 # split_skill <name> <section file...> — a small skill with an index line per section.

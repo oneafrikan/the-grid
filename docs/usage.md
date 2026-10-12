@@ -1,8 +1,8 @@
 # Usage tracking
 
 Counts how often each skill, agent, slash command and hook is actually used, per
-machine, so the prune report (a later step) can show what is safe to drop from the
-always-loaded listing. A weekly job runs the extractor and commits one small JSON
+machine, so the prune report (`scripts/prune-report.sh`, documented below) can show
+what is safe to drop from the always-loaded listing. A weekly job runs the extractor and commits one small JSON
 file per host to your **private** repo. Nothing here is installed for you:
 activating the schedule is a manual step per machine (see [Install](#install)).
 
@@ -22,9 +22,11 @@ read from the same dir):
 - Which skills and agents are wired on the machine right now.
 
 Not collected: prompt or response text, file paths, project names, session ids,
-message ids, tool ids, hook commands or hook output. Skill, agent and slash names
-are stored **as seen**, so a private skill named after a client lands in the
-private repo. Keep the usage repo private.
+message ids, tool ids, hook commands or hook output. The file does hold NAMES: the
+skills and agents wired on the machine, hook names and model names. A skill, agent
+or slash name that is not wired on that machine is stored as `other`, so a private
+name (a client, a project) used from an unwired skill never leaves the machine. Keep
+the usage repo private all the same: the wired names are pushed.
 
 ## File schema
 
@@ -57,6 +59,8 @@ location as well as `GRID_DIR`).
         }
       },
       "wired":   {"skills": ["handoff", "tdd"], "agents": ["grid-qa-engineer"]},
+      "wired_first_seen": {"skills": {"handoff": "2026-09-01", "tdd": "2026-10-02"},
+                           "agents": {"grid-qa-engineer": "2026-09-01"}},
       "listing": {"2026-10-09": {"skills": 187, "chars": 30002}}
     }
   }
@@ -72,6 +76,12 @@ location as well as `GRID_DIR`).
   loses data and never double counts when scans overlap.
 - `wired` is replaced only for a list the scan could produce; `updated` changes
   only when something else did.
+- `wired_first_seen` holds the first UTC day each wired name was seen (earliest
+  day wins on every merge). A host file written before the key existed is seeded
+  with its own earliest stored day, not today. The prune report never proposes a
+  skill first seen after its window began.
+- The schema number (`schema: 1`) lives in one place, `scripts/usage/usage_schema.py`,
+  with the migration plan for the day it changes; adding a key does not need a bump.
 
 ## Retention
 
@@ -228,9 +238,16 @@ The prune report ignores stored days outside that range, never ends its window a
 today, and prints file and skill names escaped. It is for you to read: do not feed it
 to an agent that can apply proposals on its own.
 
-**Names are stored as seen.** A private skill, agent or slash command named after
-a client or a project lands in the usage file, and so in the private repo. Never
-copy a usage file or a report built from one into the public repo.
+**Which names are stored.** Skill, agent and slash names are checked against what is
+wired on the machine (this scan plus the stored wired lists); anything else is counted
+under `other`. When nothing is wired, names are stored as seen rather than lost. The
+wired names themselves, hook names and model names are stored. Never copy a usage file
+or a report built from one into the public repo.
+
+**Do not run the gate or the prune report on a checkout you have not read.** The
+baseline measurement runs that checkout's own `scripts/wire.sh`, with a scrubbed
+environment (only `PATH`, locale, `TMPDIR` and `GRID_*`), but it is still that
+checkout's code.
 
 **De-duplication** happens in the adapter before anything is stored (resumed
 sessions copy history into new transcript files, so a raw sum double counts):
@@ -244,10 +261,15 @@ sessions copy history into new transcript files, so a raw sum double counts):
 Stored counts only ever go up (max-merge), so a de-duplication bug fixed later
 leaves inflated history until the host file is deleted and re-extracted.
 
+Assumption: de-duplication relies on a re-emitted record keeping its ORIGINAL
+timestamp (resumed transcripts do). A message re-emitted with a later timestamp after
+its original transcript was deleted would be counted again; this has not been observed
+and is accepted. If it ever is, store the de-duplication ids in the host file.
+
 ### The prune report
 
 ```
-bash scripts/prune-report.sh [--window-days 90] [--rare 2] [--min-days 28]
+bash scripts/prune-report.sh [--window-days 90] [--rare 2] [--min-days 14]
                              [--usage-dir DIR] [--out FILE] [--json]
 ```
 
@@ -257,13 +279,17 @@ bash scripts/prune-report.sh [--window-days 90] [--rare 2] [--min-days 28]
 - Candidates are the skills the baseline wires (`scripts/lib/baseline_wired.py`).
   No baseline on the machine (no `baseline-submodules.txt`, or uninitialised
   submodules): it prints `no baseline on this machine` and exits 0.
-- Window: the last `--window-days` days, ending at the latest day stored (not
-  today). Skills use = Skill-tool calls + slash invocations of the same name,
+- Window: the last `--window-days` days, ending at the latest valid day stored but
+  never later than today (UTC); stored days before 2024-01-01 or after tomorrow are
+  ignored and counted in the evidence. Skills use = Skill-tool calls + slash invocations of the same name,
   summed over all hosts. State: `never` (0), `rare` (1..`--rare`), `used`. A
   skill used on one host only is `used`.
-- Fewer than `--min-days` days of coverage (first to last stored day, all hosts):
-  prints `insufficient history: N days of M required`, no proposals, then the
-  evidence section.
+- Fewer than `--min-days` (default 14) ACTIVE days (distinct days holding data, all
+  hosts; a calendar span is not enough): prints `insufficient history: N active days
+  of M required`, no proposals, then the evidence section, which still shows the
+  calendar coverage.
+- A skill first seen wired after the window began is "newly wired": never proposed,
+  and counted as `N newly wired skills not assessed`.
 
 Proposals are numbered, largest saving first, so you can reply "apply 2, skip 3":
 
