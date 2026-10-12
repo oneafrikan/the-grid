@@ -24,6 +24,8 @@ setup() {
   export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
   export GRID_STATE_DIR="$BATS_TEST_TMPDIR/state"
   export GRID_HOST="host-a"
+  # The analyser hands `claude` an allowlisted environment: name what the stubs read.
+  export INSTINCTS_PASS_ENV="STUB_DIR STUB_LOG STUB_CLAUDE_JSON STUB_CLAUDE_EXIT STUB_CLAUDE_SLEEP STUB_CLAUDE_STDIN CASE_STUB_LOG STUB_CASES_DIR REPO_ROOT STUB_BAD_CASES"
   RESULTS="$GRID_STATE_DIR/instincts/eval-results.jsonl"
   make_stubs
   # Tripwire: every call must reach a stub, never a real claude.
@@ -254,4 +256,30 @@ PY
   grep -q -- '--max-budget-usd 0.02' "$STUB_LOG"
   grep -q -- '--tools ""' "$STUB_LOG"
   grep -q -- '--no-session-persistence' "$STUB_LOG"
+}
+
+
+# --- WP-029: bounds on spend ----------------------------------------------------------------
+
+@test "--budget 100, nan, inf, a negative budget and --runs over the cap exit 2 with no call" {
+  case_stub
+  for a in "--budget 100" "--budget nan" "--budget inf" "--budget -1" "--budget 1.01" "--runs 50" "--runs 11" "--runs 0"; do
+    # shellcheck disable=SC2086
+    GRID_EVALS=1 run "$SH" eval-prompt --yes $a
+    [ "$status" -eq 2 ] || { echo "accepted: $a"; return 1; }
+  done
+  [ ! -s "$CASE_STUB_LOG" ]
+}
+
+@test "a plan whose worst case is over --max-total is refused before any call; nan is rejected" {
+  case_stub
+  GRID_EVALS=1 run "$SH" eval-prompt --yes --runs 10 --budget 1
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--max-total"* ]]
+  GRID_EVALS=1 run "$SH" eval-prompt --yes --max-total nan
+  [ "$status" -eq 2 ]
+  [ ! -s "$CASE_STUB_LOG" ]
+  # raising the cap lets the same plan through
+  GRID_EVALS=1 run "$SH" eval-prompt --yes --runs 1 --budget 0.05 --case c01-repeated-correction --max-total 100
+  [ "$status" -ne 2 ]
 }

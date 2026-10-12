@@ -52,6 +52,7 @@ import argparse  # noqa: E402
 import contextlib  # noqa: E402
 import datetime as dt  # noqa: E402
 import json  # noqa: E402
+import math  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
 import tempfile  # noqa: E402
@@ -76,6 +77,11 @@ EXPECT_KEYS = frozenset(["items", "must_include", "must_not_match", "max_items"]
 INCLUDE_KEYS = frozenset(["kind", "id", "domain", "evidence_has"])
 DEFAULT_RUNS = 3
 DEFAULT_BUDGET = 0.05
+# Hard bounds on what one invocation can spend: a typo (`--budget 100`, `--runs 50`) or `nan`
+# must not turn the paid eval into an open cheque.
+MAX_BUDGET = 1.00         # USD per call
+MAX_RUNS = 10             # runs per case
+DEFAULT_MAX_TOTAL = 5.00  # USD, worst case of the whole plan
 RESULTS_NAME = "eval-results.jsonl"
 
 
@@ -379,6 +385,10 @@ def cmd_live(args, directory: Path) -> int:
     print(f"plan: {len(cases)} case(s) x {args.runs} run(s) x ${args.budget:.2f} cap = worst case ${total:.2f} "
           f"(prompt {analyse.PROMPT_FILE} pv={pv})")
     print("      " + " ".join(c["name"] for c in cases))
+    if total > args.max_total:
+        print(f"instincts: refusing: worst case ${total:.2f} exceeds --max-total ${args.max_total:.2f}. "
+              "Narrow it with --case, lower --runs or --budget, or raise --max-total.", file=sys.stderr)
+        return 2
     if os.environ.get("GRID_EVALS") != "1" or not args.yes:
         print("instincts: refusing to call the model: live runs cost money and need GRID_EVALS=1 and --yes",
               file=sys.stderr)
@@ -422,13 +432,17 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--runs", type=int, default=DEFAULT_RUNS)
     ap.add_argument("--budget", type=float, default=DEFAULT_BUDGET, help="per-call cap, USD")
     ap.add_argument("--case", help="run only this case (exact name)")
+    ap.add_argument("--max-total", type=float, default=DEFAULT_MAX_TOTAL,
+                    help="refuse a plan whose worst case (cases x runs x budget) exceeds this many USD")
     ap.add_argument("--cases-dir", default=str(CASES_DIR), help=argparse.SUPPRESS)   # tests point this at a copy
     try:
         args = ap.parse_args(argv)
     except SystemExit as e:
         return 2 if e.code else 0
-    if args.runs < 1 or args.budget <= 0:
-        print("instincts: --runs must be >= 1 and --budget > 0", file=sys.stderr)
+    if not (1 <= args.runs <= MAX_RUNS and math.isfinite(args.budget) and 0 < args.budget <= MAX_BUDGET
+            and math.isfinite(args.max_total) and args.max_total > 0):
+        print(f"instincts: --runs must be 1 to {MAX_RUNS}, --budget more than 0 and at most {MAX_BUDGET:.2f}, "
+              "--max-total finite and more than 0", file=sys.stderr)
         return 2
     directory = Path(args.cases_dir)
     return cmd_validate(directory) if args.validate else cmd_live(args, directory)

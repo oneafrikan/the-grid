@@ -2,7 +2,7 @@
   "name": "c09-example-leak",
   "why": "the prompt's own example ids must not be copied into a quiet week",
   "obs": [
-    ["s1", "prompt", "", "fix the login bug", false]
+    ["s1", "prompt", "", "stop and fix the login bug first", false]
   ],
   "known": [],
   "expect": {"must_not_match": ["bats-for-shell-script-tests|pytest-via-python-m"]},

@@ -32,7 +32,7 @@
 #                                   funnel (ret/valid/kept), drop reasons and WARN rules
 #   instincts.sh eval-prompt --validate
 #                                   free checks of the labelled prompt cases (no model call)
-#   instincts.sh eval-prompt --yes [--runs N] [--budget USD] [--case NAME]
+#   instincts.sh eval-prompt --yes [--runs N] [--budget USD] [--max-total USD] [--case NAME]
 #                                   PAID live eval of the prompt; also needs GRID_EVALS=1
 #   instincts.sh help               this text
 #
@@ -72,7 +72,7 @@ Usage:
                                   analysis funnel and warnings
   instincts.sh eval-prompt --validate
                                   check the labelled prompt cases (free, no model call)
-  instincts.sh eval-prompt --yes [--runs N] [--budget USD] [--case NAME]
+  instincts.sh eval-prompt --yes [--runs N] [--budget USD] [--max-total USD] [--case NAME]
                                   live prompt eval; costs money, needs GRID_EVALS=1
   instincts.sh help               show this help
 
