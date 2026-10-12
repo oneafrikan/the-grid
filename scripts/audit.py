@@ -746,12 +746,15 @@ class Scan:
             return
 
         text = None
-        if b"\x00" in head:
+        # A NUL ANYWHERE in the file counts (not just the first BINARY_SNIFF bytes): bash
+        # drops NULs, so `cu<NUL>rl ... | ba<NUL>sh` placed after a long padding still runs.
+        if b"\x00" in data:
+            nul_in_head = b"\x00" in head
+            exec_class = self._exec_class(fclass, name, rel_target, rel_root)
             if _plausible_utf16(data):
                 # Genuine UTF-16 with a BOM: decode it and scan the text.
                 text = data.decode("utf-16")
-            elif (_is_known_binary(head)
-                  and not self._exec_class(fclass, name, rel_target, rel_root)):
+            elif nul_in_head and _is_known_binary(head) and not exec_class:
                 # An image/archive/font: nothing to scan. Never for executable classes:
                 # a magic-number first line is trivially forged in front of a script
                 # (fail closed; a genuine binary there is allowlisted by hash).
@@ -761,10 +764,11 @@ class Scan:
                           self._not_scanned_severity("unscannable-file", fclass, name, rel_target, rel_root),
                           display, 0, fclass, tier, BUILTIN_MESSAGES["unscannable-file"],
                           sha256=sha256_bytes(data))
-                if not self._exec_class(fclass, name, rel_target, rel_root):
-                    return
-                # Content that will be executed or loaded: ALSO scan the bytes as bash would
-                # see them (NULs dropped), so the finding above is not the only signal.
+                if nul_in_head and not exec_class:
+                    return                    # genuine binary content
+                # Executable content, or text with a stray NUL deep inside: ALSO scan the
+                # bytes as bash would see them (NULs dropped), so the finding above is not
+                # the only signal.
                 text = data.replace(b"\x00", b"").decode("utf-8", errors="replace")
 
         file_sha = sha256_bytes(data)
