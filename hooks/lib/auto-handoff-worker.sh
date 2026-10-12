@@ -386,12 +386,61 @@ OUT="$SNAP_DIR/child.out"
 # GRID_AUTOHANDOFF_CHILD=1 is the recursion guard (the child's own SessionEnd hook
 # checks it first). The alarm survives exec, so the child is killed at TIMEOUT and
 # the shell sees 142 (128 + SIGALRM). exec failing (no such binary) is exit 127.
-GRID_AUTOHANDOFF_CHILD=1 perl -e 'alarm shift; exec @ARGV or exit 127' "$TIMEOUT" \
+#
+# Isolation (D-extra-1 B). The rule form Edit(//<abs>/**) is the primary confinement but
+# was never proven live, so nothing below depends on it:
+#   - --permission-mode default and --setting-sources user: the operator's own
+#     permission mode (say acceptEdits) and project settings do not apply to this run
+#   - --strict-mcp-config: no MCP server config is picked up
+#   - extra denies for the places a write would persist code or access (ssh, Claude and
+#     user config, shell startup files, anything under a .git directory)
+#   - env -i: the child sees PATH, HOME, locale, TMPDIR, the Claude config dir and OAuth
+#     token, the recursion guard, and only what GRID_AUTOHANDOFF_KEEP_ENV names (a comma
+#     list of NAMEs or PREFIX*). GH_TOKEN, ANTHROPIC_API_KEY, cloud credentials and
+#     SSH_AUTH_SOCK are NOT passed; if claude authenticates through an API key variable,
+#     name it in GRID_AUTOHANDOFF_KEEP_ENV.
+DENY=("Edit" "Bash(git:*)")
+for h in "$HOME" "$HOME_REAL"; do
+  for s in .ssh .claude .config .gnupg .aws; do
+    case "$h" in *[\*\?\[\]\{\}\(\)\!]*|*$'\n'*) ;; *) DENY+=("Edit(/$h/$s/**)") ;; esac
+  done
+  for s in .bashrc .bash_profile .bash_login .profile .zshrc .zshenv .zprofile .zlogin .gitconfig; do
+    case "$h" in *[\*\?\[\]\{\}\(\)\!]*|*$'\n'*) ;; *) DENY+=("Edit(/$h/$s)") ;; esac
+  done
+  [ "$HOME_REAL" = "$HOME" ] && break
+done
+DENY+=("Edit(**/.git/**)")
+
+CHILD_ENV=()
+# KEEP_ENV: NAME or PREFIX*; entries that are not plain identifiers are ignored (the value
+# is used in an indirect expansion, which must never see anything else).
+IFS=, read -r -a KEEP_PATS <<< "${GRID_AUTOHANDOFF_KEEP_ENV:-}"
+for pat in "${KEEP_PATS[@]}"; do
+  [[ "$pat" =~ ^[A-Za-z_][A-Za-z0-9_]*\*?$ ]] || continue
+  case "$pat" in
+    *'*')
+      pfx="${pat%\*}"
+      while IFS= read -r nm; do
+        [[ "$nm" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        case "$nm" in "$pfx"*) CHILD_ENV+=("$nm=${!nm}") ;; esac
+      done < <(compgen -e) ;;
+    *) [ -n "${!pat+x}" ] && CHILD_ENV+=("$pat=${!pat}") ;;
+  esac
+done
+for nm in LANG LC_ALL TMPDIR CLAUDE_CONFIG_DIR CLAUDE_CODE_OAUTH_TOKEN; do
+  [ -n "${!nm+x}" ] && CHILD_ENV+=("$nm=${!nm}")
+done
+# Last, so nothing above can override them (later assignments win under env).
+CHILD_ENV+=("PATH=$PATH" "HOME=$HOME" "GRID_AUTOHANDOFF_CHILD=1")
+PERL_BIN="$(command -v perl || printf perl)"
+
+env -i "${CHILD_ENV[@]}" "$PERL_BIN" -e 'alarm shift; exec @ARGV or exit 127' "$TIMEOUT" \
   "${GRID_CLAUDE:-claude}" -p "$PROMPT" \
   --model sonnet --max-turns 25 --max-budget-usd "$MAX_USD" \
+  --permission-mode default --setting-sources user --strict-mcp-config \
   --tools "Read,Write,Bash" \
   --allowedTools "Read" "${RULES[@]}" "Bash(hostname:*)" "Bash(realpath:*)" "Bash(readlink:*)" "Bash(ls:*)" "Bash(date:*)" \
-  --disallowedTools "Edit" "Bash(git:*)" \
+  --disallowedTools "${DENY[@]}" \
   --add-dir "$DIGEST_DIR" --add-dir "$FALLBACK" \
   --append-system-prompt-file "$HERE/auto-handoff-system.md" \
   < /dev/null > "$OUT" 2>&1
