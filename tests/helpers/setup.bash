@@ -43,6 +43,15 @@ common_setup() {
   export GRID_HOOK_STATE_DIR="$MOCK_HOOK_ROOT/state"
   export GRID_HANDOFF_FALLBACK_DIR="$MOCK_HOOK_ROOT/fallback"
   export GRID_PRIVATE_DIR="$MOCK_HOOK_ROOT/private"
+  # Machine-local state (~/.grid by default) and the user runtime dir (/run/user/<uid>,
+  # where the live systemd manager's sockets live) are sandboxed too. REAL_XDG_RUNTIME_DIR
+  # remembers the real one, as REAL_HOME does, because it is not under $HOME and so the
+  # tripwire needs the value itself.
+  export REAL_XDG_RUNTIME_DIR="${REAL_XDG_RUNTIME_DIR-${XDG_RUNTIME_DIR:-}}"
+  mkdir -p "$MOCK_HOOK_ROOT/grid-state" "$MOCK_HOOK_ROOT/runtime"
+  chmod 700 "$MOCK_HOOK_ROOT/runtime"
+  export GRID_STATE_DIR="$MOCK_HOOK_ROOT/grid-state"
+  export XDG_RUNTIME_DIR="$MOCK_HOOK_ROOT/runtime"
   # A path, not a file: the run log is created by the first append.
   export GRID_RUN_LOG="$MOCK_HOOK_ROOT/runs.jsonl"
   # Tripwire: the claude binary resolves to a path that cannot execute, so a test
@@ -92,6 +101,29 @@ assert_sandboxed() {
       esac
     done
   done
+  # Whole-home targets: state, learning store and scheduler unit dirs default to places
+  # under ~ that are NOT one of the three roots above (~/.config/systemd/user,
+  # ~/Library/LaunchAgents), so these are compared against the real home itself.
+  r="$(cd "${REAL_HOME:-$HOME}" 2>/dev/null && pwd -P || echo "${REAL_HOME:-$HOME}")"
+  for d in "${GRID_STATE_DIR:-}" "${GRID_LEARNING_DIR:-}" "${LAUNCH_AGENTS_DIR:-}" "${SYSTEMD_USER_DIR:-}"; do
+    [ -n "$d" ] || continue
+    d="$(cd "$d" 2>/dev/null && pwd -P || echo "$d")"
+    case "$d" in
+      "$r"|"$r"/*) echo "REFUSING: test dir $d is inside the real home $r" >&2; return 1 ;;
+    esac
+  done
+  # The live user runtime dir holds the systemd manager's private socket: a test that
+  # runs systemd-analyze/systemctl against it can unlink that socket.
+  if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    d="$(cd "$XDG_RUNTIME_DIR" 2>/dev/null && pwd -P || echo "$XDG_RUNTIME_DIR")"
+    for r in "${REAL_XDG_RUNTIME_DIR:-}" "/run/user/$(id -u)"; do
+      [ -n "$r" ] || continue
+      r="$(cd "$r" 2>/dev/null && pwd -P || echo "$r")"
+      case "$d" in
+        "$r"|"$r"/*) echo "REFUSING: XDG_RUNTIME_DIR $d is the real runtime dir $r (or inside it)" >&2; return 1 ;;
+      esac
+    done
+  fi
   # GRID_HARNESS_HOME must be set and must stay out of the real home: it is the base of
   # every non-Claude harness dir (~/.agents/skills, ~/.codex/agents, ...).
   if [ -z "${GRID_HARNESS_HOME:-}" ]; then
@@ -115,7 +147,8 @@ common_teardown() {
          "${MOCK_HARNESS_ROOT:-}"
   unset AGENTS_DIR SKILLS_DIR RULES_DIR GRID_PRIVATE_ROLES_DIR CLAUDE_CONFIG_DIR GRID_HOOK_LOG_DIR \
         GRID_HOOK_STATE_DIR GRID_HANDOFF_FALLBACK_DIR GRID_PRIVATE_DIR GRID_RUN_LOG GRID_CLAUDE \
-        GRID_HARNESS_HOME GRID_HARNESS MOCK_HARNESS_ROOT MOCK_HARNESS_HOME
+        GRID_HARNESS_HOME GRID_HARNESS MOCK_HARNESS_ROOT MOCK_HARNESS_HOME \
+        GRID_STATE_DIR XDG_RUNTIME_DIR REAL_XDG_RUNTIME_DIR
 }
 
 # Write a minimal valid skill dir to a given path
