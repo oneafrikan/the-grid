@@ -62,6 +62,13 @@ mk_remote_and_clones() {
   git -C "$PA" commit -q -m init
   git -C "$PA" push -q -u origin main
   git clone -q "$REMOTE" "$PB" 2>/dev/null
+  mark_remote "$PA"
+  mark_remote "$PB"
+}
+
+# mark_remote DIR — the push-remote marker (.grid-private-remote) the push guard requires.
+mark_remote() {
+  git -C "$1" remote get-url --push origin > "$1/.grid-private-remote"
 }
 
 # write_instinct DIR HOST — a synthetic per-host instinct file under DIR/learning/instincts.
@@ -200,6 +207,109 @@ sync_as() {
   [[ "$output" == *"sync warning"*"push failed"* ]]
   [ "$(git -C "$PA" log -1 --format=%s)" = "instincts: host-a 2026-W41" ]
   [ "$(git -C "$REMOTE" rev-list --count main)" -eq 1 ]
+}
+
+@test "sync: remote edit plus a conflicting local edit to a tracked file: no markers, pull skipped, edit kept" {
+  mk_remote_and_clones
+  printf 'line one\n' > "$PA/README"
+  git -C "$PA" commit -q -am "readme line"
+  git -C "$PA" push -q origin main
+  git -C "$PB" pull -q
+  printf 'line one remote\n' > "$PB/README"
+  git -C "$PB" commit -q -am "remote edit"
+  git -C "$PB" push -q origin main
+  printf 'line one local\n' > "$PA/README"                  # operator's uncommitted edit
+  write_instinct "$PA" host-a
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  ! grep -rq '^<<<<<<<' "$PA" --exclude-dir=.git
+  [ "$(cat "$PA/README")" = "line one local" ]
+  [[ "$output" == *"pull skipped"* ]]
+  [ "$(git -C "$PA" show --name-only --format= HEAD)" = "learning/instincts/aaaaaaaaaaaa/host-a.jsonl" ]
+  [ ! -e "$PA/.git/rebase-merge" ]
+}
+
+@test "sync: a dirty tracked file outside the path is left alone and only the pull is skipped" {
+  mk_remote_and_clones
+  write_instinct "$PA" host-a
+  printf 'changed\n' >> "$PA/README"
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pull skipped"* ]]
+  git -C "$PA" status --short | grep -q 'README'
+  [ "$(git -C "$REMOTE" log -1 --format=%s)" = "instincts: host-a 2026-W41" ]   # still committed and pushed
+}
+
+@test "sync: a repo mid-rebase is left untouched: no commit, no push, exit 0" {
+  mk_remote_and_clones
+  printf 'base\n' > "$PA/f.txt"
+  git -C "$PA" add f.txt
+  git -C "$PA" commit -q -m base
+  git -C "$PA" push -q origin main
+  git -C "$PA" checkout -q -b topic
+  printf 'topic\n' > "$PA/f.txt"
+  git -C "$PA" commit -q -am topic
+  git -C "$PA" checkout -q main
+  printf 'main\n' > "$PA/f.txt"
+  git -C "$PA" commit -q -am main
+  git -C "$PA" checkout -q topic
+  git -C "$PA" rebase main >/dev/null 2>&1 || true
+  printf 'resolved\n' > "$PA/f.txt"
+  git -C "$PA" add f.txt
+  [ -d "$PA/.git/rebase-merge" ]
+  write_instinct "$PA" host-a
+  before="$(git -C "$PA" rev-parse HEAD)"
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [ -d "$PA/.git/rebase-merge" ]
+  [ "$(git -C "$PA" rev-parse HEAD)" = "$before" ]
+  [ "$(cat "$PA/f.txt")" = resolved ]
+  [[ "$output" == *"rebase-in-progress"* ]]
+  [ "$(git -C "$REMOTE" rev-list --count main)" -eq 2 ]
+}
+
+@test "sync: an unpushed foreign commit stops the push and exits 4" {
+  mk_remote_and_clones
+  printf 'mine\n' > "$PA/notes.txt"
+  git -C "$PA" add notes.txt
+  git -C "$PA" commit -q -m "operator work"
+  write_instinct "$PA" host-a
+  sync_as host-a "$PA"
+  [ "$status" -eq 4 ]
+  [ "$(git -C "$REMOTE" rev-list --count main)" -eq 1 ]
+  [[ "$output" == *"foreign-commits"* ]]
+}
+
+@test "sync: no marker file means no push, with a warning, exit 0" {
+  mk_remote_and_clones
+  rm "$PA/.grid-private-remote"
+  write_instinct "$PA" host-a
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"push skipped"* ]]
+  [ "$(git -C "$PA" log -1 --format=%s)" = "instincts: host-a 2026-W41" ]   # committed locally
+  [ "$(git -C "$REMOTE" rev-list --count main)" -eq 1 ]
+}
+
+@test "sync: detached HEAD creates no commit" {
+  mk_remote_and_clones
+  git -C "$PA" checkout -q --detach
+  write_instinct "$PA" host-a
+  before="$(git -C "$PA" rev-parse HEAD)"
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$PA" rev-parse HEAD)" = "$before" ]
+  [[ "$output" == *"detached-head"* ]]
+}
+
+@test "sync: a staged file over 1 MiB is not committed" {
+  mk_remote_and_clones
+  write_instinct "$PA" host-a
+  head -c 1100000 /dev/zero > "$PA/learning/instincts/aaaaaaaaaaaa/junk.bin"
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"junk.bin"* ]]
+  [ "$(git -C "$PA" show --name-only --format= HEAD)" = "learning/instincts/aaaaaaaaaaaa/host-a.jsonl" ]
 }
 
 @test "sync: a private dir that is not a git repo is skipped with a notice, exit 0" {
