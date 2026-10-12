@@ -78,6 +78,31 @@ teardown() {
   [[ "$output" == *"REFUSING"* ]] || false
 }
 
+# An empty/unset HOME made `cd ""` succeed, so the "real home" silently became the
+# cwd and every real-home comparison was against the wrong place (R16.qa.F7).
+# The subshell function keeps `unset HOME` away from the rest of the test.
+assert_sandboxed_without_home() ( unset HOME; assert_sandboxed )
+
+@test "tripwire refuses an empty HOME" {
+  HOME= run assert_sandboxed
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses an unset HOME" {
+  run assert_sandboxed_without_home
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "common_setup refuses an empty HOME" {
+  # Subshell so the failed setup cannot leak exports into the next test.
+  run bash -c 'HOME=; unset REAL_HOME; BATS_TEST_FILENAME="$1"; source "$2"; common_setup' \
+    _ "$BATS_TEST_FILENAME" "$REPO_ROOT/tests/helpers/setup.bash"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
 @test "tripwire accepts the sandbox dirs" {
   run assert_sandboxed
   [ "$status" -eq 0 ]
