@@ -95,7 +95,8 @@ grid_log() {
 # _grid_tokenize <command>
 #   One left-to-right pass (never two regex passes: they break on
 #   "don't --no-verify"). Fills T_RAW[] / T_MASK[] / T_FLAG[] / T_SEP[] in step. T_SEP[i]=1
-#   marks a separator (unquoted ; && || | & or newline) instead of a word.
+#   marks a separator (unquoted ; && || | & ( ) or newline) instead of a word. An
+#   unquoted word-initial # starts a comment that runs to the end of the line.
 #   Outside quotes: whitespace splits words, ' or " opens a span, a backslash keeps
 #   itself and the next character in the word (so \git survives to be normalised
 #   and \; or \" never split or open a span). Inside ": backslash escapes the next
@@ -113,7 +114,7 @@ _grid_tokenize() {
   #      instead of one loop iteration each.
   # Ordinary = not a quote, backslash, blank, newline or one of ; & | (the characters the
   # per-character cases below handle). In a bracket expression a backslash is literal.
-  local _TK_ORD=$'^([^\'"\\ \t\n;&|]+)([ \t]?)' _TK_Q1=$'^[^\']+' _TK_Q2=$'^[^"\\]+'
+  local _TK_ORD=$'^([^\'"\\ \t\n;&|()]+)([ \t]?)' _TK_Q1=$'^[^\']+' _TK_Q2=$'^[^"\\]+' _TK_CM=$'^[^\n]+'
   T_RAW=(); T_MASK=(); T_FLAG=(); T_SEP=()
   _TK_RAW=""; _TK_MASK=""; _TK_FLAG=""; _TK_IN=0; _TK_DLR=0
   n=${#s}
@@ -126,6 +127,12 @@ _grid_tokenize() {
     [ "$i" -lt "$wl" ] || break
     c="${buf:$i:1}"
     case "$q" in
+      3) # inside a # comment: skipped up to (not including) the newline
+        if [ "$c" = $'\n' ]; then
+          q=0; continue
+        elif [[ "${buf:$i:256}" =~ $_TK_CM ]]; then
+          i=$((i + ${#BASH_REMATCH[0]})); continue
+        fi ;;
       1) # inside '...': literal until the next '
         if [ "$c" = "'" ]; then
           q=0
@@ -145,6 +152,8 @@ _grid_tokenize() {
           _TK_RAW+="$c"; _TK_FLAG+="$c"
         fi ;;
       *) # outside quotes
+        # A # that starts a word is a comment (a # inside a word, like a#b or $#, is not).
+        if [ "$c" = '#' ] && [ "$_TK_IN" = 0 ]; then q=3; i=$((i + 1)); continue; fi
         if [[ "${buf:$i:256}" =~ $_TK_ORD ]]; then
           run="${BASH_REMATCH[1]}"
           _TK_RAW+="$run"; _TK_MASK+="$run"; _TK_FLAG+="$run"; _TK_IN=1
@@ -184,6 +193,8 @@ _grid_tokenize() {
             nx="${buf:$((i + 1)):1}"
             _grid_tk_word; _grid_tk_sep
             [ "$nx" = '|' ] && i=$((i + 1)) ;;
+          # Subshells, command substitution and function bodies: ( and ) end a segment.
+          '('|')') _grid_tk_word; _grid_tk_sep ;;
           *) _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_FLAG+="$c"; _TK_IN=1 ;;
         esac ;;
     esac
@@ -241,118 +252,140 @@ _grid_scan() {
   done
 }
 
+# _grid_record_git <index of the git word>
+#   Record one git call. Runs in _grid_segment's scope (reads its r, m, f, n). Skips
+#   git's global options to find the subcommand: -C <dir> and -c k=v take a value;
+#   --git-dir / --work-tree / --namespace take one when given as two words; any other
+#   leading dash word is a lone flag (--no-pager, -p, ...). Words are read through the
+#   FLAG form so a quoted or escaped option cannot hide the subcommand.
+#   --config-env=<key>=<ENVVAR> is -c with the value taken from the environment, so a
+#   hooksPath key is the same override.
+_grid_record_git() {
+  local gj=$(($1 + 1)) gk gw gv
+  while [ "$gj" -lt "$n" ]; do
+    gw="${f[$gj]}"
+    case "$gw" in
+      -C) gj=$((gj + 2)) ;;
+      -c|--config-env)
+        gv="${f[$((gj + 1))]:-}"
+        if _grid_is_hookspath "$gv"; then
+          GIT_VIOLATIONS+=("uses $gw core.hooksPath=... (overrides the repo's git hooks)")
+        fi
+        gj=$((gj + 2)) ;;
+      --config-env=*)
+        if _grid_is_hookspath "${gw#--config-env=}"; then
+          GIT_VIOLATIONS+=("uses --config-env=core.hooksPath=... (overrides the repo's git hooks)")
+        fi
+        gj=$((gj + 1)) ;;
+      --git-dir|--work-tree|--namespace) gj=$((gj + 2)) ;;
+      -*) gj=$((gj + 1)) ;;
+      *) break ;;
+    esac
+  done
+  [ "$gj" -lt "$n" ] || return 0
+
+  GIT_SUB+=("${f[$gj]}")
+  GIT_START+=("${#GIT_RAW[@]}")
+  GIT_LEN+=($((n - gj - 1)))
+  for ((gk = gj + 1; gk < n; gk++)); do
+    GIT_RAW+=("${r[$gk]}"); GIT_MASK+=("${m[$gk]}"); GIT_FLAG+=("${f[$gk]}")
+  done
+}
+
 # _grid_segment <depth> <n> <n RAW words> <n MASKED words> <n FLAG words>
-#   Design steps 3 to 5 for one segment: assignment check, one level of wrapper
-#   unwrapping, then record the segment if it is a git call.
+#   Check one segment (the words between two separators): the assignment check, the
+#   hook-file write check, then every git call in it.
+#
+#   A git call is ANY word of the segment that is `git` (any letter case, any path
+#   prefix: Git, GIT, /usr/bin/git). Looking at every word, not only the first, means no
+#   list of wrappers or shell keywords has to be kept: timeout, nohup, setsid, env -u X,
+#   find -exec, ssh, `if ...; then git ...`, `! git`, `>/dev/null git` all reach git.
+#   The accepted cost is false blocks such as `echo git commit -n`.
+#   Shell wrappers (bash/sh/zsh/dash/ksh/busybox -c, eval, env -S) are re-scanned once,
+#   at depth 1, because their payload is one quoted word.
 _grid_segment() {
   local depth="$1" n="$2"
   shift 2
   local -a r=("${@:1:$n}") m=("${@:$((n + 1)):$n}") f=("${@:$((2 * n + 1)):$n}")
-  local k first j w v joined opt skip_next
-  local re_assign='^(GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS|GIT_CONFIG_KEY_[0-9]+)='
-  local re_name='^[A-Za-z_][A-Za-z0-9_]*='
+  local k j w b joined hasgit=0 redir=0 cmdw=0 sedc=0 inplace=0 pathhit=0
+  # Always a violation, whatever the value: these switch hooks off or move git's config.
+  local re_assign='^(GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS|GIT_CONFIG_KEY_[0-9]+|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_CONFIG_NOSYSTEM|GIT_DIR|GIT_WORK_TREE|GIT_EXEC_PATH|GIT_TEMPLATE_DIR|HUSKY_SKIP_HOOKS|LEFTHOOK_EXCLUDE|PRE_COMMIT_ALLOW_NO_CONFIG)='
+  local re_redir='^(&|[0-9]*)>>?([^&]|$)'
 
-  # Step 4: assignment check on every word whose NAME is unquoted (matched on the
-  # MASKED form, so `echo "HUSKY=0"` is not a hit while GIT_CONFIG_PARAMETERS="'...'"
-  # is: its value is quoted, its name is not). Applies whatever the command is, so
-  # `export HUSKY=0` and `env GIT_CONFIG_COUNT=1 ...` are caught too.
+  # Assignment check on every word whose NAME is unquoted (matched on the MASKED form,
+  # so `echo "HUSKY=0"` is not a hit while GIT_CONFIG_PARAMETERS="'...'" is: its value is
+  # quoted, its name is not). Applies whatever the command is, so `export HUSKY=0` and
+  # `env GIT_CONFIG_COUNT=1 ...` are caught too. HUSKY=0 and LEFTHOOK=0 are hits only
+  # for that value; a bare SKIP=... is deliberately NOT matched (too common, too noisy).
   for ((k = 0; k < n; k++)); do
     # Cheap glob pre-test first: a regex per word made a 50 KB command slow (WP-019).
-    case "${m[$k]}" in GIT_CONFIG_*|HUSKY=*) ;; *) continue ;; esac
+    case "${m[$k]}" in GIT_*|HUSKY*|LEFTHOOK*|PRE_COMMIT_*) ;; *) continue ;; esac
     if [[ "${m[$k]}" =~ $re_assign ]]; then
-      GIT_VIOLATIONS+=("sets ${m[$k]%%=*} (a hook-disabling git config override)")
+      GIT_VIOLATIONS+=("sets ${m[$k]%%=*} (a hook-disabling git or hook-manager override)")
     elif [[ "${m[$k]}" == HUSKY=* && "${r[$k]}" == "HUSKY=0" ]]; then
       GIT_VIOLATIONS+=("sets HUSKY=0 (disables husky git hooks)")
+    elif [[ "${m[$k]}" == LEFTHOOK=* && "${r[$k]}" == "LEFTHOOK=0" ]]; then
+      GIT_VIOLATIONS+=("sets LEFTHOOK=0 (disables lefthook git hooks)")
     fi
   done
 
-  # Step 3: drop leading NAME=value words, then normalise the first word. The FLAG
-  # form already has quotes and backslashes removed the way the shell does (so g""it,
-  # g\it and \git all read git); then take the basename (/usr/bin/git -> git).
-  k=0
-  while [ "$k" -lt "$n" ] && [[ "${r[$k]}" =~ $re_name ]]; do k=$((k + 1)); done
-  [ "$k" -lt "$n" ] || return 0
-  first="${f[$k]}"; first="${first##*/}"
-
-  case "$first" in
-    bash|sh|zsh)
-      # `-c <arg>`, also -lc / -ec / any short cluster ending in c: re-run <arg> once.
-      [ "$depth" -eq 0 ] || return 0
-      for ((j = k + 1; j < n - 1; j++)); do
-        if [[ "${r[$j]}" =~ ^-[a-zA-Z]*c$ ]]; then
-          _grid_scan "${r[$((j + 1))]}" 1
-          return 0
-        fi
-      done
-      return 0 ;;
-    eval)
-      # The remaining RAW words joined by spaces are re-run once.
-      [ "$depth" -eq 0 ] || return 0
-      joined=""
-      for ((j = k + 1; j < n; j++)); do joined+="${r[$j]} "; done
-      _grid_scan "$joined" 1
-      return 0 ;;
-    exec|env|command|xargs|nice|time|sudo)
-      [ "$depth" -eq 0 ] || return 0
-      opt="$first"
-      k=$((k + 1))
-      # Drop the wrapper's own options and NAME=value words. A value-taking option
-      # also consumes the next word (sudo -u root, nice -n 5, xargs -n 1 ...).
-      while [ "$k" -lt "$n" ]; do
-        w="${f[$k]}"
-        if [[ "$w" == -* ]]; then
-          skip_next=0
-          case "$opt:$w" in
-            sudo:-u|sudo:-g|sudo:-h|sudo:-C|nice:-n|xargs:-n|xargs:-I|xargs:-L|xargs:-P|xargs:-d|xargs:-s|xargs:-E) skip_next=1 ;;
-          esac
-          k=$((k + 1 + skip_next))
-        elif [[ "$w" =~ $re_name ]]; then
-          k=$((k + 1))
-        else
-          break
-        fi
-      done
-      [ "$k" -lt "$n" ] || return 0
-      first="${f[$k]}"; first="${first##*/}" ;;
-  esac
-
-  # Step 5: only git segments are recorded.
-  [ "$first" = git ] || return 0
-
-  # Skip git's global options to find the subcommand: -C <dir> and -c k=v take a
-  # value; --git-dir / --work-tree / --namespace take one when given as two words;
-  # any other leading dash word is a lone flag (--no-pager, -p, ...). Read through the
-  # FLAG form so a quoted or escaped option cannot hide the subcommand.
-  # --config-env=<key>=<ENVVAR> is -c with the value taken from the environment, so a
-  # hooksPath key is the same override.
-  j=$((k + 1))
-  while [ "$j" -lt "$n" ]; do
-    w="${f[$j]}"
-    case "$w" in
-      -C) j=$((j + 2)) ;;
-      -c|--config-env)
-        v="${f[$((j + 1))]:-}"
-        if _grid_is_hookspath "$v"; then
-          GIT_VIOLATIONS+=("uses $w core.hooksPath=... (overrides the repo's git hooks)")
-        fi
-        j=$((j + 2)) ;;
-      --config-env=*)
-        if _grid_is_hookspath "${w#--config-env=}"; then
-          GIT_VIOLATIONS+=("uses --config-env=core.hooksPath=... (overrides the repo's git hooks)")
-        fi
-        j=$((j + 1)) ;;
-      --git-dir|--work-tree|--namespace) j=$((j + 2)) ;;
-      -*) j=$((j + 1)) ;;
-      *) break ;;
-    esac
+  # Hook-file write check: a segment that names .git/config, .git/hooks or .githooks and
+  # writes there (a > or >> redirect, tee, truncate, chmod, rm, mv, or sed -i) can switch
+  # the hooks off without git being involved. When the segment is itself a git call, rm
+  # and mv are git subcommands (git rm .githooks/x is a tracked-file change), so only a
+  # redirect counts there.
+  for ((k = 0; k < n; k++)); do
+    case "${f[$k]}" in *.git/config*|*.git/hooks*|*.githooks*) pathhit=1; break ;; esac
   done
-  [ "$j" -lt "$n" ] || return 0
+  if [ "$pathhit" = 1 ]; then
+    for ((k = 0; k < n; k++)); do
+      w="${f[$k]}"; b="${w##*/}"
+      [[ "${r[$k]}" =~ $re_redir ]] && redir=1
+      case "$b" in
+        [gG][iI][tT]) hasgit=1 ;;
+        tee|truncate|chmod|rm|mv) cmdw=1 ;;     # ignored when the segment is a git call
+        sed) sedc=1 ;;
+        -i*|--in-place*) inplace=1 ;;
+      esac
+    done
+    [ "$sedc" = 1 ] && [ "$inplace" = 1 ] && cmdw=1
+    if [ "$redir" = 1 ] || { [ "$cmdw" = 1 ] && [ "$hasgit" = 0 ]; }; then
+      GIT_VIOLATIONS+=("writes to .git/config, .git/hooks or .githooks (can switch git hooks off)")
+    fi
+  fi
 
-  GIT_SUB+=("${f[$j]}")
-  GIT_START+=("${#GIT_RAW[@]}")
-  GIT_LEN+=($((n - j - 1)))
-  for ((k = j + 1; k < n; k++)); do
-    GIT_RAW+=("${r[$k]}"); GIT_MASK+=("${m[$k]}"); GIT_FLAG+=("${f[$k]}")
+  # Find every git call and every re-scannable wrapper in the segment.
+  for ((j = 0; j < n; j++)); do
+    w="${f[$j]}"; b="${w##*/}"
+    case "$b" in
+      [gG][iI][tT]) _grid_record_git "$j" ;;
+      bash|sh|zsh|dash|ksh|busybox)
+        # `-c <arg>`, also -lc / -ec / any short cluster ending in c: re-run <arg> once.
+        [ "$depth" -eq 0 ] || continue
+        for ((k = j + 1; k < n - 1; k++)); do
+          if [[ "${r[$k]}" =~ ^-[a-zA-Z]*c$ ]]; then
+            _grid_scan "${r[$((k + 1))]}" 1
+            break
+          fi
+        done ;;
+      eval)
+        # The remaining RAW words joined by spaces are re-run once.
+        [ "$depth" -eq 0 ] || continue
+        joined=""
+        for ((k = j + 1; k < n; k++)); do joined+="${r[$k]} "; done
+        _grid_scan "$joined" 1 ;;
+      env)
+        # env -S "<command line>" (also -S<text>, --split-string[=]<text>): the value is a
+        # command line, re-run once.
+        [ "$depth" -eq 0 ] || continue
+        for ((k = j + 1; k < n; k++)); do
+          case "${r[$k]}" in
+            -S|--split-string) [ "$((k + 1))" -lt "$n" ] && _grid_scan "${r[$((k + 1))]}" 1; break ;;
+            --split-string=*) _grid_scan "${r[$k]#--split-string=}" 1; break ;;
+            -S?*) _grid_scan "${r[$k]#-S}" 1; break ;;
+          esac
+        done ;;
+    esac
   done
 }
 
