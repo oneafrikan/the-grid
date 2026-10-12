@@ -4,11 +4,12 @@
 # GRID_PRIVATE_ROLES_DIR and deploys go to temp dirs, so nothing real is touched.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   COMPOSE="$REPO_ROOT/agent-factory/compose.py"
   DEPLOY="$REPO_ROOT/agent-factory/deploy.py"
   PRIV=$(mktemp -d)
@@ -69,9 +70,9 @@ make_role() {
   [ "$status" -eq 0 ]
   grep -q '^tools: Read, Grep, Glob, Bash$' "$PROJ/.claude/agents/grid-qa-engineer.md"
   grep -q '^tools: Read, Grep, Glob, Bash, WebFetch, WebSearch$' "$PROJ/.claude/agents/grid-security-reviewer.md"
-  ! grep -qE '^tools:.*(Edit|Write)' "$PROJ/.claude/agents/grid-qa-engineer.md"
-  ! grep -qE '^tools:.*(Edit|Write)' "$PROJ/.claude/agents/grid-security-reviewer.md"
-  ! grep -q '^tools:' "$PROJ/.claude/agents/grid-backend-dev.md"
+  ! grep -qE '^tools:.*(Edit|Write)' "$PROJ/.claude/agents/grid-qa-engineer.md" || false
+  ! grep -qE '^tools:.*(Edit|Write)' "$PROJ/.claude/agents/grid-security-reviewer.md" || false
+  ! grep -q '^tools:' "$PROJ/.claude/agents/grid-backend-dev.md" || false
   ! grep -q '^tools:' "$PROJ/.claude/skills/grid-tech-lead/SKILL.md"
 }
 

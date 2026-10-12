@@ -665,7 +665,8 @@ pad_pack() {
   run emit --harness gemini --packs sql
   [ "$status" -eq 0 ]
   [ "$output" = "wrote GEMINI.md" ]
-  [ -f "$W/AGENTS.md" ] && [ -f "$W/GEMINI.md" ]
+  [ -f "$W/AGENTS.md" ]
+  [ -f "$W/GEMINI.md" ]
   rm -rf "$W"
 }
 
@@ -709,7 +710,7 @@ pad_pack() {
   [ "$(head -c "$head_len" "$R/AGENTS.md" | cksum)" = "$(cksum < "$R/head.bin")" ]
   [ "$(tail -c "$tail_len" "$R/AGENTS.md" | cksum)" = "$(cksum < "$R/tail.bin")" ]
   grep -q '^### bash / style' "$R/AGENTS.md"
-  ! grep -q 'stale block body' "$R/AGENTS.md"
+  ! grep -q 'stale block body' "$R/AGENTS.md" || false
   [ "$(grep -c '^<!-- BEGIN the-grid rules' "$R/AGENTS.md")" -eq 1 ]
   [ "$(grep -c '^<!-- END the-grid rules' "$R/AGENTS.md")" -eq 1 ]
 }
@@ -841,7 +842,7 @@ pad_pack() {
   run emit --harness agents-md --packs "" --out "$R/AGENTS.md"
   [ "$status" -eq 0 ]
   [ "$output" = "wrote $R/AGENTS.md" ]
-  ! grep -q 'the-grid rules' "$R/AGENTS.md"
+  ! grep -q 'the-grid rules' "$R/AGENTS.md" || false
   grep -q '^head$' "$R/AGENTS.md"
   grep -q '^tail$' "$R/AGENTS.md"
   # Removing again is a no-op.

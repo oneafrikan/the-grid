@@ -17,6 +17,7 @@
 bats_require_minimum_version 1.5.0
 
 load helpers/setup
+load helpers/venv
 
 # The four ids, sorted the way owned_ids() prints them.
 FOUR="instincts-capture-failure,instincts-capture-prompt,instincts-capture-tool,instincts-inject"
@@ -27,7 +28,7 @@ setup() {
   export HOME="$MOCK_HOOK_ROOT/home"
   mkdir -p "$HOME"
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   EMIT="$REPO_ROOT/agent-factory/deploy_hooks.py"
   DEPLOY="$REPO_ROOT/agent-factory/deploy.py"
   export PYTHONDONTWRITEBYTECODE=1

@@ -225,7 +225,7 @@ snapshot() { tree_digest "$GREAL"; echo "--"; tree_digest "$SKILLS_DIR"; echo "-
   grep -q "my edit" "$G/repos/up/skills/alpha/SKILL.md"
   run grid repair --force
   [ "$status" -eq 0 ]
-  ! grep -q "my edit" "$G/repos/up/skills/alpha/SKILL.md"
+  ! grep -q "my edit" "$G/repos/up/skills/alpha/SKILL.md" || false
   run grid doctor
   [ "$status" -eq 0 ]
 }
@@ -253,7 +253,7 @@ snapshot() { tree_digest "$GREAL"; echo "--"; tree_digest "$SKILLS_DIR"; echo "-
   run grid repair --prune
   [ "$status" -eq 0 ]
   [ ! -e "$G/repos/up/nested" ]
-  ! grep -q "beta" "$(LEDGER)"
+  ! grep -q "beta" "$(LEDGER)" || false
   grep -q "alpha" "$(LEDGER)"
 }
 
