@@ -1215,7 +1215,7 @@ V35() { printf '%s' "Zx9fQ2mK7vB4nL8pR3tYAb3dEfGhIjKlMnO"; }
 
 tok_azure()     { printf '%s' "Account""Key=$(rep Ab3dEf 15)"; }
 tok_bearer()    { printf '%s' "Authorization: Bear""er $(rep Ab3dEf 5)"; }
-tok_dburl()     { printf '%s' "postgres:/""/app:S3cretPw9@db.internal:5432/x"; }
+tok_dburl()     { printf '%s' "postgres:/""/app:S3cretPw9@dbhost/x"; }
 tok_sendgrid()  { printf '%s' "S""G.$(rep Ab3dEf 4).$(rep Ab3dEf 4)"; }
 tok_twilio()    { printf '%s' "S""K$(rep 0a1b2c3d 4)"; }
 tok_mailgun()   { printf '%s' "ke""y-$(rep Ab3d 8)"; }
