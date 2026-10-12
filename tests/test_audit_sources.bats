@@ -55,7 +55,9 @@ print(eval(sys.argv[1]))' "$1"
     'hook:auto-handoff' '-hook:auto-handoff' '-project:grid' '-gstack/careful' \
     'anthropic/pdf   # trailing comment' 'anthropic/docx' 'openspec' '  obra  ' \
     'future-kind:whatever' > "$BASE"
-  run python3 -c 'import sys; sys.path.insert(0, "scripts"); import audit; print(sorted(audit.baseline_repos(sys.argv[1])))' "$BASE"
+  # The scripts dir is passed as an argument, not a cwd-relative "scripts", so the test
+  # passes from any working directory (R16.qa.F12).
+  run python3 -c 'import sys; sys.path.insert(0, sys.argv[2]); import audit; print(sorted(audit.baseline_repos(sys.argv[1])))' "$BASE" "$REPO_ROOT/scripts"
   [ "$status" -eq 0 ]
   [ "$output" = "['anthropic', 'obra', 'openspec']" ]
 }
