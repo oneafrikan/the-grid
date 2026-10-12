@@ -57,7 +57,7 @@ fi
 grid_check_cmd_cap pre-bash-no-bypass "$command"
 
 grid_git_segments "$command"
-grid_check_balanced pre-bash-no-bypass
+grid_check_balanced pre-bash-no-bypass "$command"
 
 reasons=()
 for v in "${GIT_VIOLATIONS[@]}"; do reasons+=("$v"); done
@@ -93,8 +93,8 @@ for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
           reasons+=("git commit $w includes -n, which is --no-verify")
         fi ;;
       push)
-        # --mirror from 4 characters (--mi): git accepts any unique prefix of it
-        if [ "$w" = "--force" ] || { [ "${#w}" -ge 4 ] && [[ "--mirror" == "$w"* ]]; } \
+        # --mirror from 3 characters (--m): git accepts any prefix of it that is unique
+        if [ "$w" = "--force" ] || { [ "${#w}" -ge 3 ] && [[ "--mirror" == "$w"* ]]; } \
            || [[ "$w" =~ $re_push_f ]] || [[ "$w" == +* ]]; then
           reasons+=("git push $w is a forced push (use --force-with-lease)")
         fi ;;
