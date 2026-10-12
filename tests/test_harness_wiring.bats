@@ -793,3 +793,163 @@ wire_nohome() {
   wire_nohome --check
   [ "$status" -eq 0 ]
 }
+
+# ---------------------------------------------------------------- WP-012: fan-out guards
+
+@test "a PATH-stub ln that plants a dir symlink at the destination before the real ln creates nothing inside the victim dir" {
+  # Simulates the race between the "does the destination exist" check and the ln: the stub
+  # plants a symlink-to-a-directory at the destination, then runs the real ln. Plain `ln -s`
+  # follows it and drops the link INSIDE the victim dir; `ln -sn` does not.
+  local victim="$BATS_TEST_TMPDIR/victim" stubs="$BATS_TEST_TMPDIR/stubs" real_ln
+  real_ln="$(command -v ln)"
+  mkdir -p "$victim" "$stubs"
+  cat > "$stubs/ln" <<STUB
+#!/usr/bin/env bash
+dest="\${@: -1}"
+case "\$dest" in
+  "$HS"/*) if [ ! -e "\$dest" ] && [ ! -L "\$dest" ]; then "$real_ln" -s "$victim" "\$dest"; fi ;;
+esac
+exec "$real_ln" "\$@"
+STUB
+  chmod +x "$stubs/ln"
+  PATH="$stubs:$PATH" GRID_HARNESS=codex wire
+  [ -z "$(ls -A "$victim")" ]
+}
+
+@test "a foreign symlink in SKILLS_DIR is not fanned out to the shared dir" {
+  # A portable skill the grid does not own, linked into the Claude dir by someone else.
+  make_skill "$OTHER_DIR/foreign" "foreign"
+  ln -s "$OTHER_DIR/foreign" "$MOCK_SKILLS/foreign"
+  GRID_HARNESS=codex wire
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/foreign" ]
+  [ -L "$HS/skill-alpha" ]                                  # the grid's own skills do go
+  [ ! -e "$HS/foreign" ] && [ ! -L "$HS/foreign" ]
+}
+
+@test "-harness:<h> with opencode still active keeps the shared links and removes the per-harness agents (codex, pi, gemini, openclaw)" {
+  local h
+  stub_all_agents
+  for h in codex pi gemini openclaw; do
+    printf 'harness:%s\nharness:opencode\n' "$h" > "$OVERLAY"
+    wire
+    [ "$status" -eq 0 ]
+    printf 'harness:%s\nharness:opencode\n-harness:%s\n' "$h" "$h" > "$OVERLAY"
+    wire
+    [ "$status" -eq 0 ]
+    # opencode shares ~/.agents/skills with every one of them: its links survive.
+    [ -L "$HS/skill-alpha" ]
+    [ -L "$HS/skill-beta" ]
+  done
+  # codex and gemini own agent dirs of their own: gone with the deactivation. (The last loop
+  # pass left openclaw deactivated, so look at the first two harnesses' dirs directly.)
+  printf 'harness:codex\nharness:gemini\nharness:opencode\n' > "$OVERLAY"
+  wire
+  [ -L "$GRID_HARNESS_HOME/.codex/agents/a.toml" ] && [ -L "$GRID_HARNESS_HOME/.gemini/agents/a.md" ]
+  printf 'harness:codex\nharness:gemini\nharness:opencode\n-harness:codex\n' > "$OVERLAY"
+  wire
+  [ ! -L "$GRID_HARNESS_HOME/.codex/agents/a.toml" ]
+  [ -L "$GRID_HARNESS_HOME/.gemini/agents/a.md" ]
+  [ -L "$HS/skill-alpha" ]
+  printf 'harness:codex\nharness:gemini\nharness:opencode\n-harness:gemini\n' > "$OVERLAY"
+  wire
+  [ ! -L "$GRID_HARNESS_HOME/.gemini/agents/a.md" ]
+  [ -L "$HS/skill-alpha" ]
+}
+
+# A registry file the tests point wire.sh at (needs GRID_ALLOW_REGISTRY=1).
+write_registry() { # $@ = row lines
+  REG="$BATS_TEST_TMPDIR/registry.txt"
+  printf '%s\n' "claude ~/.claude/skills ~/.claude/agents claude-code - -" "$@" > "$REG"
+}
+
+@test "registry rows with 5 columns, a relative path, or .. exit 2 naming the row, with no writes" {
+  local row
+  for row in \
+    "codex ~/.agents/skills ~/.codex/agents codex ~/.codex/AGENTS.md" \
+    "codex skills ~/.codex/agents codex - -" \
+    "codex ~/.agents/skills ../.codex/agents codex - -" \
+    "codex ~/.agents/skills ~/x/../.codex/agents codex - -" \
+    "codex ~/.agents/skills ~/.codex/agents codex rules.md agents-md"; do
+    write_registry "$row"
+    GRID_ALLOW_REGISTRY=1 HARNESS_REGISTRY="$REG" GRID_HARNESS=codex wire
+    [ "$status" -eq 2 ]
+    [[ "$stderr" == *"registry"* ]] && [[ "$stderr" == *"codex"* ]]
+    [ -z "$(tree "$GRID_HARNESS_HOME")" ]
+    [ -z "$(tree "$MOCK_SKILLS")" ]            # nothing written, not even the Claude links
+  done
+}
+
+@test "the shipped registry passes the registry check" {
+  . "$REPO_ROOT/scripts/lib/harness.sh"
+  harness_registry_check
+}
+
+@test "relative XDG_CONFIG_HOME is ignored" {
+  . "$REPO_ROOT/scripts/lib/harness.sh"
+  [ "$(unset GRID_HARNESS_HOME; HOME=/h XDG_CONFIG_HOME=rel harness_path '~/.config/opencode/agents')" = "/h/.config/opencode/agents" ]
+  [ "$(unset GRID_HARNESS_HOME; HOME=/h XDG_CONFIG_HOME=/x harness_path '~/.config/opencode/agents')" = "/x/opencode/agents" ]
+}
+
+@test "harness_path refuses a value with a .. component" {
+  . "$REPO_ROOT/scripts/lib/harness.sh"
+  run harness_path '~/../etc'
+  [ "$status" -ne 0 ]
+  run harness_path '/a/../b'
+  [ "$status" -ne 0 ]
+  [ "$(harness_path '~/.a..b/c')" = "$GRID_HARNESS_HOME/.a..b/c" ]   # a dotted NAME is fine
+}
+
+@test "HARNESS_REGISTRY without GRID_ALLOW_REGISTRY=1 is ignored" {
+  write_registry "evil ~/.agents/skills - - - -"
+  HARNESS_REGISTRY="$REG" run bash -c ". '$REPO_ROOT/scripts/lib/harness.sh'; harness_valid evil"
+  [ "$status" -ne 0 ]                                  # ignored: evil is not a registry row
+  GRID_ALLOW_REGISTRY=1 HARNESS_REGISTRY="$REG" run bash -c ". '$REPO_ROOT/scripts/lib/harness.sh'; harness_valid evil"
+  [ "$status" -eq 0 ]                                  # honoured behind the flag
+}
+
+@test "two projects shipping the same agent name: the second skip names the clash" {
+  mkdir -p "$MOCK_GRID/agent-factory/projects/p/_codex/agents" "$MOCK_GRID/agent-factory/projects/q/_codex/agents"
+  printf 'x\n' > "$MOCK_GRID/agent-factory/projects/p/_codex/agents/a.toml"
+  printf 'y\n' > "$MOCK_GRID/agent-factory/projects/q/_codex/agents/a.toml"
+  GRID_HARNESS=codex wire
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skip (~/.codex/agents: name clash with p): a.toml"* ]]
+  [[ "$output" != *"skip (~/.codex/agents: exists, not managed): a.toml"* ]]
+  [[ "$output" != *"skip (real dir, not managed)"* ]]
+  grep -qF "agent@~/.codex/agents	a.toml	$MOCK_GRID/agent-factory/projects/q/_codex/agents/a.toml	skipped	name clash with p" "$MANIFEST"
+  # The first project's agent is the one linked.
+  [ "$(readlink "$GRID_HARNESS_HOME/.codex/agents/a.toml")" = "$MOCK_GRID/agent-factory/projects/p/_codex/agents/a.toml" ]
+}
+
+@test "a truly foreign entry keeps the 'exists, not managed' wording" {
+  mkdir -p "$GRID_HARNESS_HOME/.codex/agents"
+  printf 'mine\n' > "$GRID_HARNESS_HOME/.codex/agents/a.toml"
+  stub_agent codex a.toml
+  GRID_HARNESS=codex wire
+  [[ "$output" == *"skip (~/.codex/agents: exists, not managed): a.toml"* ]]
+}
+
+@test "GRID_HARNESS=, exits 2 before any write and changes nothing" {
+  wire
+  [ "$status" -eq 0 ]
+  local before; before="$(tree "$MOCK_SKILLS")"
+  GRID_HARNESS=, wire
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"GRID_HARNESS"* ]]
+  [ "$(tree "$MOCK_SKILLS")" = "$before" ]
+}
+
+@test "an unknown manifest harness is rejected even while GRID_HARNESS is set" {
+  printf 'harness:nonesuch\n' > "$OVERLAY"
+  GRID_HARNESS=codex wire
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"nonesuch"* ]]
+  [ -z "$(tree "$GRID_HARNESS_HOME")" ]
+}
+
+@test "docs/harnesses.md documents the three limits" {
+  grep -qF 'Two harnesses whose agents dirs are aliased' "$REPO_ROOT/docs/harnesses.md"
+  grep -qF 'only after `-harness:<name>` has been wired once' "$REPO_ROOT/docs/harnesses.md"
+  grep -qF 'lags the Claude dir' "$REPO_ROOT/docs/harnesses.md"
+}

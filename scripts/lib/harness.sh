@@ -11,6 +11,7 @@
 #                               skills_dir agents_dir compose_target rules_file
 #                               rules_harness. Prints nothing for an unknown name.
 #   harness_valid <name>        exit 0 when <name> is a registry row
+#   harness_registry_check      validate every registry row (see below); exit 1 + message
 #   harness_path <value>        expand a registry path value (see below)
 #   harness_registry_check      exit 2 when two rows share a rules_file
 #   harness_rules_action <file> <active 0|1> <csv> [<raw>]
@@ -18,10 +19,17 @@
 #   harness_rules_emit <rules_harness> <csv> <file> [--check]
 #                               run `rules.py emit` for one instruction file
 #
-# HARNESS_REGISTRY overrides the registry file (tests); the default sits next to
-# this file, so a mock GRID_DIR never needs its own copy.
+# HARNESS_REGISTRY overrides the registry file (tests), but ONLY together with
+# GRID_ALLOW_REGISTRY=1 (the same convention as the test-only GRID_ALLOW_FILE=1): the
+# registry decides where links are written, so a stray or planted variable alone must not
+# redirect them. The default sits next to this file, so a mock GRID_DIR never needs its own copy.
 
-HARNESS_REGISTRY="${HARNESS_REGISTRY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harnesses.txt}"
+_HARNESS_REGISTRY_DEFAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harnesses.txt"
+if [ "${GRID_ALLOW_REGISTRY:-}" = 1 ]; then
+  HARNESS_REGISTRY="${HARNESS_REGISTRY:-$_HARNESS_REGISTRY_DEFAULT}"
+else
+  HARNESS_REGISTRY="$_HARNESS_REGISTRY_DEFAULT"
+fi
 
 # Registry rows with comments and blank lines removed. A plain awk (default field
 # split) is used on purpose: the file may be edited with spaces or tabs.
@@ -43,6 +51,33 @@ harness_field() {
   _harness_rows | awk -v n="$name" -v i="$idx" '$1 == n { print $i; exit }'
 }
 
+# harness_registry_check: every row must have exactly 6 columns, and skills_dir, agents_dir
+# and rules_file must each be '-', an absolute path or '~/...' with no '..' component. wire.sh
+# calls it before any write, so a malformed or hostile row exits 2 instead of steering a link
+# (a short row used to reach harness_path with an empty value, a relative one landed under the
+# cwd). Prints "harness registry: row '<name>': <problem>" to stderr and returns 1 on the first.
+harness_registry_check() {
+  local name skills agents _target rules rharness extra col val
+  while read -r name skills agents _target rules rharness extra; do
+    if [ -z "$rharness" ] || [ -n "$extra" ]; then
+      echo "harness registry: row '$name': expected 6 columns" >&2; return 1
+    fi
+    for col in "skills_dir:$skills" "agents_dir:$agents" "rules_file:$rules"; do
+      val="${col#*:}"
+      # The quoted "~/" is a LITERAL tilde of a registry value (SC2088 is the point).
+      # shellcheck disable=SC2088
+      case "$val" in
+        -) ;;
+        /*|"~/"*)
+          case "/$val/" in
+            */../*) echo "harness registry: row '$name': ${col%%:*} '$val' has a '..' component" >&2; return 1 ;;
+          esac ;;
+        *) echo "harness registry: row '$name': ${col%%:*} '$val' must be '-', absolute or ~/..." >&2; return 1 ;;
+      esac
+    done
+  done < <(_harness_rows)
+}
+
 # A registry row always has a skills_dir ('-' at minimum), so a non-empty field
 # means the row exists. (No `names | grep -q` pipe: under pipefail an early-exiting
 # grep can SIGPIPE the writer and turn a match into a failure.)
@@ -58,18 +93,24 @@ harness_valid() {
 #   ~/<rest>          <base>/<rest>, <base> = ${GRID_DRY_HOME:-${GRID_HARNESS_HOME:-$HOME}}
 #                     (GRID_DRY_HOME wins: it redirects every home-derived target)
 # CODEX_HOME and PI_CODING_AGENT_DIR are deliberately not honoured; edit the row.
-# An empty base is an error (exit 1), never a path under "/".
+# An empty base is an error (exit 1), never a path under "/". A value with a '..'
+# component is an error too, and XDG_CONFIG_HOME is honoured only when it is an absolute path
+# (the XDG spec says a relative one must be ignored; it would land under the cwd).
 harness_path() {
-  local v="$1" base
+  local v="$1" base xdg="${XDG_CONFIG_HOME:-}"
   base="${GRID_DRY_HOME:-${GRID_HARNESS_HOME:-${HOME:-}}}"
+  case "/$v/" in
+    */../*) echo "harness_path: '$v' has a '..' component" >&2; return 1 ;;
+  esac
+  case "$xdg" in /*) ;; *) xdg="" ;; esac
   # The quoted "~/..." patterns below match the LITERAL tilde of a registry value; they
   # are meant not to expand (SC2088), and quoting is what makes bash 3.2 treat them so.
   # shellcheck disable=SC2088
   case "$v" in
     -) printf '%s\n' "$v"; return 0 ;;
     "~/.config/"*)
-      if [ -z "${GRID_DRY_HOME:-}" ] && [ -z "${GRID_HARNESS_HOME:-}" ] && [ -n "${XDG_CONFIG_HOME:-}" ]; then
-        printf '%s/%s\n' "$XDG_CONFIG_HOME" "${v#"~/.config/"}"
+      if [ -z "${GRID_DRY_HOME:-}" ] && [ -z "${GRID_HARNESS_HOME:-}" ] && [ -n "$xdg" ]; then
+        printf '%s/%s\n' "$xdg" "${v#"~/.config/"}"
         return 0
       fi ;;
   esac
