@@ -804,6 +804,7 @@ if [ -d "$GRID_DIR/repos" ]; then
       while IFS= read -r skill_md; do
         skill_dir=$(dirname "$skill_md")
         [ "$skill_dir" = "$repo_dir" ] && continue
+        case "$skill_dir" in "$repo_dir"/*) ;; *) continue ;; esac   # never link outside the repo
         skill_is_denied "$repo_name" "$(basename "$skill_dir")" && continue
         wire_skill "$skill_dir"
       done < <(find_skill_mds "$repo_dir")
@@ -812,6 +813,7 @@ if [ -d "$GRID_DIR/repos" ]; then
       while IFS= read -r skill_md; do
         skill_dir=$(dirname "$skill_md")
         [ "$skill_dir" = "$repo_dir" ] && continue
+        case "$skill_dir" in "$repo_dir"/*) ;; *) continue ;; esac   # never link outside the repo
         skill_is_wired "$repo_name" "$(basename "$skill_dir")" || continue
         wire_skill "$skill_dir"
       done < <(find_skill_mds "$repo_dir")

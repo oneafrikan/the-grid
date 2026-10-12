@@ -485,6 +485,27 @@ links_of() {
   [ "$(links_of "$MOCK_SKILLS")" = "$before" ]     # all three back, none lost
 }
 
+# --- WP-009: a hostile tracked path must not link anything outside the repo ----
+
+@test "a tracked newline path creates no link outside GRID_DIR and wire.sh exits 0" {
+  # The second half of the path (after the line break) is an absolute path into OTHER_DIR:
+  # a line-split listing used to hand wire.sh that directory as a skill dir.
+  local nl=$'\n' evil="$MOCK_GRID/repos/evil"
+  make_skill "$evil/skills/real" "real"
+  mkdir -p "$OTHER_DIR/payload"
+  make_skill "$evil/skills/x${nl}$OTHER_DIR/payload" "payload"
+  git -C "$evil" init -q
+  git -C "$evil" add -A
+  printf 'evil\n' > "$MOCK_GRID/baseline-submodules.txt"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/real" ]
+  # Exactly the expected links: the two root skills and the one real repo skill. A line-split
+  # listing used to add the repo's whole skills/ dir and the outside dir as "skills".
+  [ "$(ls "$MOCK_SKILLS" | LC_ALL=C sort | paste -sd, -)" = "real,skill-alpha,skill-beta" ]
+  [ ! -e "$MOCK_SKILLS/payload" ] && [ ! -L "$MOCK_SKILLS/payload" ]
+}
+
 # --- WP-008: a missing or mistyped manifest is announced, not silently "wire everything" ---
 
 @test "a missing GRID_BASELINE warns and writes a manifest row" {
