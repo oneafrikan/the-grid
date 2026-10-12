@@ -7,6 +7,7 @@ Output (generated, committed):
     plugins/<bundle>/.claude-plugin/plugin.json
     plugins/<bundle>/skills/<name>/...      owned skills + composed orchestrator skills
     plugins/<bundle>/agents/<name>.md       composed specialists + root-owned agents
+    plugins/<bundle>/LICENSE, THIRD-PARTY-NOTICES.md   byte-identical copies of the repo root's
 
 Never hand-edit the output: re-run this script instead.
 
@@ -43,10 +44,12 @@ from pathlib import Path
 
 # ---- manifest schema -------------------------------------------------------
 # Unknown keys are a hard error (typos must not silently drop content).
-TOP_REQUIRED = {"marketplace", "version", "license", "repository", "bundles"}
+TOP_REQUIRED = {"marketplace", "version", "license", "repository", "exclude_skills", "bundles"}
 MARKETPLACE_REQUIRED = {"name", "owner", "description"}
 BUNDLE_REQUIRED = {"description", "skills", "compose", "agents"}
 MAX_DESCRIPTION = 200  # marketplace listing budget; enforced, never truncated
+# Repo-root files copied byte-identically into every bundle dir.
+BUNDLE_NOTICE_FILES = ("LICENSE", "THIRD-PARTY-NOTICES.md")
 
 # Component names become path segments, so refuse anything that could escape a dir.
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -82,11 +85,21 @@ def load_manifest(grid):
     if not path.is_file():
         raise GuardError(f"manifest not found: {path}")
     try:
-        m = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
+        m = json.loads(read_regular(path).decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise GuardError(f"{path}: invalid JSON: {e}")
 
     check_keys(m, TOP_REQUIRED, "bundles.json")
+    # exclude_skills: {skill name: one-line reason}. Every skills/<d>/SKILL.md must be in a
+    # bundle or listed here, so a new root skill is never silently left out of the plugins.
+    ex = m["exclude_skills"]
+    if not isinstance(ex, dict):
+        raise GuardError("bundles.json: 'exclude_skills' must be an object")
+    bad = [str(k) for k, v in ex.items()
+           if not (NAME_RE.match(k) and isinstance(v, str) and v.strip())]
+    if bad:
+        raise GuardError("bundles.json: 'exclude_skills' must map plain skill names to a "
+                         f"non-empty reason string; bad entr(ies): {', '.join(bad)}")
     check_keys(m["marketplace"], MARKETPLACE_REQUIRED, "bundles.json marketplace")
     for k in ("version", "license", "repository"):
         if not isinstance(m[k], str) or not m[k]:
@@ -297,6 +310,15 @@ def render_bundle(grid, name, b, manifest, repo_skills, tmp):
         "repository": manifest["repository"],
     }
     files[f"{base}/.claude-plugin/plugin.json"] = (dump_json(plugin), False)
+
+    # Licence and third-party notice travel with every bundle (a plugin install copies only
+    # its own dir, so the repo-root files would not reach the user). Byte-identical copies
+    # of the root files; a missing or odd root file is a guard error, never skipped.
+    for fname in BUNDLE_NOTICE_FILES:
+        src = grid / fname
+        if not os.path.lexists(src):
+            raise GuardError(f"bundle '{name}': root file {fname} is missing ({src})")
+        files[f"{base}/{fname}"] = (read_regular(src), False)
     return files
 
 
@@ -320,6 +342,35 @@ def render_marketplace(manifest):
     return {".claude-plugin/marketplace.json": (dump_json(doc), False)}
 
 
+def check_skill_classification(grid, manifest):
+    """Every skills/<d>/SKILL.md must be bundled or listed in exclude_skills (with a reason).
+
+    Without this a new root skill is silently never shipped, and an exclusion has no recorded
+    reason. Also refuses a stale exclusion (skill gone) and a skill that is both bundled and
+    excluded, so the list cannot rot.
+    """
+    bundled = {s for b in manifest["bundles"].values() for s in b["skills"]}
+    excluded = set(manifest["exclude_skills"])
+    skills_dir = grid / "skills"
+    on_disk = set()
+    if skills_dir.is_dir():
+        for d in sorted(skills_dir.iterdir()):
+            if os.path.lexists(d / "SKILL.md"):
+                on_disk.add(d.name)
+    both = sorted(bundled & excluded)
+    if both:
+        raise GuardError(f"skill(s) both bundled and in exclude_skills: {', '.join(both)}")
+    ghost = sorted(excluded - on_disk)
+    if ghost:
+        raise GuardError(f"exclude_skills names skill(s) with no skills/<name>/SKILL.md: "
+                         f"{', '.join(ghost)}")
+    unclassified = sorted(on_disk - bundled - excluded)
+    if unclassified:
+        raise GuardError(
+            f"skill(s) in no bundle and not in exclude_skills: {', '.join(unclassified)} "
+            "(add each to a bundle in plugins/bundles.json, or to 'exclude_skills' with a reason)")
+
+
 def render(grid, manifest, tmp):
     """Render every generated file: {path: FileSpec}. Raises GuardError before any write."""
     repo_skills = repos_skill_names(grid)
@@ -328,6 +379,7 @@ def render(grid, manifest, tmp):
     files = {}
     for name, b in manifest["bundles"].items():
         files.update(render_bundle(grid, name, b, manifest, repo_skills, tmp))
+    check_skill_classification(grid, manifest)
     files.update(render_marketplace(manifest))
     return files
 

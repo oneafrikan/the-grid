@@ -1049,10 +1049,13 @@ def write_portable(name: str, config: dict, out_dir: Path) -> Path:
     if target_dir.is_symlink():
         raise ValueError(f"refusing to write: {target_dir} is a symlink, not a dir")
     # Render everything BEFORE the wipe so a render error leaves the old tree untouched.
+    # The portable export is public output: it must not name the private repo or its layout.
+    # Role sources keep the real path (the agents need it); only this export swaps in a
+    # placeholder the reader can map to their own private directory.
     rendered = [
         (f"{agent['role']}.md",
-         f"# {role_meta(agent['role']).get('title') or agent['role']}\n\n"
-         + render_lean_body(agent, ""))
+         (f"# {role_meta(agent['role']).get('title') or agent['role']}\n\n"
+          + render_lean_body(agent, "")).replace("~/.the-grid-private/", "<private-dir>/"))
         for agent in config["agents"]
     ]
     if target_dir.exists():

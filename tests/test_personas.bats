@@ -83,3 +83,10 @@ repo_copy() {
   [ ! -e "$TMP/r/dist/personas/zz-private.md" ]
   cmp "$TMP/r/dist/personas/backend-dev.md" "$REPO_ROOT/dist/personas/backend-dev.md"
 }
+
+@test "no persona names the private learning store path" {
+  # The role sources keep the real path (agents need it); the portable export must not.
+  run grep -rn 'the-grid-private' "$REPO_ROOT/dist/personas"
+  [ "$status" -eq 1 ]
+  grep -rqF '<private-dir>/' "$REPO_ROOT/dist/personas"
+}
