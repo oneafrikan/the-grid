@@ -176,6 +176,14 @@ directories, so a file you edited just before the session ended is not blamed on
 build or editor writing into the directory *during* the run still is (`unexpected-file`).
 The child runs in its own process group and the whole group is killed at the timeout.
 
+Known limit: the locks serialise sessions that share a directory or a repo, and a waiter
+gives up after `GRID_AUTOHANDOFF_WAIT` seconds (`cwd-busy`, or `repo-busy` once its child
+has run, leaving the pair on disk uncommitted) with no retry. Three or more sessions that
+end together on one shared target can therefore lose a handoff; the hook's outer alarm
+allows for four such waits. `~/.local/bin` is watched by names, types, link targets and
+sizes only (a same-size rewrite there is not seen, and a self-update of the claude link
+during a run is reported as `unexpected-file`).
+
 **Cost.** One Sonnet run per qualifying session. Bounds: `--max-budget-usd`
 (`GRID_AUTOHANDOFF_MAX_USD`, default 1.00; it may not bind on a subscription plan),
 `--max-turns 25`, and a wall-clock alarm (`GRID_AUTOHANDOFF_TIMEOUT`, default 900 s).
@@ -218,8 +226,9 @@ proven live (operator check B1), so the rules are not the only barrier:
   `GH_TOKEN`, `ANTHROPIC_API_KEY`, cloud credentials and `SSH_AUTH_SOCK` are not passed;
   if `claude` authenticates through an API key variable, list it there.
 - The worker's own git calls after the child run with `core.fsmonitor=false`,
-  `core.hooksPath=/dev/null`, no remote-shell command from configuration and the `ext::`
-  transport off, and only in a git dir that existed before the run, so a configuration
+  `core.hooksPath=/dev/null` and the `ext::` transport off (your own configuration for
+  remote access is left alone, so a push to a `git@host:` remote works), and only in a git dir that existed
+  before the run, so a configuration
   the child managed to plant cannot execute anything. The repository's own hooks
   therefore do not run for the handoff commit (the worker's strict secret scan runs
   first); a git dir the child creates is `unexpected-git-dir`.
