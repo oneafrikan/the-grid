@@ -1194,6 +1194,93 @@ big_file() {
   [[ "$output" != *"$(rep a 101)"* ]] || { echo "$output" >&2; false; }
 }
 
+# --- WP-023: key-name and JSON-quoted coverage, provider table, false-block escape,
+# exemption scope.
+
+# V35: a 35-character mixed value (letters and digits).
+V35() { printf '%s' "Zx9fQ2mK7vB4nL8pR3tYAb3dEfGhIjKlMnO"; }
+
+@test "secret: assigned-secret sees common key names and JSON-quoted keys" {
+  v="$(V35)"
+  flag_case assigned-secret "AWS_SECRET_ACCESS_KEY=$v" "$v"
+  flag_case assigned-secret "aws_secret_access_key = $v" "$v"
+  flag_case assigned-secret "SECRET_KEY = '$v'" "$v"
+  flag_case assigned-secret "DJANGO_SECRET_KEY=$v" "$v"
+  flag_case assigned-secret "JWT_SECRET_KEY=$v" "$v"
+  flag_case assigned-secret "\"api_key\": \"$v\"" "$v"
+  flag_case assigned-secret "\"password\": \"$v\"" "$v"
+  flag_case assigned-secret "\"token\": \"$v\"" "$v"
+  flag_case assigned-secret "{\"secret\": \"$v\"}" "$v"
+}
+
+tok_azure()     { printf '%s' "Account""Key=$(rep Ab3dEf 15)"; }
+tok_bearer()    { printf '%s' "Authorization: Bear""er $(rep Ab3dEf 5)"; }
+tok_dburl()     { printf '%s' "postgres:/""/app:S3cretPw9@db.internal:5432/x"; }
+tok_sendgrid()  { printf '%s' "S""G.$(rep Ab3dEf 4).$(rep Ab3dEf 4)"; }
+tok_twilio()    { printf '%s' "S""K$(rep 0a1b2c3d 4)"; }
+tok_mailgun()   { printf '%s' "ke""y-$(rep Ab3d 8)"; }
+tok_hf()        { printf '%s' "h""f_$(rep Ab3dEf 6)"; }
+tok_do()        { printf '%s' "do""p_v1_$(rep 0a1b2c3d 8)"; }
+tok_shopify()   { printf '%s' "shp""at_$(rep 0a1b2c3d 4)"; }
+tok_stripetest() { printf '%s' "sk_""test_$(rep Ab3dE 4)"; }
+tok_whsec()     { printf '%s' "whs""ec_$(rep Ab3dE 4)"; }
+tok_slackhook() { printf '%s' "https:/""/hooks.slack.com/services/T0123ABCD/B0123ABCD/$(rep Ab3dEf 4)"; }
+tok_ya29()      { printf '%s' "ya""29.$(rep Ab3dEf 5)"; }
+tok_pgp()       { printf '%s' "-----BEGIN PGP PRIV""ATE KEY BLOCK-----"; }
+
+@test "secret: provider rows are detected (Azure, Bearer, DB URL, SendGrid, Twilio, Mailgun, Hugging Face, DigitalOcean, Shopify, Stripe test and webhook, Slack webhook, Google OAuth, PGP)" {
+  t="$(tok_azure)";      flag_case azure-account-key "conn = \"$t\"" "$t"
+  t="$(tok_bearer)";     flag_case bearer-token "curl -H '$t'" "$t"
+  t="$(tok_dburl)";      flag_case db-url-password "DATABASE_URL=$t" "$t"
+  t="$(tok_sendgrid)";   flag_case sendgrid-key "x = \"$t\"" "$t"
+  t="$(tok_twilio)";     flag_case twilio-key "x = \"$t\"" "$t"
+  t="$(tok_mailgun)";    flag_case mailgun-key "x = \"$t\"" "$t"
+  t="$(tok_hf)";         flag_case huggingface-token "x = \"$t\"" "$t"
+  t="$(tok_do)";         flag_case digitalocean-token "x = \"$t\"" "$t"
+  t="$(tok_shopify)";    flag_case shopify-token "x = \"$t\"" "$t"
+  t="$(tok_stripetest)"; flag_case stripe-test "x = \"$t\"" "$t"
+  t="$(tok_whsec)";      flag_case stripe-webhook "x = \"$t\"" "$t"
+  t="$(tok_slackhook)";  flag_case slack-webhook "url: $t" "$t"
+  t="$(tok_ya29)";       flag_case google-oauth "x = \"$t\"" "$t"
+  t="$(tok_pgp)";        flag_case private-key "$t" "$t"
+}
+
+@test "secret: ordinary code that mentions token or secret is not blocked (the false-block table)" {
+  mkrepo
+  rows=(
+    'has_token = agents_md.is_file() and (agents_md.read_text() != "")'
+    "token = request.headers.get('authorization')"
+    'api_key = get_key_from_somewhere_long()'
+    'token = tokenizer.encode(some_very_long_input_string_here)'
+    'secret: ref+vault://path/to/secret/value'
+    'password = input_prompt_for_the_password_here'
+    'x = "postgres://user:${DB_PASSWORD}@host/db"'
+  )
+  for row in "${rows[@]}"; do
+    stage_line "$row"
+    scan 'git commit -m x'
+    if [ "$status" -ne 0 ]; then echo "expected PASS for row: $row" >&2; echo "$output" >&2; false; fi
+  done
+}
+
+@test "secret: only the matched token's own text can exempt it (not the rest of the line)" {
+  mkrepo
+  t="$(tok_ghp)"
+  for row in "key = \"$t\" # counterexample" "key = \"$t\" # example" "see https://example.com/x key = \"$t\"" "key = \"$t\" # placeholder value"; do
+    stage_line "$row"
+    scan 'git commit -m x'
+    [ "$status" -eq 2 ] || { echo "expected BLOCK for: $row" >&2; echo "$output" >&2; false; }
+  done
+  # a token whose own text holds the word is a documentation key and passes
+  stage_line "key = \"gh""p_exampleexampleexampleexampleexample12\""
+  scan 'git commit -m x'
+  [ "$status" -eq 0 ] || { echo "$output" >&2; false; }
+}
+
+@test "secret: the README no longer documents the allow pragma" {
+  [ "$(grep -c 'allow-secret' "$REPO_ROOT/hooks/README.md")" -eq 0 ]
+}
+
 # --- secret_scan_file and secret_sensitive_name (the shared library API)
 
 @test "secret_scan_file prints path:line: name (4 chars...) and returns 1; clean file returns 0" {
