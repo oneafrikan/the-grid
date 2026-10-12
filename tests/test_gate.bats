@@ -15,6 +15,7 @@ setup() {
   printf '#!/usr/bin/env bash\nexit 0\n' > "$G/.githooks/pre-commit"
   printf '#!/usr/bin/env bash\necho "1..0"\nexit 0\n' > "$G/tests/lib/bats-core/bin/bats"
   chmod +x "$G"/scripts/*.sh "$G/.githooks/pre-commit" "$G/tests/lib/bats-core/bin/bats"
+  bats_answers_version "$G/tests/lib/bats-core/bin/bats"
   ( cd "$G" && git init -q && git config user.email t@t && git config user.name t \
       && git add -A && git commit -q -m init )
   # PATH with essentials but no shellcheck (tr/wc/xargs: needed by the real check-personal.sh)
@@ -26,6 +27,24 @@ setup() {
 teardown() {
   rm -rf "$G"
   common_teardown
+}
+
+# pinned_bats_version — the version scripts/gate.sh pins (the one source of that number).
+pinned_bats_version() {
+  sed -n 's/^PINNED_BATS_VERSION="\(.*\)"$/\1/p' "$REPO_ROOT/scripts/gate.sh"
+}
+
+# bats_answers_version <stub file> [version] — make a stub bats answer `--version` the way
+# the real one does ("Bats X.Y.Z"), whatever else it does, so the gate's version pin passes
+# (default: the pinned version) or fails (a different one) in a test (R16.qa.F14).
+bats_answers_version() {
+  local f="$1" v="${2:-$(pinned_bats_version)}" t
+  t="$(mktemp)"
+  { head -n 1 "$f"
+    printf '[ "${1:-}" = "--version" ] && { echo "Bats %s"; exit 0; }\n' "$v"
+    tail -n +2 "$f"; } > "$t"
+  cat "$t" > "$f"
+  rm -f "$t"
 }
 
 # GATE_ENV: extra VAR=value pairs a test wants the gate to see (the gate runs under env -i).
@@ -53,9 +72,36 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GA
   [[ "$output" == *"gate: FAIL"* ]] || false
 }
 
+# R16.qa.F14: the bats submodule pointer can move; the gate asserts the version it was written for.
+@test "a bats of the wrong version fails the gate, naming bats and both versions" {
+  bats_answers_version "$G/tests/lib/bats-core/bin/bats" 0.0.0
+  run run_gate
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — bats"* ]] || false
+  [[ "$output" == *"0.0.0"* ]] || false
+  [[ "$output" == *"$(pinned_bats_version)"* ]] || false
+}
+
+@test "a bats that prints no version fails the gate" {
+  run run_gate
+  [ "$status" -eq 0 ]    # the setup stub answers --version
+  printf '#!/usr/bin/env bash\necho "1..0"\nexit 0\n' > "$G/tests/lib/bats-core/bin/bats"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — bats"* ]] || false
+}
+
+@test "the pinned bats version is the one the real submodule carries" {
+  [ -f "$REPO_ROOT/tests/lib/bats-core/package.json" ] || skip "bats-core submodule not initialised"
+  [ -n "$(pinned_bats_version)" ]
+  grep -q "\"version\": \"$(pinned_bats_version)\"" "$REPO_ROOT/tests/lib/bats-core/package.json"
+}
+
 @test "a bats run that leaves files in its TMPDIR fails the gate and names them" {
   # The stub bats leaks one file the way a test that forgot its rm -rf would.
   printf '#!/usr/bin/env bash\n: > "$TMPDIR/leaked-by-a-test"\necho "1..0"\nexit 0\n' > "$G/tests/lib/bats-core/bin/bats"
+  bats_answers_version "$G/tests/lib/bats-core/bin/bats"
   run run_gate
   [ "$status" -eq 1 ]
   [[ "$output" == *"leaked-by-a-test"* ]] || false
@@ -65,6 +111,7 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GA
 @test "a bats run that cleans up after itself leaves no TMPDIR behind" {
   # The stub records the dir it was given; the gate must remove it afterwards.
   printf '#!/usr/bin/env bash\necho "$TMPDIR" > "%s/bats-tmpdir"\necho "1..0"\nexit 0\n' "$BATS_TEST_TMPDIR" > "$G/tests/lib/bats-core/bin/bats"
+  bats_answers_version "$G/tests/lib/bats-core/bin/bats"
   run run_gate
   [ "$status" -eq 0 ]
   seen="$(cat "$BATS_TEST_TMPDIR/bats-tmpdir")"
@@ -75,6 +122,7 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GA
 @test "the gate makes the venv-gated tests mandatory (GRID_REQUIRE_VENV=1)" {
   # The stub records what bats would see; without the variable 215 tests skip and the gate stays green.
   printf '#!/usr/bin/env bash\necho "${GRID_REQUIRE_VENV-unset}" > "%s/bats-require-venv"\necho "1..0"\nexit 0\n' "$BATS_TEST_TMPDIR" > "$G/tests/lib/bats-core/bin/bats"
+  bats_answers_version "$G/tests/lib/bats-core/bin/bats"
   run run_gate
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/bats-require-venv")" = "1" ]
@@ -94,6 +142,7 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GA
 
 @test "a failing check is named in the summary and the rest still run" {
   printf '#!/usr/bin/env bash\necho BOOM\nexit 1\n' > "$G/tests/lib/bats-core/bin/bats"
+  bats_answers_version "$G/tests/lib/bats-core/bin/bats"
   run run_gate
   [ "$status" -eq 1 ]
   [[ "$output" == *"gate: FAIL — bats"* ]] || false
@@ -686,6 +735,7 @@ stub_git_with_bats_restore() {
   chmod +x "$G/stubbin/ps"
   # a test that leaks a file whose contents are a secret, and a directory holding one
   printf '#!/usr/bin/env bash\nprintf "SECRET-CONTENT\\n" > "$TMPDIR/leaked-file"\nmkdir -p "$TMPDIR/leaked-dir"\nprintf "SECRET-INNER\\n" > "$TMPDIR/leaked-dir/inner"\necho "1..0"\nexit 0\n' > "$G/tests/lib/bats-core/bin/bats"
+  bats_answers_version "$G/tests/lib/bats-core/bin/bats"
   run run_gate
   echo "$output"
   [ "$status" -eq 1 ]
