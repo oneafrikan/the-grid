@@ -144,6 +144,21 @@ tok_jwt()       { printf '%s' "ey""JhbGciOiJIUzI1NiJ9.ey""JzdWIiOiIxMjM0NTY3ODkw
   [ "$status" -ne 0 ]
 }
 
+@test "launcher: unknown well-formed id obeys the kill switches (WP-019)" {
+  # A stale settings entry naming a removed hook must be switchable off; without a
+  # switch it still exits 2 (and an invalid id exits 2 even with the switch).
+  GRID_HOOKS=off run bash "$REPO_ROOT/hooks/run.sh" gone-hook < /dev/null
+  [ "$status" -eq 0 ]
+  GRID_DISABLED_HOOKS=gone-hook run bash "$REPO_ROOT/hooks/run.sh" gone-hook < /dev/null
+  [ "$status" -eq 0 ]
+  run bash "$REPO_ROOT/hooks/run.sh" gone-hook < /dev/null
+  [ "$status" -eq 2 ]
+  GRID_HOOKS=off run bash "$REPO_ROOT/hooks/run.sh" '../../etc/passwd' < /dev/null
+  [ "$status" -eq 2 ]
+  GRID_DISABLED_HOOKS='Bad_Id' run bash "$REPO_ROOT/hooks/run.sh" 'Bad_Id' < /dev/null
+  [ "$status" -eq 2 ]
+}
+
 @test "launcher: works without jq (fail open for an open hook, closed for a guard)" {
   # auto-handoff does not exist until a later change group, so stand in for it with a
   # scratch copy of hooks/ that holds an open-fail stub script using the real
@@ -314,6 +329,10 @@ STUB
   PATH="$NOJQ_DIR" run_hook pre-bash-no-bypass "$(hook_payload 'git status')"
   [ "$status" -eq 2 ]
   [[ "$output" == *"jq"* ]] || false
+  # WP-019: the message names what the operator can do (install, or restart with the switch)
+  [[ "$output" == *"GRID_HOOKS=off"* ]] || false
+  [[ "$output" == *"install"* ]] || false
+  [[ "$output" == *"every Bash call"* ]] || false
 }
 
 # --- the command block table (design.md "Command block table"): one test, row printed on failure
@@ -673,6 +692,9 @@ STUB
   PATH="$NOJQ_DIR" run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x')"
   [ "$status" -eq 2 ]
   [[ "$output" == *"jq"* ]] || false
+  [[ "$output" == *"GRID_HOOKS=off"* ]] || false
+  [[ "$output" == *"install"* ]] || false
+  [[ "$output" == *"every Bash call"* ]] || false
 }
 
 @test "secret: at most 10 findings are listed" {
