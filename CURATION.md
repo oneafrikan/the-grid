@@ -452,4 +452,32 @@ Every entry is a line the scanner flags that was read in context and judged to b
   path: repos/gstack/unfreeze/SKILL.md
   contains: 'allowed-tools: Bash, Read'
   reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: hook-declared
+  path: repos/gstack/autoplan/SKILL.md
+  contains: 'command: "bash -c ''S=\"$HOME/.claude/skills/gstack/autoplan/bin/phase-publication-hook\"\nif [ -f \"$S\" ]; then exec bash \"$S\"; fi\nprintf ''\\''''%s\\n''\\'''' ''\\''''{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Autoplan publication guard is unavailable. Restore the installed autoplan/bin/phase-publication-hook before continuing this skill.\"}}''\\''''''"'
+  reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
+- rule: hook-declared
+  path: repos/gstack/careful/SKILL.md
+  contains: 'command: ''bash -c "exec bash \"$HOME/.claude/skills/gstack/careful/bin/check-careful.sh\""'''
+  reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
+- rule: hook-declared
+  path: repos/gstack/freeze/SKILL.md
+  contains: 'command: ''bash -c "exec bash \"$HOME/.claude/skills/gstack/freeze/bin/check-freeze.sh\""'''
+  reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
+- rule: hook-declared
+  path: repos/gstack/guard/SKILL.md
+  contains: 'command: ''bash -c "exec bash \"$HOME/.claude/skills/gstack/careful/bin/check-careful.sh\""'''
+  reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
+- rule: hook-declared
+  path: repos/gstack/guard/SKILL.md
+  contains: 'command: ''bash -c "exec bash \"$HOME/.claude/skills/gstack/freeze/bin/check-freeze.sh\""'''
+  reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
+- rule: hook-declared
+  path: repos/gstack/investigate/SKILL.md
+  contains: 'command: ''bash -c "test -x \"$HOME/.claude/skills/gstack/freeze/bin/check-freeze.sh\" && exec bash \"$HOME/.claude/skills/gstack/freeze/bin/check-freeze.sh\"; exit 0"'''
+  reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
+- rule: hook-declared
+  path: repos/gstack/plan-ceo-review/SKILL.md
+  contains: 'command: "bash -c ''S=\"$HOME/.claude/skills/gstack/plan-ceo-review/bin/mode-handoff-hook\"\nif [ -f \"$S\" ]; then exec bash \"$S\"; fi\nexit 0''"'
+  reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
 ```

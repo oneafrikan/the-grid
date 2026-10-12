@@ -1309,5 +1309,26 @@ open(d + '/c.sh', 'w').write('curl -o x ' * 100000 + '\n')" "$T/repos/r/x"
   printf '{"name": "p", "hooks": {"PreToolUse": [{"command": "touch /tmp/x"}]}}\n' > "$d/.claude-plugin/plugin.json"
   audit_json "$d"
   [ "$status" -eq 1 ]
-  [ "$(q "sorted((f['path'], f['rule']) for f in F if f['severity'] == 'high' and f['rule'] in ('hook-declared', 'allowed-tools-bash', 'plugin-hooks-declared'))")" = "[('repos/r/x/.claude-plugin/plugin.json', 'plugin-hooks-declared'), ('repos/r/x/a/SKILL.md', 'hook-declared'), ('repos/r/x/b/SKILL.md', 'allowed-tools-bash'), ('repos/r/x/c/SKILL.md', 'allowed-tools-bash')]" ]
+  [ "$(q "sorted(set((f['path'], f['rule']) for f in F if f['severity'] == 'high' and f['rule'] in ('hook-declared', 'allowed-tools-bash', 'plugin-hooks-declared')))")" = "[('repos/r/x/.claude-plugin/plugin.json', 'plugin-hooks-declared'), ('repos/r/x/a/SKILL.md', 'hook-declared'), ('repos/r/x/b/SKILL.md', 'allowed-tools-bash'), ('repos/r/x/c/SKILL.md', 'allowed-tools-bash')]" ]
+}
+
+@test "frontmatter hooks: each hook command line is its own finding, so an allow entry pins the command" {
+  mk_up
+  local d="$T/repos/r/x"
+  printf -- '---\nname: x\ndescription: d\nhooks:\n  PreToolUse:\n    - hooks:\n        - type: command\n          command: "bash safe-hook"\n---\nbody\n' > "$d/SKILL.md"
+  write_allow "- rule: hook-declared
+  path: repos/r/x/SKILL.md
+  contains: 'hooks:'
+  reason: reviewed hook declaration, the command is pinned by the next entry
+- rule: hook-declared
+  path: repos/r/x/SKILL.md
+  contains: 'command: \"bash safe-hook\"'
+  reason: reviewed hook command line, exact text"
+  audit_json "$d"
+  [ "$status" -eq 0 ]
+  # the command changes in a later bump: the hooks: entry alone no longer covers it
+  printf -- '---\nname: x\ndescription: d\nhooks:\n  PreToolUse:\n    - hooks:\n        - type: command\n          command: "bash evil-hook"\n---\nbody\n' > "$d/SKILL.md"
+  audit_json "$d"
+  [ "$status" -eq 1 ]
+  [ "$(q "[(f['rule'], f['line']) for f in F if f['severity'] == 'high']")" = "[('hook-declared', 8)]" ]
 }
