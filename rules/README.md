@@ -45,7 +45,10 @@ paths:
   be nearly always-on: the last path segment must hold at least 2 literal characters, where
   `[...]`, `*` and `?` count 0 and a `{a,b}` group counts as its shortest alternative. That
   rejects `*`, `**/*`, `**/*.*`, `**/[a-z]*`, `**/{*,x}` and `**/*e*` but keeps `*.{ts,tsx}`
-  (`E_PATHS`).
+  (`E_PATHS`). A directory scope is the one allowed shape ending in `**`: `src/**` and
+  `**/migrations/**` pass when the directory name has no wildcard and at least 2 characters;
+  `**/**` and `*/**` do not. `..` is rejected only as a whole path segment
+  (`**/foo..bar.txt` is fine), and a leading `~` is outside the character set.
 - Brace expansion `{a,b}` is allowed: no nesting, no empty alternative, at most 2 groups per
   glob and 12 alternatives per group, and one rule file may expand to at most 64 globs in
   all. Write `**/*.py` and `**/*.pyi` as two entries rather than `**/*.py{,i}`.
@@ -60,9 +63,17 @@ paths:
   invisible characters shown), not only as rendered markdown.
 - After the frontmatter: a first line `# <Title>`, then only `##`/`###` headings,
   bullets (`- `) with two-space continuation lines, and fenced blocks of at most 10 lines
-  (`E_STYLE`).
-- Size caps: 4096 bytes per rule file (`E_FILE_SIZE`), 9216 bytes per pack (`E_PACK_SIZE`).
-- File and pack names are lowercase kebab-case (`E_NAME`).
+  (`E_STYLE`). A bullet is measured with its continuation lines joined by one space. A rule
+  file needs at least one non-empty bullet. Fences are triple backticks only (`~~~` is one
+  `E_STYLE`); a fence may be indented inside a bullet; a closing line is backticks only.
+- A file with a bad frontmatter (or a leading BOM, which is named in its message) gets that
+  one finding, not a cascade of title and style findings on top of it.
+- Size caps: 4096 bytes per rule file (`E_FILE_SIZE`, the rest of an oversize file is not
+  read), 9216 bytes per pack (`E_PACK_SIZE`).
+- File and pack names are lowercase kebab-case (`E_NAME`). `readme` is a reserved topic
+  name, a dangling symlink is `E_NAME`, and two rule files that would write the same Cursor
+  output name (`a-b` + `c.md` and `a` + `b-c.md` both give `grid-a-b-c.mdc`) collide.
+- A pack with no rule files is `E_PACK_META`.
 - No line, fenced or not, may start with `<!-- BEGIN the-grid rules` or `<!-- END the-grid rules`
   or contain `the-grid:rules` (`E_MARKER`): those strings delimit the managed block and the
   generated Cursor files, and a copy inside a rule body would wedge delivery and removal.
@@ -96,10 +107,19 @@ Warehouse-first SQL conventions. Not tuned for MySQL/Postgres OLTP.
 (tier 2 only) What was dropped from ECC and why; "Adapted from affaan-m/ECC (MIT), see rules/THIRD_PARTY_NOTICES.txt".
 ```
 
-- Every `<topic>.md` basename must appear in the table with at least one `https://` URL
-  on its row (`E_SOURCES`).
+- Only rows under the `## Sources` heading count. Every `<topic>.md` basename must appear
+  in that table with at least one full `https://host.tld/...` URL on its row; a row naming a
+  file that is not in the pack, or a URL such as `https://x`, is `E_SOURCES`.
 - Tier 2 packs must contain the literal line `Adapted from affaan-m/ECC (MIT)` and be
-  listed in `THIRD_PARTY_NOTICES.txt` under `Adapted packs` (`E_ATTRIBUTION`).
+  listed in `THIRD_PARTY_NOTICES.txt` under `Adapted packs`; the list ends at the next
+  heading, and every name on it must be an existing tier 2 pack (`E_ATTRIBUTION`).
+- `adapted_from` reads `<owner>/<repo> rules/<pack> @ <sha> (MIT)` (`E_PACK_META`). A
+  trailing comment in `pack.yaml` needs two or more spaces before the `#`.
+- `python3 scripts/rules.py lint --check-urls` checks every Sources URL (8 in parallel, 10 s
+  each; HEAD, then GET on any failure; 429 and 5xx retried once; a redirect with no
+  `Location` counts as alive). It needs network and is never run by the gate or the tests.
+- `lint` and `list` with an explicit `--root` that has no `rules/` exit 2. Without
+  `--root` (the gate uses `GRID_DIR`) an absent `rules/` is clean.
 
 ## Pack authoring template
 
