@@ -141,7 +141,7 @@ baseline_repo_names() {
     head="${line%%/*}"
     case "$head" in *:*) continue ;; esac
     printf '%s\n' "$head"
-  done < "$1"
+  done < "$1" | LC_ALL=C sort -u
 }
 
 partial=0
