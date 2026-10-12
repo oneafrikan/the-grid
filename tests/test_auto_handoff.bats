@@ -33,6 +33,9 @@ setup() {
   export GRID_STATE_DIR="$MOCK_HOOK_ROOT/gridstate"
   # The stub claude: prepends PATH and exports GRID_CLAUDE as the stub.
   make_stubs
+  # The worker starts the child under `env -i` (WP-016); the stub reads its own STUB_* and
+  # GRID_* inputs from the environment, so those are the variables that must be kept.
+  export GRID_AUTOHANDOFF_KEEP_ENV='STUB_*,GRID_*'
   LOG="$GRID_HOOK_LOG_DIR/auto-handoff.log"
   TXN="$BATS_TEST_TMPDIR/transcript.jsonl"
   WORKER="$REPO_ROOT/hooks/lib/auto-handoff-worker.sh"
@@ -334,7 +337,7 @@ fake_token() { printf 'gh%s_%s' p "$(printf 'a%.0s' $(seq 36))"; }
   contains "$line" "--tools Read,Write,Bash "
   contains "$line" "--disallowedTools Edit Bash(git:*)"
   contains "$line" "--append-system-prompt-file $REPO_ROOT/hooks/lib/auto-handoff-system.md"
-  lacks "$line" "--permission-mode"
+  contains "$line" "--permission-mode default"   # pinned since WP-016, see the isolation tests
   allowed="${line#*--allowedTools }"
   allowed="${allowed%% --disallowedTools*}"
   contains "$allowed" "Read "
@@ -821,4 +824,64 @@ mkother() {
   export STUB_CLAUDE_MODE=handoff-logs
   run_worker
   log_has "action=done"
+}
+
+# ---- child isolation: no ambient permission config, no ambient secrets ------------------
+# disallowed_rules: the --disallowedTools part of the logged stub invocation.
+disallowed_rules() {
+  local l; l="$(claude_line)"; l="${l#*--disallowedTools }"; printf '%s' "${l%% --add-dir*}"
+}
+
+@test "argv carries --permission-mode default, --setting-sources user, --strict-mcp-config and the extra denies" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  line="$(claude_line)"
+  contains "$line" "--permission-mode default"
+  contains "$line" "--setting-sources user"
+  contains "$line" "--strict-mcp-config"
+  # the original denies are still first
+  contains "$line" "--disallowedTools Edit Bash(git:*)"
+  denied="$(disallowed_rules)"
+  local d
+  for d in .ssh .claude .config .gnupg .aws; do contains "$denied" "$(edit_rule "$HOME/$d")"; done
+  contains "$denied" "Edit(/$HOME/.bashrc)"
+  contains "$denied" "Edit(/$HOME/.zshrc)"
+  contains "$denied" "Edit(**/.git/**)"
+}
+
+@test "ambient secrets are absent from the child environment; the basics and the guard are present" {
+  mk_tx 6
+  export GH_TOKEN="sentinel-gh-$$" ANTHROPIC_API_KEY="sentinel-anthropic-$$" AWS_SECRET_ACCESS_KEY="sentinel-aws-$$"
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=done"
+  refute grep -q "sentinel-" "$STUB_DIR/claude.env"
+  grep -qx "GRID_AUTOHANDOFF_CHILD=1" "$STUB_DIR/claude.env"
+  grep -qx "HOME=$HOME" "$STUB_DIR/claude.env"
+  grep -q '^PATH=' "$STUB_DIR/claude.env"
+  # the config dir is how a custom-located login is found, so it is passed on
+  grep -qx "CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR" "$STUB_DIR/claude.env"
+}
+
+@test "GRID_AUTOHANDOFF_KEEP_ENV passes named variables and PREFIX* groups, and nothing else" {
+  mk_tx 6
+  export KEEP_ME=yes KEEP_PFX_A=1 KEEP_PFX_B=2 DROP_ME=no
+  export GRID_AUTOHANDOFF_KEEP_ENV='STUB_*,GRID_*,KEEP_ME,KEEP_PFX_*'
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=done"
+  grep -qx "KEEP_ME=yes" "$STUB_DIR/claude.env"
+  grep -qx "KEEP_PFX_A=1" "$STUB_DIR/claude.env"
+  grep -qx "KEEP_PFX_B=2" "$STUB_DIR/claude.env"
+  refute grep -q "^DROP_ME=" "$STUB_DIR/claude.env"
+}
+
+@test "a malformed KEEP_ENV entry is ignored, never evaluated" {
+  mk_tx 6
+  export GRID_AUTOHANDOFF_KEEP_ENV='STUB_*,GRID_*,a[$(touch '"$BATS_TEST_TMPDIR"'/pwned)]'
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=done"
+  [ ! -e "$BATS_TEST_TMPDIR/pwned" ]
 }
