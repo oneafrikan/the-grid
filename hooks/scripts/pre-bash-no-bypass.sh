@@ -34,9 +34,18 @@ command="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')"
 # Fast path: every rule needs one of these substrings somewhere in the text.
 # `git` covers all git rules (including \git, /usr/bin/git); the assignment rules
 # need GIT_CONFIG or HUSKY. Anything else cannot match, so skip the tokenizer.
-case "$command" in
+# The test runs on the text with quotes and backslashes removed, as the shell would
+# (g""it, g\it and "g"it are git); a command holding $ or a backtick may build a word
+# the text test cannot see, so it always goes to the tokenizer. (A name spliced in
+# from ${x} is a documented gap.)
+stripped="${command//[\"\'\\]/}"
+case "$stripped" in
   *git*|*GIT_CONFIG*|*HUSKY*) ;;
-  *) exit 0 ;;
+  *)
+    case "$command" in
+      *'$'*|*'`'*) ;;
+      *) exit 0 ;;
+    esac ;;
 esac
 
 grid_check_cmd_cap pre-bash-no-bypass "$command"
@@ -46,16 +55,29 @@ grid_git_segments "$command"
 reasons=()
 for v in "${GIT_VIOLATIONS[@]}"; do reasons+=("$v"); done
 
-# Per git segment checks, on the MASKED words (quoted text never counts as a flag)
-# except config values, which are read from the RAW words.
+# Per git segment checks, on the FLAG words: quotes and backslashes are removed the way
+# the shell removes them, so "--no-verify", \--no-verify and --no-ver""ify are the flag.
+# The word that is the VALUE of an option such as -m is skipped, so a message that only
+# mentions --no-verify never matches. A flag-looking word that is really a value of an
+# unlisted option (git log --grep "--no-verify") is a known, accepted false block.
 re_short_n='^-[^-mFCctS]*n'       # a short cluster with n before any value-taking letter
 re_push_f='^-[^-o]*f'             # a short push cluster containing f (-f, -fu, -uf)
+
+# is_noverify <word>: --no-verify or an unambiguous git abbreviation of it. git accepts
+# any unique prefix of a long option; from 7 characters (--no-ve) is blocked, a wider
+# floor than today's git needs, so a newer git adding an option cannot reopen the gap.
+is_noverify() {
+  [ "${#1}" -ge 7 ] && [[ "--no-verify" == "$1"* ]]
+}
+
 for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
   sub="${GIT_SUB[$i]}"; start="${GIT_START[$i]}"; len="${GIT_LEN[$i]}"
+  skip_val=0
   for ((k = start; k < start + len; k++)); do
-    w="${GIT_MASK[$k]}"
+    w="${GIT_FLAG[$k]}"
+    if [ "$skip_val" = 1 ]; then skip_val=0; continue; fi
     # --no-verify on any subcommand (commit, push, merge, ...)
-    if [ "$w" = "--no-verify" ]; then
+    if is_noverify "$w"; then
       reasons+=("git $sub --no-verify skips git hooks")
     fi
     case "$sub" in
@@ -64,9 +86,29 @@ for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
           reasons+=("git commit $w includes -n, which is --no-verify")
         fi ;;
       push)
-        if [ "$w" = "--force" ] || [ "$w" = "--mirror" ] || [[ "$w" =~ $re_push_f ]] || [[ "$w" == +* ]]; then
+        # --mirror from 5 characters (--mir): a unique prefix of it
+        if [ "$w" = "--force" ] || { [ "${#w}" -ge 5 ] && [[ "--mirror" == "$w"* ]]; } \
+           || [[ "$w" =~ $re_push_f ]] || [[ "$w" == +* ]]; then
           reasons+=("git push $w is a forced push (use --force-with-lease)")
         fi ;;
+    esac
+    # The next word is this option's value when the option takes one as a separate word.
+    case "$w" in
+      -m|-F|--message|--file|--author|--date|--cleanup|--trailer|--reuse-message|--reedit-message|--fixup|--squash|--template) skip_val=1 ;;
+      -C|-c|-t) [ "$sub" = commit ] && skip_val=1 ;;
+      -[!-]?*)
+        # A short cluster is read letter by letter up to its first value-taking letter:
+        # when that letter is last the value is the next word (-am "msg", -nm "msg");
+        # when text follows it, the value is attached (-mfoo) and nothing is skipped.
+        rest="${w#-}"; vletters='mF'
+        [ "$sub" = commit ] && vletters='mFCct'
+        while [ -n "$rest" ]; do
+          letter="${rest:0:1}"; rest="${rest:1}"
+          if [ "$sub" = commit ] && [ "$letter" = S ]; then break; fi   # -S<keyid>: attached only
+          case "$vletters" in
+            *"$letter"*) [ -z "$rest" ] && skip_val=1; break ;;
+          esac
+        done ;;
     esac
   done
 
@@ -94,8 +136,12 @@ for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
           # An alias whose RAW value hides --no-verify or a -n cluster.
           alias_value="${pos[1]}"
           bad=0
+          # Each word is read the way the shell would (quotes and backslashes removed),
+          # then tested like a command-line word: --no-verify, a prefix of it, or -n.
           case "$alias_value" in *--no-verify*) bad=1 ;; esac
           for aw in $alias_value; do
+            aw="${aw//[\"\'\\]/}"
+            is_noverify "$aw" && bad=1
             [[ "$aw" =~ $re_short_n ]] && bad=1
           done
           [ "$bad" = 1 ] && reasons+=("git config alias ${pos[0]} hides --no-verify")

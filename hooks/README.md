@@ -274,7 +274,17 @@ The guards do not inspect:
 - `git -c alias.x=...` one-shot aliases,
 - heredoc bodies that sit outside quotes (each body line is read as a command, so a body
   line that itself starts with `git push --force` is a false positive),
-- command substitution outside quotes (`$(git commit --no-verify)`).
+- command substitution outside quotes (`$(git commit --no-verify)`),
+- ANSI-C escape decoding (`$'\x2d\x2dno-verify'`) and names spliced from `${x}`.
+
+How flag words are read: quotes and backslashes are removed the way the shell removes
+them, so `"--no-verify"`, `\--no-verify` and `--no-ver""ify` are all `--no-verify`. The
+value word of an option such as `-m`, `--message` or `--author` is skipped, which keeps a
+commit message that only mentions a flag from blocking. A flag-looking word that is the
+value of an option the guard does not list (`git log --grep "--no-verify"`) is blocked:
+a known, accepted false positive. git accepts any unique prefix of a long option, so
+`--no-verify` is blocked from 7 characters (`--no-ve`) and `git push --mirror` from 5
+(`--mir`); `--force` has no valid abbreviation.
 
 The secret scan covers the patterns in `lib/secret-patterns.sh` only (no entropy
 scoring), and it scans the repository in the payload's `cwd`.

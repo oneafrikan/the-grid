@@ -76,20 +76,25 @@ grid_log() {
 #
 # Results (all reset on every call):
 #   GIT_SUB[i]      subcommand of git segment i (commit, push, config, ...)
-#   GIT_START[i]    offset of its first word in GIT_RAW / GIT_MASK
+#   GIT_START[i]    offset of its first word in GIT_RAW / GIT_MASK / GIT_FLAG
 #   GIT_LEN[i]      number of words after the subcommand
 #   GIT_RAW[]       words after the subcommand, quotes removed (content kept):
 #                   used for config values and pathspecs
 #   GIT_MASK[]      the same words with every quoted span replaced by the single
-#                   token Q: used for flag checks, so a quoted commit message that
-#                   merely MENTIONS --no-verify never matches
+#                   token Q (no longer used by the guards for flag checks)
+#   GIT_FLAG[]      the same words as the SHELL would pass them to git: quotes and
+#                   unquoted backslashes removed, and a $ right before a quote span
+#                   dropped ($'--no-verify'). Used for every flag check, so quoting
+#                   or escaping part of a flag cannot hide it. The guards skip the
+#                   value word of an option such as -m, so a message that merely
+#                   MENTIONS --no-verify never matches.
 #   GIT_VIOLATIONS  reasons found outside any one subcommand: -c core.hooksPath=,
 #                   GIT_CONFIG_* / HUSKY=0 assignments
 # ---------------------------------------------------------------------------
 
 # _grid_tokenize <command>
 #   One left-to-right pass (never two regex passes: they break on
-#   "don't --no-verify"). Fills T_RAW[] / T_MASK[] / T_SEP[] in step. T_SEP[i]=1
+#   "don't --no-verify"). Fills T_RAW[] / T_MASK[] / T_FLAG[] / T_SEP[] in step. T_SEP[i]=1
 #   marks a separator (unquoted ; && || | & or newline) instead of a word.
 #   Outside quotes: whitespace splits words, ' or " opens a span, a backslash keeps
 #   itself and the next character in the word (so \git survives to be normalised
@@ -109,8 +114,8 @@ _grid_tokenize() {
   # Ordinary = not a quote, backslash, blank, newline or one of ; & | (the characters the
   # per-character cases below handle). In a bracket expression a backslash is literal.
   local _TK_ORD=$'^([^\'"\\ \t\n;&|]+)([ \t]?)' _TK_Q1=$'^[^\']+' _TK_Q2=$'^[^"\\]+'
-  T_RAW=(); T_MASK=(); T_SEP=()
-  _TK_RAW=""; _TK_MASK=""; _TK_IN=0
+  T_RAW=(); T_MASK=(); T_FLAG=(); T_SEP=()
+  _TK_RAW=""; _TK_MASK=""; _TK_FLAG=""; _TK_IN=0; _TK_DLR=0
   n=${#s}
   buf="${s:0:2048}"; wl=${#buf}
   while :; do
@@ -125,24 +130,25 @@ _grid_tokenize() {
         if [ "$c" = "'" ]; then
           q=0
         elif [[ "${buf:$i:256}" =~ $_TK_Q1 ]]; then
-          run="${BASH_REMATCH[0]}"; _TK_RAW+="$run"; i=$((i + ${#run})); continue
+          run="${BASH_REMATCH[0]}"; _TK_RAW+="$run"; _TK_FLAG+="$run"; i=$((i + ${#run})); continue
         else
-          _TK_RAW+="$c"
+          _TK_RAW+="$c"; _TK_FLAG+="$c"
         fi ;;
       2) # inside "...": backslash escapes, ' is literal
         if [ "$c" = '"' ]; then
           q=0
         elif [ "$c" = '\' ]; then
-          i=$((i + 1)); _TK_RAW+="${buf:$i:1}"
+          i=$((i + 1)); _TK_RAW+="${buf:$i:1}"; _TK_FLAG+="${buf:$i:1}"
         elif [[ "${buf:$i:256}" =~ $_TK_Q2 ]]; then
-          run="${BASH_REMATCH[0]}"; _TK_RAW+="$run"; i=$((i + ${#run})); continue
+          run="${BASH_REMATCH[0]}"; _TK_RAW+="$run"; _TK_FLAG+="$run"; i=$((i + ${#run})); continue
         else
-          _TK_RAW+="$c"
+          _TK_RAW+="$c"; _TK_FLAG+="$c"
         fi ;;
       *) # outside quotes
         if [[ "${buf:$i:256}" =~ $_TK_ORD ]]; then
           run="${BASH_REMATCH[1]}"
-          _TK_RAW+="$run"; _TK_MASK+="$run"; _TK_IN=1
+          _TK_RAW+="$run"; _TK_MASK+="$run"; _TK_FLAG+="$run"; _TK_IN=1
+          _TK_DLR=0; [[ "$run" == *'$' ]] && _TK_DLR=1   # a $ right before a quote: $'..' / $".."
           # A run followed by a blank ends the word: take the blank in the same step
           # (half the iterations for ordinary "word word word" text).
           [ -n "${BASH_REMATCH[2]}" ] && _grid_tk_word
@@ -150,14 +156,15 @@ _grid_tokenize() {
           continue
         fi
         case "$c" in
-          "'") q=1; _TK_IN=1; _TK_MASK+="Q" ;;
-          '"') q=2; _TK_IN=1; _TK_MASK+="Q" ;;
+          "'") q=1; _TK_IN=1; _TK_MASK+="Q"; [ "$_TK_DLR" = 1 ] && _TK_FLAG="${_TK_FLAG%?}" ;;
+          '"') q=2; _TK_IN=1; _TK_MASK+="Q"; [ "$_TK_DLR" = 1 ] && _TK_FLAG="${_TK_FLAG%?}" ;;
           '\')
             nx="${buf:$((i + 1)):1}"
             if [ "$nx" = $'\n' ]; then
               _grid_tk_word            # backslash-newline: a line continuation, acts as a space
             else
-              _TK_RAW+="$c$nx"; _TK_MASK+="$c$nx"; _TK_IN=1
+              # FLAG drops the backslash: the shell passes the next character through
+              _TK_RAW+="$c$nx"; _TK_MASK+="$c$nx"; _TK_FLAG+="$nx"; _TK_IN=1
             fi
             i=$((i + 1)) ;;
           ' '|$'\t') _grid_tk_word ;;
@@ -169,7 +176,7 @@ _grid_tokenize() {
               _grid_tk_word; _grid_tk_sep; i=$((i + 1))
             elif [ "$pv" = '>' ] || [ "$pv" = '<' ] || [ "$nx" = '>' ]; then
               # redirection such as 2>&1 or &>file: part of the word, not a separator
-              _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_IN=1
+              _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_FLAG+="$c"; _TK_IN=1
             else
               _grid_tk_word; _grid_tk_sep
             fi ;;
@@ -177,9 +184,11 @@ _grid_tokenize() {
             nx="${buf:$((i + 1)):1}"
             _grid_tk_word; _grid_tk_sep
             [ "$nx" = '|' ] && i=$((i + 1)) ;;
-          *) _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_IN=1 ;;
+          *) _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_FLAG+="$c"; _TK_IN=1 ;;
         esac ;;
     esac
+    # a $ is only "right before a quote" for the very next character
+    case "$c" in '$') ;; *) _TK_DLR=0 ;; esac
     i=$((i + 1))
   done
   _grid_tk_word
@@ -189,14 +198,14 @@ _grid_tokenize() {
 # A word made only of an empty quoted span ("") is a real, empty word.
 _grid_tk_word() {
   if [ "$_TK_IN" = 1 ]; then
-    T_RAW+=("$_TK_RAW"); T_MASK+=("$_TK_MASK"); T_SEP+=(0)
+    T_RAW+=("$_TK_RAW"); T_MASK+=("$_TK_MASK"); T_FLAG+=("$_TK_FLAG"); T_SEP+=(0)
   fi
-  _TK_RAW=""; _TK_MASK=""; _TK_IN=0
+  _TK_RAW=""; _TK_MASK=""; _TK_FLAG=""; _TK_IN=0; _TK_DLR=0
 }
 
 # _grid_tk_sep: push a segment separator.
 _grid_tk_sep() {
-  T_RAW+=(""); T_MASK+=(""); T_SEP+=(1)
+  T_RAW+=(""); T_MASK+=(""); T_FLAG+=(""); T_SEP+=(1)
 }
 
 # _grid_is_hookspath <text>
@@ -217,28 +226,28 @@ _grid_scan() {
   local cmd="$1" depth="$2" i n
   _grid_tokenize "$cmd"
   # Copy the token arrays: the recursion re-tokenizes and overwrites the T_ globals.
-  local -a raw=("${T_RAW[@]}") mask=("${T_MASK[@]}") sep=("${T_SEP[@]}")
-  local -a sraw=() smask=()
+  local -a raw=("${T_RAW[@]}") mask=("${T_MASK[@]}") flag=("${T_FLAG[@]}") sep=("${T_SEP[@]}")
+  local -a sraw=() smask=() sflag=()
   n=${#raw[@]}
   for ((i = 0; i <= n; i++)); do
     if [ "$i" -eq "$n" ] || [ "${sep[$i]}" = 1 ]; then
       if [ "${#sraw[@]}" -gt 0 ]; then
-        _grid_segment "$depth" "${#sraw[@]}" "${sraw[@]}" "${smask[@]}"
+        _grid_segment "$depth" "${#sraw[@]}" "${sraw[@]}" "${smask[@]}" "${sflag[@]}"
       fi
-      sraw=(); smask=()
+      sraw=(); smask=(); sflag=()
     else
-      sraw+=("${raw[$i]}"); smask+=("${mask[$i]}")
+      sraw+=("${raw[$i]}"); smask+=("${mask[$i]}"); sflag+=("${flag[$i]}")
     fi
   done
 }
 
-# _grid_segment <depth> <n> <n RAW words> <n MASKED words>
+# _grid_segment <depth> <n> <n RAW words> <n MASKED words> <n FLAG words>
 #   Design steps 3 to 5 for one segment: assignment check, one level of wrapper
 #   unwrapping, then record the segment if it is a git call.
 _grid_segment() {
   local depth="$1" n="$2"
   shift 2
-  local -a r=("${@:1:$n}") m=("${@:$((n + 1)):$n}")
+  local -a r=("${@:1:$n}") m=("${@:$((n + 1)):$n}") f=("${@:$((2 * n + 1)):$n}")
   local k first j w v joined opt skip_next
   local re_assign='^(GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS|GIT_CONFIG_KEY_[0-9]+)='
   local re_name='^[A-Za-z_][A-Za-z0-9_]*='
@@ -257,12 +266,13 @@ _grid_segment() {
     fi
   done
 
-  # Step 3: drop leading NAME=value words, then normalise the first word:
-  # strip one leading backslash, then take the basename (\git, /usr/bin/git -> git).
+  # Step 3: drop leading NAME=value words, then normalise the first word. The FLAG
+  # form already has quotes and backslashes removed the way the shell does (so g""it,
+  # g\it and \git all read git); then take the basename (/usr/bin/git -> git).
   k=0
   while [ "$k" -lt "$n" ] && [[ "${r[$k]}" =~ $re_name ]]; do k=$((k + 1)); done
   [ "$k" -lt "$n" ] || return 0
-  first="${r[$k]#\\}"; first="${first##*/}"
+  first="${f[$k]}"; first="${first##*/}"
 
   case "$first" in
     bash|sh|zsh)
@@ -289,7 +299,7 @@ _grid_segment() {
       # Drop the wrapper's own options and NAME=value words. A value-taking option
       # also consumes the next word (sudo -u root, nice -n 5, xargs -n 1 ...).
       while [ "$k" -lt "$n" ]; do
-        w="${r[$k]}"
+        w="${f[$k]}"
         if [[ "$w" == -* ]]; then
           skip_next=0
           case "$opt:$w" in
@@ -303,7 +313,7 @@ _grid_segment() {
         fi
       done
       [ "$k" -lt "$n" ] || return 0
-      first="${r[$k]#\\}"; first="${first##*/}" ;;
+      first="${f[$k]}"; first="${first##*/}" ;;
   esac
 
   # Step 5: only git segments are recorded.
@@ -311,18 +321,26 @@ _grid_segment() {
 
   # Skip git's global options to find the subcommand: -C <dir> and -c k=v take a
   # value; --git-dir / --work-tree / --namespace take one when given as two words;
-  # any other leading dash word is a lone flag (--no-pager, -p, ...).
+  # any other leading dash word is a lone flag (--no-pager, -p, ...). Read through the
+  # FLAG form so a quoted or escaped option cannot hide the subcommand.
+  # --config-env=<key>=<ENVVAR> is -c with the value taken from the environment, so a
+  # hooksPath key is the same override.
   j=$((k + 1))
   while [ "$j" -lt "$n" ]; do
-    w="${r[$j]}"
+    w="${f[$j]}"
     case "$w" in
       -C) j=$((j + 2)) ;;
-      -c)
-        v="${r[$((j + 1))]:-}"
+      -c|--config-env)
+        v="${f[$((j + 1))]:-}"
         if _grid_is_hookspath "$v"; then
-          GIT_VIOLATIONS+=("uses -c core.hooksPath=... (overrides the repo's git hooks)")
+          GIT_VIOLATIONS+=("uses $w core.hooksPath=... (overrides the repo's git hooks)")
         fi
         j=$((j + 2)) ;;
+      --config-env=*)
+        if _grid_is_hookspath "${w#--config-env=}"; then
+          GIT_VIOLATIONS+=("uses --config-env=core.hooksPath=... (overrides the repo's git hooks)")
+        fi
+        j=$((j + 1)) ;;
       --git-dir|--work-tree|--namespace) j=$((j + 2)) ;;
       -*) j=$((j + 1)) ;;
       *) break ;;
@@ -330,11 +348,11 @@ _grid_segment() {
   done
   [ "$j" -lt "$n" ] || return 0
 
-  GIT_SUB+=("${r[$j]}")
+  GIT_SUB+=("${f[$j]}")
   GIT_START+=("${#GIT_RAW[@]}")
   GIT_LEN+=($((n - j - 1)))
   for ((k = j + 1; k < n; k++)); do
-    GIT_RAW+=("${r[$k]}"); GIT_MASK+=("${m[$k]}")
+    GIT_RAW+=("${r[$k]}"); GIT_MASK+=("${m[$k]}"); GIT_FLAG+=("${f[$k]}")
   done
 }
 
@@ -343,6 +361,6 @@ _grid_segment() {
 # source this file, not here.
 # shellcheck disable=SC2034
 grid_git_segments() {
-  GIT_SUB=(); GIT_START=(); GIT_LEN=(); GIT_RAW=(); GIT_MASK=(); GIT_VIOLATIONS=()
+  GIT_SUB=(); GIT_START=(); GIT_LEN=(); GIT_RAW=(); GIT_MASK=(); GIT_FLAG=(); GIT_VIOLATIONS=()
   _grid_scan "$1" 0
 }
