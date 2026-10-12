@@ -294,6 +294,14 @@ gitmodules_entry() {
   [ -L "$MOCK_SKILLS/s" ]
 }
 
+@test "a blocked run on a fresh home creates no skills or agents dir" {
+  add_wired evil "$BAD"
+  SKILLS_DIR="$BATS_TEST_TMPDIR/fresh/skills" AGENTS_DIR="$BATS_TEST_TMPDIR/fresh/agents" run_wire
+  [ "$status" -eq 3 ]
+  # "nothing was changed" must be literally true: the old mkdir -p ran before the audit.
+  [ ! -e "$BATS_TEST_TMPDIR/fresh/skills" ] && [ ! -e "$BATS_TEST_TMPDIR/fresh/agents" ]
+}
+
 @test "GRID_SKIP_CATALOG=1 alone does not skip the audit" {
   add_wired evil "$BAD"
   GRID_SKIP_CATALOG=1 run_wire
