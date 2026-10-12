@@ -118,7 +118,7 @@ rules:
     severity: low
     severity_by_class: {script: high, hook: high, test: high}
     message: reads a credential store
-    regex: '(?:~|\$HOME|\$\{HOME\})/(?:\.ssh/(?!known_hosts|config\b|\s|$)|\.aws/|\.kube/|\.config/gcloud|\.config/gh/hosts\.yml|\.netrc|\.docker/config\.json|\.npmrc|\.git-credentials)|Library/Keychains|security\s+find-(?:generic|internet)-password|\b(?:cat|less|more|head|tail|base64|xxd|cp|scp)\s+(?:\S{0,64}/)?\.env(?:\.(?!example|sample|template)\w+)?(?=\s|$)|@\.env\b|\b(?:tar|zip|7z|rsync|scp|cp\s+-\w*r\w*)\b[^\n|;&]{0,80}(?:~|\$HOME|\$\{HOME\})/\.(?:ssh|aws|kube|gnupg)\b'
+    regex: '(?:~|\$HOME|\$\{HOME\})/(?:\.ssh/(?!(?:known_hosts|config)(?:[\s\"''`;)|&]|$)|\s|$)|\.aws/|\.kube/|\.config/gcloud|\.config/gh/hosts\.yml|\.netrc|\.docker/config\.json|\.npmrc|\.git-credentials)|Library/Keychains|security\s+find-(?:generic|internet)-password|\b(?:cat|less|more|head|tail|base64|xxd|cp|scp)\s+(?:\S{0,64}/)?\.env(?:\.(?!example|sample|template)\w+)?(?=\s|$)|@\.env\b|\b(?:tar|zip|7z|rsync|scp|cp\s+-\w*r\w*)\b[^\n|;&]{0,80}(?:~|\$HOME|\$\{HOME\})/\.(?:ssh|aws|kube|gnupg)\b'
     downgrade: [comment]
   - id: decode-and-exec
     severity: low
