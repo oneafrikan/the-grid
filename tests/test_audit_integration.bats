@@ -255,6 +255,12 @@ add_wired() {
   printf '%s\n' "$1" >> "$T/baseline-submodules.txt"
 }
 
+# lock_vouches REPO -> grid.lock names REPO as an install source, so the "repo with no
+# submodule entry" source check (once any entry exists) does not fire for it.
+lock_vouches() {
+  printf '{"entries": [{"source": "%s"}]}\n' "$1" > "$T/grid.lock"
+}
+
 # gitmodules_entry REPO URL -> a submodule entry so the source checks apply to repos/REPO.
 gitmodules_entry() {
   printf '[submodule "repos/%s"]\n\tpath = repos/%s\n\turl = %s\n' "$1" "$1" "$2" >> "$T/.gitmodules"
@@ -379,6 +385,7 @@ gitmodules_entry() {
 
 @test "wire (h): an overlay-only repo with no CURATION heading warns; the same repo in the baseline blocks" {
   add_wired base
+  lock_vouches base
   mk_skill "$T/repos/ovl" o
   gitmodules_entry ovl https://github.com/obra/superpowers   # an allowed source
   mkdir -p "$T/machines"; printf 'ovl\n' > "$T/machines/$GRID_HOST.txt"
@@ -396,6 +403,7 @@ gitmodules_entry() {
 
 @test "wire (i): an overlay-only repo whose URL is not allowed warns and still wires" {
   add_wired base
+  lock_vouches base
   mk_skill "$T/repos/ovl" o
   gitmodules_entry ovl https://example.net/someone/else
   # Curated (heading present) so only the source check is in play.

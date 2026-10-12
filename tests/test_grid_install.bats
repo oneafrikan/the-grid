@@ -247,6 +247,17 @@ open(p, "w").write(json.dumps(doc, indent=2, sort_keys=True) + "\n")
   [ ! -e "$GRID_TRACE_FETCH" ]
 }
 
+@test "a url whose authority is confused by # exits 2 naming the source, before any trace line" {
+  build_grids
+  printf 'version: 1\nsources:\n  up:\n    url: https://evil.invalid#@github.com/anthropics/skills.git\nwired:\n  baseline: baseline-submodules.example.txt\n' > "$GREAL/grid.yaml"
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"'up'"* ]]
+  # refused by the https-url check itself, not only later by the policy check
+  [[ "$output" == *"not https"* ]]
+  [ ! -e "$GRID_TRACE_FETCH" ]
+}
+
 @test "a file:// source prints the --check-url skipped notice" {
   build_grids
   run install
