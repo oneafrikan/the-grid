@@ -928,6 +928,12 @@ class Scan:
             if (ctx == "comment" and cls in ("script", "hook", "config")
                     and line.lstrip().startswith(
                         COMMENT_PREFIXES_BY_EXT.get(ext, DEFAULT_COMMENT_PREFIXES))):
+                # `/* note */ code(...)`: a block comment that is CLOSED before the match
+                # does not cover it, so the match is code, not comment.
+                off = len(line) - len(line.lstrip())
+                close = line.find("*/", off + 2) if line.startswith("/*", off) else -1
+                if close != -1 and close + 2 <= span[0]:
+                    continue
                 return ctx
         return None
 
