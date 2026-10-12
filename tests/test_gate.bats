@@ -70,6 +70,14 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" bash scripts/gate.s
   [ ! -e "$seen" ]
 }
 
+@test "the gate makes the venv-gated tests mandatory (GRID_REQUIRE_VENV=1)" {
+  # The stub records what bats would see; without the variable 215 tests skip and the gate stays green.
+  printf '#!/usr/bin/env bash\necho "${GRID_REQUIRE_VENV-unset}" > "%s/bats-require-venv"\necho "1..0"\nexit 0\n' "$BATS_TEST_TMPDIR" > "$G/tests/lib/bats-core/bin/bats"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/bats-require-venv")" = "1" ]
+}
+
 @test "--pre-commit aborts on unstaged changes to tracked files" {
   echo x >> "$G/scripts/catalog.sh"
   run run_gate --pre-commit
