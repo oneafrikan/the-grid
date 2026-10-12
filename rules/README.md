@@ -40,10 +40,24 @@ paths:
 - Frontmatter is the first block delimited by `---` lines. It holds exactly one key,
   `paths:`, followed by one or more `  - "<glob>"` lines (two-space indent, double quotes).
   Any other key or shape is `E_FRONTMATTER`.
-- A glob must not start with `/`, contain `..`, or be effectively always-on (last
-  segment empty after removing `*?[]{},.`, which rejects `*`, `**/*`, `**/*.*`): `E_PATHS`.
-- Brace expansion `{a,b}` is allowed: no nesting, no empty alternative, at most 2 groups
-  per glob. Write `**/*.py` and `**/*.pyi` as two entries rather than `**/*.py{,i}`.
+- A glob may use only `A-Za-z0-9_./*?{},[]-` (anything else, such as spaces or quotes, is
+  prose smuggled into the delivered header). It must not start with `/`, contain `..`, or
+  be nearly always-on: the last path segment must hold at least 2 literal characters, where
+  `[...]`, `*` and `?` count 0 and a `{a,b}` group counts as its shortest alternative. That
+  rejects `*`, `**/*`, `**/*.*`, `**/[a-z]*`, `**/{*,x}` and `**/*e*` but keeps `*.{ts,tsx}`
+  (`E_PATHS`).
+- Brace expansion `{a,b}` is allowed: no nesting, no empty alternative, at most 2 groups per
+  glob and 12 alternatives per group, and one rule file may expand to at most 64 globs in
+  all. Write `**/*.py` and `**/*.pyi` as two entries rather than `**/*.py{,i}`.
+- Rule files are untrusted text: an HTML comment marker (`<!--`, `-->`), an invisible or
+  bidi character (zero-width, tag, variation selector, BOM) or a word mixing ASCII with
+  Cyrillic or Greek letters is `E_STYLE`, fenced or not. The denylist is matched after
+  NFKC folding, dropping invisible characters and collapsing whitespace.
+- Files must be UTF-8 (`E_ENCODING`) and readable (`E_UNREADABLE`); neither is ever a
+  traceback. An empty `denylist.txt` with packs present is `E_OPINION` (fails closed).
+- Lint is a format and hygiene check, not a security control. A merged pack is loaded as
+  instructions every session, so review pack changes as raw bytes (`git diff` with
+  invisible characters shown), not only as rendered markdown.
 - After the frontmatter: a first line `# <Title>`, then only `##`/`###` headings,
   bullets (`- `) with two-space continuation lines, and fenced blocks of at most 10 lines
   (`E_STYLE`).
