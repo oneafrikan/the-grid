@@ -5,6 +5,7 @@
 # no venv; the deploy / lint / eval-validate checks skip without it. No model is ever called.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
@@ -45,7 +46,7 @@ teardown() {
 }
 
 @test "a lean deploy of tech-lead carries the gate" {
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   PROJ=$(mktemp -d)
   run "$PY" "$REPO_ROOT/agent-factory/deploy.py" "$PROJ" --roles tech-lead --profile lean
   [ "$status" -eq 0 ]
@@ -54,13 +55,13 @@ teardown() {
 }
 
 @test "role lint passes" {
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   run "$PY" "$REPO_ROOT/agent-factory/compose.py" --lint-roles
   [ "$status" -eq 0 ]
 }
 
 @test "eval case validation passes" {
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   run "$PY" "$REPO_ROOT/agent-factory/run_evals.py" --validate
   [ "$status" -eq 0 ]
 }

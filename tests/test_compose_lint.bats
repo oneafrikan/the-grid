@@ -4,11 +4,12 @@
 # GRID_PRIVATE_ROLES_DIR so the real roles/ tree is never touched.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   COMPOSE="$REPO_ROOT/agent-factory/compose.py"
   PRIV=$(mktemp -d)
   export GRID_PRIVATE_ROLES_DIR="$PRIV"
@@ -248,6 +249,6 @@ EOT
   printf 'project: dd\nslug: dd\nagents:\n  - role: morpheus\n' > "$cfg/dd.yaml"
   run "$PY" "$COMPOSE" "$cfg/dd.yaml" --target claude-code --out "$out"
   [ "$status" -eq 0 ]
-  ! grep -q 'dev-team feature' "$out/dd/_claude-code/skills/dd-morpheus/SKILL.md"
+  ! grep -q 'dev-team feature' "$out/dd/_claude-code/skills/dd-morpheus/SKILL.md" || false
   rm -rf "$cfg" "$out"
 }

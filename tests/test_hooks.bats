@@ -647,7 +647,7 @@ STUB
   chmod +x "$stubdir/git"
   PATH="$stubdir:$PATH" run_hook pre-bash-secret-scan "$(hook_payload 'git status' "$R")"
   [ "$status" -eq 0 ]
-  ! grep -q 'diff' "$stubdir/git.log" 2>/dev/null
+  ! grep -q 'diff' "$stubdir/git.log" 2>/dev/null || false
   # positive control: a commit DOES go through the stub and run a diff
   PATH="$stubdir:$PATH" run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x' "$R")"
   grep -q 'diff' "$stubdir/git.log"

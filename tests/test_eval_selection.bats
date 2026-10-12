@@ -5,11 +5,12 @@
 # venv; skipped without it.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   EVALS="$REPO_ROOT/agent-factory/run_evals.py"
   unset GRID_EVALS
   TMP=$(mktemp -d)

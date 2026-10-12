@@ -78,7 +78,7 @@ install() {
   # Pushed: the bare remote has the same tip.
   [ "$(git -C "$T/remote.git" rev-parse main)" = "$(git -C "$GRID_PRIVATE_DIR" rev-parse HEAD)" ]
   # No AI attribution in the commit message.
-  ! git -C "$GRID_PRIVATE_DIR" log -1 --format=%B | grep -qi 'claude\|co-authored'
+  ! git -C "$GRID_PRIVATE_DIR" log -1 --format=%B | grep -qi 'claude\|co-authored' || false
   grep -q 'git push rc=0' "$T/state/usage.log"
 }
 
@@ -146,7 +146,8 @@ paths_ok() {
   [ "$status" -eq 0 ]
   [[ "$stderr" != *"command not found"* ]]
   s="$SYSTEMD_USER_DIR/grid-usage.service" t="$SYSTEMD_USER_DIR/grid-usage.timer"
-  [ -f "$s" ] && [ -f "$t" ]
+  [ -f "$s" ]
+  [ -f "$t" ]
   grep -q '^Type=oneshot$' "$s"
   grep -q "^ExecStart=/bin/bash $(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/usage/weekly.sh$" "$s"
   grep -q '^OnCalendar=Mon \*-\*-\* 09:00:00$' "$t"
@@ -172,7 +173,8 @@ paths_ok() {
   # The shared renderer zero-pads the fields ("00 09"), which cron reads as 0 9.
   [[ "$output" == *"00 09 * * 1 mkdir -p $T/state && cd $repo && /bin/bash $repo/scripts/usage/weekly.sh >> $T/state/usage.log 2>&1"* ]]
   [[ "$output" == *"crontab -"* ]]
-  [ ! -e "$LAUNCH_AGENTS_DIR" ] && [ ! -e "$SYSTEMD_USER_DIR" ]
+  [ ! -e "$LAUNCH_AGENTS_DIR" ]
+  [ ! -e "$SYSTEMD_USER_DIR" ]
   printf '%s\n' "$output" > "$T/out.txt"
   paths_ok "$T/out.txt"
 }

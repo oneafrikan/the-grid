@@ -207,6 +207,61 @@ tripwire_attempt() (
   [[ "$output" == *"REFUSING"* ]] || false
 }
 
+# The tripwire must not depend on common_setup having captured the real runtime dir: it
+# also refuses /run/user/<uid> by name (the live systemd manager's socket lives there), so
+# an empty REAL_XDG_RUNTIME_DIR (unset XDG_RUNTIME_DIR at capture time) is not a way round it.
+@test "tripwire refuses /run/user/<uid> by name even with no captured real runtime dir" {
+  REAL_XDG_RUNTIME_DIR= XDG_RUNTIME_DIR="/run/user/$(id -u)" run assert_sandboxed
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+  REAL_XDG_RUNTIME_DIR= XDG_RUNTIME_DIR="/run/user/$(id -u)/systemd" run assert_sandboxed
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+# common_setup_child <env assignment>... prints "real=<REAL_XDG_RUNTIME_DIR>" after calling
+# common_setup TWICE in a child bash (a test file may set up again after its own setup()).
+# TMPDIR is under BATS_TEST_TMPDIR so the dirs common_setup makes are removed by bats.
+common_setup_child() {
+  run env -u REAL_XDG_RUNTIME_DIR -u XDG_RUNTIME_DIR TMPDIR="$BATS_TEST_TMPDIR" "$@" \
+    bash -c 'BATS_TEST_FILENAME="$1"; source "$2"; common_setup; common_setup; echo "real=${REAL_XDG_RUNTIME_DIR-UNSET}"' \
+    _ "$BATS_TEST_FILENAME" "$REPO_ROOT/tests/helpers/setup.bash"
+}
+
+@test "common_setup captures the real XDG_RUNTIME_DIR once, before it is sandboxed" {
+  common_setup_child XDG_RUNTIME_DIR=/the/real/runtime/dir
+  [ "$status" -eq 0 ]
+  [ "$output" = "real=/the/real/runtime/dir" ]
+}
+
+# With no runtime dir at capture time the recorded value is EMPTY, and must stay empty on the
+# second call: re-capturing would record the first call's sandbox dir as "the real one".
+@test "common_setup keeps an empty captured runtime dir empty on a second call" {
+  common_setup_child
+  [ "$status" -eq 0 ]
+  [ "$output" = "real=" ]
+}
+
+# A guarded variable equal to the real home or a real root ITSELF (not a path under it): the
+# exact-match arm of each `case` in assert_sandboxed, which a "/*"-only pattern would miss.
+@test "tripwire refuses GRID_STATE_DIR equal to the real home itself" {
+  run tripwire_attempt GRID_STATE_DIR .
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses GRID_HARNESS_HOME equal to the real home itself" {
+  run tripwire_attempt GRID_HARNESS_HOME .
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses SKILLS_DIR equal to the real ~/.claude itself" {
+  run tripwire_attempt SKILLS_DIR .claude
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
 @test "common_setup points GRID_STATE_DIR and XDG_RUNTIME_DIR at sandbox dirs" {
   [ -n "$GRID_STATE_DIR" ]
   [ -n "$XDG_RUNTIME_DIR" ]

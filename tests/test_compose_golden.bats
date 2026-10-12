@@ -5,11 +5,12 @@
 # mutates goldens works on a temp copy (GOLDEN_DIR), never the committed tree.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   GOLDENS="$REPO_ROOT/tests/fixtures/compose/golden"
   SCRIPT="$REPO_ROOT/scripts/compose-goldens.sh"
   TMP=$(mktemp -d)

@@ -125,7 +125,7 @@ PY
   for k in prompt version supersedes inputs output_schema invariants model_cannot_see change; do
     grep -q "^$k:" "$f"
   done
-  ! grep -q '{{' "$f"
+  ! grep -q '{{' "$f" || false
   [ "$(grep -c '^<<<DIGEST$' "$f")" -eq 3 ]
 }
 
