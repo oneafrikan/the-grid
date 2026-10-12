@@ -1125,7 +1125,7 @@ quarantine_has() { [ -f "$GRID_STATE_DIR/handoff-quarantine/$SID/$1" ]; }
   b64="$(printf 'Ab1+%.0s' $(seq 20))"
   tok="$(fake_token)"
   local bodies=("$pem" "$b64" "$tok # example" "DB_PASS=s3cretvalue1" \
-                "Authorization: Bearer abcdefghijklmnopqrstuvwxyz" "postgres://admin:s3cr3tpw@db.internal/app")
+                "Authorization: Bearer abcdefghijklmnopqrstuvwxyz" "$(printf 'postgres://admin:s3cr3tpw%sdb.internal/app' @)")
   local n=0 body
   export STUB_CLAUDE_MODE=handoff-logs
   for body in "${bodies[@]}"; do
