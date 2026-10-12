@@ -56,6 +56,16 @@ grid_check_cmd_cap() {
   exit 2
 }
 
+# grid_check_balanced <hook-name>
+#   Call right after grid_git_segments. A quote or substitution still open at the end of
+#   the command means the tokenizer may have lost track of where later words start, so
+#   a git call after it could be invisible: fail closed (exit 2).
+grid_check_balanced() {
+  [ "${GIT_UNBALANCED:-0}" = 1 ] || return 0
+  echo "BLOCKED by the-grid hook $1: a quote or substitution in this command is not closed, so the command cannot be inspected. Simplify the command: close the quote, or write the content to a file with the Write tool." >&2
+  exit 2
+}
+
 # grid_log <file> <message>
 #   Append one line to <file>. The directory is created 0700 (umask in a subshell
 #   so the caller's umask is untouched) because logs may name sessions and paths.
@@ -101,37 +111,92 @@ grid_log() {
 # _grid_tokenize <command>
 #   One left-to-right pass (never two regex passes: they break on
 #   "don't --no-verify"). Fills T_RAW[] / T_MASK[] / T_FLAG[] / T_SEP[] in step. T_SEP[i]=1
-#   marks a separator (unquoted ; && || | & ( ) or newline) instead of a word. An
+#   marks a separator (unquoted ; && || | & ( ) ` or newline) instead of a word. An
 #   unquoted word-initial # starts a comment that runs to the end of the line.
 #   Outside quotes: whitespace splits words, ' or " opens a span, a backslash keeps
 #   itself and the next character in the word (so \git survives to be normalised
-#   and \; or \" never split or open a span). Inside ": backslash escapes the next
-#   character and ' is literal. Inside ': everything is literal.
+#   and \; or \" never split or open a span); backslash-newline is deleted. Inside ":
+#   backslash escapes the next character and ' is literal. Inside ': everything is
+#   literal. Inside $'..' a backslash escapes the next character (so \' does not end it).
+#
+#   Quote state must never drift, because a drifted state hides every LATER git call:
+#     - a heredoc body is not code for quote tracking: its lines are tokenized one at a
+#       time with the quote state reset at each newline (so `it's` in a body cannot open
+#       a span that swallows the next command). The lines are still READ as code, so a
+#       `bash <<EOF` body is still checked;
+#     - $(..) and `..` inside double quotes are code with their own quotes, tracked on a
+#       stack, so `"$(echo '"')"` closes correctly and `"$(git commit -n)"` is seen;
+#     - when a quote or substitution is still open at the end, GIT_UNBALANCED is set and
+#       the guards fail closed.
 _grid_tokenize() {
-  local s="$1" n i=0 c nx pv q=0 run buf wl base=0 abs start
+  local s="$1" n i=0 c nx pv q=0 run buf wl base=0 abs start j dl
   # Linear-time scanning (WP-019). A long command used to take longer than the 5 s hook
   # timeout, and a timed-out hook does not block. Two causes, both fixed here:
   #   1. ${s:$i:k} costs O(i) in bash (it copies the whole string first), so indexing a
   #      long command per character is quadratic. The text is therefore read through a
   #      sliding window `buf` of at most 2048 bytes, so every index is O(2048). A window
   #      starts one character early so the "previous character" test still works, and is
-  #      refilled when fewer than 4 characters remain (the longest look-ahead is 1).
+  #      refilled when fewer than 300 characters remain (the longest look-ahead is a
+  #      heredoc delimiter, at most 200 characters).
   #   2. runs of ordinary characters are consumed with one anchored regex (O(256) slice)
   #      instead of one loop iteration each.
-  # Ordinary = not a quote, backslash, blank, newline or one of ; & | ( ) (the characters the
-  # per-character cases below handle). In a bracket expression a backslash is literal.
-  local _TK_ORD=$'^([^\'"\\ \t\n;&|()`]+)([ \t]?)' _TK_Q1=$'^[^\']+' _TK_Q2=$'^[^"\\]+' _TK_CM=$'^[^\n]+'
+  # Ordinary = not a quote, backslash, blank, newline or one of ; & | ( ) ` < (the
+  # characters the per-character cases below handle). In a bracket expression a
+  # backslash is literal.
+  local _TK_ORD=$'^([^\'"\\ \t\n;&|()`<]+)([ \t]?)' _TK_Q1=$'^[^\'\n]+' _TK_Q2=$'^[^"\\$`\n]+'
+  local _TK_Q5=$'^[^\'\\\n]+' _TK_CM=$'^[^\n]+' _TK_HD=$'^(-?)[ \t]*([\\\\\'"]?)([A-Za-z0-9_.-]{1,200})'
+  local -a _hdp=() _hdd=() _hdm=()
+  local _hd="" _hdt="" _hdb=0 _hdmode=0 _hdskip=0 ln
   T_RAW=(); T_MASK=(); T_FLAG=(); T_SEP=()
-  _TK_RAW=""; _TK_MASK=""; _TK_FLAG=""; _TK_IN=0; _TK_DLR=0
+  D_RAW=(); D_MASK=(); D_FLAG=(); D_SEP=()
+  _CS_Q=(); _CS_K=(); _CS_D=(); _CS_WR=(); _CS_WM=(); _CS_WF=(); _CS_WI=()
+  _TK_RAW=""; _TK_MASK=""; _TK_FLAG=""; _TK_IN=0; _TK_DLR=0; _TK_DEFER=0
   n=${#s}
   buf="${s:0:2048}"; wl=${#buf}
   while :; do
-    if [ $((i + 4)) -gt "$wl" ] && [ $((base + wl)) -lt "$n" ]; then
+    if [ $((i + 1600)) -gt "$wl" ] && [ $((base + wl)) -lt "$n" ]; then
       abs=$((base + i)); start=$((abs > 0 ? abs - 1 : 0))
       buf="${s:$start:2048}"; wl=${#buf}; base=$start; i=$((abs - start))
     fi
     [ "$i" -lt "$wl" ] || break
     c="${buf:$i:1}"
+
+    # Inside a heredoc body: at the start of a line, the delimiter line ends the body
+    # (leading tabs are ignored for <<-); at a newline the quote state is reset.
+    # What a body line is depends on who reads it (_hdmode, fixed when << was seen):
+    #   0  the heredoc feeds a shell (bash <<EOF): every line is code;
+    #   1  quoted delimiter (<<'EOF'): the body is data, every line is skipped;
+    #   2  unquoted delimiter: the shell expands $( ) and backticks in the body, so a line
+    #      holding one is read as code and every other line is skipped.
+    # A data line is skipped without being tokenized, so prose such as a commit message
+    # that mentions "git push --force" is not mistaken for a command.
+    if [ -n "$_hd" ]; then
+      if [ "$_hdb" = 1 ]; then
+        _hdb=0; _hdskip=0
+        j=$i
+        if [ "$_hdt" = '-' ]; then while [ "${buf:$j:1}" = $'\t' ]; do j=$((j + 1)); done; fi
+        dl=${#_hd}
+        if [ "${buf:$j:$dl}" = "$_hd" ]; then
+          nx="${buf:$((j + dl)):1}"
+          if [ -z "$nx" ] || [ "$nx" = $'\n' ]; then _hd=""; i=$((j + dl)); continue; fi
+        fi
+        if [ "$_hdmode" = 1 ]; then
+          _hdskip=1
+        elif [ "$_hdmode" = 2 ]; then
+          # the line as far as the window shows it (a longer line counts as code)
+          ln="${buf:$i:1500}"; ln="${ln%%$'\n'*}"
+          case "$ln" in *'$('*|*'`'*) ;; *) [ "${#ln}" -lt 1500 ] && _hdskip=1 ;; esac
+        fi
+      fi
+      if [ "$_hdskip" = 1 ]; then
+        if [ "$c" = $'\n' ]; then _hdb=1; i=$((i + 1)); continue
+        elif [[ "${buf:$i:256}" =~ $_TK_CM ]]; then i=$((i + ${#BASH_REMATCH[0]})); continue; fi
+      fi
+      if [ "$c" = $'\n' ]; then
+        q=0; _grid_tk_word; _grid_tk_sep; _hdb=1; i=$((i + 1)); continue
+      fi
+    fi
+
     case "$q" in
       3) # inside a # comment: skipped up to (not including) the newline
         if [ "$c" = $'\n' ]; then
@@ -147,13 +212,29 @@ _grid_tokenize() {
         else
           _TK_RAW+="$c"; _TK_FLAG+="$c"
         fi ;;
-      2) # inside "...": backslash escapes, ' is literal
+      5) # inside $'...': like '...' but a backslash escapes the next character
+        if [ "$c" = "'" ]; then
+          q=0
+        elif [ "$c" = '\' ]; then
+          i=$((i + 1)); _TK_RAW+="${buf:$i:1}"; _TK_FLAG+="${buf:$i:1}"
+        elif [[ "${buf:$i:256}" =~ $_TK_Q5 ]]; then
+          run="${BASH_REMATCH[0]}"; _TK_RAW+="$run"; _TK_FLAG+="$run"; i=$((i + ${#run})); continue
+        else
+          _TK_RAW+="$c"; _TK_FLAG+="$c"
+        fi ;;
+      2) # inside "...": backslash escapes, ' is literal, $( and ` start code
         if [ "$c" = '"' ]; then
           q=0
         elif [ "$c" = '\' ]; then
           i=$((i + 1))
           # backslash-newline inside double quotes is a line continuation too: deleted
           if [ "${buf:$i:1}" != $'\n' ]; then _TK_RAW+="${buf:$i:1}"; _TK_FLAG+="${buf:$i:1}"; fi
+        elif [ "$c" = '$' ] && [ "${buf:$((i + 1)):1}" = '(' ]; then
+          _grid_tk_cs_push 2 p
+          _grid_tk_word; _grid_tk_sep; q=0; i=$((i + 2)); continue
+        elif [ "$c" = '`' ]; then
+          _grid_tk_cs_push 2 b
+          _grid_tk_word; _grid_tk_sep; q=0; i=$((i + 1)); continue
         elif [[ "${buf:$i:256}" =~ $_TK_Q2 ]]; then
           run="${BASH_REMATCH[0]}"; _TK_RAW+="$run"; _TK_FLAG+="$run"; i=$((i + ${#run})); continue
         else
@@ -173,7 +254,9 @@ _grid_tokenize() {
           continue
         fi
         case "$c" in
-          "'") q=1; _TK_IN=1; _TK_MASK+="Q"; [ "$_TK_DLR" = 1 ] && _TK_FLAG="${_TK_FLAG%?}" ;;
+          "'")
+            _TK_IN=1; _TK_MASK+="Q"
+            if [ "$_TK_DLR" = 1 ]; then q=5; _TK_FLAG="${_TK_FLAG%?}"; else q=1; fi ;;
           '"') q=2; _TK_IN=1; _TK_MASK+="Q"; [ "$_TK_DLR" = 1 ] && _TK_FLAG="${_TK_FLAG%?}" ;;
           '\')
             nx="${buf:$((i + 1)):1}"
@@ -185,7 +268,14 @@ _grid_tokenize() {
             fi
             i=$((i + 1)) ;;
           ' '|$'\t') _grid_tk_word ;;
-          $'\n'|';') _grid_tk_word; _grid_tk_sep ;;
+          $'\n')
+            _grid_tk_word; _grid_tk_sep
+            # the first newline after a << marker starts the heredoc body
+            if [ "${#_hdp[@]}" -gt 0 ]; then
+              _hd="${_hdp[0]}"; _hdt="${_hdd[0]}"; _hdmode="${_hdm[0]}"
+              _hdp=("${_hdp[@]:1}"); _hdd=("${_hdd[@]:1}"); _hdm=("${_hdm[@]:1}"); _hdb=1
+            fi ;;
+          ';') _grid_tk_word; _grid_tk_sep ;;
           '&')
             nx="${buf:$((i + 1)):1}"
             pv=""; [ "$i" -gt 0 ] && pv="${buf:$((i - 1)):1}"
@@ -202,9 +292,40 @@ _grid_tokenize() {
             _grid_tk_word; _grid_tk_sep
             [ "$nx" = '|' ] && i=$((i + 1)) ;;
           # Subshells, command substitution and function bodies: ( and ) end a segment.
-          '('|')') _grid_tk_word; _grid_tk_sep ;;
+          # Inside a $( opened within double quotes the matching ) returns to the quotes.
+          '(')
+            _grid_tk_word; _grid_tk_sep
+            if [ "${#_CS_K[@]}" -gt 0 ] && [ "${_CS_K[${#_CS_K[@]}-1]}" = p ]; then
+              _CS_D[${#_CS_D[@]}-1]=$((_CS_D[${#_CS_D[@]}-1] + 1))
+            fi ;;
+          ')')
+            _grid_tk_word; _grid_tk_sep
+            if [ "${#_CS_K[@]}" -gt 0 ] && [ "${_CS_K[${#_CS_K[@]}-1]}" = p ]; then
+              if [ "${_CS_D[${#_CS_D[@]}-1]}" -gt 0 ]; then
+                _CS_D[${#_CS_D[@]}-1]=$((_CS_D[${#_CS_D[@]}-1] - 1))
+              else
+                _grid_tk_cs_pop; q="$_CS_RESTORE_Q"
+              fi
+            fi ;;
           # An unquoted backtick opens or closes a command substitution: like ( and ).
-          '`') _grid_tk_word; _grid_tk_sep ;;
+          '`')
+            _grid_tk_word; _grid_tk_sep
+            if [ "${#_CS_K[@]}" -gt 0 ] && [ "${_CS_K[${#_CS_K[@]}-1]}" = b ]; then
+              _grid_tk_cs_pop; q="$_CS_RESTORE_Q"
+            fi ;;
+          # A << marker (not <<<) names a heredoc delimiter; the body starts after the
+          # next newline. The < itself is an ordinary word character.
+          '<')
+            pv=""; [ "$i" -gt 0 ] && pv="${buf:$((i - 1)):1}"
+            if [ "${buf:$((i + 1)):1}" = '<' ] && [ "${buf:$((i + 2)):1}" != '<' ] && [ "$pv" != '<' ]; then
+              if [[ "${buf:$((i + 2)):300}" =~ $_TK_HD ]]; then
+                _hdp+=("${BASH_REMATCH[3]}"); _hdd+=("${BASH_REMATCH[1]}")
+                if _grid_tk_seg_has_shell; then _hdm+=(0)
+                elif [ -n "${BASH_REMATCH[2]}" ]; then _hdm+=(1)
+                else _hdm+=(2); fi
+              fi
+            fi
+            _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_FLAG+="$c"; _TK_IN=1 ;;
           *) _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_FLAG+="$c"; _TK_IN=1 ;;
         esac ;;
     esac
@@ -213,20 +334,81 @@ _grid_tokenize() {
     i=$((i + 1))
   done
   _grid_tk_word
+  # An open quote or substitution at the end hides everything after it: tell the guards.
+  case "$q" in 1|2|5) GIT_UNBALANCED=1 ;; esac
+  [ "${#_CS_K[@]}" -eq 0 ] || GIT_UNBALANCED=1
+  # The commands found inside "$( )" and "` `" come after the outer command, each in its
+  # own segments, so the outer command keeps all of its own words.
+  _TK_DEFER=0
+  if [ "${#D_RAW[@]}" -gt 0 ]; then
+    T_RAW+=("" "${D_RAW[@]}"); T_MASK+=("" "${D_MASK[@]}"); T_FLAG+=("" "${D_FLAG[@]}"); T_SEP+=(1 "${D_SEP[@]}")
+  fi
+}
+
+# _grid_tk_seg_has_shell: true when the command being built (words since the last
+# separator, plus the word in progress) names a shell, i.e. `bash <<EOF` feeds the body
+# to a shell. Runs in the tokenizer's scope.
+_grid_tk_seg_has_shell() {
+  local k w
+  w="${_TK_FLAG##*/}"
+  case "$w" in bash|sh|zsh|dash|ksh|busybox) return 0 ;; esac
+  if [ "$_TK_DEFER" = 1 ]; then
+    for ((k = ${#D_FLAG[@]} - 1; k >= 0; k--)); do
+      [ "${D_SEP[$k]}" = 1 ] && return 1
+      w="${D_FLAG[$k]##*/}"
+      case "$w" in bash|sh|zsh|dash|ksh|busybox) return 0 ;; esac
+    done
+  else
+    for ((k = ${#T_FLAG[@]} - 1; k >= 0; k--)); do
+      [ "${T_SEP[$k]}" = 1 ] && return 1
+      w="${T_FLAG[$k]##*/}"
+      case "$w" in bash|sh|zsh|dash|ksh|busybox) return 0 ;; esac
+    done
+  fi
+  return 1
+}
+
+# _grid_tk_cs_push <q to return to> <kind p|b>
+#   A command substitution starts inside double quotes. The word being built (the quoted
+#   string) is saved, the substitution's own words are collected apart (_TK_DEFER), and the
+#   stack remembers what to return to when it ends.
+_grid_tk_cs_push() {
+  _CS_Q+=("$1"); _CS_K+=("$2"); _CS_D+=(0)
+  _CS_WR+=("$_TK_RAW"); _CS_WM+=("$_TK_MASK"); _CS_WF+=("$_TK_FLAG"); _CS_WI+=("$_TK_IN")
+  _TK_RAW=""; _TK_MASK=""; _TK_FLAG=""; _TK_IN=0; _TK_DEFER=1
+  D_RAW+=(""); D_MASK+=(""); D_FLAG+=(""); D_SEP+=(1)
+}
+
+# _grid_tk_cs_pop: the substitution ended; sets _CS_RESTORE_Q and restores the saved word.
+_grid_tk_cs_pop() {
+  local t=$((${#_CS_Q[@]} - 1))
+  _CS_RESTORE_Q="${_CS_Q[$t]}"
+  _TK_RAW="${_CS_WR[$t]}"; _TK_MASK="${_CS_WM[$t]}"; _TK_FLAG="${_CS_WF[$t]}"; _TK_IN="${_CS_WI[$t]}"
+  _CS_Q=("${_CS_Q[@]:0:$t}"); _CS_K=("${_CS_K[@]:0:$t}"); _CS_D=("${_CS_D[@]:0:$t}")
+  _CS_WR=("${_CS_WR[@]:0:$t}"); _CS_WM=("${_CS_WM[@]:0:$t}"); _CS_WF=("${_CS_WF[@]:0:$t}"); _CS_WI=("${_CS_WI[@]:0:$t}")
+  [ "${#_CS_Q[@]}" -gt 0 ] || _TK_DEFER=0
 }
 
 # _grid_tk_word: close the word being built (if any) and push it.
 # A word made only of an empty quoted span ("") is a real, empty word.
 _grid_tk_word() {
   if [ "$_TK_IN" = 1 ]; then
-    T_RAW+=("$_TK_RAW"); T_MASK+=("$_TK_MASK"); T_FLAG+=("$_TK_FLAG"); T_SEP+=(0)
+    if [ "$_TK_DEFER" = 1 ]; then
+      D_RAW+=("$_TK_RAW"); D_MASK+=("$_TK_MASK"); D_FLAG+=("$_TK_FLAG"); D_SEP+=(0)
+    else
+      T_RAW+=("$_TK_RAW"); T_MASK+=("$_TK_MASK"); T_FLAG+=("$_TK_FLAG"); T_SEP+=(0)
+    fi
   fi
   _TK_RAW=""; _TK_MASK=""; _TK_FLAG=""; _TK_IN=0; _TK_DLR=0
 }
 
 # _grid_tk_sep: push a segment separator.
 _grid_tk_sep() {
-  T_RAW+=(""); T_MASK+=(""); T_FLAG+=(""); T_SEP+=(1)
+  if [ "$_TK_DEFER" = 1 ]; then
+    D_RAW+=(""); D_MASK+=(""); D_FLAG+=(""); D_SEP+=(1)
+  else
+    T_RAW+=(""); T_MASK+=(""); T_FLAG+=(""); T_SEP+=(1)
+  fi
 }
 
 # _grid_is_hookspath <text>
@@ -433,6 +615,6 @@ _grid_segment() {
 # shellcheck disable=SC2034
 grid_git_segments() {
   GIT_SUB=(); GIT_START=(); GIT_LEN=(); GIT_RAW=(); GIT_MASK=(); GIT_FLAG=(); GIT_VIOLATIONS=()
-  GIT_CD=(); GIT_C=(); GIT_GITDIR=(); GIT_WORKTREE=(); _GRID_CD=""
+  GIT_CD=(); GIT_C=(); GIT_GITDIR=(); GIT_WORKTREE=(); _GRID_CD=""; GIT_UNBALANCED=0
   _grid_scan "$1" 0
 }
