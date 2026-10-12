@@ -32,7 +32,8 @@ Adapted packs
 -------------
 # One pack name per line (the directory name under rules/), added by the PR that
 # adds the tier 2 pack. `rules.py lint` (E_ATTRIBUTION) fails a tier 2 pack whose
-# name is not listed here. Lines starting with # are comments. Initially empty.
+# name is not listed here, and a name listed here that is not an existing tier 2 pack.
+# Lines starting with # are comments; the list ends at the next heading.
 golang
 php
 python
