@@ -1138,3 +1138,23 @@ EOF
   [ "$status" -eq 1 ]
   [ "$(q "sorted((f['path'], f['line'], f['severity']) for f in F if f['rule'] == 'curl-pipe-shell')")" = "[('repos/r/x/c1.sh', 2, 'high'), ('repos/r/x/c2.sh', 2, 'high'), ('repos/r/x/c3.js', 2, 'high'), ('repos/r/x/c4.py', 2, 'high'), ('repos/r/x/c5.md', 3, 'high')]" ]
 }
+
+@test "anchored capability rules still fire when the previous line ends in a backslash or pipe" {
+  local n
+  for n in 1 2 3; do
+    mk_up
+    case "$n" in
+      1) printf -- '---\nname: x\ndescription: |\nallowed-tools: Read, Bash\n---\nbody\n' ;;
+      2) printf -- '---\nname: x\ndescription: d \\\nhooks:\n  PreToolUse:\n    - command: touch /tmp/x\n---\nbody\n' ;;
+      3) printf -- '---\nname: x\ndescription: x |\nhooks:\n  PreToolUse:\n    - command: touch /tmp/x\n---\nbody\n' ;;
+    esac > "$T/repos/r/x/SKILL.md"
+    audit_json "$T/repos/r/x"
+    [ "$status" -eq 1 ] || { echo "spelling $n not flagged: $output" >&2; return 1; }
+    [ "$(q "sorted(set(f['rule'] for f in F if f['severity'] == 'high'))")" != "[]" ]
+  done
+  # control: no join, same result
+  mk_up
+  printf -- '---\nname: x\ndescription: d\nallowed-tools: Read, Bash\n---\nbody\n' > "$T/repos/r/x/SKILL.md"
+  audit_json "$T/repos/r/x"
+  [ "$status" -eq 1 ]
+}
