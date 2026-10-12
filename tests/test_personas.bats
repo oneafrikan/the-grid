@@ -4,11 +4,12 @@
 # Every test that builds or mutates works on a temp COPY of the repo, never the committed tree.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   TMP=$(mktemp -d)
 }
 

@@ -141,7 +141,7 @@ open(out, "w").write(json.dumps({"lockVersion": 1, "entries": entries}, indent=2
   [ "$(awk -F'\t' '{print NF}' "$(LEDGER)" | sort -u)" = "7" ]
   [ "$(cut -f1 "$(LEDGER)" | sort -u)" = "skill" ]
   [ "$(cut -f6 "$(LEDGER)" | grep -c '^repos/up/')" -eq 2 ]
-  ! grep -q "$T" "$(LEDGER)"
+  ! grep -q "$T" "$(LEDGER)" || false
   # Sorted bytewise.
   [ "$(LC_ALL=C sort "$(LEDGER)")" = "$(cat "$(LEDGER)")" ]
 }
@@ -301,7 +301,7 @@ open(p, "w").write(json.dumps(doc, indent=2, sort_keys=True) + "\n")
   [ ! -e "$G/repos/up/nested" ]
   [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
   grep -q "alpha" "$(LEDGER)"
-  ! grep -q "beta" "$(LEDGER)"
+  ! grep -q "beta" "$(LEDGER)" || false
   grep -q "^rule	sql	up" "$(LEDGER)"
 }
 

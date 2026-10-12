@@ -85,15 +85,18 @@ stage() { GRID_DIR="$FIX" bash "$REPO_ROOT/scripts/stage-site.sh" "$OUT"; }
 
 @test "real repo: every relative src/href in index.html exists in the staged site" {
   bash "$REPO_ROOT/scripts/stage-site.sh" "$BATS_TEST_TMPDIR/realsite" >/dev/null
-  local failed=0 ref
+  local failed=0 seen=0 ref
   while IFS= read -r ref; do
     case "$ref" in http://*|https://*|mailto:*|\#*|"") continue ;; esac
     ref="${ref%%#*}"; ref="${ref%%\?*}"           # drop fragment / query
     [ -n "$ref" ] || continue
+    seen=$((seen + 1))
     if [ ! -e "$BATS_TEST_TMPDIR/realsite/$ref" ]; then
       echo "index.html references '$ref' but it is not staged (add it to site-files.txt)" >&3
       failed=1
     fi
   done < <(grep -oE '(src|href)="[^"]*"' "$REPO_ROOT/index.html" | sed -E 's/^(src|href)="//; s/"$//')
+  # No local references at all would mean the grep broke, not that the page is fine.
+  [ "$seen" -gt 0 ]
   [ "$failed" -eq 0 ]
 }

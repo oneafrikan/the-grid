@@ -7,6 +7,7 @@
 # a temp output path; it never reads or rewrites the committed SKILLS.md.
 
 load helpers/setup
+load helpers/venv
 
 # shellcheck disable=SC2120  # "$@" is forwarded; callers pass flags only sometimes
 BUILD() { python3 "$REPO_ROOT/scripts/build-plugins.py" "$@"; }
@@ -210,7 +211,7 @@ EOF
 }
 
 @test "(j) real repo: --check passes, agent count is derived, no hostname leaks" {
-  [ -x "$REPO_ROOT/agent-factory/.venv/bin/python" ] || skip "agent-factory venv absent"
+  require_venv "$REPO_ROOT/agent-factory/.venv/bin/python"
   unset GRID_DIR
   run BUILD --check
   [ "$status" -eq 0 ]

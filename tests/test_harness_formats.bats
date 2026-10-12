@@ -9,11 +9,12 @@
 # independent verification belongs to qa-engineer.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   VALIDATE="$REPO_ROOT/tests/lib/validate_harness.py"
   GOLDENS="$REPO_ROOT/tests/fixtures/compose/golden"
   TMP=$(mktemp -d)
@@ -436,7 +437,9 @@ gemini_roles() {
   run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target gemini-cli --out "$TMP/out"
   echo "$output"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"E_TOOL_UNMAPPED"* ]] && [[ "$output" == *"zz-bad"* ]] && [[ "$output" == *"Teleport"* ]]
+  [[ "$output" == *"E_TOOL_UNMAPPED"* ]]
+  [[ "$output" == *"zz-bad"* ]]
+  [[ "$output" == *"Teleport"* ]]
   [ ! -e "$TMP/out/zz/_gemini-cli" ]
 }
 

@@ -62,7 +62,7 @@ teardown() {
   mkdir -p "$MOCK_GRID/repos/refindex"
   printf '# just an index\n' > "$MOCK_GRID/repos/refindex/README.md"
   GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
-  ! grep -q '^## repos/refindex' "$OUT"            # no skill section
+  ! grep -q '^## repos/refindex' "$OUT" || false            # no skill section
   grep -q 'Reference submodules' "$OUT"            # listed under the footer
   grep -q -- '- \*\*repos/refindex\*\*' "$OUT"
 }

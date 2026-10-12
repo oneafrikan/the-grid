@@ -5,11 +5,12 @@
 # dirs; no model is called.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   FRAGMENT="$REPO_ROOT/agent-factory/_core/DECISION_BRIEF.md"
   TMP=$(mktemp -d)
 }

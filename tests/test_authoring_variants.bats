@@ -4,11 +4,12 @@
 # GRID_AUTHORED_ROLES_FILE, so the real roles/ tree and authored-roles.txt are never touched.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   COMPOSE="$REPO_ROOT/agent-factory/compose.py"
   PRIV=$(mktemp -d)
   ENROL=$(mktemp)

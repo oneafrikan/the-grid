@@ -90,7 +90,7 @@ sync_as() {
   echo "$output" | grep -q '^Persistent=true$'
   echo "$output" | grep -q 'systemctl --user daemon-reload && systemctl --user enable --now grid-instincts.timer'
   # no launchd text on Linux
-  ! echo "$output" | grep -q '<plist'
+  ! echo "$output" | grep -q '<plist' || false
   no_scheduler_calls
 }
 
@@ -105,7 +105,7 @@ sync_as() {
   echo "$output" | grep -q "launchctl bootstrap gui/\$(id -u) $HOME/Library/LaunchAgents/io.the-grid.instincts.plist"
   echo "$output" | grep -qE '^00 06 \* \* 1 '
   # no systemd text on macOS
-  ! echo "$output" | grep -q 'OnCalendar'
+  ! echo "$output" | grep -q 'OnCalendar' || false
   no_scheduler_calls
 }
 
