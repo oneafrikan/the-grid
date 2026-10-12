@@ -10,5 +10,5 @@ paths:
 
 ## DML
 - In BigQuery, use `TRUNCATE TABLE` to remove all rows; it keeps table metadata and is not billed.
-- Make the `MERGE` source unique on the join key; several source rows matching one target row raises an error.
+- In BigQuery, make the `MERGE` source unique on the join key; several source rows matching one target row raises an error.
 - In BigQuery, batch rows into one `INSERT` or `MERGE`; single-row DML statements hit per-table DML limits.
