@@ -234,7 +234,21 @@ paths_ok() {
 @test "(h) the units pass systemd-analyze verify --user when available" {
   command -v systemd-analyze >/dev/null || skip "systemd-analyze not available"
   install systemd
-  run systemd-analyze verify --user "$SYSTEMD_USER_DIR/grid-usage.service" "$SYSTEMD_USER_DIR/grid-usage.timer"
+  # Private runtime dir + probe-skip (see systemd_verify_private): never the live manager.
+  systemd_verify_private "$SYSTEMD_USER_DIR/grid-usage.service" "$SYSTEMD_USER_DIR/grid-usage.timer"
   echo "$output"
   [ "$status" -eq 0 ]
+}
+
+@test "(h) systemd-analyze runs in a private XDG_RUNTIME_DIR" {
+  # A stub records the runtime dir it was given; the inherited (real) one must not reach it.
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/bash\necho "$XDG_RUNTIME_DIR" >> "%s/rt.log"\n' "$BATS_TEST_TMPDIR" > "$BATS_TEST_TMPDIR/bin/systemd-analyze"
+  chmod +x "$BATS_TEST_TMPDIR/bin/systemd-analyze"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" XDG_RUNTIME_DIR=/run/user/4242 systemd_verify_private /nonexistent.service
+  [ "$status" -eq 0 ]
+  [ -s "$BATS_TEST_TMPDIR/rt.log" ]
+  while IFS= read -r rt; do
+    [[ "$rt" == "$BATS_TEST_TMPDIR"/* ]] || { echo "runtime dir leaked: $rt"; false; }
+  done < "$BATS_TEST_TMPDIR/rt.log"
 }
