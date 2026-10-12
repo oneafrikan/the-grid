@@ -1,0 +1,60 @@
+#!/usr/bin/env bats
+# Fidelity of the fake external commands in tests/helpers/stubs.bash (R16.qa.F10): a stub
+# that answers differently from the real tool lets a caller's mistake pass unseen. Each
+# test pins ONE behaviour of the real tool the stub must copy.
+
+load helpers/setup
+load helpers/stubs
+
+setup() {
+  common_setup
+  make_stubs
+  # Tripwire: every call below must reach a stub, never the real tool.
+  case "$(command -v claude)" in "$STUB_DIR"/*) ;; *) echo "claude is not the stub" >&2; return 1 ;; esac
+}
+
+teardown() {
+  clean_stubs
+  common_teardown
+}
+
+@test "claude stub: auth status exits 0 when logged in" {
+  run claude auth status --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"loggedIn": true'* ]]
+}
+
+@test "claude stub: auth status exits 1 when logged out, like the real claude" {
+  STUB_CLAUDE_LOGGED_IN=0 run claude auth status --json
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"loggedIn": false'* ]]
+}
+
+@test "timeout stub: drops -k/--kill-after, -s/--signal, --foreground and --preserve-status" {
+  local opts
+  for opts in "-k 5" "--kill-after 5" "--kill-after=5" "-k5" "-s KILL" "--signal KILL" "--signal=KILL" \
+              "-sKILL" "--foreground" "--preserve-status" "-k 5 -s TERM --foreground --preserve-status"; do
+    # $opts is deliberately unquoted: it is a list of separate words.
+    # shellcheck disable=SC2086
+    run timeout $opts 30 echo ran
+    echo "options '$opts': $output"
+    [ "$status" -eq 0 ]
+    [ "$output" = "ran" ]
+  done
+}
+
+@test "timeout stub: a plain SECS command still runs it" {
+  run timeout 30 echo ran
+  [ "$status" -eq 0 ]
+  [ "$output" = "ran" ]
+}
+
+@test "curl stub: option values (--retry, -u, --retry-delay, --connect-timeout) are not taken for the URL" {
+  # The URL comes FIRST: the stub keeps the last bare word it sees, so a leaked option value
+  # that follows the URL would replace it.
+  run curl -s https://api.example.invalid/app/installations --retry 3 --retry-delay 2 --connect-timeout 9 -u user:pw
+  echo "$output"
+  [ "$status" -eq 0 ]
+  # The installations body, not the 404 `{}` a leaked option value would produce.
+  [[ "$output" == *'4242'* ]]
+}
