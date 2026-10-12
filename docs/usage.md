@@ -168,6 +168,10 @@ The job never touches your own work in the private repo (shared guard:
   Create it once per machine, after confirming the repo is private
   (`gh repo view <owner>/<private-repo> --json isPrivate`):
   `git -C "${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}" remote get-url --push origin > "${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}/.grid-private-remote"`.
+  The marker holds the raw push URL: keep it out of any `git add -A` (list it in
+  `.git/info/exclude` of the private repo) and never put credentials in the remote URL.
+  Both jobs push exactly that remote and the upstream branch, whatever `push.default`
+  or `branch.<name>.pushRemote` say.
 - **Hangs and overlap:** each git call is killed after `GRID_GIT_TIMEOUT` seconds
   (default 120) and prompts are disabled; a second run while one is active logs
   `already running` and exits 0 (`<state>/weekly.lock`, stale after two hours).
