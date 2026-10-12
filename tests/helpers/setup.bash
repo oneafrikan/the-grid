@@ -4,6 +4,9 @@
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
 common_setup() {
+  # An empty/unset HOME makes `cd ""` succeed, turning the "real home" into the cwd and
+  # disarming every comparison below; refuse before anything is derived from it.
+  [ -n "${HOME:-}" ] || { echo "REFUSING: HOME is unset or empty" >&2; return 1; }
   # Capture the real home FIRST: a test may later point HOME at a temp dir, and the
   # sandbox check below must still know where the real ~/.claude, ~/.grid and
   # ~/.the-grid-private live.
@@ -62,6 +65,9 @@ common_setup() {
 # Abort the test (loudly) if a wire/catalog/hook target points at the real ~/.claude,
 # ~/.grid or ~/.the-grid-private, or if the claude tripwire has been unset.
 assert_sandboxed() {
+  # An empty/unset HOME makes `cd ""` succeed, turning the "real home" into the cwd and
+  # disarming every comparison below; refuse before anything is derived from it.
+  [ -n "${HOME:-}" ] || { echo "REFUSING: HOME is unset or empty" >&2; return 1; }
   local real d real_dirs r
   real="${REAL_HOME:-$HOME}/.claude"
   # Resolve symlinks on both sides (macOS /var -> /private/var) so spelling can't dodge the guard.
