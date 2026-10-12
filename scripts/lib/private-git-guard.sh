@@ -131,7 +131,9 @@ cmd_push_ok() {
       "$spec"|"$spec"/*) ;;
       *) echo "foreign-commits: unpushed commit touches $path"; return 4 ;;
     esac
-  done < <(git -C "$dir" log --no-merges --no-renames --name-only --format= '@{u}..HEAD' 2>/dev/null)
+  # core.quotePath=false: otherwise git C-quotes a non-ASCII name ("h\303\266st") and the
+  # job's own commit would be taken for a foreign one.
+  done < <(git -C "$dir" -c core.quotePath=false log --no-merges --no-renames --name-only --format= '@{u}..HEAD' 2>/dev/null)
   return 0
 }
 
