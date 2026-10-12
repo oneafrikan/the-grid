@@ -698,7 +698,7 @@ def render_block(root, packs):
 def plan_block(root, packs, out):
     """Work out the new content of the --out file without touching disk.
 
-    Returns (old, new): bytes or None for "file absent" / "file to be deleted".
+    Returns (old, new): bytes, or None for "file absent" (new is never None).
     Raises Refusal on any problem, before any write.
     """
     if os.path.islink(out):
@@ -732,9 +732,9 @@ def plan_block(root, packs, out):
         before = old or b""
         sep = b"" if (not before or before.endswith(b"\n\n")) else (b"\n" if before.endswith(b"\n") else b"\n\n")
         new = before + sep + block
-    # Removing the block from a file that held nothing else deletes the file.
-    if block is None and new == b"":
-        new = None
+    # Removing the block from a file that held nothing else leaves a 0-byte file, never a
+    # deletion: an empty file is the operator's opt-in to receive rules (the grid never
+    # creates the instruction file), and deleting it would silently withdraw that opt-in.
     return old, new
 
 
@@ -744,11 +744,8 @@ def apply_block(root, packs, out, check):
     if old == new:
         return 0
     if not check:
-        if new is None:
-            os.remove(out)
-        else:
-            atomic_write(out, new)
-    print(("removed %s" if new is None else "wrote %s") % out)
+        atomic_write(out, new)
+    print("wrote %s" % out)
     return 1 if check else 0
 
 

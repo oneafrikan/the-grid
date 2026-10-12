@@ -135,7 +135,7 @@ What `wire.sh` does for each file in that column:
 | Harness inactive, or no pack wired, file has no block | no call at all, so an empty opt-in file stays |
 
 - **Token cost:** the block is loaded on every session (these harnesses have no path scoping). `rules.py` caps it and refuses an over-cap selection rather than truncating; wire only the packs you want always loaded.
-- **Removal can delete the file:** if removing the block leaves the file empty, `rules.py` deletes it, and the opt-in is gone. Recreate the file to opt back in. Removal also leaves the one blank separator line it added before the block.
+- **Removal keeps the file:** if removing the block leaves the file empty, `rules.py` truncates it to 0 bytes and keeps it, so the opt-in survives and re-enabling delivers the block again. Removal also leaves the one blank separator line it added before the block.
 - **Codex prefers `AGENTS.override.md`** over `AGENTS.md` when it exists. The grid only manages `AGENTS.md`, so the block is not read while an override file is present.
 - A symlinked instruction file is never edited, not even to remove an old block, because the target may belong to another tool or be regenerated elsewhere.
 - A `rules.py` failure is reported on stderr, the rest of the wire still runs, and `wire.sh` then exits 1.
