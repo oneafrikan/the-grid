@@ -750,8 +750,12 @@ class Scan:
             if _plausible_utf16(data):
                 # Genuine UTF-16 with a BOM: decode it and scan the text.
                 text = data.decode("utf-16")
-            elif _is_known_binary(head):
-                return                        # an image/archive/font: nothing to scan
+            elif (_is_known_binary(head)
+                  and not self._exec_class(fclass, name, rel_target, rel_root)):
+                # An image/archive/font: nothing to scan. Never for executable classes:
+                # a magic-number first line is trivially forged in front of a script
+                # (fail closed; a genuine binary there is allowlisted by hash).
+                return
             else:
                 self._add("unscannable-file",
                           self._not_scanned_severity("unscannable-file", fclass, name, rel_target, rel_root),
