@@ -148,6 +148,10 @@ def load_catalogue(grid: Path) -> list[dict]:
             die(f"{path}: hook '{hid}': 'timeout' must be a positive integer")
         if "matcher" in h and not isinstance(h["matcher"], str):
             die(f"{path}: hook '{hid}': 'matcher' must be a string when present")
+        # on_failure: block makes Claude Code itself block when the hook fails or times
+        # out (a timed-out hook is otherwise non-blocking). Needs Claude Code 2.1.295+.
+        if "on_failure" in h and h["on_failure"] != "block":
+            die(f"{path}: hook '{hid}': 'on_failure' must be 'block' when present")
         if "opt_in" in h and h["scope"] != "project":
             die(f"{path}: hook '{hid}': opt_in applies to project hooks only")
         if h["scope"] == "project":
@@ -169,7 +173,7 @@ def user_settings_path() -> Path:
 
 
 def user_desired(hooks: list[dict], ids: list[str], grid: Path) -> list[tuple]:
-    """(event, matcher|None, command, timeout) for each requested user-scope id.
+    """(event, matcher|None, command, timeout, on_failure|None) for each requested user-scope id.
 
     Exits 2, before anything is read or written, on an id that is not in the catalogue
     or is not user-scope (a project hook belongs to a project profile, never to the
@@ -190,7 +194,7 @@ def user_desired(hooks: list[dict], ids: list[str], grid: Path) -> list[tuple]:
         grid_s = str(grid)
         if re.search(r'["$`\\\n]', grid_s):
             die(f"grid path {grid_s!r} contains a character that cannot be written safely into a hook command")
-        out.append((h["event"], h.get("matcher"), f'bash "{grid_s}/hooks/run.sh" {hid} {GENERATED}', h["timeout"]))
+        out.append((h["event"], h.get("matcher"), f'bash "{grid_s}/hooks/run.sh" {hid} {GENERATED}', h["timeout"], h.get("on_failure")))
     return out
 
 
@@ -272,7 +276,7 @@ def load_learning_flag(project: Path) -> bool:
 
 
 def desired_for(hooks: list[dict], profile: str, learning: bool = False) -> list[tuple]:
-    """(event, matcher|None, command, timeout) for every project-scope hook the profile
+    """(event, matcher|None, command, timeout, on_failure|None) for every project-scope hook the profile
     includes, plus every `opt_in: learning` hook when the learning flag is on (whatever the
     profile). User-scope hooks are filtered out here and can never reach a project file."""
     rank = PROFILES.index(profile)
@@ -287,7 +291,7 @@ def desired_for(hooks: list[dict], profile: str, learning: bool = False) -> list
         elif PROFILES.index(h["min_profile"]) > rank:
             continue
         command = f"bash {LAUNCHER} {h['id']} {GENERATED}"
-        out.append((h["event"], h.get("matcher"), command, h["timeout"]))
+        out.append((h["event"], h.get("matcher"), command, h["timeout"], h.get("on_failure")))
     return out
 
 
@@ -318,7 +322,7 @@ def iter_owned(settings: dict):
 def merge_owned(settings: dict, desired: list[tuple]) -> dict:
     """Return a copy of `settings` whose owned hook handlers are exactly `desired`.
 
-    desired: [(event, matcher|None, command, timeout)]. Semantics are those of the
+    desired: [(event, matcher|None, command, timeout, on_failure|None)]. Semantics are those of the
     jq `merge_hook` this replaces (find the entry with the same matcher, then append
     the handler unless its command is already there; matcher-less events like
     SessionEnd use the entry with no matcher), plus:
@@ -330,7 +334,8 @@ def merge_owned(settings: dict, desired: list[tuple]) -> dict:
     Hand-written handlers are never edited, reordered or removed. Raises SettingsError
     when something must be added into a container of the wrong type."""
     out = copy.deepcopy(settings)
-    wanted = {(event, matcher, command): timeout for event, matcher, command, timeout in desired}
+    wanted = {(event, matcher, command): (timeout, on_failure)
+              for event, matcher, command, timeout, on_failure in desired}
 
     # -- 1. sweep: drop owned handlers that are not wanted (or are duplicates) -------
     hooks = out.get("hooks")
@@ -354,8 +359,14 @@ def merge_owned(settings: dict, desired: list[tuple]) -> dict:
                     key = (event, matcher, h["command"])
                     if key in wanted and key not in seen:
                         seen.add(key)
-                        if h.get("timeout") != wanted[key]:
-                            h["timeout"] = wanted[key]  # catalogue timeout changed
+                        if h.get("timeout") != wanted[key][0]:
+                            h["timeout"] = wanted[key][0]  # catalogue timeout changed
+                        if h.get("onFailure") != wanted[key][1]:
+                            # catalogue on_failure changed: add, change or drop the field
+                            if wanted[key][1] is None:
+                                h.pop("onFailure", None)
+                            else:
+                                h["onFailure"] = wanted[key][1]
                         kept.append(h)
                     else:
                         removed = True
@@ -371,7 +382,7 @@ def merge_owned(settings: dict, desired: list[tuple]) -> dict:
             del out["hooks"]
 
     # -- 2. add: each desired handler into the entry with the same matcher ----------
-    for event, matcher, command, timeout in desired:
+    for event, matcher, command, timeout, on_failure in desired:
         if "hooks" in out and not isinstance(out["hooks"], dict):
             raise SettingsError("'hooks' is not an object")
         hooks = out.setdefault("hooks", {})
@@ -379,6 +390,8 @@ def merge_owned(settings: dict, desired: list[tuple]) -> dict:
         if not isinstance(entries, list):
             raise SettingsError(f"hooks.{event} is not a list")
         handler = {"type": "command", "timeout": timeout, "command": command}
+        if on_failure is not None:
+            handler["onFailure"] = on_failure
         target = next((e for e in entries
                        if isinstance(e, dict) and isinstance(e.get("hooks"), list)
                        and e.get("matcher") == matcher), None)
@@ -457,14 +470,16 @@ def hook_id(command: str) -> str:
 def describe(current: dict, desired: list[tuple], rel: Path) -> list[str]:
     """One line per drifting hook id for a settings file: missing, stale (timeout), or
     to be removed. Empty when the owned handlers already match `desired`."""
-    have = {(e, m, h["command"]): h.get("timeout") for e, m, h in iter_owned(current)}
-    want = {(e, m, c): t for e, m, c, t in desired}
+    have = {(e, m, h["command"]): (h.get("timeout"), h.get("onFailure")) for e, m, h in iter_owned(current)}
+    want = {(e, m, c): (t, o) for e, m, c, t, o in desired}
     lines = []
     for key in sorted(want, key=lambda k: (k[0], str(k[1]), k[2])):
         if key not in have:
             lines.append(f"missing    {hook_id(key[2])}  ({rel})")
-        elif have[key] != want[key]:
-            lines.append(f"stale      {hook_id(key[2])}  ({rel}: timeout {have[key]} -> {want[key]})")
+        elif have[key][0] != want[key][0]:
+            lines.append(f"stale      {hook_id(key[2])}  ({rel}: timeout {have[key][0]} -> {want[key][0]})")
+        elif have[key][1] != want[key][1]:
+            lines.append(f"stale      {hook_id(key[2])}  ({rel}: onFailure {have[key][1]} -> {want[key][1]})")
     for key in sorted(set(have) - set(want), key=lambda k: (k[0], str(k[1]), k[2])):
         lines.append(f"remove     {hook_id(key[2])}  ({rel})")
     return lines
@@ -491,7 +506,7 @@ def run_user(args, catalogue: list[dict]) -> None:
     if merged != original and not problems:
         problems = [f"differs    {settings}  (duplicate generated entries)"]
 
-    names = ", ".join(sorted(hook_id(c) for _e, _m, c, _t in desired)) or "none"
+    names = ", ".join(sorted(hook_id(c) for _e, _m, c, _t, _o in desired)) or "none"
     if args.check:
         if problems:
             print(f"deploy_hooks --check: {settings} differs from the requested user hooks ({names}):", file=sys.stderr)

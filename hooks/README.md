@@ -87,6 +87,23 @@ A blocked command names the matching `GRID_DISABLED_HOOKS=<id>` line in its mess
 That is the human override; there is deliberately no in-command override an agent could
 add to its own command.
 
+Tuning (read by the two guards; defaults are fine for normal use):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `GRID_GUARD_MAX_CMD` | 100000 | bytes; a command over this size that mentions git is blocked ("command too long to inspect"), because a guard that cannot finish inside its 5 s timeout silently stops guarding |
+| `GRID_SCAN_MAX_LINES` | 3000 | secret scan only: more added lines than this blocks with "diff too large to scan; split the commit" |
+
+## Timeouts
+
+Claude Code treats a hook that times out as non-blocking, so a slow guard is an
+absent guard. Both guards therefore keep their work bounded: the tokenizer is linear in
+the command size, an oversized command is refused instead of scanned, and the secret
+scan refuses a diff it cannot read inside its budget. Both catalogue entries carry
+`"on_failure": "block"`, which `deploy_hooks.py` emits as `"onFailure": "block"` in the
+generated handler so Claude Code itself blocks when the guard fails or times out. That
+field needs Claude Code 2.1.295 or later; an older version ignores or rejects it.
+
 ## Auto-handoff (SessionEnd, machine-level)
 
 What it does: when a session ends, a detached worker checks whether the session was
@@ -236,6 +253,7 @@ ts=<UTC time> session=<id> action=<skip|spawn|done|error> reason=<token> [turns=
    `matcher` (omit for events without one), `min_profile` or `"opt_in": "learning"` (project
    hooks only, exactly one of them; `opt_in` hooks are emitted by the project flag, not a profile), `fail`
    (`closed` or `open`), `timeout`, `model_cost`, a non-empty `cost`, and `description`.
+   A guard also sets `"on_failure": "block"` (see "Timeouts").
 3. Add tests to `tests/test_hooks.bats`. The suite fails if a catalogue id has no script,
    a script has no catalogue entry, or a `cost` is empty.
 4. The gate runs `shellcheck -S warning` over `hooks/*.sh`, `hooks/lib/*.sh` and
