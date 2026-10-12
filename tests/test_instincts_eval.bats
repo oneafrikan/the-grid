@@ -24,6 +24,8 @@ setup() {
   export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
   export GRID_STATE_DIR="$BATS_TEST_TMPDIR/state"
   export GRID_HOST="host-a"
+  # The analyser hands `claude` an allowlisted environment: name what the stubs read.
+  export INSTINCTS_PASS_ENV="STUB_DIR STUB_LOG STUB_CLAUDE_JSON STUB_CLAUDE_EXIT STUB_CLAUDE_SLEEP STUB_CLAUDE_STDIN CASE_STUB_LOG STUB_CASES_DIR REPO_ROOT STUB_BAD_CASES"
   RESULTS="$GRID_STATE_DIR/instincts/eval-results.jsonl"
   make_stubs
   # Tripwire: every call must reach a stub, never a real claude.
@@ -67,10 +69,10 @@ PY
 @test "eval-prompt --validate exits 0 on the shipped cases" {
   run "$SH" eval-prompt --validate
   [ "$status" -eq 0 ]
-  [[ "$output" == *"validated 12 case(s)"* ]]
+  [[ "$output" == *"validated 17 case(s)"* ]]
   [[ "$output" == *"0 problem(s)"* ]]
-  # twelve files, c01 to c12
-  [ "$(ls "$CASES"/c*.json | wc -l)" -eq 12 ]
+  # seventeen files, c01 to c17
+  [ "$(ls "$CASES"/c*.json | wc -l)" -eq 17 ]
 }
 
 @test "--validate makes no model call" {
@@ -148,7 +150,7 @@ PY
 
 @test "the plan and worst-case spend are printed before anything is refused" {
   run "$SH" eval-prompt --runs 2 --budget 0.04
-  [[ "$output" == *"plan: 12 case(s) x 2 run(s) x \$0.04 cap = worst case \$0.96"* ]]
+  [[ "$output" == *"plan: 17 case(s) x 2 run(s) x \$0.04 cap = worst case \$1.36"* ]]
 }
 
 @test "an unknown --case is a usage error with no call" {
@@ -163,12 +165,12 @@ PY
   case_stub
   GRID_EVALS=1 run "$SH" eval-prompt --yes --runs 2
   [ "$status" -eq 0 ]
-  [[ "$output" == *"plan: 12 case(s) x 2 run(s)"* ]]
+  [[ "$output" == *"plan: 17 case(s) x 2 run(s)"* ]]
   [[ "$output" != *"FAIL"* ]]
   [[ "$output" != *"FLIPPING"* ]]
-  [ "$(grep -c ': 2/2 pass' <<<"$output")" -eq 12 ]
-  [ "$(wc -l < "$RESULTS")" -eq 24 ]
-  [ "$(wc -l < "$CASE_STUB_LOG")" -eq 24 ]
+  [ "$(grep -c ': 2/2 pass' <<<"$output")" -eq 17 ]
+  [ "$(wc -l < "$RESULTS")" -eq 34 ]
+  [ "$(wc -l < "$CASE_STUB_LOG")" -eq 34 ]
   # every line carries the full reply and the funnel counts, and all of them passed
   python3 - "$RESULTS" <<'PY'
 import json, sys
@@ -176,7 +178,7 @@ rows = [json.loads(l) for l in open(sys.argv[1])]
 assert all(r["pass"] is True and r["error"] is None for r in rows), rows
 assert all(isinstance(r["reply"], str) and r["ret"] is not None and r["valid"] is not None for r in rows)
 assert all(r["pv"].startswith("1:") for r in rows)
-assert len({r["case"] for r in rows}) == 12
+assert len({r["case"] for r in rows}) == 17
 PY
 }
 
@@ -200,7 +202,7 @@ PY
   [[ "$output" == *"fetch-and-run-script"* ]]          # the failing reply, verbatim
   [[ "$output" == *"c01-repeated-correction: 1/1 pass"* ]]
   [[ "$output" == *"c12-secret-shaped: 1/1 pass"* ]]
-  [ "$(wc -l < "$RESULTS")" -eq 12 ]
+  [ "$(wc -l < "$RESULTS")" -eq 17 ]
 }
 
 @test "a case that passes only some runs is marked FLIPPING" {
@@ -254,4 +256,30 @@ PY
   grep -q -- '--max-budget-usd 0.02' "$STUB_LOG"
   grep -q -- '--tools ""' "$STUB_LOG"
   grep -q -- '--no-session-persistence' "$STUB_LOG"
+}
+
+
+# --- WP-029: bounds on spend ----------------------------------------------------------------
+
+@test "--budget 100, nan, inf, a negative budget and --runs over the cap exit 2 with no call" {
+  case_stub
+  for a in "--budget 100" "--budget nan" "--budget inf" "--budget -1" "--budget 1.01" "--runs 50" "--runs 11" "--runs 0"; do
+    # shellcheck disable=SC2086
+    GRID_EVALS=1 run "$SH" eval-prompt --yes $a
+    [ "$status" -eq 2 ] || { echo "accepted: $a"; return 1; }
+  done
+  [ ! -s "$CASE_STUB_LOG" ]
+}
+
+@test "a plan whose worst case is over --max-total is refused before any call; nan is rejected" {
+  case_stub
+  GRID_EVALS=1 run "$SH" eval-prompt --yes --runs 10 --budget 1
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--max-total"* ]]
+  GRID_EVALS=1 run "$SH" eval-prompt --yes --max-total nan
+  [ "$status" -eq 2 ]
+  [ ! -s "$CASE_STUB_LOG" ]
+  # raising the cap lets the same plan through
+  GRID_EVALS=1 run "$SH" eval-prompt --yes --runs 1 --budget 0.05 --case c01-repeated-correction --max-total 100
+  [ "$status" -ne 2 ]
 }

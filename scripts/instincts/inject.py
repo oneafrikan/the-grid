@@ -19,6 +19,7 @@ Design rules (design.md: Injection):
     re-scrubbed here before it is printed. Invalid lines are skipped.
   * Nothing qualifies -> nothing printed, not even the header.
 """
+import math
 import os
 import sys
 
@@ -42,25 +43,43 @@ PROJECT_BONUS = 0.25   # a project-scoped hint outranks a global one of equal co
 
 
 def _env_num(name: str, default, cast):
-    """Numeric env override; a missing or malformed value falls back to the default."""
+    """Numeric env override; a missing, malformed or non-finite value falls back to the default.
+
+    nan must not get through: `max(nan, 0.5)` is nan and `conf < nan` is never true, so a NaN
+    floor would let every instinct in.
+    """
     try:
-        return cast(os.environ[name])
+        v = cast(os.environ[name])
     except (KeyError, ValueError):
         return default
+    # (ints are always finite; math.isfinite on a huge int would overflow, so test floats only)
+    return default if isinstance(v, float) and not math.isfinite(v) else v
+
+
+END_MARKER = "[end of hints]"
 
 
 def _item_line(m: dict) -> str:
-    """`- <trigger>: <action> (conf 0.60)`, fields re-scrubbed and kept to one plain line."""
-    trigger = lib.sanitize(lib.scrub(m["trigger"]))
-    action = lib.sanitize(lib.scrub(m["action"]))
-    return f"- {trigger}: {action} (conf {m['confidence']:.2f})"
+    """`- hint: "<trigger>: <action>" (conf 0.60)`, fields re-scrubbed and kept to one plain line.
+
+    The text sits inside quotes (a double quote inside it becomes a single quote) and the block
+    ends with END_MARKER, so the model can see where the machine-generated text stops.
+    """
+    trigger = lib.sanitize(lib.scrub(m["trigger"])).replace('"', "'")
+    action = lib.sanitize(lib.scrub(m["action"])).replace('"', "'")
+    return '- hint: "%s: %s" (conf %.2f)' % (trigger, action, m["confidence"])
 
 
-def build(project_id: str) -> str:
-    """The text to print for this project ('' when nothing qualifies)."""
-    min_conf = _env_num("INSTINCTS_MIN_CONF", 0.5, float)
-    max_items = _env_num("INSTINCTS_MAX_ITEMS", 6, int)
-    max_chars = _env_num("INSTINCTS_MAX_CHARS", 1500, int)
+def build(project_id: str, shown: list | None = None) -> str:
+    """The text to print for this project ('' when nothing qualifies).
+
+    `shown`, when given, receives one `id:conf` string per hint that made it into the text.
+    """
+    # The env knobs may tighten the design bounds (0.5 / 6 / 1500) but never lift them: what reaches
+    # a session is capped no matter what the environment says.
+    min_conf = max(_env_num("INSTINCTS_MIN_CONF", 0.5, float), 0.5)
+    max_items = min(_env_num("INSTINCTS_MAX_ITEMS", 6, int), 6)
+    max_chars = min(_env_num("INSTINCTS_MAX_CHARS", 1500, int), 1500)
 
     # Project copies first so that, for an id present in both scopes, the project
     # copy is the one kept (design: ranking prefers the project copy).
@@ -76,12 +95,29 @@ def build(project_id: str) -> str:
     lines = [_item_line(m) for _, m in ranked]
 
     def render(ls: list[str]) -> str:
-        return HEADER + "\n" + "\n".join(ls) + "\n"
+        return HEADER + "\n" + "\n".join(ls) + "\n" + END_MARKER + "\n"
 
     # Drop whole lowest-ranked items until header + items fit the cap.
     while lines and len(render(lines)) > max_chars:
         lines.pop()
+    if shown is not None:
+        shown.extend("%s:%.2f" % (m["id"], m["confidence"]) for _, m in ranked[:len(lines)])
     return render(lines) if lines else ""
+
+
+def record_injection(pid: str, shown: list[str]) -> None:
+    """One run-log line with the injected ids and confidences (which hints reached the session).
+
+    Best effort: a missing script, an unwritable log or a slow disk never breaks the hook.
+    """
+    import subprocess
+    try:
+        subprocess.run(["bash", str(lib.REPO_ROOT / "scripts" / "run-record.sh"), "--role", "instincts",
+                        "--action", "inject", "--outcome", "ok", "--target", pid,
+                        "--note", "ids=" + ",".join(shown)],
+                       capture_output=True, timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def main() -> int:
@@ -94,9 +130,12 @@ def main() -> int:
         pid = lib.git_project_id(root)
         if not pid:
             return 0
-        out = build(pid)
+        shown: list[str] = []
+        out = build(pid, shown)
         if out:
             sys.stdout.write(out)
+            sys.stdout.flush()          # the hints must be out before the (slower) run-log write
+            record_injection(pid, shown)
     except Exception:  # noqa: BLE001 - a SessionStart hook must never fail the session
         pass
     return 0
