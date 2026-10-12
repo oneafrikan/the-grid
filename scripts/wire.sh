@@ -107,6 +107,47 @@ while IFS= read -r h_name; do
   if [ "$h_dir" != "-" ] && ! in_list "$h_dir" "${HARNESS_AGENT_DIRS[@]:-}"; then HARNESS_AGENT_DIRS+=("$h_dir"); fi
 done < <(harness_names)
 
+# raw_is_active <raw> <active harness names...>: <raw> is the skills or agents dir of one
+# of the named harnesses.
+raw_is_active() {
+  local raw="$1" n; shift
+  for n in "$@"; do
+    [ -n "$n" ] || continue
+    if [ "$(harness_field "$n" skills_dir)" = "$raw" ] || [ "$(harness_field "$n" agents_dir)" = "$raw" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# resolve_harness_dirs <label> <active harness names...>
+# Resolves every registry skills/agents dir ONCE, before the audit and before any link is
+# touched (the old code resolved them inside the teardown loop, after the Claude links were
+# already gone, so an unset HOME left the machine skill-less with exit 2). Fills the parallel
+# arrays HD_RAW (registry spelling) and HD_DIR (resolved path) with the dirs that resolve.
+#   unresolvable dir of an ACTIVE harness -> exit 2, nothing changed (the contract)
+#   unresolvable dir of an inactive one   -> skipped, ONE warning on stderr for the lot
+# (inactive dirs are only ever touched to tear down stale links, which cannot be done
+# without a home; the Claude dirs do not depend on it.)
+resolve_harness_dirs() {
+  local label="$1" raw dir warned=0; shift
+  HD_RAW=(); HD_DIR=()
+  for raw in "${HARNESS_SKILL_DIRS[@]:-}" "${HARNESS_AGENT_DIRS[@]:-}"; do
+    [ -n "$raw" ] || continue
+    if dir="$(harness_path "$raw" 2>/dev/null)"; then
+      HD_RAW+=("$raw"); HD_DIR+=("$dir"); continue
+    fi
+    if raw_is_active "$raw" "$@"; then
+      echo "$label: cannot resolve harness dir $raw (is HOME set?); nothing was changed" >&2
+      exit 2
+    fi
+    if [ "$warned" = 0 ]; then
+      echo "$label: warning: HOME is unset, so non-Claude harness dirs cannot be resolved; their stale links were not checked" >&2
+      warned=1
+    fi
+  done
+}
+
 # --- ownership: is a link target inside the grid? ---------------------------------
 # lex_norm <abs path>: collapse "//", "." and ".." lexically into NORM (no forks).
 lex_norm() {
@@ -170,6 +211,14 @@ if [ "${1:-}" = "--check" ]; then
   GRID_DRY_HOME="$tmp/home" GRID_DIR="$GRID_DIR" GRID_HOST="$GRID_HOST" \
     bash "$0" >/dev/null
   chk_skills="$tmp/home/.claude/skills"; chk_agents="$tmp/home/.claude/agents"
+  # The child resolved which harnesses are active (manifest + GRID_HARNESS) and left the
+  # names in $tmp/home/.harness-active; resolve the LIVE dirs against that set up front, so
+  # an unresolvable dir of an active harness is exit 2 here, not a drift report.
+  chk_active=()
+  if [ -s "$tmp/home/.harness-active" ]; then
+    while IFS= read -r h_name; do [ -n "$h_name" ] && chk_active+=("$h_name"); done < "$tmp/home/.harness-active"
+  fi
+  resolve_harness_dirs "wire --check" "${chk_active[@]:-}"
   # "name -> target" lines for grid-owned links only, sorted (C locale: stable).
   # $2 (optional) = live dir: names shadowed there by a real dir/file, or by a link that
   # is not into the grid (foreign or dangling), are skipped, because a real wire skips
@@ -223,9 +272,9 @@ if [ "${1:-}" = "--check" ]; then
       if target_is_ours "$t"; then printf '%s -> %s\n' "$n" "$t"; fi
     done | LC_ALL=C sort
   }
-  for raw in "${HARNESS_SKILL_DIRS[@]:-}" "${HARNESS_AGENT_DIRS[@]:-}"; do
-    [ -n "$raw" ] || continue
-    if ! live="$(harness_path "$raw")"; then rc=1; continue; fi
+  hd_i=0
+  while [ "$hd_i" -lt "${#HD_RAW[@]}" ]; do
+    raw="${HD_RAW[$hd_i]}"; live="${HD_DIR[$hd_i]}"; hd_i=$((hd_i + 1))
     fresh="$( GRID_DRY_HOME="$tmp/home"; harness_path "$raw" )"
     if ! diff <(hlinks "$fresh" "$live") <(hlinks "$live") >"$tmp/harness.diff"; then
       echo "wire --check: harness drift in $live ('<' = should exist, '>' = stale):" >&2
@@ -248,7 +297,9 @@ if [ "${1:-}" = "--check" ]; then
   if [ -s "$tmp/home/.rules-wanted" ]; then
     while IFS=$'\t' read -r rw_name rw_active rw_csv; do
       rw_raw="$(harness_field "$rw_name" rules_file)"
-      if ! rw_file="$(harness_path "$rw_raw")"; then rc=1; continue; fi
+      # An unresolvable file of an inactive harness is not drift (the HOME warning above
+      # already said it was not checked); of an active one it is.
+      if ! rw_file="$(harness_path "$rw_raw" 2>/dev/null)"; then [ "$rw_active" = 1 ] && rc=1; continue; fi
       rw_action="$(harness_rules_action "$rw_file" "$rw_active" "$rw_csv" "$rw_raw")"
       case "$rw_action" in
         emit|remove)
@@ -408,6 +459,10 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ] && ! command -v python3 >/dev/null 2>&1; 
   echo "wire: python3 is required to wire a non-Claude harness (the skill portability filter reads frontmatter with it); nothing was changed" >&2
   exit 2
 fi
+# Hand --check the active set the manifest + GRID_HARNESS resolved to (dry run only).
+[ -z "${GRID_DRY_HOME:-}" ] || printf '%s\n' "${ACTIVE_HARNESSES[@]:-}" > "$GRID_DRY_HOME/.harness-active"
+# Resolve every registry dir now, before the audit or any teardown (see resolve_harness_dirs).
+resolve_harness_dirs wire "${ACTIVE_HARNESSES[@]:-}"
 
 # --- predicates ---------------------------------------------------------------
 repo_is_denied()  { local n="$1" r; for r in "${DENY_REPOS[@]:-}";   do [ "$r" = "$n" ] && return 0; done; return 1; }
@@ -505,9 +560,8 @@ teardown_grid_links "$AGENTS_DIR"
 # function is the same one, so the same ownership test applies: only a symlink into
 # "$GRID_DIR"/ goes; real files, foreign and sibling-prefix links stay. A dir that does
 # not exist is skipped, so nothing is created for a harness nobody uses.
-for h_raw in "${HARNESS_SKILL_DIRS[@]:-}" "${HARNESS_AGENT_DIRS[@]:-}"; do
-  [ -n "$h_raw" ] || continue
-  h_dir="$(harness_path "$h_raw")" || { echo "wire: cannot resolve harness dir $h_raw" >&2; exit 2; }
+for h_dir in "${HD_DIR[@]:-}"; do
+  [ -n "$h_dir" ] || continue
   teardown_grid_links "$h_dir"
 done
 
@@ -919,7 +973,10 @@ while IFS= read -r h_name; do
     printf '%s\t%s\t%s\n' "$h_name" "$rl_active" "$rules_csv" >> "$GRID_DRY_HOME/.rules-wanted"
     continue
   fi
-  if ! rl_file="$(harness_path "$rl_raw")"; then
+  if ! rl_file="$(harness_path "$rl_raw" 2>/dev/null)"; then
+    # Inactive harness with no home to resolve against: skipped (the single HOME warning
+    # printed up front covers it); an active one cannot reach here (exit 2 before any write).
+    [ "$rl_active" = 1 ] || continue
     echo "wire: rules delivery failed for $rl_raw: cannot resolve the path" >&2; rules_failed=1; continue
   fi
   rl_action="$(harness_rules_action "$rl_file" "$rl_active" "$rules_csv" "$rl_raw")"

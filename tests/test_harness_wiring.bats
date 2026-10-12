@@ -730,3 +730,49 @@ description: >
   GRID_HARNESS=antigravity wire --check
   [ "$status" -eq 0 ]
 }
+
+# ---------------------------------------------------------------- WP-007: HOME unset
+
+# wire_nohome [args...]: wire.sh with HOME and GRID_HARNESS_HOME unset, so every "~/" registry
+# path is unresolvable. SKILLS_DIR / AGENTS_DIR / RULES_DIR / CLAUDE_CONFIG_DIR stay set
+# (common_setup exports them), so the Claude side does not need HOME at all.
+wire_nohome() {
+  GRID_DIR="$MOCK_GRID" run --separate-stderr env -u HOME -u GRID_HARNESS_HOME \
+    bash "$REPO_ROOT/scripts/wire.sh" "$@"
+}
+
+@test "HOME unset, no harness active: exit 0, Claude links rebuilt, one warning" {
+  wire
+  [ "$status" -eq 0 ]
+  local before; before="$(tree "$MOCK_SKILLS")"
+  wire_nohome
+  [ "$status" -eq 0 ]
+  [ "$(tree "$MOCK_SKILLS")" = "$before" ]
+  [ -L "$MOCK_SKILLS/skill-alpha" ]
+  # Exactly one HOME warning, not one per registry dir.
+  [ "$(printf '%s\n' "$stderr" | grep -c 'HOME is unset')" -eq 1 ]
+}
+
+@test "HOME unset, harness active, GRID_HARNESS_HOME unset: exit 2, links unchanged" {
+  wire
+  local before; before="$(tree "$MOCK_SKILLS")"
+  GRID_HARNESS=codex wire_nohome
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"nothing was changed"* ]]
+  [ "$(tree "$MOCK_SKILLS")" = "$before" ]     # the Claude links were not torn down first
+  [ -L "$MOCK_SKILLS/skill-alpha" ]
+}
+
+@test "--check with HOME unset and an active harness exits 2" {
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  wire_nohome --check
+  [ "$status" -eq 2 ]
+}
+
+@test "--check with HOME unset and no active harness does not report drift" {
+  wire
+  wire_nohome --check
+  [ "$status" -eq 0 ]
+}
