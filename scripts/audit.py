@@ -16,9 +16,10 @@ Exit codes: 0 no un-allowed high finding | 1 at least one high | 2 usage,
 policy, allowlist or CURATION.md error (including a missing target).
 
 Only the Python standard library is used (plus scripts/lib/miniyaml.py, the
-restricted-YAML reader for the policy files, and scripts/lib/fmyaml.py, the YAML
-structure scanner for SKILL.md / agent frontmatter; both live in lib/ next to this
-file) so the scanner runs on a bare machine before any virtualenv exists.
+restricted-YAML reader for the policy files, scripts/lib/fmshape.py, the shape
+whitelist for SKILL.md / agent frontmatter, and scripts/lib/fmyaml.py, the YAML structure
+scanner that judges a frontmatter `hooks` block; all live in lib/ next to this file) so the
+scanner runs on a bare machine before any virtualenv exists.
 
 Do NOT run this under `python3 -I`: isolated mode drops the script directory
 and the sys.path insert below would not be enough for `import audit` in tests.
@@ -38,6 +39,7 @@ import urllib.parse
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, "lib"))
 import miniyaml  # noqa: E402  (needs the sys.path insert above)
+import fmshape  # noqa: E402
 import fmyaml  # noqa: E402
 
 # --------------------------------------------------------------------------
@@ -52,6 +54,7 @@ DEFAULT_BUILTIN = {
     "oversize-file": "low",
     "unscannable-file": "low",
     "vendored-deps": "high",
+    "frontmatter-complex": "high",
     "source-not-allowed": "low",
     "source-uncurated": "low",
     "allow-unused": "low",
@@ -77,6 +80,7 @@ BUILTIN_MESSAGES = {
     "oversize-file": "file larger than limits.max_file_bytes; not scanned",
     "unscannable-file": "binary content (NUL byte) that is not a known non-text format; not scanned",
     "vendored-deps": "vendored node_modules directory; not scanned",
+    "frontmatter-complex": "frontmatter outside the plain shape the scanner can judge reader-independently",
     "allow-unused": "allowlist entry matched nothing in this run",
     "allow-stale": "hash-pinned allowlist entry no longer matches the file; entry inactive",
 }
@@ -242,16 +246,23 @@ def _search(rx, text, tick=None):
     return None
 
 
-# A SKILL.md / agent .md frontmatter is READ AS YAML (scripts/lib/fmyaml.py), not scanned for
-# lines: every `hooks` key at any depth (block or flow, quoted, under any parent, in an anchored
-# mapping) is a hooks block, and the block is judged DENY BY DEFAULT. The only lines of a hooks
-# block that are not findings are its own structure, decided from the parse tree below: the
-# `hooks:` key, the event keys, and `matcher` / `type: command` / `statusMessage` / `timeout`
-# pairs whose whole line is just that pair. EVERYTHING ELSE (any `command`, `run`, `exec`,
-# `script`, `args`, `prompt`, `url`, flow mappings, anchors and aliases, unknown keys or hook
-# types, a value on the next line, a trailing comment) is a `hook-declared` finding that an
-# allowlist entry must pin by whole line. Deny-by-default on purpose: a pattern that names what
-# is dangerous is always one spelling behind.
+# A SKILL.md / agent .md frontmatter is checked in two layers, neither of which models Claude
+# Code's own frontmatter reader (it cuts at the FIRST `---` anywhere, parses strictly and, when
+# that throws, repairs the text line by line; every scanner that imitated one parser was bypassed):
+#   1. scripts/lib/fmshape.py, a shape WHITELIST: a frontmatter that is not made only of plain
+#      `key: value` lines, one-line quoted scalars, block scalars, simple lists, one-level maps and
+#      the top-level hooks block is a `frontmatter-complex` finding (an allowlist entry pins each
+#      offending line), as is a `---` anywhere inside the text and a `hooks` word in a key position
+#      that the second layer did not judge. This is what keeps reader differences out of reach.
+#   2. scripts/lib/fmyaml.py reads what passed layer 1 as YAML and finds every `hooks` key; the
+#      block is judged DENY BY DEFAULT.
+# The only lines of a hooks block that are not findings are its own structure, decided from the
+# parse tree below: the `hooks:` key, the event keys, and `matcher` / `type: command` /
+# `statusMessage` / `timeout` pairs whose whole line is just that pair. EVERYTHING ELSE (any
+# `command`, `run`, `exec`, `script`, `args`, `prompt`, `url`, flow mappings, anchors and aliases,
+# unknown keys or hook types, a value on the next line, a trailing comment) is a `hook-declared`
+# finding that an allowlist entry must pin by whole line. Deny-by-default on purpose: a pattern
+# that names what is dangerous is always one spelling behind.
 _HOOK_EVENTS = frozenset(("PreToolUse", "PostToolUse", "Stop", "SubagentStop", "UserPromptSubmit",
                           "SessionStart", "SessionEnd", "Notification", "PreCompact"))
 # Whole-value patterns (fullmatch on a value the parser already isolated; single character
@@ -413,7 +424,8 @@ def _frontmatter_tool_lists(lines):
     i = 1
     while i < len(lines):
         text = lines[i].rstrip("\r")
-        if text in ("---", "..."):
+        # Claude's reader ends the frontmatter at the first `---` anywhere (fmshape flags it).
+        if "---" in text or text == "...":
             break
         if re.match(r"""^["']?allowed-tools["']?\s*:\s*(#.*)?$""", text):
             items = []
@@ -988,15 +1000,19 @@ class Scan:
             self.findings[before:] = [f for f in self.findings[before:]
                                       if (f["rule"], f["severity"], f["excerpt"]) not in known]
 
-    def _hook_block_findings(self, lines, display, tier, file_sha, fm):
+    def _hook_block_findings(self, lines, display, tier, file_sha, fm, shape=None):
         """Default-deny over the frontmatter's hooks blocks (see _HookStructure): every non-blank
         line of a block that is not pure structure is a `hook-declared` finding, reported at its
         own line so an allowlist entry pins that exact line. Two fail-closed extras: a frontmatter
         that could not be read is itself a finding, and so is the token `hooks:` anywhere in a
         frontmatter whose parse found no hooks key (the parser and the consumer may disagree)."""
         rule = next((r for r in self.policy.rules if r.id == "hook-declared"), None)
-        if rule is None or fm is None:
+        if rule is None:
             return
+        if fm is None:
+            # The scanner's own reader saw no frontmatter. Claude's reader may still (a U+FEFF
+            # after the opening fence): the shape whitelist below is what reports that.
+            fm = fmyaml.Frontmatter()
         have = {(f["rule"], f["line"]) for f in self.findings if f["path"] == display}
         sev = rule.owned_severity if (tier == "owned" and rule.owned_severity) else rule.severity
 
@@ -1023,10 +1039,35 @@ class Scan:
         if not fm.hooks:
             for idx in fm.token_lines:
                 flag(idx, lines[idx].rstrip("\r"))
+        # Backstop, independent of every parser: the whole word `hooks` in a key position of the
+        # frontmatter that is not inside a hooks block the parse tree found and judged above.
+        if shape is not None:
+            covered = [(first, last) for first, last, _st in _hook_regions(fm, lines)] if fm else []
+            for idx in shape.word_lines:
+                if not any(first <= idx <= last for first, last in covered) and idx < len(lines):
+                    flag(idx, lines[idx].rstrip("\r"))
+            # The shape whitelist (scripts/lib/fmshape.py): a line outside the plain grammar, or
+            # a `---` that makes Claude's reader and the scanner see different text.
+            frule_sev = self.policy.builtin.get("frontmatter-complex", "high")
+            if tier == "owned":
+                frule_sev = "low"                       # as hook-declared: the grid's own assets
+            seen_lines = set()
+            for idx, why in shape.violations:
+                idx = min(idx, len(lines) - 1)
+                if idx in seen_lines:
+                    continue
+                seen_lines.add(idx)
+                raw = lines[idx].rstrip("\r")
+                self._add("frontmatter-complex", frule_sev, display, idx + 1, "hook", tier,
+                          BUILTIN_MESSAGES["frontmatter-complex"] + ": " + why,
+                          excerpt=raw, raw_line=raw)
 
     def _scan_text(self, text, fclass, name, rel_target, rel_root, display, tier, file_sha):
         """Run the line rules over one text view of a file."""
         loaded_md = name == "SKILL.md" or _is_agent_md(rel_target, rel_root, name)
+        # The shape whitelist reads the text as it is on disk (a bare CR is itself a violation),
+        # so it runs before the line-ending normalisation below.
+        shape = fmshape.check(text) if loaded_md else None
         if loaded_md:
             # YAML (and so Claude's frontmatter reader) breaks lines on CRLF and on a lone CR
             # as well as LF; split the way it does so a CR cannot hide a key from the scan.
@@ -1051,7 +1092,7 @@ class Scan:
                 self._scan_line(lines[p].rstrip("\r"), p + 1, classes[p], display, tier,
                                 file_sha, ext, only_physical=True)
         if loaded_md:
-            self._hook_block_findings(lines, display, tier, file_sha, fm)
+            self._hook_block_findings(lines, display, tier, file_sha, fm, shape)
 
     def _line_classes(self, lines, fclass, name, rel_target, rel_root, fm=None):
         """Class of each line: the file's class, except (1) frontmatter `hooks:`

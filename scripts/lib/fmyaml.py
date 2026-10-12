@@ -666,8 +666,9 @@ def analyse(lines):
     close = None
     for i in range(1, len(lines)):
         t = lines[i].rstrip("\r")
-        # Claude's own extraction: a `---` at column 0, blanks allowed after it. An indented
-        # `---` or any `...` is content (it can sit inside a block scalar).
+        # This scanner's cut: a `---` at column 0, blanks allowed after it. An indented `---` or
+        # any `...` is content (it can sit inside a block scalar). NOT Claude's cut (its reader
+        # stops at the first `---` anywhere); scripts/lib/fmshape.py flags the difference.
         if t.startswith("---") and t[3:].strip(" \t") == "":
             close = i
             break
