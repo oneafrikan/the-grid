@@ -8,6 +8,7 @@ React conventions: Rules of Hooks, Effects, state placement, the Server Componen
 - `testing.md` loads on `*.test.*` and `*.spec.*` files with a `.tsx` or `.jsx` extension. Its first bullet is conditional on the project using Testing Library; the other bullets name Testing Library APIs.
 - Server Function bullets (`security.md`) sit on `.tsx` and `.jsx`; a separate actions file written as `.ts` is not matched.
 - The `Server Components` bullets in `patterns.md` are conditional on the project using React Server Components.
+- Bullets about writing a composable (Hook) load only when a `.tsx` or `.jsx` file is open, so they reach the author only while consuming it.
 - TypeScript rules (no `React.FC`, prop typing) are not covered here; `typescript` is the pack for type rules.
 
 ## Sources
@@ -27,6 +28,6 @@ Adapted from affaan-m/ECC (MIT), see rules/THIRD_PARTY_NOTICES.txt. Source: `rul
 |---|---|---|
 | hooks.md | hooks.md | Kept: Rules of Hooks, "when not to use an Effect", cleanup, `useMemo` as optimization only. Dropped: `useSyncExternalStore`, `useRef` and React 19 sections, the lint-configuration section and the custom-Hook template. |
 | patterns.md | patterns.md | Kept: state placement, keys, the Server and Client boundary. Dropped: lifting state up and the state-setter rule (basic React, reviewer B4),  container and presentational split, compound components, portals, form library choices, Suspense and error-boundary templates, the Next.js and React Native pointer sections and the skill reference. |
-| security.md | security.md | Kept: `dangerouslySetInnerHTML` and Server Function input validation. Dropped: the Trusted Types bullet (the cited page states no hazard for omitting it), URL-scheme, `target="_blank"`, env-var, prototype-pollution, SSR-injection, source-map and third-party sections (no cited react.dev page states them), the CSP section (see `web`) and the agent-support section. |
+| security.md | security.md | Kept: `dangerouslySetInnerHTML` and Server Function input validation. Dropped: URL-scheme, `target="_blank"`, env-var, prototype-pollution, SSR-injection, source-map and third-party sections (no cited react.dev page states them), the CSP section (see `web`) and the agent-support section. |
 | testing.md | testing.md | Kept: query priority and async queries. Dropped: the MSW, Playwright and Cypress sections, snapshot advice, setup helpers, accessibility-assertion helpers, the coverage-targets section and the skill reference. |
 | coding-style.md | none | Dropped: file extensions, naming, component shape, JSX and import layout are house style; the Server and Client boundary moved to patterns.md. |

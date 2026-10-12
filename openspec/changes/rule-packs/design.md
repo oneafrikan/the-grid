@@ -189,7 +189,7 @@ python3 scripts/rules.py emit --harness cursor|agents-md|gemini --packs sql,bash
 | `--check` | write nothing; exit 1 if a run would change anything |
 | `--root` | the-grid checkout whose `rules/` is read (default: `GRID_DIR`, else the repo containing the script); same flag as `lint` |
 
-- Exit codes: 0 done / no drift; 1 drift under `--check`; 2 usage or refusal (unknown harness or pack, unbalanced markers, block over cap, `--out` of the wrong type such as an existing file for `cursor`). On exit 2 nothing is written.
+- Exit codes: 0 done / no drift; 1 drift under `--check`; 2 usage or refusal (unknown harness or pack, unbalanced markers, `--out` of the wrong type such as an existing file for `cursor`; also a selected pack that fails re-lint, which is excluded while the clean packs are still delivered); 3 block over cap. On exit 3 nothing is written.
 - Stdout: one line per change, `wrote <path>` or `removed <path>`; nothing when already up to date. Errors go to stderr.
 - Output is deterministic: packs and files sorted in C locale, no timestamps.
 - `cursor`: one file per rule, `<out>/grid-<pack>-<topic>.mdc`:
@@ -221,8 +221,8 @@ Apply each rule only when working on files matching its globs.
 ```
 
   - The block is replaced between the markers; everything outside is preserved byte-for-byte. Exactly one BEGIN and one END or the command exits 2 without writing.
-  - Block size over 12288 bytes (constant `BLOCK_CAP` in `rules.py`, not a flag) exits 2 with a message to choose fewer packs. These files are always loaded, so the cap is the budget.
-  - Emitting with an empty selection removes the block; if the file then contains nothing else it is deleted.
+  - Block size over 12288 bytes (constant `BLOCK_CAP` in `rules.py`, not a flag) exits 3 with a message to choose fewer packs. These files are always loaded, so the cap is the budget.
+  - Emitting with an empty selection removes the block; if the file then contains nothing else it is truncated to 0 bytes and kept.
 
 ## Token budget
 

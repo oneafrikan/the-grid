@@ -8,6 +8,7 @@ Ruby and Rails hazards: `rescue` and `Hash` pitfalls, injection and deserializat
 - `security.md` loads on `.rb` files. Its Active Record bullet is conditional on the project using Active Record.
 - `rails-controllers.md`, `rails-models.md` and `rails-views.md` load on the standard Rails directories (`app/controllers`, `app/models`, `app/views` plus `app/helpers`). Rails is detected by directory layout only: a non-Rails project that has an `app/models/` directory loads them too, and a Rails app that keeps controllers elsewhere does not.
 - `rspec.md` loads under `spec/`, RSpec's default directory; a project using another layout is not matched. Minitest is not covered: its only candidate bullet (Rails `use_transactional_tests`) was deleted after review (B8: `test/` also holds non-Rails suites).
+- `rails-views.md` loads on `.erb` views only: `.haml`, `.slim` and `.jbuilder` views are not matched.
 - `Gemfile`, `*.gemspec`, `config.ru` and `config/` files are not matched; no cited source supports a bullet for them.
 - RuboCop configuration and a Ruby or Rails version target are not covered.
 

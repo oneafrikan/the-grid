@@ -4,6 +4,7 @@ Python conventions: PEP 8 and PEP 484 pitfalls, standard-library security, pytes
 
 ## Scope
 
+- Bullets name a minimum version where the cited page gives one.
 - `style.md` and `security.md` load on `**/*.py`; `.pyi` stub files are not matched (the bullets are about runtime code).
 - `testing.md` loads on `test_*.py`, `*_test.py` and `conftest.py`.
 - `testing.md` is written for pytest (its heading says so); `unittest` projects match the same globs.
@@ -13,7 +14,7 @@ Python conventions: PEP 8 and PEP 484 pitfalls, standard-library security, pytes
 
 | Rule file | Source |
 |---|---|
-| style.md | https://peps.python.org/pep-0008/ https://peps.python.org/pep-0484/ https://docs.python.org/3/tutorial/controlflow.html https://docs.python.org/3/tutorial/errors.html https://typing.python.org/en/latest/spec/protocol.html |
+| style.md | https://fastapi.tiangolo.com/tutorial/response-model/ https://peps.python.org/pep-0008/ https://peps.python.org/pep-0484/ https://docs.python.org/3/tutorial/controlflow.html https://docs.python.org/3/tutorial/errors.html https://typing.python.org/en/latest/spec/protocol.html |
 | security.md | https://docs.python.org/3/library/subprocess.html https://docs.python.org/3/library/pickle.html https://docs.python.org/3/library/functions.html https://docs.python.org/3/library/random.html https://docs.python.org/3/library/hmac.html https://docs.python.org/3/library/tempfile.html https://docs.python.org/3/reference/simple_stmts.html https://docs.python.org/3/library/tarfile.html |
 | testing.md | https://docs.pytest.org/en/stable/how-to/monkeypatch.html https://docs.pytest.org/en/stable/how-to/tmp_path.html https://docs.pytest.org/en/stable/how-to/assert.html https://docs.pytest.org/en/stable/reference/reference.html https://docs.pytest.org/en/stable/how-to/fixtures.html https://docs.pytest.org/en/stable/how-to/mark.html |
 | fastapi.md | https://fastapi.tiangolo.com/async/ https://fastapi.tiangolo.com/tutorial/bigger-applications/ https://fastapi.tiangolo.com/tutorial/response-model/ https://fastapi.tiangolo.com/tutorial/extra-models/ https://fastapi.tiangolo.com/tutorial/dependencies/dependencies-with-yield/ |

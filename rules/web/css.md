@@ -11,7 +11,7 @@ paths:
 - Register a custom property with `@property` when it needs a type, a controlled `inherits` or an `initial-value`; an invalid value then falls back to `initial-value`.
 
 ## Motion
-- Animate `transform` and `opacity` only; animating `top` or `left` triggers layout or paint on every frame.
+- Prefer animating `transform` and `opacity`; before animating any other property, check its impact on the rendering pipeline and avoid properties that trigger layout or paint (such as `top` or `left`) unless it is absolutely necessary.
 - Add a `@media (prefers-reduced-motion: reduce)` override that tones down scaling or panning animation, which can trigger vestibular motion disorders.
 - Set `will-change` only as a last resort for an existing performance problem; on many elements it slows the page down.
 

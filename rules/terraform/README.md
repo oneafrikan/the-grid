@@ -7,6 +7,8 @@ files only; OpenTofu is not covered by the cited sources.
 ## Scope
 
 - All three rule files load on `**/*.tf`.
+- The `style.md` layout bullets are written for a root module (`main.tf`, `variables.tf`,
+  `outputs.tf`, `providers.tf`); `modules.md#4` says a called module omits provider blocks.
 - `.tfvars` and `.terraform.lock.hcl` are not matched by any glob: a glob for either would
   load every `safety.md` bullet on a file that only one or two of them concern (the
   `.tfvars` and lock-file bullets load when a `.tf` file is read instead).
