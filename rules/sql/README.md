@@ -1,7 +1,8 @@
 # sql
 
 Warehouse-first SQL conventions (BigQuery/GoogleSQL), plus safety rules for parameterised
-queries and DML. Not tuned for MySQL/Postgres OLTP. Loads on every `*.sql` file.
+queries and DML. Not tuned for MySQL/Postgres OLTP. Loads on every `*.sql` file, so
+bullets that name BigQuery apply to that dialect only; a glob cannot tell dialects apart.
 
 ## Sources
 
