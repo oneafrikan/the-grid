@@ -484,6 +484,10 @@ stub_issue() {
   jq -n --arg t "$title" --rawfile b "$STUB_DIR/issue-$n.body" --argjson l "[${labels}]" '{title:$t,body:$b,labels:$l}' > "$STUB_DIR/issue-$n.json"
 }
 
+# After this PATH still lists the removed stub dir, so a command a test left running in the
+# background (a detached hook) resolves the REAL gh/claude/curl from then on. The "no network,
+# no model call" promise in the header holds only while the stub dir exists: wait for
+# background work to finish before calling this (see tests/test_issue_loop_hooks.bats).
 clean_stubs() {
   if [ -n "${STUB_DIR:-}" ]; then rm -rf "$STUB_DIR"; fi
   unset STUB_DIR STUB_LOG STUB_ENV_LOG STUB_COMMENTS STUB_MINT_LOG GRID_CLAUDE GRID_APP_TOKEN_BIN
