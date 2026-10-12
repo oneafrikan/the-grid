@@ -15,7 +15,9 @@
 #   5. exec bash hooks/scripts/<id>.sh     -> stdin (the hook payload) passes through
 #
 # Exit codes are Claude Code's: only 2 blocks a PreToolUse call; any other non-zero
-# is a visible, non-blocking error.
+# is a visible, non-blocking error UNLESS the handler carries "onFailure": "block", which
+# deploy_hooks.py emits for both guards (Claude Code 2.1.295 or later): then any exit other
+# than 0 or 2, a failure to start and a timeout all block. See hooks/README.md "Timeouts".
 #
 # No readlink -f: it does not exist on stock macOS.
 

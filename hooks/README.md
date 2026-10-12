@@ -91,8 +91,10 @@ Tuning (read by the two guards; defaults are fine for normal use):
 
 | Variable | Default | Effect |
 |---|---|---|
-| `GRID_GUARD_MAX_CMD` | 100000 | bytes; a command over this size that mentions git is blocked ("command too long to inspect"), because a guard that cannot finish inside its 5 s timeout silently stops guarding |
-| `GRID_SCAN_MAX_LINES` | 3000 | secret scan only: more candidate lines (lines some pattern could match) than this blocks with "diff too large to scan; split the commit" |
+| `GRID_GUARD_MAX_CMD` | 20000 | bytes, counted on the text with quotes removed; a command over this size that mentions git is blocked ("command too long to inspect"), because a guard that cannot finish inside its 5 s timeout silently stops guarding |
+| `GRID_GUARD_MAX_TOKENS` | 2500 | blanks and separators in the command (cost follows token count as much as size); the same block when over |
+| `GRID_GUARD_MAX_GIT_CALLS` | 40 | secret scan only: git calls that need a repository check (plain ones such as `git status` are free); more than this blocks with the same message |
+| `GRID_SCAN_MAX_LINES` | 1000 | secret scan only: more candidate lines (lines some pattern could match) than this blocks with "diff too large to scan; split the commit" |
 | `GRID_SCAN_MAX_FILES` | 500 | secret scan only: a `git add ... && git commit` in one command that would stage more files than this blocks with "stage in a separate call so the scan can see it" |
 | `GRID_SCAN_MAX_BYTES` | 5242880 | secret scan only: the same block when the files the add would stage hold more bytes than this |
 
@@ -100,11 +102,17 @@ Tuning (read by the two guards; defaults are fine for normal use):
 
 Claude Code treats a hook that times out as non-blocking, so a slow guard is an
 absent guard. Both guards therefore keep their work bounded: the tokenizer is linear in
-the command size, an oversized command is refused instead of scanned, and the secret
-scan refuses a diff it cannot read inside its budget. Both catalogue entries carry
+the command size, an oversized or token-dense command is refused instead of scanned, the
+secret scan refuses a diff it cannot read inside its budget, and a candidate line over
+256 KB blocks as `oversize-line`. Both catalogue entries carry
 `"on_failure": "block"`, which `deploy_hooks.py` emits as `"onFailure": "block"` in the
-generated handler so Claude Code itself blocks when the guard fails or times out. That
-field needs Claude Code 2.1.295 or later; an older version ignores or rejects it.
+generated handler so Claude Code itself blocks when the guard fails or times out.
+Claude Code 2.1.295 or later is a hard requirement for that guarantee: an older version
+ignores the field (a timed-out guard then lets the command through) or rejects the
+settings entry. Settings written to a project's shared file (`settings.json`) carry the
+field for every teammate, including one without the-grid installed: for them a missing
+`run.sh` (exit 127) blocks every Bash call until the entry is removed or `GRID_HOOKS=off`
+is set, so prefer the local settings target for a team that does not all use the-grid.
 
 ## Auto-handoff (SessionEnd, machine-level)
 
@@ -237,9 +245,12 @@ ts=<UTC time> session=<id> action=<skip|spawn|done|error> reason=<token> [turns=
 
 - Only exit **2** blocks a `PreToolUse` call; the stderr text is shown to the agent.
 - Any other non-zero exit, including **127** ("command not found", for example a
-  missing `run.sh`), is a visible, non-blocking error. A guard whose script is missing
-  therefore stops guarding, visibly. That is deliberate: bricking every Bash call on a
-  machine without the-grid is worse.
+  missing `run.sh`), is normally a visible, non-blocking error. The two guards are emitted
+  with `"onFailure": "block"` (Claude Code 2.1.295 or later), which turns a failure to
+  start, a timeout and any exit other than 0 into a block. So a missing `run.sh` now blocks
+  every Bash call: the guard fails closed instead of silently turning off. The way out is
+  `GRID_HOOKS=off` (or removing the entry); see "Timeouts" for the shared-settings
+  consequence.
 - The one failure inside our control that would otherwise turn a guard into a silent
   no-op is a missing `jq`, so the guards exit 2 when `jq` is absent. That blocks every
   Bash call (not only git) until `jq` is installed, or until `claude` is restarted with
@@ -276,30 +287,53 @@ The guards do not inspect:
 - `git -c alias.x=...` one-shot aliases,
 - a bash/sh/eval payload nested more than one level deep (`bash -c "bash -c '...'"`),
 - ANSI-C escape decoding (`$'\x2d\x2dno-verify'`) and names spliced from `${x}`,
+- other shell expansions that build a word: brace expansion (`{git,commit,-n}`,
+  `--no-{verify,x}`), pathname globs in a command word (`/usr/bin/g?t commit -n`), and
+  `${x}` / `$((..))` results,
+- a heredoc fed to something that is not named as a shell (`ssh host <<EOF`, a script that
+  reads stdin): the body is data to the guard,
+- `cp`, `ln -sf`, `dd`, `install`, `unlink` and `find -delete` are read as writers, but a
+  hook file changed by a program the guard does not know (a script, `git` itself via
+  `core.hooksPath`) is not,
 - writes made with the Write, Edit or MultiEdit tools (a hook script or `.git/config`
   edited that way is out of scope; only Bash commands are read).
 
 Where a git call is looked for: every word of a command segment that is `git` (any letter
 case, any path prefix) starts a git call, so `if ...; then git ...; fi`, `( git ... )`,
 `{ git ...; }`, `! git`, `timeout 5 git ...`, `nohup`, `setsid`, `env -u X`, `find -exec`,
-`>/dev/null git ...` and `$(git ...)` are all read. `bash|sh|zsh|dash|ksh|busybox -c`,
-`eval` and `env -S` payloads are re-read once. Parentheses end a segment and a
-word-initial `#` starts a comment, so `git commit # -n` is just `git commit`.
+`>/dev/null git ...`, `$(git ...)` and backticks are all read, including `$( )` and
+backticks inside double quotes (`echo "$(git push --force)"`); the commands inside such a
+substitution are checked as their own segments, after the outer command.
+`bash|sh|zsh|dash|ksh|busybox -c`, `eval` and `env -S` payloads are re-read once.
+Parentheses end a segment and a word-initial `#` starts a comment, so `git commit # -n` is
+just `git commit`. A backslash-newline joins a word (`git commit --no-\<newline>verify` is
+`--no-verify`).
+
+Quote state is tracked so that one quote cannot hide a later command: a heredoc body is
+data, not code, for quote tracking; `$'..'` strings end at an unescaped `'`; `$( )` inside
+double quotes has its own quotes. A heredoc body is read as code only when the heredoc
+feeds a shell (`bash <<EOF`) or when a body line holds `$(` or a backtick under an unquoted
+delimiter (the shell would run it); other body lines are skipped, so a commit message that
+says "git push --force" does not block. If a quote or substitution is still open at the
+end of the command, the guard blocks with "a quote or substitution in this command is not
+closed": it cannot tell where later commands start, so it fails closed.
 
 Accepted false blocks (a mistake-catcher errs towards blocking):
 
 - any word that is `git` starts a git call, so `echo git commit -n` blocks,
 - `HUSKY=0 npm ci` and `echo HUSKY=0` block (the assignment is the signal, not the command),
 - `git config core.hooksPath <dir>` blocks even when the directory is a legitimate hooks dir,
-- a heredoc body outside quotes is read as ordinary text: an apostrophe in it opens a quote
-  span (not stripped, because `bash <<EOF` bodies really run).
+- an unclosed quote or substitution blocks (see above), even in a command that is only an
+  unfinished one-liner.
 
 Hook-disabling routes that are blocked: `-c` / `--config-env` with a hooksPath key,
 `GIT_CONFIG_*`, `GIT_DIR`, `GIT_WORK_TREE`, `GIT_EXEC_PATH` and `GIT_TEMPLATE_DIR`
 assignments, `HUSKY=0`, `HUSKY_SKIP_HOOKS`, `LEFTHOOK=0`, `LEFTHOOK_EXCLUDE`,
 `PRE_COMMIT_ALLOW_NO_CONFIG`, `git config --unset[-all]` / `unset` of hooksPath, `git
-config set` of hooksPath, and a redirect, `tee`, `truncate`, `chmod`, `rm`, `mv` or
-`sed -i` that names `.git/config`, `.git/hooks` or `.githooks`. A bare `SKIP=...` is not
+config set` of hooksPath, `include.path` and `includeIf.*.path` set through `-c`,
+`--config-env` or `git config` (an included file can set hooksPath), and a redirect, `tee`,
+`truncate`, `chmod`, `rm`, `mv`, `cp`, `ln`, `install`, `dd`, `unlink`, `find -delete` or
+`sed -i` / `perl -pi` that names `.git/config`, `.git/hooks` or `.githooks`. A bare `SKIP=...` is not
 matched. Anyone who must edit those files by shell uses the kill switch above.
 
 How flag words are read: quotes and backslashes are removed the way the shell removes
@@ -308,8 +342,8 @@ value word of an option such as `-m`, `--message` or `--author` is skipped, whic
 commit message that only mentions a flag from blocking. A flag-looking word that is the
 value of an option the guard does not list (`git log --grep "--no-verify"`) is blocked:
 a known, accepted false positive. git accepts any unique prefix of a long option, so
-`--no-verify` is blocked from 7 characters (`--no-ve`) and `git push --mirror` from 5
-(`--mir`); `--force` has no valid abbreviation.
+`--no-verify` is blocked from 7 characters (`--no-ve`) and `git push --mirror` from 4
+(`--mi`); `--force` has no valid abbreviation.
 
 The secret scan covers the patterns in `lib/secret-patterns.sh` and nothing else: no
 entropy scoring, no token split over several lines, and an unquoted assigned value that
