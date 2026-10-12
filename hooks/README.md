@@ -241,7 +241,7 @@ proven live (operator check B1), so the rules are not the only barrier:
 1. A change (content compared, before and after) to git `config`, `HEAD`, `info/`,
    `hooks/`, a submodule's config and hooks, a linked worktree's config, hooks and
    info, or a `core.hooksPath` directory, in the session's repo, the target repo or the
-   fallback repo; or to shell startup files, `~/.ssh/{authorized_keys,config,rc}`,
+   fallback repo; or to shell startup files, `~/.ssh/{authorized_keys,config,config.d,rc}`,
    `~/{.gitconfig,.npmrc,.xprofile,.pam_environment,.local/bin,.bashrc.d}`,
    `~/.config/{autostart,systemd/user,git/attributes}`, Claude's
    `settings*.json`, `.credentials.json`, `CLAUDE.md`, `hooks/` and `commands/`, is
@@ -261,10 +261,13 @@ proven live (operator check B1), so the rules are not the only barrier:
    `no-handoff-file`.
 3. Both files are scanned with the secret table (`lib/secret-patterns.sh`), whatever the
    project profile says, in strict mode: the "example"/placeholder exemptions do not
-   apply (a model can add the word to any line), and four extra shapes count: a run of
-   64 or more base64 characters, `Bearer <20+ chars>`, a URL password
-   (`scheme://user:secret@host`) and `pass`/`pwd`/`password` assigned a value of 6 or
-   more characters. A long hex digest in a handoff is therefore quarantined too. The same
+   apply (a model can add the word to any line, and the allow pragma is ignored too), and
+   four extra shapes count: a run of 64 or more base64 characters, `Bearer <20+ chars>`,
+   a URL password of any characters (`scheme://user:secret@host`, including a password
+   that starts with `$`, `<` or `{` or holds a colon) and `pass`/`pwd`/`password`
+   assigned a value of 6 or more characters. An unquoted assigned value (`api_key =
+   abc...`) counts at 16+ characters even when it is all letters or holds parentheses.
+   A long hex digest in a handoff is therefore quarantined too. The same
    scan runs first on the timeout, child-failure and `unexpected-file` paths: a NEW file
    with a hit moves to the quarantine directory (the reason stays `timeout` and so on,
    with `secret=` and `quarantine=` added); a pre-existing file the child changed is only
@@ -472,10 +475,11 @@ a known, accepted false positive. git accepts any unique prefix of a long option
 (`--m`); `--force` has no valid abbreviation.
 
 The secret scan covers the patterns in `lib/secret-patterns.sh` and nothing else: no
-entropy scoring, no token split over several lines, and an unquoted assigned value that
-is made only of letters is not flagged (an assignment value counts when it is quoted and
+entropy scoring, no token split over several lines, and (in this commit guard) an unquoted
+assigned value that is made only of letters is not flagged (the auto-handoff worker's
+strict scan flags it). An assignment value counts when it is quoted and
 16+ characters, or unquoted, 16+ characters, with a digit and no parentheses; a value
-that starts with `$`, `<` or `{` is a template and is skipped). A match is passed over
+that starts with `$`, `<` or `{` is a template and is skipped. A match is passed over
 when the matched token itself holds a placeholder word such as `example` or `changeme`;
 a placeholder word elsewhere on the line does not exempt a real token. What it reads for
 a command:

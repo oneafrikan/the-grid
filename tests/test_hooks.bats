@@ -1736,3 +1736,150 @@ tok_pgp()       { printf '%s' "-----BEGIN PGP PRIV""ATE KEY BLOCK-----"; }
 @test "README says the kill switches are read from the environment the hook runs in" {
   grep -q "environment the hook runs in" "$REPO_ROOT/hooks/README.md"
 }
+
+# ===========================================================================
+# NF-054 (hardening, refs private NF-054): the strict scan the auto-handoff worker runs
+# (SECRET_STRICT=1). It must stay at least as strict as the pre-merge worker scan, and it
+# must ignore the human overrides (allow pragma, placeholder words). Every secret-shaped
+# value below is assembled from fragments or is plainly fake.
+# ===========================================================================
+
+# _name_of <strict|plain> <line>: the pattern name the matcher reports for the line, or
+# "clean". Goes through secret_match_long, the entry point the worker uses, so long lines
+# are exercised too. Leaves bats' $status / $output set.
+_name_of() {
+  # the line goes in through a file: a 300 KB argv word would exceed the per-argument limit
+  printf '%s' "$2" > "$BATS_TEST_TMPDIR/line.txt"
+  run bash -c '. "$1/hooks/lib/secret-patterns.sh"
+    if [ "$2" = strict ]; then SECRET_STRICT=1; fi
+    line="$(cat "$3")"
+    if secret_match_long "$line"; then printf "%s" "$SECRET_MATCH_NAME"; else printf clean; fi' \
+    _ "$REPO_ROOT" "$1" "$BATS_TEST_TMPDIR/line.txt"
+}
+
+# expect_strict / expect_plain <expected name|clean> <line>: the matcher reports exactly
+# that in strict / default mode.
+expect_strict() {
+  _name_of strict "$2"
+  { [ "$status" -eq 0 ] && [ "$output" = "$1" ]; } || { echo "strict: want '$1' got '$output' for (len ${#2}): ${2:0:120}" >&2; false; }
+}
+expect_plain() {
+  _name_of plain "$2"
+  { [ "$status" -eq 0 ] && [ "$output" = "$1" ]; } || { echo "plain: want '$1' got '$output' for (len ${#2}): ${2:0:120}" >&2; false; }
+}
+
+@test "strict: an unquoted assigned value is judged by length alone (letters only, parentheses, trailing comment)" {
+  expect_strict assigned-secret 'api_key = abcdefghijklmnopqrstuvwxyz'
+  expect_strict assigned-secret 'secret: XkJhGfDsAqWeRtYuIoPzMnBv'
+  expect_strict assigned-secret 'token = abc(1234567890123456)'
+  expect_strict assigned-secret 'client_secret=abcdefghijklmnop # example'
+  expect_strict assigned-secret "token = 'abcdefghijklmnopqrstuv"
+  expect_strict assigned-secret 'API_KEY=abcdefghijklmnopqrstuvwxyz'
+  # a second assignment later on the line is still tried
+  expect_strict assigned-secret 'name = x; secret=abcdefghijklmnopqrstuvwxyz'
+}
+
+@test "strict: the old value boundaries hold (15 chars passes, template marker first passes)" {
+  expect_strict clean 'api_key = abcdefghijklmno'
+  expect_strict clean 'token = $abcdefghijklmnopqrstuv'
+  expect_strict clean 'token = <abcdefghijklmnopqrstuv>'
+  expect_strict clean 'secret: {abcdefghijklmnopqrstuv}'
+}
+
+@test "default mode keeps the false-block rules: letters-only and parenthesised unquoted values still pass" {
+  expect_plain clean 'api_key = abcdefghijklmnopqrstuvwxyz'
+  expect_plain clean 'secret: XkJhGfDsAqWeRtYuIoPzMnBv'
+  expect_plain clean 'token = abc(1234567890123456)'
+  expect_plain clean 'token = request.headers.get('
+}
+
+@test "strict: a URL password is caught whatever its characters (leading marker char, colon inside, templated)" {
+  expect_strict url-password 'https://user:$ecretPw9@host'
+  expect_strict url-password 'https://user:pa:ss12345@host'
+  expect_strict url-password 'https://user:<pw123456>@host'
+  expect_strict url-password 'https://user:{pw123456}@host'
+  expect_strict url-password 'x = "postgres://user:${DB_PASSWORD}@host/db"'
+  # the table row still names the plain shape
+  expect_strict db-url-password 'postgres://app:S3cretPw9@dbhost/x'
+}
+
+@test "strict: URL shapes without a password do not block (port, userinfo only, IPv6, path with @)" {
+  expect_strict clean 'see https://user@host:443/path'
+  expect_strict clean 'see https://host:12345678/x@y'
+  expect_strict clean 'see http://[::1]:8080/x@y'
+  expect_strict clean 'see https://example.org/a/b@c'
+  expect_strict clean 'mailto:someone@example.org'
+}
+
+@test "default mode keeps the templated-URL rows unblocked" {
+  expect_plain clean 'x = "postgres://user:${DB_PASSWORD}@host/db"'
+  expect_plain clean 'https://user:$ecretPw9@host'
+}
+
+# The human overrides are for human diffs. Model output must not be able to use them: a
+# line the default mode lets through because of the pragma or a placeholder word is still a
+# finding in strict mode.
+@test "strict: the allow pragma does not exempt a line (default mode honours it)" {
+  local t; t="$(tok_ghp)"
+  expect_plain clean "key = \"$t\" # grid:allow-secret"
+  expect_strict github-token "key = \"$t\" # grid:allow-secret"
+  expect_plain clean 'api_key = "Zx9fQ2mK7vB4nL8pR3tYq" # grid:allow-secret'
+  expect_strict assigned-secret 'api_key = "Zx9fQ2mK7vB4nL8pR3tYq" # grid:allow-secret'
+  expect_strict assigned-secret 'token: Zx9fQ2mK7vB4nL8pR3tYq1 grid:allow-secret'
+}
+
+@test "strict: a placeholder word inside the token does not exempt it (default mode honours each)" {
+  local w t
+  for w in example placeholder changeme your_ xxxxxxxx redacted EXAMPLE; do
+    expect_plain clean "api_key = \"${w}Ab3dEAb3dEAb3dE\""
+    expect_strict assigned-secret "api_key = \"${w}Ab3dEAb3dEAb3dE\""
+  done
+  # the same for a table row (the ghp_ shape allows letters and digits only, so no your_)
+  for w in example placeholder changeme xxxxxxxx redacted EXAMPLE; do
+    t="gh""p_${w}$(rep Ab3dE 7)"
+    expect_plain clean "key = \"$t\""
+    expect_strict github-token "key = \"$t\""
+  done
+}
+
+@test "strict: a token that is exempt in default mode does not hide a second, real one on the line" {
+  local ex real
+  ex="gh""p_example$(rep Ab3dE 7)"; real="$(tok_ghp)"
+  expect_strict github-token "a=$ex b=$real"
+}
+
+# --- VE4: secret_match_long cuts text over 6,000 bytes into overlapping pieces. A run of
+# blanks between the key and the value used to be able to straddle a piece boundary so that
+# no piece held key and value together.
+# _padded_line <leading blanks> <gap char> <gap width> <value>
+_padded_line() {
+  local pre gap
+  pre="$(head -c "$1" /dev/zero | tr '\0' ' ')"
+  gap="$(head -c "$3" /dev/zero | tr '\0' "$2")"
+  printf '%stoken=%s%s%s' "$pre" "$gap" "$4" "$(head -c 3500 /dev/zero | tr '\0' ' ')"
+}
+
+@test "long line: a blank-padded value is found wherever the gap falls relative to a piece boundary" {
+  local v='Ab3dEf9Gh2Jk4Lm6Np8Q' off
+  # 0 and 100 are single-piece controls; 4100 and 4200 start after the first cut
+  for off in 0 100 3950 4000 4050 4090 4100 4200 8100 8190; do
+    expect_strict assigned-secret "$(_padded_line "$off" ' ' 400 "$v")"
+    expect_plain  assigned-secret "$(_padded_line "$off" ' ' 400 "$v")"
+  done
+}
+
+@test "long line: tab padding and a gap longer than a whole piece are found" {
+  local v='Ab3dEf9Gh2Jk4Lm6Np8Q'
+  expect_strict assigned-secret "$(_padded_line 4000 $'\t' 400 "$v")"
+  expect_strict assigned-secret "$(_padded_line 4000 ' ' 5000 "$v")"
+  expect_plain  assigned-secret "$(_padded_line 100 ' ' 9000 "$v")"
+}
+
+@test "long line: a long clean line is still clean and an oversize one still blocks" {
+  expect_strict clean "$(_padded_line 4000 ' ' 400 'short')"
+  # 300 KB with no collapsible blanks: oversize, as before
+  expect_plain oversize-line "$(head -c 300000 /dev/zero | tr '\0' a)"
+  # 300 KB of blanks around nothing: still fails closed (a scan that cannot be shown to
+  # be complete blocks); it must not become clean because the blanks collapsed
+  expect_plain oversize-line "$(head -c 300000 /dev/zero | tr '\0' ' ')x"
+}
