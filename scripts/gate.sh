@@ -24,8 +24,9 @@
 #                their skills/ and agents/ dirs (skipped with a notice if `claude` or
 #                .claude-plugin/marketplace.json is absent; CI has no claude)
 #   audit        vetting scan of owned assets + the baseline's wired set (audit.sh --gate --quiet;
-#                skipped with a notice if python3 or scripts/audit.sh is absent; the wired half
-#                is skipped by audit.sh itself where submodules are uninitialised)
+#                skipped with a notice if python3 or scripts/audit.sh is absent; an uninitialised
+#                baseline submodule fails it in CI, locally it is --allow-partial and `audit-wired`
+#                is listed as skipped)
 #   personas     dist/personas/*.md is current (build-personas.sh --check; skipped with a
 #                notice if the script or the venv is absent)
 #   personal     no personal data in the tracked tree (check-personal.sh); with no private
