@@ -57,3 +57,6 @@ deny	hooks/*	author-name-in-rendered-text	Gareth
 deny	rules/*	author-name-in-rendered-text	Gareth
 deny	automation-factory/patterns/*	author-name-in-rendered-text	Gareth
 deny	plugins/*	author-name-in-rendered-text	Gareth
+# The licence text each plugin bundle ships is a byte copy of the repo-root LICENSE; its
+# copyright line names the rights holder, which the licence requires.
+allow	plugins/*/LICENSE	licence-copyright-line	^Copyright \(c\) [0-9]{4}

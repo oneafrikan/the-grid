@@ -9,3 +9,5 @@ summary: >-
 description: "Copywriter. Long-form and product copy, written to a brief for voice, clarity and structure. Use for long-form or product copy."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+# Writes and edits copy and hand-off notes; no shell.
+tools: [Read, Grep, Glob, Write, Edit]

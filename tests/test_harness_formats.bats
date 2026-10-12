@@ -432,12 +432,12 @@ gemini_roles() {
   [[ "$output" == *"model"* ]]
 }
 
-@test "gemini: an unmapped tool exits 1 with E_TOOL_UNMAPPED naming role and tool, and writes no _gemini-cli dir" {
+@test "gemini: an unmapped tool exits 1 with E_TOOL_UNKNOWN (lint, before any emitter) naming role and tool, and writes no _gemini-cli dir" {
   gemini_roles zz-bad=Read,Teleport
   run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target gemini-cli --out "$TMP/out"
   echo "$output"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"E_TOOL_UNMAPPED"* ]]
+  [[ "$output" == *"E_TOOL_UNKNOWN"* ]]
   [[ "$output" == *"zz-bad"* ]]
   [[ "$output" == *"Teleport"* ]]
   [ ! -e "$TMP/out/zz/_gemini-cli" ]
@@ -527,6 +527,364 @@ gemini_roles() {
   echo "$output"
   [ "$status" -eq 0 ]
   run python3 -I "$VALIDATE" gemini-agent "${gemini[@]}"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+# ================================================================ WP-050: writer safety ====
+# Every writer vets its target dir, renders before it touches disk, swaps atomically and (for
+# the legacy default target) wipes only its own output. Author's own checks, not independent
+# verification.
+
+# snap DIR — path + content hash of every file under DIR, so "left alone" is checkable
+snap() {
+  (cd "$1" && find . -type f -o -type l | LC_ALL=C sort | xargs -r shasum)
+}
+
+@test "writers: every target composed into one --out, then the default target: siblings survive and --check passes" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" t
+  for t in claude-code codex opencode gemini-cli portable paperclip openclaw-native; do
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$TMP/out"
+    echo "$t: $output"
+    [ "$status" -eq 0 ]
+  done
+  # A leftover from a role that no longer exists: only the legacy wipe should remove it.
+  mkdir -p "$TMP/out/fx/gone-role"
+  printf 'x\n' > "$TMP/out/fx/gone-role/SOUL.md"
+  local before; before="$(snap "$TMP/out/fx" | grep -v '/gone-role/')"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  for t in claude-code codex opencode gemini-cli portable paperclip openclaw; do
+    [ -d "$TMP/out/fx/_$t" ]
+  done
+  [ ! -e "$TMP/out/fx/gone-role" ]
+  [ -f "$TMP/out/fx/agents.yaml" ]
+  # Every _<target> dir is byte-identical to before the default-target run.
+  [ "$(snap "$TMP/out/fx" | grep '/_')" = "$(printf '%s\n' "$before" | grep '/_')" ]
+  # --check on the default target ignores the sibling _* dirs ...
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --check --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  # ... but still sees drift in its own output.
+  printf 'x\n' > "$TMP/out/fx/stray.txt"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --check --out "$TMP/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"stray.txt"* ]]
+  # No swap leftovers anywhere.
+  [ -z "$(find "$TMP/out" -name '*.tmp' -o -name '*.old')" ]
+}
+
+@test "writers: an unsafe project name never reaches disk outside --out (every writer, called directly)" {
+  gemini_env
+  # Nested two levels under $TMP so that even an unguarded "..", "../.." or "." writer can only
+  # damage this test's own temp tree, never /tmp itself.
+  local base="$TMP/sb/deep"
+  mkdir -p "$base/victim/_claude-code" "$base/victim/_codex" "$base/out"
+  printf 'keep\n' > "$base/victim/_claude-code/keep.txt"
+  printf 'keep\n' > "$base/victim/_codex/keep.txt"
+  printf 'keep\n' > "$base/victim/keep.txt"
+  printf 'keep\n' > "$base/keep-top.txt"
+  run "$PY" "$BATS_TEST_DIRNAME/lib/writer_guard_probe.py" "$REPO_ROOT/agent-factory" \
+    "$REPO_ROOT/tests/fixtures/compose/fixture.yaml" "$base/out" "$base/victim"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$base/victim/_claude-code/keep.txt")" = keep ]
+  [ "$(cat "$base/victim/_codex/keep.txt")" = keep ]
+  [ "$(cat "$base/victim/keep.txt")" = keep ]
+  [ "$(cat "$base/keep-top.txt")" = keep ]
+  [ -d "$base/out" ]
+}
+
+@test "writers: a write-phase failure leaves the prior tree intact, with a clean error" {
+  [ "$(id -u)" -ne 0 ] || skip "root ignores directory permissions"
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" t
+  for t in claude-code codex portable openclaw; do
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$TMP/out"
+    [ "$status" -eq 0 ]
+  done
+  local before; before="$(snap "$TMP/out")"
+  chmod a-w "$TMP/out/fx"
+  for t in claude-code codex portable openclaw; do
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$TMP/out"
+    echo "$t: $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"error:"* ]]
+    [[ "$output" != *"Traceback"* ]]
+  done
+  chmod u+w "$TMP/out/fx"
+  [ "$before" = "$(snap "$TMP/out")" ]
+  [ -z "$(find "$TMP/out" -name '*.tmp' -o -name '*.old')" ]
+}
+
+@test "writers: a symlinked <out>/<name> or _<target> is refused with a clean error and never written through" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" t
+  mkdir -p "$TMP/real" "$TMP/out"
+  printf 'keep\n' > "$TMP/real/keep.txt"
+  ln -s "$TMP/real" "$TMP/out/fx"
+  for t in claude-code codex portable paperclip openclaw-native openclaw; do
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$TMP/out"
+    echo "$t: $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"symlink"* ]]
+    [[ "$output" != *"Traceback"* ]]
+  done
+  [ "$(ls "$TMP/real")" = "keep.txt" ]
+  rm "$TMP/out/fx"
+  mkdir -p "$TMP/out/fx"
+  ln -s "$TMP/real" "$TMP/out/fx/_claude-code"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$TMP/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"symlink"* ]]
+  [ "$(ls "$TMP/real")" = "keep.txt" ]
+  # --check must not call a symlinked tree "up to date".
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --check --out "$TMP/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"up to date"* ]]
+  [[ "$output" != *"Traceback"* ]]
+}
+
+@test "--check sees a symlink and an empty dir inside a composed tree" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target codex --out "$TMP/out"
+  [ "$status" -eq 0 ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target codex --check --out "$TMP/out"
+  [ "$status" -eq 0 ]
+  ln -s /etc/hostname "$TMP/out/fx/_codex/agents/link.toml"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target codex --check --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"link.toml"* ]]
+  rm "$TMP/out/fx/_codex/agents/link.toml"
+  mkdir "$TMP/out/fx/_codex/agents/emptydir"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target codex --check --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"emptydir"* ]]
+}
+
+# ================================================================ WP-051: emitter honesty ====
+# Unknown tools are rejected everywhere, the wording claims only what each harness enforces,
+# and the validator and mutation gaps found by the review are closed.
+
+@test "emitters: an unknown, empty or malformed tools list is E_TOOL_UNMAPPED on every harness (direct call)" {
+  # load_config's lint stops these first on a normal compose (E_TOOL_UNKNOWN, tested in
+  # test_compose_lint.bats); this calls the emitters directly, as another importer could.
+  gemini_roles zz-task=Read,Task zz-frob=Read,Frobnicate zz-lower=Read,read
+  run "$PY" - "$REPO_ROOT/agent-factory" "$TMP/roles" <<'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import compose
+
+bad = []
+def expect_unmapped(label, fn, agent):
+    try:
+        fn(agent, "zz")
+    except SystemExit as e:
+        if "E_TOOL_UNMAPPED" not in str(e.code):
+            bad.append(f"{label}: exited with {e.code!r}")
+    else:
+        bad.append(f"{label}: accepted")
+
+emitters = {"codex": compose.emit_codex_agent, "opencode": compose.emit_opencode_agent,
+            "gemini-cli": compose.emit_gemini_agent, "claude-code": compose.emit_cc_subagent}
+for role in ("zz-task", "zz-frob", "zz-lower"):
+    for name, fn in emitters.items():
+        expect_unmapped(f"{name} {role}", fn, {"role": role})
+
+# Empty list, string, None element: patch role_meta so no file edit is needed.
+real_meta = compose.role_meta
+for label, tools in (("empty", []), ("string", "Read"), ("null-element", ["Read", None]), ("blank", [" "])):
+    def fake(role, _t=tools):
+        m = dict(real_meta("zz-task")); m["tools"] = _t; return m
+    compose.role_meta = fake
+    for name, fn in emitters.items():
+        expect_unmapped(f"{name} tools={label}", fn, {"role": "zz-task"})
+compose.role_meta = real_meta
+
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+PYEOF
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "emitters: a role with no tools key still composes on every harness" {
+  gemini_env
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/tests/fixtures/compose/fixture.yaml" \
+    --target codex --out "$TMP/out"
+  [ "$status" -eq 0 ]
+}
+
+@test "codex: a role that can edit or write but has no Bash prints a shell warning; others do not" {
+  gemini_roles zz-write=Read,Write zz-edit=Read,Edit,Bash zz-ro=Read,Grep
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target codex --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"role zz-write gets a shell on Codex"* ]]
+  [[ "$output" != *"role zz-edit gets a shell"* ]]
+  [[ "$output" != *"role zz-ro gets a shell"* ]]
+  # Files are unchanged by the warning: no sandbox_mode for the editing roles.
+  lacks '^sandbox_mode' "$TMP/out/zz/_codex/agents/zz-zz-write.toml"
+}
+
+@test "wording: no emitter or doc claims read-only roles are read-only on every harness" {
+  run grep -n "errs safe\|stay read-only on every harness" \
+    "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/docs/harnesses.md"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  grep -qi "best-effort" "$REPO_ROOT/docs/harnesses.md"
+  grep -q "^### What each harness enforces" "$REPO_ROOT/docs/harnesses.md"
+}
+
+@test "validator: codex rejects an unknown sandbox_mode" {
+  need_tomllib
+  local m
+  for m in read-only workspace-write danger-full-access; do
+    printf 'name = "x"\ndescription = "d"\nsandbox_mode = "%s"\ndeveloper_instructions = "b"\n' "$m" > "$TMP/ok.toml"
+    run python3 -I "$VALIDATE" codex-agent "$TMP/ok.toml"
+    [ "$status" -eq 0 ]
+  done
+  for m in yolo READ-ONLY ""; do
+    printf 'name = "x"\ndescription = "d"\nsandbox_mode = "%s"\ndeveloper_instructions = "b"\n' "$m" > "$TMP/bad.toml"
+    run python3 -I "$VALIDATE" codex-agent "$TMP/bad.toml"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"sandbox_mode"* ]]
+  done
+  printf 'name = "x"\ndescription = "d"\nsandbox_mode = 3\ndeveloper_instructions = "b"\n' > "$TMP/bad.toml"
+  run python3 -I "$VALIDATE" codex-agent "$TMP/bad.toml"
+  [ "$status" -eq 1 ]
+}
+
+@test "validator: opencode rejects flow-style permission, an unknown permission key and an unknown frontmatter key" {
+  printf -- '---\ndescription: d\nmode: subagent\npermission: {edit: yolo}\n---\nbody\n' > "$TMP/flow.md"
+  run python3 -I "$VALIDATE" opencode-agent "$TMP/flow.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"permission"* ]]
+  printf -- '---\ndescription: d\nmode: subagent\npermission: {edit: deny}\n---\nbody\n' > "$TMP/flowok.md"
+  run python3 -I "$VALIDATE" opencode-agent "$TMP/flowok.md"
+  [ "$status" -eq 1 ]
+  printf -- '---\ndescription: d\nmode: subagent\npermission:\n  frobnicate: deny\n---\nbody\n' > "$TMP/key.md"
+  run python3 -I "$VALIDATE" opencode-agent "$TMP/key.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"frobnicate"* ]]
+  printf -- '---\ndescription: d\nmode: subagent\nsurprise: 1\n---\nbody\n' > "$TMP/top.md"
+  run python3 -I "$VALIDATE" opencode-agent "$TMP/top.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"surprise"* ]]
+  # The three keys the emitter writes still pass.
+  printf -- '---\ndescription: d\nmode: subagent\npermission:\n  edit: deny\n  bash: deny\n  webfetch: deny\n---\nbody\n' > "$TMP/all.md"
+  run python3 -I "$VALIDATE" opencode-agent "$TMP/all.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "validator: gemini rejects a bogus tool name and a file with no body" {
+  printf -- '---\nname: x\ndescription: d\ntools:\n- read_file\n- teleport\n---\nbody\n' > "$TMP/tool.md"
+  run python3 -I "$VALIDATE" gemini-agent "$TMP/tool.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"teleport"* ]]
+  printf -- '---\nname: x\ndescription: d\ntools:\n- read_file\n---\n' > "$TMP/nobody.md"
+  run python3 -I "$VALIDATE" gemini-agent "$TMP/nobody.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"body"* ]]
+  printf -- '---\nname: x\ndescription: d\n---\n   \n\n' > "$TMP/blank.md"
+  run python3 -I "$VALIDATE" gemini-agent "$TMP/blank.md"
+  [ "$status" -eq 1 ]
+  # Every mapped Gemini tool name is accepted.
+  printf -- '---\nname: x\ndescription: d\ntools:\n- read_file\n- read_many_files\n- grep_search\n- glob\n- list_directory\n- run_shell_command\n- replace\n- write_file\n- web_fetch\n- google_web_search\n---\nbody\n' > "$TMP/all.md"
+  run python3 -I "$VALIDATE" gemini-agent "$TMP/all.md"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "validator: a directory argument is reported as such, not as a traceback" {
+  mkdir "$TMP/adir"
+  local c
+  for c in opencode-agent gemini-agent codex-agent; do
+    run python3 -I "$VALIDATE" "$c" "$TMP/adir"
+    echo "$c: $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is a directory"* ]]
+    [[ "$output" != *"Traceback"* ]]
+  done
+}
+
+# bare_names and per-agent `bare` (mutations M16 and M17 survived: no test used either).
+@test "bare names: bare_names:true and a per-agent bare:true drop the slug prefix on codex, opencode and gemini-cli" {
+  gemini_roles zz-a=Read zz-b=Read
+  local t ext
+  # whole project bare
+  printf 'bare_names: true\n' >> "$TMP/zz.yaml"
+  for t in codex opencode gemini-cli; do
+    ext=md; [ "$t" = codex ] && ext=toml
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target "$t" --out "$TMP/out1"
+    echo "$t: $output"
+    [ "$status" -eq 0 ]
+    [ -f "$TMP/out1/zz/_$t/agents/zz-a.$ext" ]
+    [ -f "$TMP/out1/zz/_$t/agents/zz-b.$ext" ]
+    [ ! -e "$TMP/out1/zz/_$t/agents/zz-zz-a.$ext" ]
+  done
+  # one agent bare, the other prefixed
+  printf 'project: zz\nslug: zz\nagents:\n  - role: zz-a\n  - role: zz-b\n    bare: true\n' > "$TMP/zz2.yaml"
+  for t in codex opencode gemini-cli; do
+    ext=md; [ "$t" = codex ] && ext=toml
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz2.yaml" --target "$t" --out "$TMP/out2"
+    [ "$status" -eq 0 ]
+    [ -f "$TMP/out2/zz/_$t/agents/zz-zz-a.$ext" ]
+    [ -f "$TMP/out2/zz/_$t/agents/zz-b.$ext" ]
+    [ ! -e "$TMP/out2/zz/_$t/agents/zz-zz-b.$ext" ]
+  done
+}
+
+# The writers' symlink refusals (mutations M15 and M25 survived).
+@test "writers: a symlinked _codex, _opencode, _gemini-cli or _portable is refused and never written through" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" t
+  mkdir -p "$TMP/real" "$TMP/out/fx"
+  printf 'keep\n' > "$TMP/real/keep.txt"
+  for t in codex opencode gemini-cli portable; do
+    ln -s "$TMP/real" "$TMP/out/fx/_$t"
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$TMP/out"
+    echo "$t: $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"symlink"* ]]
+    [[ "$output" != *"Traceback"* ]]
+    rm "$TMP/out/fx/_$t"
+  done
+  [ "$(ls "$TMP/real")" = "keep.txt" ]
+}
+
+# --dry-run (mutation M32 survived: nothing checked that orchestrators are left out).
+@test "dry-run: a harness target lists specialists only, never an orchestrator" {
+  gemini_env
+  local t
+  for t in codex opencode gemini-cli; do
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/tests/fixtures/compose/fixture.yaml" \
+      --target "$t" --dry-run --out "$TMP/out"
+    echo "$t: $output"
+    [ "$status" -eq 0 ]
+    lacks 'ceo-orchestrator|tech-lead|growth-hacker' <(printf '%s\n' "$output")
+    [[ "$output" == *"fx-eng"* ]]
+    [[ "$output" == *"3 specialists"* ]]
+  done
+  [ ! -e "$TMP/out" ]
+}
+
+@test "validator: its Gemini tool list matches compose.GEMINI_TOOLS (no drift between the two)" {
+  run "$PY" - "$REPO_ROOT/agent-factory" "$VALIDATE" <<'PYEOF'
+import importlib.util, sys
+sys.path.insert(0, sys.argv[1])
+import compose
+spec = importlib.util.spec_from_file_location("validate_harness", sys.argv[2])
+v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v)
+want = {g for names in compose.GEMINI_TOOLS.values() for g in names}
+assert v.GEMINI_TOOL_NAMES == want, sorted(v.GEMINI_TOOL_NAMES ^ want)
+assert set(compose.KNOWN_TOOLS) == set(compose.GEMINI_TOOLS)
+PYEOF
   echo "$output"
   [ "$status" -eq 0 ]
 }

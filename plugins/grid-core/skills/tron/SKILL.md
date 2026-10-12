@@ -308,7 +308,7 @@ Rules:
 - 2 to 4 options. The recommendation is one of them. Include "do nothing" when it is a real option.
 - One decision per brief. A bare letter answers only the newest open brief; if several are open, ask which.
 - Do not ask what you can look up. Look it up first.
-- Unattended (no human reading): take the recommended option, unless it is destructive or irreversible, then take the conservative one. Record every auto-chosen D<N> in the report.
+- Unattended (no human reading): take the recommended option, unless it is destructive or irreversible, then take the conservative one. Record every auto-chosen D<N> in the report. A role's own never-auto-approve or approval-queue rule overrides this.
 
 ---
 
