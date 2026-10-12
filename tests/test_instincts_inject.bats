@@ -368,6 +368,58 @@ print(m["newer-retired"], m["older-retired"])'
   [[ "$output" == *"unreviewed-habit"* ]]
 }
 
+@test "inject: a newer pending line with different text never overrides the approved text (2 hosts)" {
+  # An id collision or a tampered synced line gives host B a pending line for an id host A has
+  # approved. B's text is unreviewed, so it must not reach the session, whatever its last_seen.
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  fx "$PID" host-a run-tests-first 0.6 2026-W41 active "run the approved test thing" "when approved"
+  fx "$PID" host-b run-tests-first 0.9 2026-W42 pending "do the UNREVIEWED thing" "when unreviewed"
+  cd "$BATS_TEST_TMPDIR/repo"
+  run "$SH" inject
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"run the approved test thing"* ]]
+  [[ "$output" != *"UNREVIEWED"* ]]
+  [[ "$output" == *"(conf 0.60)"* ]]       # the pending line's confidence does not lift it either
+}
+
+@test "inject: the same with three hosts, and the newest ACTIVE line still supplies the text" {
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  fx "$PID" host-a run-tests-first 0.6 2026-W40 active "old approved text" "when old"
+  fx "$PID" host-c run-tests-first 0.6 2026-W41 active "newer approved text" "when newer"
+  fx "$PID" host-b run-tests-first 0.9 2026-W43 pending "do the UNREVIEWED thing" "when unreviewed"
+  cd "$BATS_TEST_TMPDIR/repo"
+  run "$SH" inject
+  [[ "$output" == *"newer approved text"* ]]
+  [[ "$output" != *"old approved text"* ]]
+  [[ "$output" != *"UNREVIEWED"* ]]
+}
+
+@test "inject: a pending line alone is still not injected, and approve then shows its text" {
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  fx "$PID" host-b run-tests-first 0.9 2026-W42 pending "do the reviewed-later thing" "when pending"
+  cd "$BATS_TEST_TMPDIR/repo"
+  run "$SH" inject
+  [ -z "$output" ]
+  run "$SH" approve run-tests-first
+  [ "$status" -eq 0 ]
+  run "$SH" inject
+  [[ "$output" == *"do the reviewed-later thing"* ]]
+  # a later pending line from another host cannot replace what was approved
+  fx "$PID" host-c run-tests-first 0.9 2026-W44 pending "do the SECOND unreviewed thing" "when second"
+  run "$SH" inject
+  [[ "$output" == *"do the reviewed-later thing"* ]]
+  [[ "$output" != *"SECOND"* ]]
+}
+
+@test "merge: a pending line newer than a retire does not bring a retired instinct back" {
+  fx $PA host-a gone 0.6 2026-W40 active
+  fx $PA host-b gone 0.6 2026-W41 retired
+  fx $PA host-c gone 0.9 2026-W43 pending "do the UNREVIEWED thing"
+  run pylib 'm={x["id"]:x for x in lib.merge_instincts("aaaaaaaaaaaa")}
+print(m["gone"]["status"])'
+  [ "$output" = "retired" ]
+}
+
 @test "merge: pending when only pending lines exist, active when any line is active, retired rule unchanged" {
   fx $PA host-a only-pending 0.6 2026-W40 pending
   fx $PA host-a both 0.4 2026-W40 pending

@@ -852,7 +852,8 @@ def merge_instincts(scope_dir: str) -> list[dict]:
     """Read-time merge of one project's (or `_global`'s) host files; one dict per id.
 
     Group lines by id. Among ACTIVE lines take the max confidence and the latest
-    last_seen (text fields come from the newest active line). The id is `retired`
+    last_seen (text fields come from the newest active line; pending lines never contribute
+    to an id that has an active line). The id is `retired`
     when some host's retired line has last_seen >= the latest last_seen of every
     active line; an id with only retired lines is retired too. Result is sorted by id
     and includes retired ids (status field), so callers filter on status.
@@ -865,14 +866,18 @@ def merge_instincts(scope_dir: str) -> list[dict]:
     for iid in sorted(groups):
         lines = groups[iid]
         active = [l for l in lines if l["status"] == "active"]
-        live = active + [l for l in lines if l["status"] == "pending"]   # lines that still count for the id
+        # Lines that still count for the id. Once ANY host holds an approved (active) line, only
+        # active lines count: an unreviewed pending line (a stale store, an id collision, a tampered
+        # synced line) must not supply text, confidence or dates for an approved instinct, nor
+        # outlive a retire. Without an active line the pending ones stand (shown as pending).
+        live = active or [l for l in lines if l["status"] == "pending"]
         retired = [l for l in lines if l["status"] == "retired"]
         newest_live = max(live, key=_line_order) if live else None
         if retired and (newest_live is None
                         or max(r["last_seen"] for r in retired) >= newest_live["last_seen"]):
             m = dict(max(retired, key=_line_order), status="retired")
         else:
-            # `active` as soon as ANY host holds an active line (an approval), else `pending`.
+            # `active` when an approval exists (live is then active lines only), else `pending`.
             m = dict(newest_live, status="active" if active else "pending")
             m["confidence"] = max(l["confidence"] for l in live)
             firsts = [l["first_seen"] for l in live if "first_seen" in l]
