@@ -72,7 +72,7 @@ teardown() {
 # --- sandbox tripwire ---------------------------------------------------------
 
 @test "tripwire refuses a target inside the real ~/.claude" {
-  fake_home=$(mktemp -d); mkdir -p "$fake_home/.claude"
+  fake_home="$BATS_TEST_TMPDIR/fake-home"; mkdir -p "$fake_home/.claude"
   REAL_HOME="$fake_home" SKILLS_DIR="$fake_home/.claude" run assert_sandboxed
   [ "$status" -eq 1 ]
   [[ "$output" == *"REFUSING"* ]] || false
@@ -108,7 +108,7 @@ assert_sandboxed_without_home() ( unset HOME; assert_sandboxed )
 # unnoticed. tripwire_attempt <VAR> <subpath-of-fake-real-home> points VAR at that
 # subpath and runs the tripwire; the subshell keeps the exports away from the test.
 tripwire_attempt() (
-  fake_home=$(mktemp -d); mkdir -p "$fake_home/$2"
+  fake_home="$BATS_TEST_TMPDIR/fake-home"; mkdir -p "$fake_home/$2"
   export REAL_HOME="$fake_home"
   export "$1=$fake_home/$2"
   assert_sandboxed
@@ -191,7 +191,7 @@ tripwire_attempt() (
 # XDG_RUNTIME_DIR is outside $HOME (/run/user/<uid>), so it is compared against the
 # real runtime dir captured by common_setup, not against the real home.
 @test "tripwire refuses XDG_RUNTIME_DIR equal to the real runtime dir" {
-  fake_rt=$(mktemp -d)
+  fake_rt="$BATS_TEST_TMPDIR/fake-rt"; mkdir -p "$fake_rt"
   REAL_XDG_RUNTIME_DIR="$fake_rt" XDG_RUNTIME_DIR="$fake_rt" run assert_sandboxed
   [ "$status" -eq 1 ]
   [[ "$output" == *"REFUSING"* ]] || false
