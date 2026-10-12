@@ -198,6 +198,28 @@ nested_fixture() {
   [ "$(cat "$RMLOG")" = "-rf -- $BATS_TEST_TMPDIR/elsewhere/site" ]
 }
 
+@test "GRID_DIR spelled with a leading '//' is judged on its canonical path: the repo and its subdir are still refused" {
+  stub_rm_setup
+  nested_fixture
+  local before; before="$(list_fixture "$ANC")"
+  local bad
+  for bad in "$REPO" "$REPO/docs"; do
+    run env PATH="$STUBBIN:$PATH" GRID_DIR="/$REPO" bash "$REPO_ROOT/scripts/stage-site.sh" "$bad"
+    if [ "$status" -ne 2 ]; then
+      echo "expected exit 2 for out dir '$bad' with a '//' GRID_DIR, got $status: $output" >&3
+      return 1
+    fi
+    if [ -s "$RMLOG" ]; then
+      echo "rm was called for out dir '$bad': $(cat "$RMLOG")" >&3
+      return 1
+    fi
+    if [ "$(list_fixture "$ANC")" != "$before" ]; then
+      echo "out dir '$bad' changed the fixture tree" >&3
+      return 1
+    fi
+  done
+}
+
 @test "a relative out dir that looks like an option is a path, not an option" {
   stub_rm_setup
   nested_fixture
