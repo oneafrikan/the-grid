@@ -128,15 +128,21 @@ secret_scan_file() {
 }
 
 # secret_sensitive_name <basename>
-#   Sensitive file names: .env, .env.* (but not .env.example), *.pem, and private
-#   key names id_rsa / id_dsa / id_ecdsa / id_ed25519 (optionally _sk) with NO
-#   extension. A bare id_* glob is wrong: it also matches source files like
-#   id_mapping.py, and .pub files are public keys.
+#   Sensitive file names, matched case-insensitively (.ENV is .env on a
+#   case-insensitive filesystem): .env, .env.*, *.env, .envrc (but not .env.example),
+#   *.pem *.key *.p12 *.pfx *.keystore, .npmrc .netrc, credentials*, *.tfstate, and private
+#   key names id_rsa* / id_dsa* / id_ecdsa* / id_ed25519* (a key pair is two files and the
+#   .pub half is public, so *.pub is exempt). A bare id_* glob is wrong: it also matches
+#   source files like id_mapping.py.
 secret_sensitive_name() {
+  local was=0 rc=1
+  shopt -q nocasematch && was=1
+  shopt -s nocasematch
   case "$1" in
-    .env.example) return 1 ;;
-    .env|.env.*|*.pem) return 0 ;;
-    id_rsa|id_dsa|id_ecdsa|id_ed25519|id_rsa_sk|id_dsa_sk|id_ecdsa_sk|id_ed25519_sk) return 0 ;;
+    .env.example|*.pub) rc=1 ;;
+    .env|.env.*|*.env|.envrc|*.pem|*.key|*.p12|*.pfx|*.keystore|.npmrc|.netrc|credentials*|*.tfstate) rc=0 ;;
+    id_rsa*|id_dsa*|id_ecdsa*|id_ed25519*) rc=0 ;;
   esac
-  return 1
+  if [ "$was" = 1 ]; then shopt -s nocasematch; else shopt -u nocasematch; fi
+  return "$rc"
 }

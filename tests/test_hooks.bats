@@ -40,9 +40,10 @@ teardown() {
 # helpers local to this file
 # ---------------------------------------------------------------------------
 
-# mkrepo: a scratch git repo $R with one committed file base.txt.
+# mkrepo [dir]: a scratch git repo $R (default $MOCK_HOOK_ROOT/repo) with one committed
+# file base.txt.
 mkrepo() {
-  R="$MOCK_HOOK_ROOT/repo"
+  R="${1:-$MOCK_HOOK_ROOT/repo}"
   rm -rf "$R"; mkdir -p "$R"
   git -C "$R" init -q
   git -C "$R" config user.email t@example.com
@@ -1019,6 +1020,172 @@ big_file() {
   [ "$status" -eq 2 ]
   n="$(printf '%s\n' "$output" | grep -c 'many.txt:')"
   [ "$n" -eq 10 ]
+}
+
+# --- WP-022: the scan covers what the command will really commit.
+
+@test "secret: a chained add then commit scans what the add would stage" {
+  mkrepo
+  echo "key = \"$(tok_ghp)\"" > "$R/leak.txt"            # untracked, the add would stage it
+  echo "k=1" > "$R/tracked.txt"; git -C "$R" add tracked.txt; git -C "$R" commit -q -m t
+  rows=(
+    'git add -A && git commit -m x'
+    'git add . && git commit -m x'
+    'git add leak.txt && git commit -m x'
+    'git add -A; git commit -m x'
+    'git stage . && git commit -m x'
+    'git add --all && git commit -m x'
+  )
+  for row in "${rows[@]}"; do
+    scan "$row"
+    [ "$status" -eq 2 ] || { echo "expected BLOCK for: $row: $output" >&2; false; }
+    [[ "$output" == *"leak.txt:1: github-token"* ]] || { echo "no finding for: $row: $output" >&2; false; }
+  done
+  # same-command writes cannot be seen on disk yet: the command text itself is scanned
+  scan "echo 'k=\"$(tok_ghp)\"' >> tracked.txt && git commit -am x"
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
+}
+
+@test "secret: a chained add of a sensitive name is blocked, an unrelated add is not" {
+  mkrepo
+  echo 'A=1' > "$R/.env"
+  scan 'git add -A && git commit -m x'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *".env: sensitive-file"* ]] || false
+  # only the named pathspec is looked at: the .env is outside it
+  echo ok > "$R/fine.txt"
+  scan 'git add fine.txt && git commit -m x'
+  [ "$status" -eq 0 ] || { echo "$output" >&2; false; }
+}
+
+@test "secret: an oversize chained add exits 2 with the split message" {
+  mkrepo
+  for i in 1 2 3 4 5; do echo "file $i" > "$R/f$i.txt"; done
+  GRID_SCAN_MAX_FILES=3 run_hook pre-bash-secret-scan "$(hook_payload 'git add -A && git commit -m x' "$R")"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"stage in a separate call"* ]] || false
+  rep 'x' 400 > "$R/big.txt"
+  GRID_SCAN_MAX_BYTES=100 run_hook pre-bash-secret-scan "$(hook_payload 'git add -A && git commit -m x' "$R")"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"stage in a separate call"* ]] || false
+}
+
+@test "secret: the repo the command targets is scanned, not the payload cwd" {
+  A="$MOCK_HOOK_ROOT/repoA"; B="$MOCK_HOOK_ROOT/repoB"
+  mkrepo "$A"; stage_line "key = \"$(tok_ghp)\""        # secret staged in A
+  mkrepo "$B"                                           # B (the cwd) is clean
+  rows=(
+    "git -C $A commit -m x"
+    "cd $A && git commit -m x"
+    "git --git-dir=$A/.git commit -m x"
+    "git --git-dir $A/.git commit -m x"
+    "git -C $A -c core.editor=true commit -m x"
+  )
+  for row in "${rows[@]}"; do
+    run_hook pre-bash-secret-scan "$(hook_payload "$row" "$B")"
+    [ "$status" -eq 2 ] || { echo "expected BLOCK for: $row: $output" >&2; false; }
+  done
+  # a clean target passes even when the payload cwd has the secret
+  run_hook pre-bash-secret-scan "$(hook_payload "git -C $B commit -m x" "$A")"
+  [ "$status" -eq 0 ] || { echo "$output" >&2; false; }
+  # a relative -C resolves against the payload cwd
+  run_hook pre-bash-secret-scan "$(hook_payload "git -C ../repoA commit -m x" "$B")"
+  [ "$status" -eq 2 ]
+}
+
+@test "secret: commit-creating subcommands, aliases and pathspec files are covered" {
+  mkrepo
+  stage_line "key = \"$(tok_ghp)\""
+  for row in 'git merge topic' 'git cherry-pick -n abc' 'git revert -n HEAD' 'git am p.mbox' 'git rebase main' 'git commit-tree HEAD^{tree}'; do
+    scan "$row"
+    [ "$status" -eq 2 ] || { echo "expected BLOCK for: $row: $output" >&2; false; }
+  done
+  git -C "$R" config alias.ci commit
+  scan 'git ci -m x'
+  [ "$status" -eq 2 ] || { echo "alias: $output" >&2; false; }
+  # an unrelated alias is not a commit
+  git -C "$R" config alias.st status
+  scan 'git st'
+  [ "$status" -eq 0 ]
+  # --pathspec-from-file, -p and --interactive take the working tree like -a does
+  git -C "$R" reset -q
+  printf 'key = "%s"\n' "$(tok_ghp)" >> "$R/base.txt"
+  scan 'git commit --pathspec-from-file=list -m x'
+  [ "$status" -eq 2 ] || { echo "pathspec-from-file: $output" >&2; false; }
+  scan 'git commit -p -m x'
+  [ "$status" -eq 2 ] || { echo "-p: $output" >&2; false; }
+  scan 'git commit --interactive -m x'
+  [ "$status" -eq 2 ] || { echo "--interactive: $output" >&2; false; }
+}
+
+@test "secret: files git treats as binary or non-diffable are still scanned" {
+  mkrepo
+  line="key = \"$(tok_ghp)\""
+  # attribute -diff
+  printf '*.dat -diff\n' > "$R/.gitattributes"
+  printf '%s\n' "$line" > "$R/a.dat"
+  git -C "$R" add .gitattributes a.dat
+  scan 'git commit -m x'
+  [ "$status" -eq 2 ] || { echo "-diff: $output" >&2; false; }
+  [[ "$output" == *"a.dat:1:"* ]] || false
+  git -C "$R" reset -q
+  # UTF-16 (a NUL between characters)
+  printf '%s\n' "$line" | perl -pe 's/(.)/$1\0/gs' > "$R/u16.txt"
+  git -C "$R" add u16.txt
+  scan 'git commit -m x'
+  [ "$status" -eq 2 ] || { echo "utf-16: $output" >&2; false; }
+  git -C "$R" reset -q
+  # a NUL byte anywhere makes git call the file binary
+  { printf '%s\n' "$line"; printf '\0'; } > "$R/nul.bin"
+  git -C "$R" add nul.bin
+  scan 'git commit -m x'
+  [ "$status" -eq 2 ] || { echo "nul: $output" >&2; false; }
+}
+
+@test "secret: a secret in the commit message is blocked" {
+  mkrepo
+  stage_line 'harmless line'
+  scan "git commit -m 'token=$(tok_aws)'"
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
+  [[ "$output" == *"aws-access-key"* ]] || false
+  [[ "$output" != *"$(tok_aws)"* ]] || false
+  scan "git commit --message='token=$(tok_aws)'"
+  [ "$status" -eq 2 ]
+  scan "git commit -am 'token=$(tok_aws)'"
+  [ "$status" -eq 2 ]
+  scan "git commit -m 'a plain message'"
+  [ "$status" -eq 0 ]
+}
+
+@test "secret: more sensitive file names are blocked on add and in a commit" {
+  mkrepo
+  for name in .envrc credentials.json .npmrc server.key key.pfx .ENV sub.env cert.p12 store.keystore .netrc terraform.tfstate id_rsa_work; do
+    scan "git add $name"
+    [ "$status" -eq 2 ] || { echo "expected BLOCK for git add $name: $output" >&2; false; }
+    [[ "$output" == *"sensitive-file"* ]] || false
+  done
+  for name in .env.example id_rsa.pub notes.txt keys.md; do
+    scan "git add $name"
+    [ "$status" -eq 0 ] || { echo "expected PASS for git add $name: $output" >&2; false; }
+  done
+}
+
+@test "secret: file names in the block message are single-line and at most 100 characters" {
+  mkrepo
+  nl=$'evil\nINJECTED-LINE.env'
+  printf 'x' > "$R/$nl"
+  git -C "$R" add -f -- "$nl"
+  scan 'git commit -m x'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"evil?INJECTED-LINE.env: sensitive-file"* ]] || { echo "$output" >&2; false; }
+  [[ "$output" != *$'\nINJECTED-LINE'* ]] || false
+  git -C "$R" reset -q
+  long="$(rep a 150).env"
+  printf 'x' > "$R/$long"
+  git -C "$R" add -f -- "$long"
+  scan 'git commit -m x'
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"$(rep a 101)"* ]] || { echo "$output" >&2; false; }
 }
 
 # --- secret_scan_file and secret_sensitive_name (the shared library API)
