@@ -18,6 +18,11 @@ patterns split across lines. "Why trusted" is a statement of what was checked an
 not a guarantee. Popularity (stars) is deliberately not given as a reason. Counts are
 after the allowlist; `high` must be 0 for the gate to pass.
 
+The audit is point-in-time: it runs when `wire.sh` runs and in the gate, never between
+them, and `wire.sh --check` does not re-audit. At wire time it covers the skill and agent
+link targets only; helper directories behind a runtime-root link (for example gstack's
+`bin/`) are not scanned, which is accepted per source below.
+
 ## Trusted sources
 
 ### repos/anthropic
