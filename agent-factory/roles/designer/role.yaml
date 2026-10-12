@@ -10,3 +10,5 @@ summary: >-
 description: "Designer. UI/UX design: user flows, layout, design systems, component specs, accessibility-by-design. Use for design specs to hand to frontend-dev."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+# Writes design specs and hand-off notes; no shell.
+tools: [Read, Grep, Glob, Write, Edit]

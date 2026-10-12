@@ -11,3 +11,5 @@ description: "Product Manager. Owns scope, acceptance criteria, PRDs and tracer-
 owns: Scope, acceptance criteria, PRDs, tracer-bullet tickets   # short roster phrase (summary 1st sentence too thin)
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+# Writes the PRD and hand-off notes; no shell.
+tools: [Read, Grep, Glob, Write, Edit]

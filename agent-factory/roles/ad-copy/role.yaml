@@ -10,3 +10,5 @@ summary: >-
 description: "Ad Copy. Short-form ad creative: hooks, headlines and channel-fit copy variants written to be A/B tested. Use for ad copy variants from a brief."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+# Writes ad variants and hand-off notes; no shell.
+tools: [Read, Grep, Glob, Write, Edit]

@@ -565,3 +565,16 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"personal: 0 finding(s)"* ]]
 }
+
+@test "real repo: shipped agents for the allowlisted recommend-only roles carry a tools line" {
+  local a
+  for a in grid-ad-copy grid-copywriter grid-data-analyst grid-designer grid-product-manager \
+           grid-project-manager grid-technical-writer; do
+    grep -q '^tools:' "$REPO_ROOT/plugins/grid-agents/agents/$a.md" || { echo "no tools: in $a"; false; }
+  done
+  # The two that already had one still do, and fewer than the original 24 shipped agents lack it.
+  grep -q '^tools:' "$REPO_ROOT/plugins/grid-agents/agents/grid-qa-engineer.md"
+  grep -q '^tools:' "$REPO_ROOT/plugins/grid-agents/agents/grid-security-reviewer.md"
+  missing="$(for f in "$REPO_ROOT"/plugins/*/agents/*.md; do grep -L '^tools:' "$f"; done | wc -l)"
+  [ "$missing" -lt 24 ]
+}
