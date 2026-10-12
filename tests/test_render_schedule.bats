@@ -40,7 +40,7 @@ in_proc() {
   contains "$output" "Description=issue-loop runner for owner/name"
   contains "$output" "Type=oneshot"
   contains "$output" "WorkingDirectory=/srv/repo"
-  contains "$output" "Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+  contains "$output" "Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin"
   contains "$output" "ExecStart=/bin/bash /srv/repo/loop/run-issues.sh"
   contains "$output" "TimeoutStartSec=7800"
   lacks "$output" "EnvironmentFile"
@@ -98,7 +98,7 @@ in_proc() {
   contains "$output" "<string>/srv/repo/loop/run-issues.sh</string>"
   lacks "$output" "<string>-l</string>"
   lacks "$output" "-lc"
-  contains "$output" "<string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>"
+  contains "$output" "<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/you/.local/bin</string>"
   contains "$output" "<key>HOME</key>"
   contains "$output" "<string>/srv/repo</string>"
   contains "$output" "<integer>2</integer>"
@@ -134,10 +134,98 @@ in_proc() {
   rs render_activation_commands launchd /Users/you/Library/LaunchAgents/io.the-grid.issue-loop.owner-name.plist
   [ "$output" = 'launchctl bootstrap gui/$(id -u) /Users/you/Library/LaunchAgents/io.the-grid.issue-loop.owner-name.plist' ]
   rs render_activation_commands cron '00 02 * * * cd /srv && /bin/true >> /l 2>&1'
-  [ "$output" = "(crontab -l 2>/dev/null; echo '00 02 * * * cd /srv && /bin/true >> /l 2>&1') | crontab -" ]
+  # One guarded line (run in a subshell, so no variable leaks into the operator's shell).
+  [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" = 1 ]
+  contains "$output" "crontab -l >"
+  contains "$output" "grep -vxF -- '00 02 * * * cd /srv && /bin/true >> /l 2>&1'"
+  contains "$output" "echo '00 02 * * * cd /srv && /bin/true >> /l 2>&1'"
+  lacks "$output" "2>/dev/null; echo"
   rs render_activation_commands upstart foo
   [ "$status" -eq 2 ]
   [ -z "$output" ]
+}
+
+# fake_crontab — a FILE-BACKED `crontab` on PATH (not the logging stub): `-l` prints the
+# stored table ("no crontab for user", exit 1, when empty), `crontab FILE` / `crontab -`
+# replaces it. FAKE_LIST_FAIL=1 makes `-l` fail with a message that is NOT "no crontab".
+# Sets FAKE_CRON (the store) and FAKE_BIN (prepend to PATH where the printed text runs).
+fake_crontab() {
+  FAKE_BIN="$T/fakebin"; FAKE_CRON="$T/cron.store"
+  mkdir -p "$FAKE_BIN" "$T/tmp"
+  : > "$FAKE_CRON"
+  cat > "$FAKE_BIN/crontab" <<'EOF'
+#!/bin/bash
+if [ "${1:-}" = "-l" ]; then
+  if [ "${FAKE_LIST_FAIL:-}" = 1 ]; then echo "crontab: cannot read the spool" >&2; exit 1; fi
+  if [ ! -s "$FAKE_CRON" ]; then echo "no crontab for user" >&2; exit 1; fi
+  cat "$FAKE_CRON"; exit 0
+fi
+if [ "${1:-}" = "-" ]; then cat > "$FAKE_CRON"; else cp "$1" "$FAKE_CRON"; fi
+EOF
+  chmod +x "$FAKE_BIN/crontab"
+  export FAKE_CRON TMPDIR="$T/tmp"
+}
+
+# run_printed <scheduler> <name> — execute the PRINTED activation text in a fresh bash,
+# with the fake crontab first on PATH.
+run_printed() {
+  rs render_activation_commands "$1" "$2"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" > "$T/act.sh"
+  run env PATH="$FAKE_BIN:$PATH" bash "$T/act.sh"
+}
+
+@test "activation cron: executing the printed text twice leaves exactly one job line" {
+  fake_crontab
+  local line='00 02 * * * cd /srv && /bin/true >> /l 2>&1'
+  printf '5 4 * * * other-job\n' > "$FAKE_CRON"
+  run_printed cron "$line"; [ "$status" -eq 0 ]
+  run_printed cron "$line"; [ "$status" -eq 0 ]
+  [ "$(grep -cxF -- "$line" "$FAKE_CRON")" = 1 ]
+  grep -qxF -- '5 4 * * * other-job' "$FAKE_CRON"
+  # Its temp files are cleaned up.
+  [ -z "$(ls -A "$T/tmp")" ]
+}
+
+@test "activation cron: an empty crontab (crontab -l says no crontab) still installs the line" {
+  fake_crontab
+  run_printed cron '00 02 * * * /bin/true'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FAKE_CRON")" = '00 02 * * * /bin/true' ]
+}
+
+@test "activation cron: with crontab -l failing, existing entries are kept and nothing is installed" {
+  fake_crontab
+  printf '5 4 * * * other-job\n' > "$FAKE_CRON"
+  FAKE_LIST_FAIL=1 run_printed cron '00 02 * * * /bin/true'
+  [ "$status" -ne 0 ]
+  [ "$(cat "$FAKE_CRON")" = '5 4 * * * other-job' ]
+  [ -z "$(ls -A "$T/tmp")" ]
+}
+
+@test "an en_GB/en_US UTF-8 locale does not widen the character allowlist" {
+  local loc
+  loc="$(locale -a | grep -iE '^en_(GB|US)\.utf-?8$' | head -n 1)"
+  # A missing locale is a failure, not a skip: without it the test would pass vacuously.
+  [ -n "$loc" ] || { echo "no en_GB/en_US UTF-8 locale installed" >&2; false; }
+  # U+FF42 (fullwidth b) sorts between A-Z and a-z in a locale-collated bracket range.
+  local fw=$'\xef\xbd\x82'
+  LC_ALL="$loc" rs render_systemd_service "d" "/srv/a$fw" 0 /bin/true
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  LC_ALL="$loc" rs render_systemd_service "d$fw" /srv 0 /bin/true
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  LC_ALL="$loc" rs render_systemd_service "d" /srv 0 /bin/true "w$fw"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+}
+
+@test "rendered unit and plist PATH start with a system directory and end with .local/bin" {
+  rs render_systemd_service "d" /srv 0 /bin/true
+  printf '%s\n' "$output" | grep '^Environment=PATH=' | grep -q '^Environment=PATH=/usr/local/bin:.*:%h/\.local/bin$'
+  rs render_launchd_plist l /Users/you /srv /l daily:01:00 /bin/true
+  printf '%s\n' "$output" | grep -A1 '<key>PATH</key>' | grep -q '<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/you/\.local/bin</string>'
 }
 
 @test "unsafe path characters are refused: exit 2, empty stdout, the value named on stderr" {

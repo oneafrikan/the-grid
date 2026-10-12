@@ -311,7 +311,7 @@ loop_conf_value() {
   [ -f "$tmr" ]
   contains "$(cat "$svc")" "Type=oneshot"
   contains "$(cat "$svc")" "WorkingDirectory=$REPO"
-  contains "$(cat "$svc")" "Environment=PATH=%h/.local/bin:"
+  contains "$(cat "$svc")" "Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin"
   contains "$(cat "$svc")" "ExecStart=/bin/bash $REPO/loop/run-issues.sh"
   contains "$(cat "$svc")" "TimeoutStartSec=7800"
   lacks "$(cat "$svc")" "EnvironmentFile"
@@ -410,7 +410,7 @@ loop_conf_value() {
   p="$(cat "$plist")"
   contains "$p" "<string>io.the-grid.issue-loop.owner-name</string>"
   contains "$p" "run-issues.sh"
-  contains "$p" "/.local/bin:"
+  contains "$p" "/.local/bin</string>"   # last on PATH (WP-025)
   contains "$p" "/opt/homebrew/bin"
   lacks "$p" "<string>-l</string>"
   lacks "$p" "bash -l"

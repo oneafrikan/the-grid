@@ -2,7 +2,7 @@
 """prune_report.py - propose what to drop from the always-wired baseline, from usage.
 
     python3 scripts/usage/prune_report.py [--window-days 90] [--rare 2]
-            [--min-days 28] [--usage-dir D] [--out FILE] [--json]
+            [--min-days 14] [--usage-dir D] [--out FILE] [--json]
     (normally via scripts/prune-report.sh)
 
 READ-ONLY: it writes stdout (or --out) and nothing else. It never edits the
@@ -19,6 +19,10 @@ Inputs
 It deliberately never reads `tokens` or `hooks` from the aggregate: those are for
 cost analysis, not for pruning decisions.
 
+The report is for the OPERATOR to read. Do not feed it to an agent that can apply
+proposals on its own: names in it come from host files pulled from the private repo
+(filtered to a safe shape and escaped here, but still data from outside this checkout).
+
 Per baseline skill:  uses = Skill-tool calls + slash invocations of that name,
 all hosts, inside the window.  state = never (0) | rare (1..--rare) | used.
 
@@ -29,6 +33,11 @@ Proposals
                        all B items are also printed as one skillOverrides block
   C  unused agents     wired agents with zero uses (no saving figure)
 Numbered 1..N: A and B by chars saved (largest first), then C.
+
+Enough history means --min-days (default 14) ACTIVE days: distinct days that hold data
+across all hosts. A calendar span is not enough (two days 40 days apart is not history).
+A skill whose name was first seen wired after the window started (the host files'
+`wired_first_seen`) is "newly wired": never proposed, counted in the evidence.
 
 Exit 0 always, including "no baseline on this machine" and "insufficient history".
 Stdlib only.
@@ -117,9 +126,12 @@ def build(grid, usage_dir, window_days, rare, min_days):
     a = agg.aggregate(usage_dir, window_days)
     h = a.get(HARNESS) or {"skills": {}, "agents": {}, "slash": {}, "hosts": 0,
                            "first_day": None, "last_day": None, "coverage_days": 0,
+                           "rejected_days": 0, "active_days": 0, "window_start": "",
+                           "wired_first_seen": {"skills": {}, "agents": {}},
                            "wired": {"skills": [], "agents": []}}
     rep.update(hosts=h["hosts"], first_day=h["first_day"], last_day=h["last_day"],
-               coverage_days=h["coverage_days"], ignored=a["ignored"])
+               coverage_days=h["coverage_days"], rejected_days=h["rejected_days"],
+               active_days=h["active_days"], ignored=a["ignored"])
 
     keep = set(read_names(os.path.join(grid, "docs", "prune-keep.txt")))
 
@@ -134,22 +146,28 @@ def build(grid, usage_dir, window_days, rare, min_days):
         size = budget.skill_entry(w["name"], md, md, budget.DEFAULT_TRUNCATE)
         uses = h["skills"].get(w["name"], 0) + h["slash"].get(w["name"], 0)
         state = "never" if uses == 0 else "rare" if uses <= rare else "used"
+        # Wired after the window began: too new to call unused. A name no host ever
+        # recorded a first-seen day for (an older host file) counts as old.
+        first = h["wired_first_seen"]["skills"].get(w["name"])
+        new = bool(first and h["window_start"] and first > h["window_start"])
         skills.append({"name": w["name"], "repo": w["repo"], "uses": uses,
                        "state": state, "entry_chars": size["chars"],
-                       "listing_chars": size["listing_chars"]})
+                       "listing_chars": size["listing_chars"], "new": new})
     skills.sort(key=lambda s: s["name"])
+    rep["newly_wired"] = sum(1 for s in skills if s["new"] and s["state"] != "used")
     rep["counts"] = {st: sum(1 for s in skills if s["state"] == st)
                      for st in ("used", "rare", "never")}
 
     # Not enough history: say so and stop (no proposals at all).
-    rep["insufficient"] = h["coverage_days"] < min_days
+    rep["insufficient"] = h["active_days"] < min_days
     rep["proposals"] = []
     if rep["insufficient"]:
         rep["status"] = "insufficient-history"
         return rep
     rep["status"] = "ok"
 
-    unused = lambda s: s["state"] in ("never", "rare")        # noqa: E731
+    # A newly wired skill is never "unused": it protects its repo from demotion too.
+    unused = lambda s: s["state"] in ("never", "rare") and not s["new"]   # noqa: E731
     proposals = []
 
     # A. Demote a whole-repo baseline entry that is >= 90% unused.
@@ -197,6 +215,19 @@ def build(grid, usage_dir, window_days, rare, min_days):
     return rep
 
 
+_PLAIN = re.compile(r"[A-Za-z0-9-][A-Za-z0-9._:@+-]*\Z", re.ASCII)
+
+
+def _q(name):
+    """A name for the markdown. A well-formed name is printed as is; anything else (a
+    control character, a backtick, a newline that could start a forged numbered line) is
+    printed JSON-escaped, with the backtick escaped too."""
+    name = str(name)
+    if _PLAIN.match(name):
+        return name
+    return json.dumps(name).replace("`", "\\u0060")
+
+
 def render(rep):
     """Markdown for the report dict."""
     if rep["status"] == "no-baseline":
@@ -207,7 +238,7 @@ def render(rep):
          f"{rep['counts']['used']} used, {rep['counts']['rare']} rare, "
          f"{rep['counts']['never']} never", ""]
     if rep["insufficient"]:
-        L += [f"insufficient history: {rep['coverage_days']} days of "
+        L += [f"insufficient history: {rep['active_days']} active days of "
               f"{rep['min_days']} required. No proposals.", ""]
     else:
         ps = rep["proposals"]
@@ -216,16 +247,16 @@ def render(rep):
               'Reply e.g. "apply 2, skip 3".', ""]
         for p in ps:
             if p["kind"] == "A":
-                keepers = ", ".join(p["keep_per_skill"]) or "none"
-                L.append(f"{p['n']}. A: demote repo `{p['name']}` to library, saves "
-                         f"~{p['saved_chars']} chars. Drops: {', '.join(p['dropped'])}. "
+                keepers = ", ".join(_q(k) for k in p["keep_per_skill"]) or "none"
+                L.append(f"{p['n']}. A: demote repo `{_q(p['name'])}` to library, saves "
+                         f"~{p['saved_chars']} chars. Drops: {', '.join(_q(d) for d in p['dropped'])}. "
                          f"Or replace the line with per-skill entries for the used ones: {keepers}.")
             elif p["kind"] == "B":
-                L.append(f"{p['n']}. B: name-only `{p['name']}` ({p['state']}, {p['uses']} uses), "
+                L.append(f"{p['n']}. B: name-only `{_q(p['name'])}` ({p['state']}, {p['uses']} uses), "
                          f"saves ~{p['saved_chars']} chars.")
             else:
-                hint = f" Overlay: `{p['overlay']}`." if p["overlay"] else ""
-                L.append(f"{p['n']}. C: agent `{p['name']}` never used.{hint}")
+                hint = f" Overlay: `{_q(p['overlay'])}`." if p["overlay"] else ""
+                L.append(f"{p['n']}. C: agent `{_q(p['name'])}` never used.{hint}")
         if not ps:
             L.append("Nothing to propose.")
         L.append("")
@@ -235,10 +266,19 @@ def render(rep):
                   "```", ""]
     L += ["## Evidence", "",
           f"- Hosts reporting: {rep['hosts']}",
+          f"- Active days (days holding data): {rep['active_days']}",
           f"- Day coverage: {rep['coverage_days']} days "
           f"({rep['first_day'] or 'n/a'} to {rep['last_day'] or 'n/a'})"]
+    if rep.get("newly_wired"):
+        L.append(f"- {rep['newly_wired']} newly wired skills not assessed (wired after the window began)")
     if rep["ignored"]:
-        L.append(f"- Ignored usage files (unparseable or unknown schema): {', '.join(rep['ignored'])}")
+        # File names come from a pulled repo: json.dumps keeps a newline in a name from
+        # starting a forged line of the report.
+        names = ", ".join(json.dumps(n).replace("`", "\\u0060") for n in rep["ignored"])
+        L.append(f"- Ignored usage files (unparseable or unknown schema): {names}")
+    if rep.get("rejected_days"):
+        L.append(f"- Caveat: {rep['rejected_days']} stored day key(s) were ignored: outside 2024-01-01..tomorrow (UTC) "
+                 f"or not a date.")
     L += [f"- Caveat: {c}" for c in CAVEATS]
     return "\n".join(L) + "\n"
 
@@ -247,7 +287,8 @@ def main():
     ap = argparse.ArgumentParser(description="Propose baseline pruning from usage data (read-only).")
     ap.add_argument("--window-days", type=int, default=90)
     ap.add_argument("--rare", type=int, default=2)
-    ap.add_argument("--min-days", type=int, default=28)
+    ap.add_argument("--min-days", type=int, default=14,
+                    help="active days (days holding data, all hosts) required before proposing anything")
     ap.add_argument("--usage-dir", default=None)
     ap.add_argument("--out", default=None, help="write here instead of stdout")
     ap.add_argument("--json", action="store_true", help="machine-readable output")

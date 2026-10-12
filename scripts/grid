@@ -2196,7 +2196,14 @@ def cmd_schedule(args):
         files, printed = schedule_plan(grid_dir, scheduler)     # renders everything first
         if scheduler == "launchd":
             # launchd does not create the log dir the plist points at.
-            os.makedirs(os.path.abspath(os.path.join(state_dir(), "logs")), exist_ok=True)
+            logs = os.path.abspath(os.path.join(state_dir(), "logs"))
+            try:
+                os.makedirs(logs, exist_ok=True)
+            except OSError as exc:
+                # An unwritable state dir is a user error, not a traceback.
+                # Exit 1 (not the usual 2) as the WP-027 brief states; it is what the
+                # uncaught PermissionError exited with before, so scripts see no change.
+                raise GridError("grid: cannot create %s: %s" % (logs, exc.strerror or exc), code=1)
         for path, text in files:
             wrote = atomic_write(path, text)
             print("grid: %s %s" % ("wrote" if wrote else "unchanged", path))
@@ -2208,22 +2215,29 @@ def cmd_schedule(args):
             print(line)
         return EXIT_OK
 
-    # remove: delete exactly the files install writes; print how to deactivate.
-    for path in schedule_paths(scheduler):
-        try:
-            os.unlink(path)
-            print("grid: removed %s" % path)
-        except FileNotFoundError:
-            print("grid: not present %s" % path)
-    if scheduler == "launchd":
-        # $(id -u) is printed literally for the human's shell to expand.
-        deactivate = "launchctl bootout gui/$(id -u)/" + LAUNCHD_LABEL
-    elif scheduler == "systemd":
-        deactivate = "systemctl --user disable --now %s.timer" % SYSTEMD_UNIT
-    else:
-        deactivate = "delete the crontab line containing `scripts/grid drift` (run `crontab -e`)"
+    # remove: delete exactly the files install writes, for EVERY scheduler by their fixed
+    # names (never by re-detecting one: the systemd probe can answer differently than at
+    # install time, which used to leave the units behind); print how to deactivate each
+    # scheduler that had files, plus the detected one.
+    removed_for = {}
+    for sched in ("launchd", "systemd"):
+        for path in schedule_paths(sched):
+            try:
+                os.unlink(path)
+                print("grid: removed %s" % path)
+                removed_for[sched] = True
+            except FileNotFoundError:
+                print("grid: not present %s" % path)
+    # $(id -u) is printed literally for the human's shell to expand.
+    advice = {
+        "launchd": "launchctl bootout gui/$(id -u)/" + LAUNCHD_LABEL,
+        "systemd": "systemctl --user disable --now %s.timer" % SYSTEMD_UNIT,
+        "cron": "delete the crontab line containing `scripts/grid drift` (run `crontab -e`)",
+    }
     print("grid: nothing is deactivated for you; to deactivate:")
-    print(deactivate)
+    for sched in ("launchd", "systemd", "cron"):
+        if sched == scheduler or removed_for.get(sched):
+            print(advice[sched])
     return EXIT_OK
 
 
