@@ -49,6 +49,16 @@ teardown() {
     kill "$(cat "$STUB_DIR/claude.pid")" 2>/dev/null || true
   fi
   pkill -f "$BATS_TEST_TMPDIR" 2>/dev/null || true
+  # Wait for those processes to be GONE before the sandbox is removed. A worker answers TERM
+  # (and finishes a log or run-record write after its last decision line), and a write that
+  # lands after the rm -rf re-creates logs/ and runs.jsonl under TMPDIR: the gate's
+  # "tests leaked temp files" failure (NF-001, seen in CI with exactly those two files).
+  local _i
+  for ((_i = 0; _i < 50; _i++)); do
+    pgrep -f "$BATS_TEST_TMPDIR" > /dev/null 2>&1 || break
+    sleep 0.1
+  done
+  pkill -9 -f "$BATS_TEST_TMPDIR" 2>/dev/null || true
   clean_stubs
   common_teardown
 }
