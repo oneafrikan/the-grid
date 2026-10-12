@@ -899,6 +899,92 @@ pad_pack() {
   [ ! -e "$R/AGENTS.md" ]
 }
 
+# --- write safety (WP-052): atomic write, no symlinks, no tracebacks -----------------------------
+# rules.py replaces the instruction file via a temp file in the same directory, so a failed
+# write can never truncate the operator's file, and a symlinked --out is refused outright.
+
+# no_tmp_left DIR: a failed or finished emit leaves no temp file next to the target.
+no_tmp_left() { [ -z "$(find "$1" -maxdepth 1 -name '*.tmp' -print -quit)" ]; }
+
+@test "emit agents-md: a failed write (file size limit) exits 2 with one line and keeps the original" {
+  make_pack sql
+  # ~9 KB of operator text, bigger than the 4 KB limit applied to the emit below.
+  for i in $(seq 1 300); do printf 'operator line number %s\n' "$i"; done > "$R/AGENTS.md"
+  cp "$R/AGENTS.md" "$R/orig"
+  run bash -c 'ulimit -f 4; python3 "$1" emit --root "$2" --harness agents-md --packs sql --out "$3"' \
+    _ "$REPO_ROOT/scripts/rules.py" "$R" "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *Traceback* ]]
+  [ "$(printf '%s\n' "$output" | wc -l)" -eq 1 ]
+  cmp "$R/AGENTS.md" "$R/orig"
+  no_tmp_left "$R"
+}
+
+@test "emit agents-md: a read-only file exits 2 with one line, no traceback, file unchanged" {
+  [ "$(id -u)" -ne 0 ] || skip "root ignores file modes"
+  make_pack sql
+  printf 'keep me\n' > "$R/AGENTS.md"
+  chmod 444 "$R/AGENTS.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *Traceback* ]]
+  [ "$(printf '%s\n' "$output" | wc -l)" -eq 1 ]
+  [ "$(cat "$R/AGENTS.md")" = "keep me" ]
+  no_tmp_left "$R"
+}
+
+@test "emit agents-md: a symlinked --out is refused for emit and for the empty selection" {
+  make_pack sql
+  printf 'victim text\n' > "$R/real.md"
+  ln -s "$R/real.md" "$R/AGENTS.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"symlink"* ]]
+  run emit --harness agents-md --packs "" --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [ -L "$R/AGENTS.md" ]
+  [ "$(cat "$R/real.md")" = "victim text" ]
+}
+
+@test "emit cursor: a symlink at a target path pointing at a marker-bearing file is refused, victim survives" {
+  make_pack sql
+  mkdir -p "$R/out"
+  printf '<!-- the-grid:rules generated from rules/x/y.md; do not edit -->\nvictim\n' > "$R/victim.mdc"
+  cp "$R/victim.mdc" "$R/victim.orig"
+  ln -s "$R/victim.mdc" "$R/out/grid-sql-style.mdc"
+  run emit --harness cursor --packs sql --out "$R/out"
+  [ "$status" -eq 2 ]
+  cmp "$R/victim.mdc" "$R/victim.orig"
+  [ -L "$R/out/grid-sql-style.mdc" ]
+  # A stale symlinked grid-*.mdc is not removed either.
+  ln -s "$R/victim.mdc" "$R/out/grid-gone-x.mdc"
+  rm "$R/out/grid-sql-style.mdc"
+  run emit --harness cursor --packs sql --out "$R/out"
+  [ "$status" -eq 0 ]
+  [ -L "$R/out/grid-gone-x.mdc" ]
+  cmp "$R/victim.mdc" "$R/victim.orig"
+}
+
+@test "emit agents-md: the file mode survives a rewrite and no temp file is left" {
+  make_pack sql
+  printf 'notes\n' > "$R/AGENTS.md"
+  chmod 600 "$R/AGENTS.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$R/AGENTS.md")" = 600 ]
+  no_tmp_left "$R"
+}
+
+@test "emit agents-md: a hard-linked second name keeps the old content (the replace breaks the link)" {
+  make_pack sql
+  printf 'notes\n' > "$R/AGENTS.md"
+  ln "$R/AGENTS.md" "$R/other.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  grep -q 'the-grid rules' "$R/AGENTS.md"
+  [ "$(cat "$R/other.md")" = "notes" ]
+}
+
 # --- the real tree --------------------------------------------------------------------------
 
 @test "real packs lint clean" {

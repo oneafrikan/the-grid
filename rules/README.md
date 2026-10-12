@@ -143,3 +143,18 @@ fidelity: fetches every cited URL and quotes support for each bullet) and
 - Targets: 1.5-2.5 KB per file, at most 6 KB per tier 1 pack.
 - A file read loads every matching file, so packs that co-load (for example typescript,
   web and react on `.tsx`) add up; `python3 scripts/rules.py list` shows the sizes.
+
+## Delivery to harness instruction files (`rules.py emit`)
+
+`rules.py emit` renders packs for other harnesses (`cursor`, `agents-md`, `gemini`);
+`wire.sh` calls it for the instruction files in the harness registry. How it writes:
+
+- **Atomic:** every file is written to a temp file in the same directory and swapped in
+  with `os.replace`, so a failed write (disk full, size limit, read-only file) leaves the
+  original byte-identical and `emit` exits 2 with one stderr line, never a traceback.
+- **Mode kept:** the permission bits (and, where allowed, the owner) of an existing file
+  are kept.
+- **Hard links are broken:** the swap gives the file a new inode, so a second hard link
+  to the instruction file keeps the old content. Edit the file through one name only.
+- **Never through a symlink:** a symlinked `--out` (or a symlink at a Cursor target path,
+  even one pointing at a marker-bearing file) is refused with exit 2.
