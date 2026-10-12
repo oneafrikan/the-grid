@@ -141,6 +141,68 @@ skill_raw() {
   [[ "$output" == *"skills/big/SKILL.md: SKILL.md is "* ]] || false
 }
 
+# --- target keys fail CLOSED (WP-046, R20.qa.F7) -----------------------------------
+# Removing (or nulling) a limit from the committed target used to disable that check silently;
+# a wrong schema version was never read. All three must now exit 1 and name the key.
+
+# edit_target <python expr on d> — rewrite the mock grid's target JSON
+edit_target() {
+  python3 - "$MOCK_GRID/docs/budget-target.json" "$1" <<'PY'
+import json, sys
+path, expr = sys.argv[1], sys.argv[2]
+d = json.load(open(path))
+exec(expr)
+json.dump(d, open(path, "w"))
+PY
+}
+
+@test "target without per_entry_max_chars fails --check (not silently skipped)" {
+  skill_raw a "name: a" "description: x"
+  write_target 1000 0 0 0 5000 4000
+  edit_target 'del d["per_entry_max_chars"]'
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"per_entry_max_chars"* ]] || false
+}
+
+@test "target with a null per_entry_max_chars fails --check" {
+  skill_raw a "name: a" "description: x"
+  write_target 1000 0 0 0 5000 4000
+  edit_target 'd["per_entry_max_chars"] = None'
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"per_entry_max_chars"* ]] || false
+}
+
+@test "target without owned.skill_body_max_bytes fails --check" {
+  skill_raw a "name: a" "description: x"
+  write_target 1000 0 0 0 5000 4000
+  edit_target 'del d["owned"]["skill_body_max_bytes"]'
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skill_body_max_bytes"* ]] || false
+}
+
+@test "target with schema 2 (or no schema) fails --check" {
+  skill_raw a "name: a" "description: x"
+  write_target 1000 0 0 0 5000 4000
+  edit_target 'd["schema"] = 2'
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"schema"* ]] || false
+  edit_target 'del d["schema"]'
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"schema"* ]] || false
+}
+
+@test "a complete target with schema 1 still passes (exit 3: baseline not measurable here)" {
+  skill_raw a "name: a" "description: x"
+  write_target 1000 0 0 0 5000 4000
+  budget --check
+  [ "$status" -eq 3 ]
+}
+
 # --- sections/ integrity (budget-and-usage group 4) ------------------------------
 
 # split_skill <name> <section file...> — a small skill with an index line per section.
@@ -332,9 +394,18 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
 
 # --- the real repo --------------------------------------------------------------
 
-@test "the real repo passes its own committed target (exit 0, or 3 when baseline is skipped)" {
-  run env -u GRID_DIR python3 "$BUDGET" --check
+@test "the real repo passes its own committed target on the example baseline (exit 0, or 3 when submodules are uninitialised)" {
+  # Pinned to the TRACKED example baseline, never the developer's own (a personal baseline
+  # has no business deciding this test; R16.qa.F9). 3 = baseline half not measurable here.
+  run env -u GRID_DIR GRID_BASELINE="$REPO_ROOT/baseline-submodules.example.txt" python3 "$BUDGET" --check
+  echo "$output"
   [ "$status" -eq 0 ] || [ "$status" -eq 3 ]
+}
+
+@test "the committed target carries a real baseline ratchet, not 0 (WP-046, D64)" {
+  # baseline.skills_max_chars: 0 made the check fail wherever it could measure the baseline.
+  run python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["baseline"]["skills_max_chars"] > 0 else 1)' "$REPO_ROOT/docs/budget-target.json"
+  [ "$status" -eq 0 ]
 }
 
 # --- owned skill descriptions (budget-and-usage group 3) ------------------------

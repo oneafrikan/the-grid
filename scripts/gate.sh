@@ -7,12 +7,14 @@
 #                (_retired/ is archived and never linted)
 #   pysyntax     every tracked *.py and scripts/grid parses (stdlib ast; no new dependency; skipped with a notice
 #                if python3 is absent)
-#   catalog     SKILLS.md is current           (catalog.sh --check)
+#   catalog      SKILLS.md is current           (catalog.sh --check, rendered from the TRACKED example
+#                baseline so CI and every machine agree; skipped with a notice if submodules are uninitialised)
+#   sources      docs/SOURCES.md is current     (sources.sh --check-drift; offline, example baseline)
 #   lock         grid.lock matches the submodule checkouts (grid lock --check; skipped with a
 #                notice if python3 or scripts/grid is absent, or a locked source is not checked out)
 #   budget       skill/role description listing stays within docs/budget-target.json
-#                (budget.py --check; the baseline half is skipped with a notice where
-#                there is no baseline-submodules.txt / initialised submodules)
+#                (budget.py --check against the example baseline; the baseline half is skipped
+#                with a notice where submodules are not initialised)
 #   compose      every role lints clean (compose.py --lint-roles) and composed
 #                output is current for every public project (compose.py --check; skipped with a notice if the venv is absent)
 #   plugins      generated plugin bundles + marketplace.json are current
@@ -153,17 +155,32 @@ PYEOF
 
 check shellcheck run_shellcheck
 check pysyntax   run_pysyntax
-# SKILLS.md is generated from the PERSONAL (gitignored) baseline + whichever
-# submodules are initialised, so comparing it only means something on a machine
-# that has both. Elsewhere the check is skipped loudly, not failed.
+# SKILLS.md, docs/SOURCES.md and the budget ratchet are all rendered/measured from the TRACKED
+# example baseline (baseline-submodules.example.txt), never the personal gitignored one, so the
+# same inputs give the same answer in CI and on every machine (a personal baseline is not gated).
+# GRID_BASELINE_PIN is empty only where that file is absent (a stub grid, an odd checkout), and
+# then each check skips loudly instead of silently judging a different baseline.
+GRID_BASELINE_PIN=""
+[ ! -f "$GRID_DIR/baseline-submodules.example.txt" ] || GRID_BASELINE_PIN="$GRID_DIR/baseline-submodules.example.txt"
+
 run_catalog_check() {
-  if [ ! -f baseline-submodules.txt ]; then
-    echo "    no baseline-submodules.txt on this machine — skipped"; SKIPPED+=(catalog); return 0
+  if [ -z "$GRID_BASELINE_PIN" ]; then
+    echo "    no baseline-submodules.example.txt — skipped"; SKIPPED+=(catalog); return 0
   fi
+  # Uninitialised submodules mean the skill counts cannot match the committed file: skip loudly.
   if git submodule status 2>/dev/null | grep -q '^-'; then
     echo "    uninitialised submodules — skipped (git submodule update --init)"; SKIPPED+=(catalog); return 0
   fi
-  bash scripts/catalog.sh --check
+  GRID_BASELINE="$GRID_BASELINE_PIN" bash scripts/catalog.sh --check
+}
+
+# docs/SOURCES.md is a pure function of .gitmodules + the example baseline: offline, needs no
+# submodule checkout, so it is checked everywhere (no uninitialised-submodule skip).
+run_sources_check() {
+  if [ ! -f scripts/sources.sh ] || [ -z "$GRID_BASELINE_PIN" ]; then
+    echo "    scripts/sources.sh or baseline-submodules.example.txt absent — skipped"; SKIPPED+=(sources); return 0
+  fi
+  GRID_BASELINE="$GRID_BASELINE_PIN" bash scripts/sources.sh --check-drift
 }
 
 # grid.lock must describe the committed submodule state, so a pointer bump or a
@@ -193,7 +210,8 @@ run_budget_check() {
   fi
   local rc=0
   # GRID_DIR pinned so a stray exported GRID_DIR cannot point it at another tree.
-  GRID_DIR="$GRID_DIR" python3 scripts/budget.py --check || rc=$?
+  # Pinned to the example baseline (empty = unset where that file is absent).
+  GRID_DIR="$GRID_DIR" GRID_BASELINE="$GRID_BASELINE_PIN" python3 scripts/budget.py --check || rc=$?
   if [ "$rc" -eq 3 ]; then SKIPPED+=(budget-baseline); return 0; fi
   return "$rc"
 }
@@ -260,6 +278,7 @@ run_bats() {
 }
 
 check catalog    run_catalog_check
+check sources    run_sources_check
 check lock       run_lock_check
 check budget     run_budget_check
 check compose    run_compose_check

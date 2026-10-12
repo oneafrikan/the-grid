@@ -11,6 +11,7 @@
 #   bash catalog.sh            # write SKILLS.md in the repo root
 #   bash catalog.sh /tmp/x.md  # write somewhere else (used by tests)
 #   bash catalog.sh --check    # write nothing; exit 1 if SKILLS.md is stale
+#   GRID_BASELINE=<file> bash catalog.sh   # render from that baseline (gate.sh and wire.sh pin the tracked example)
 #
 # Re-run after adding, editing, or updating skills — same idea as wire.sh.
 
@@ -158,7 +159,17 @@ done
 # workflow skills but not the maintainer-only release one), and without this
 # SKILLS.md would advertise a skill wire.sh never links. `project:` entries gate
 # composed agent-factory output, not submodules, so they're skipped.
-WIRE_ALLOWLIST_FILE="$GRID_DIR/baseline-submodules.txt"
+#
+# GRID_BASELINE pins which baseline file is read (the same override wire.sh, audit.sh and
+# budget.py take). The committed SKILLS.md is rendered from the TRACKED example baseline
+# (gate.sh and wire.sh pin it), so CI and every machine agree; with no pin the personal,
+# gitignored baseline is used as before. A pin that names a missing file is an error, not a
+# silent "wire everything" render.
+if [ -n "${GRID_BASELINE:-}" ] && [ ! -f "$GRID_BASELINE" ]; then
+  echo "catalog: GRID_BASELINE names a missing file: $GRID_BASELINE" >&2
+  exit 2
+fi
+WIRE_ALLOWLIST_FILE="${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}"
 WIRED_REPOS=()
 WIRED_SKILLS=()
 DENY_REPOS=()

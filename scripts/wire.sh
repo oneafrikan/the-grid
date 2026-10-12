@@ -905,9 +905,15 @@ fi
 # Coupled on purpose: any change to what's wired re-renders the catalogue.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -f "$SCRIPT_DIR/catalog.sh" ] && [ -z "${GRID_SKIP_CATALOG:-}" ] && [ -z "${GRID_NO_CATALOG:-}" ]; then
+  # The tracked SKILLS.md is the PUBLIC default catalogue: render it from the tracked example
+  # baseline, never from this machine's personal one, so a wire never dirties it and CI's
+  # check agrees with every machine. (Tradeoff: SKILLS.md no longer shows this machine's own
+  # wired set; `wire.sh` output and the symlinks do.) No example file (a mock grid) = legacy.
+  catalog_baseline=""
+  [ ! -f "$GRID_DIR/baseline-submodules.example.txt" ] || catalog_baseline="$GRID_DIR/baseline-submodules.example.txt"
   # env prefix is intentional; value is identical in the parent shell
   # shellcheck disable=SC2097,SC2098
-  GRID_DIR="$GRID_DIR" bash "$SCRIPT_DIR/catalog.sh" "$GRID_DIR/SKILLS.md"
+  GRID_DIR="$GRID_DIR" GRID_BASELINE="$catalog_baseline" bash "$SCRIPT_DIR/catalog.sh" "$GRID_DIR/SKILLS.md"
 fi
 
 # Rules delivery (3f) finishes every other step first, then fails the run.

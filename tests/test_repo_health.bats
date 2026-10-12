@@ -34,7 +34,7 @@ SANDBOX_EXCEPTIONS=(
   "test_render_schedule.bats|pure renderer, HOME in a temp dir; systemd-analyze runs in a private runtime dir"
   "test_repo_health.bats|reads the repo and a fixture skills dir under BATS_FILE_TMPDIR; writes nothing"
   "test_skill_format.bats|wire.sh runs into a throwaway GRID_DRY_HOME (helpers/wired.bash); the repo is only read"
-  "test_submodule_sources.bats|read-only checks of .gitmodules and the tracked example baseline"
+  "test_submodule_sources.bats|read-only checks of .gitmodules and the tracked example baseline; sources.sh fixtures live under BATS_TEST_TMPDIR"
 )
 
 # sandbox_status <bats file> prints how the file relates to common_setup (R16.qa.F8, VF3):
