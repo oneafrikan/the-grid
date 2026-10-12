@@ -28,6 +28,8 @@ import json
 import os
 import re
 import sys
+import time
+import unicodedata
 import urllib.parse
 
 # Make scripts/lib importable no matter where we are called from.
@@ -76,7 +78,7 @@ BUILTIN_MESSAGES = {
     "allow-stale": "hash-pinned allowlist entry no longer matches the file; entry inactive",
 }
 
-DOWNGRADE_CONTEXTS = ("test", "negation", "comment")
+DOWNGRADE_CONTEXTS = ("test", "negation", "negation-quoted", "comment")
 # What starts a comment depends on the language, so a `comment` downgrade looks
 # the prefixes up by file extension. `*` and `<!--` are never comment starters
 # for executable text (`*)` is a shell case branch), and `//` is not one in shell
@@ -91,6 +93,37 @@ DEFAULT_COMMENT_PREFIXES = ("#",)
 EXCERPT_MAX = 120
 BINARY_SNIFF = 8192
 
+# A line longer than LONG_LINE is matched in overlapping windows instead of in one
+# regex pass, so one hostile minified line cannot make a rule's backtracking
+# quadratic; WINDOW_STEP leaves a 512-char overlap so a payload shorter than that
+# is whole in at least one window. Backslash/trailing-pipe continuations are joined
+# up to MAX_JOIN physical lines.
+LONG_LINE = 4096
+WINDOW_STEP = LONG_LINE - 512
+MAX_JOIN = 20
+DEFAULT_MAX_SECONDS = 300
+
+# Quote characters that must sit immediately around a phrase for a leading
+# negation to excuse it (`negation-quoted`).
+QUOTE_CHARS = frozenset("\"'`\u201c\u201d\u2018\u2019\u00ab\u00bb")
+
+# Look-alike letters folded to ASCII before a `normalise: true` rule matches, so
+# `\u0456gnore previous instructions` (Cyrillic i) is still the attack phrase.
+_CONFUSABLES = str.maketrans({
+    **{ord(a): b for a, b in zip(
+        "\u0430\u0435\u043e\u0440\u0441\u0443\u0445\u0456\u0458\u0455\u0501\u051b\u051d\u04bb\u0475\u043a",
+        "aeopcyxijsdqwhvk")},
+    **{ord(a): b for a, b in zip(
+        "\u0410\u0412\u0415\u041a\u041c\u041d\u041e\u0420\u0421\u0422\u0425\u0406\u0408\u0405\u0423",
+        "ABEKMHOPCTXIJSY")},
+    **{ord(a): b for a, b in zip(
+        "\u03bf\u03b1\u03b5\u03b9\u03ba\u03bd\u03c1\u03c4\u03c5\u03c7",
+        "oaeiknptux")},
+    **{ord(a): b for a, b in zip(
+        "\u0391\u0392\u0395\u0396\u0397\u0399\u039a\u039c\u039d\u039f\u03a1\u03a4\u03a5\u03a7",
+        "ABEZHIKMNOPTYX")},
+})
+
 # Executable magic numbers (see _is_exec_binary). Fat Mach-O (0xCAFEBABE) is left
 # out on purpose: it collides with Java class files.
 _MACHO_MAGICS = (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf",
@@ -99,6 +132,10 @@ _MACHO_MAGICS = (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf",
 
 class UsageError(Exception):
     """Anything that must end the run with exit code 2."""
+
+
+class BudgetExceeded(UsageError):
+    """limits.max_seconds ran out; reported without the "error:" prefix."""
 
 
 # --------------------------------------------------------------------------
@@ -174,6 +211,58 @@ def _exempt(c, prev, nxt, at_file_start):
             return False
         return ord(prev) >= 0x2190       # emoji presentation selector after a symbol
     return False
+
+
+def _prep(rule, text):
+    """The text a rule matches: for `normalise: true` rules NFKC-folded, with look-alike
+    letters mapped to ASCII and invisible characters removed (they are their own
+    finding), so an obfuscated spelling of the phrase still matches."""
+    if not rule.normalise:
+        return text
+    text = unicodedata.normalize("NFKC", text).translate(_CONFUSABLES)
+    return "".join(c for c in text if not is_hidden_char(c))
+
+
+def _search(rx, text, tick=None):
+    """(start, end) of the first match of `rx` in `text`, else None. Text longer than
+    LONG_LINE is searched in overlapping windows (see LONG_LINE), calling `tick()`
+    between windows so the time budget is honoured inside one huge line."""
+    if len(text) <= LONG_LINE:
+        m = rx.search(text)
+        return (m.start(), m.end()) if m else None
+    for off in range(0, len(text), WINDOW_STEP):
+        if tick is not None:
+            tick()
+        m = rx.search(text[off:off + LONG_LINE])
+        if m:
+            return off + m.start(), off + m.end()
+    return None
+
+
+def _logical_lines(lines):
+    """[(first physical index, text)] with backslash-continued lines and lines that
+    end in a pipe joined to the following one (at most MAX_JOIN physical lines), so
+    `curl ... \\` newline `| bash` is one command. A markdown table row (starts with
+    `|`) is never joined on its trailing pipe. Consumed continuation lines are not
+    scanned separately; a finding is reported at the first physical line."""
+    out = []
+    i, n = 0, len(lines)
+    while i < n:
+        text = lines[i].rstrip("\r")
+        joined, j = text, i
+        while j + 1 < n and j - i < MAX_JOIN - 1:
+            cur = joined.rstrip()
+            if cur.endswith("\\") and not cur.endswith("\\\\"):
+                joined = cur[:-1] + " " + lines[j + 1].strip()
+            elif (cur.endswith("|") and not cur.endswith("||")
+                  and not text.lstrip().startswith("|")):
+                joined = cur + " " + lines[j + 1].strip()
+            else:
+                break
+            j += 1
+        out.append((i, joined))
+        i = j + 1
+    return out
 
 
 def escape_text(s):
@@ -271,6 +360,12 @@ class Rule:
                 raise UsageError("policy: rule %r: unknown downgrade context %r" % (rid, ctx))
         self.regex = self._compile(rid, "regex", d.get("regex"), required=True)
         self.ignore = self._compile(rid, "ignore_regex", d.get("ignore_regex"), required=False)
+        # normalise: match on NFKC-folded, confusable-folded text (prompt-injection).
+        # window: 2 also matches a phrase split over this line and the next.
+        self.normalise = bool(d.get("normalise", False))
+        self.window = d.get("window", 1)
+        if self.window not in (1, 2):
+            raise UsageError("policy: rule %r: window must be 1 or 2" % rid)
 
     @staticmethod
     def _compile(rid, field, pattern, required):
@@ -306,6 +401,9 @@ class Policy:
         self.max_file_bytes = limits.get("max_file_bytes", 1048576)
         if not isinstance(self.max_file_bytes, int):
             raise UsageError("policy: limits.max_file_bytes must be an integer")
+        self.max_seconds = limits.get("max_seconds", DEFAULT_MAX_SECONDS)
+        if not isinstance(self.max_seconds, int) or self.max_seconds < 1:
+            raise UsageError("policy: limits.max_seconds must be a positive integer")
         self.sources = doc.get("sources") or {}
         neg = doc.get("negation")
         try:
@@ -466,6 +564,10 @@ class Scan:
         self.findings = []
         self.targets = 0
         self.files = 0
+        # Wall-clock budget for the whole run (limits.max_seconds): one pathological
+        # input must stall the gate for seconds, not hours.
+        self.deadline = time.monotonic() + policy.max_seconds
+        self._current = ""                # display path of the file being scanned
         # Names <n> of every repos/<n> upstream submodule a target resolves under
         # (feeds the source checks; a library repo with no target never appears).
         self.repos = set()
@@ -512,6 +614,12 @@ class Scan:
             self._walk(real, real, tier)
         else:
             self._scan_file(real, os.path.basename(real), tier)
+
+    def _tick(self, path=None):
+        """Abort the run (exit 2) when the time budget is spent. Names the file being
+        scanned (`self._current`) unless a path is given."""
+        if time.monotonic() > self.deadline:
+            raise BudgetExceeded("time budget exceeded at %s" % (path or self._current))
 
     def _display(self, real_path):
         rel = self._rel_root(real_path)
@@ -574,6 +682,7 @@ class Scan:
         self.files += 1
         rel_root = self._rel_root(full)
         display = self._display(full)
+        self._current = display
         name = os.path.basename(full)
         fclass = pol.file_class(rel_target, rel_root)
 
@@ -624,11 +733,13 @@ class Scan:
         lines = text.split("\n")
         classes = self._line_classes(lines, fclass, name, rel_target, rel_root)
         ext = os.path.splitext(name)[1].lower()
-        for idx, raw in enumerate(lines):
-            line = raw.rstrip("\r")
+        logical = _logical_lines(lines)
+        for k, (idx, line) in enumerate(logical):
             if line == "":
                 continue
-            self._scan_line(line, idx + 1, classes[idx], display, tier, file_sha, ext)
+            self._tick(display)
+            nxt = logical[k + 1][1] if k + 1 < len(logical) else ""
+            self._scan_line(line, idx + 1, classes[idx], display, tier, file_sha, ext, nxt)
 
     def _line_classes(self, lines, fclass, name, rel_target, rel_root):
         """Class of each line: the file's class, except (1) frontmatter `hooks:`
@@ -679,7 +790,7 @@ class Scan:
                         classes[i] = "script"
         return classes
 
-    def _scan_line(self, line, lineno, cls, display, tier, file_sha, ext=""):
+    def _scan_line(self, line, lineno, cls, display, tier, file_sha, ext="", next_line=""):
         pol = self.policy
 
         # Built-in: hidden Unicode. One finding per line however many characters.
@@ -702,22 +813,41 @@ class Scan:
         for rule in pol.rules:
             if rule.applies is not None and cls not in rule.applies:
                 continue
-            if not rule.regex.search(line):
+            hit = self._rule_match(rule, line, next_line)
+            if hit is None:
                 continue
-            if rule.ignore is not None and rule.ignore.search(line):
-                continue
+            text, span = hit
             sev = rule.severity_by_class.get(cls, rule.severity)
             if tier == "owned" and rule.owned_severity:
                 sev = rule.owned_severity
             down = None
             if sev == "high":
-                down = self._downgrade_context(rule, line, cls, ext)
+                down = self._downgrade_context(rule, text, cls, ext, span)
                 if down:
                     sev = "low"
             self._add(rule.id, sev, display, lineno, cls, tier, rule.message,
                       excerpt=line, downgraded=down, raw_line=line)
 
-    def _downgrade_context(self, rule, line, cls, ext=""):
+    def _rule_match(self, rule, line, next_line):
+        """(text matched, (start, end)) when `rule` fires on `line`, else None. A rule
+        with `window: 2` also fires on a phrase that starts on this line and ends on
+        the next (whitespace collapsed); a match wholly inside the next line is that
+        line's own business, so only a match that crosses the boundary counts."""
+        text = _prep(rule, line)
+        span = _search(rule.regex, text, self._tick)
+        if span is None and rule.window >= 2 and next_line.strip():
+            first = " ".join(text.split())
+            joined = first + " " + " ".join(_prep(rule, next_line).split())
+            crossing = _search(rule.regex, joined, self._tick)
+            if crossing and crossing[0] < len(first) < crossing[1]:
+                text, span = joined, crossing
+        if span is None:
+            return None
+        if rule.ignore is not None and _search(rule.ignore, text, self._tick) is not None:
+            return None
+        return text, span
+
+    def _downgrade_context(self, rule, line, cls, ext="", span=(0, 0)):
         """Name of the first listed context that excuses a high finding, else None.
 
         Each context is something the AUTHOR of the scanned text could otherwise
@@ -726,13 +856,20 @@ class Scan:
                     exec/exfil rules; see `downgrade:` in policy.yaml)
           negation  prose only (class doc), and only when the negation word comes
                     BEFORE the match on the same line ("never run `...`")
+          negation-quoted
+                    as negation, and the matched phrase must also sit directly
+                    inside quote characters (it is being quoted, not said)
           comment   the line starts with this file type's own comment marker"""
         for ctx in rule.downgrade:
             if ctx == "test" and cls == "test":
                 return ctx
-            if (ctx == "negation" and self.policy.negation is not None and cls == "doc"):
-                m = rule.regex.search(line)
-                if m and self.policy.negation.search(line[:m.start()]):
+            if (ctx in ("negation", "negation-quoted") and self.policy.negation is not None
+                    and cls == "doc" and self.policy.negation.search(line[:span[0]])):
+                if ctx == "negation":
+                    return ctx
+                before = line[span[0] - 1] if span[0] > 0 else ""
+                after = line[span[1]] if span[1] < len(line) else ""
+                if before in QUOTE_CHARS and after in QUOTE_CHARS:
                     return ctx
             if (ctx == "comment" and cls in ("script", "hook", "config")
                     and line.lstrip().startswith(
@@ -1086,6 +1223,9 @@ def main(argv=None):
     try:
         args = build_parser().parse_args(argv)   # argparse exits 2 on bad usage
         return run(args)
+    except BudgetExceeded as exc:
+        sys.stderr.write("audit: %s\n" % exc)
+        return 2
     except UsageError as exc:
         sys.stderr.write("audit: error: %s\n" % exc)
         return 2
