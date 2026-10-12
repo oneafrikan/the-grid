@@ -8,6 +8,8 @@ Rules load only on PHP files under `wp-content/`. Every other glob tried (`**/{p
 
 Remaining gap, which is large: most plugin and theme repositories have no `wp-content/` directory, so their PHP files (the main plugin file `my-plugin.php`, `functions.php`, `uninstall.php`, `inc/helpers.php`, `class-*.php`) match no glob and get only the `php` pack. The design inventory listed those wider globs plus `**/wp-config.php` and `**/{theme,block}.json`; widening them is a human decision between coverage and loading these rules on non-WordPress PHP.
 
+These files also load on vendored third-party code (`vendor/`, third-party plugins under `wp-content/`); the glob cannot exclude them.
+
 ## Sources
 
 | Rule file | Source |
