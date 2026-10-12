@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import unicodedata
@@ -1032,10 +1033,8 @@ def check_url(policy, url):
     return True, "%s on %s is allowed" % (repo, host)
 
 
-def parse_gitmodules(path):
-    """{submodule path: (url, line number of its `url` line)} from a modules file.
-    Parsed by `[submodule "x"]` section; a section missing `path` or `url` is
-    ignored (nothing to look up)."""
+def _parse_gitmodules_text(path):
+    """Line-based fallback reader (used only when git itself is not available)."""
     sections = []                      # one dict per section: path, url, url_line
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -1059,6 +1058,48 @@ def parse_gitmodules(path):
             sections[-1]["url"], sections[-1]["url_line"] = value, n
     return {s["path"]: (s["url"], s["url_line"])
             for s in sections if "path" in s and "url" in s}
+
+
+def parse_gitmodules(path):
+    """{submodule path: (url, line number of its `url` line)} from a modules file.
+
+    Read by git itself (`git config -f <file> --get-regexp`), the same reader the
+    client uses, so every spelling git accepts (a section header and its first key
+    on ONE line, quoting, comments) is understood the same way here. A homemade line
+    parser disagreed with git on those spellings and then saw no submodules at all.
+    The line number is found by searching the file for the url text (0 if absent);
+    without git the line-based reader is the fallback. A section missing `path` or
+    `url` is ignored (nothing to look up)."""
+    try:
+        proc = subprocess.run(
+            ["git", "config", "-f", path, "--get-regexp", r"^submodule\..*\.(path|url)$"],
+            env=dict(os.environ, LC_ALL="C"), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            encoding="utf-8", errors="replace")
+    except OSError:
+        return _parse_gitmodules_text(path)       # git is not installed
+    if proc.returncode not in (0, 1):             # 1 = no match; anything else = unreadable
+        raise UsageError("cannot read %s: %s" % (path, proc.stderr.strip() or "git config failed"))
+    sections = {}
+    for row in proc.stdout.splitlines():
+        key, _, value = row.partition(" ")
+        name, _, field = key[len("submodule."):].rpartition(".")
+        sections.setdefault(name, {})[field.lower()] = value.strip()
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().split("\n")
+    except OSError as exc:
+        raise UsageError("cannot read %s: %s" % (path, exc))
+    out = {}
+    for sec in sections.values():
+        if "path" not in sec or "url" not in sec:
+            continue
+        url_line = 0
+        for n, raw in enumerate(lines, 1):
+            if sec["url"] in raw and re.search(r"\burl\b", raw, re.I):
+                url_line = n
+                break
+        out[sec["path"]] = (sec["url"], url_line)
+    return out
 
 
 def curated_repos(path):

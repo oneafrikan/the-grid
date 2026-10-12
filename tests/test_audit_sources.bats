@@ -285,3 +285,25 @@ print(eval(sys.argv[1]))' "$1"
   run python3 "$AUDIT" --root "$T" --grid-dir "$T" --baseline "$T/nope.txt" "$T/repos/fine"
   [ "$status" -eq 2 ]
 }
+
+@test "a .gitmodules section written as '[submodule \"x\"] path = ...' on one line is still read (source-not-allowed, high)" {
+  printf '[submodule "evil"] path = repos/evil\n\turl = https://evil.invalid/someone/evil.git\n' > "$T/.gitmodules"
+  mkdir -p "$T/repos/evil/x"
+  printf -- '---\nname: x\ndescription: clean\n---\nHello\n' > "$T/repos/evil/x/SKILL.md"
+  printf '### repos/evil\n' > "$T/CURATION.md"
+  printf 'evil\n' > "$BASE"
+  audit_json --baseline "$BASE" "$T/repos/evil"
+  [ "$status" -eq 1 ]
+  [ "$(q '[(f["rule"], f["severity"], f["path"], f["line"]) for f in F]')" = "[('source-not-allowed', 'high', '.gitmodules', 2)]" ]
+}
+
+@test "a .gitmodules entry with an allowed url in the same one-line spelling passes" {
+  printf '[submodule "fine"] path = repos/fine\n\turl = https://github.com/obra/superpowers.git\n' > "$T/.gitmodules"
+  mkdir -p "$T/repos/fine/x"
+  printf -- '---\nname: x\ndescription: clean\n---\nHello\n' > "$T/repos/fine/x/SKILL.md"
+  printf '### repos/fine\n' > "$T/CURATION.md"
+  printf 'fine\n' > "$BASE"
+  audit_json --baseline "$BASE" "$T/repos/fine"
+  [ "$status" -eq 0 ]
+  [ "$(q 'F')" = "[]" ]
+}
