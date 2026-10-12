@@ -620,3 +620,86 @@ mkprivate() {
   refute grep -q "zzzzzzzzzz" "$BATS_TEST_TMPDIR/digest.md"
   refute grep -q "SIDECHAIN-TEXT" "$BATS_TEST_TMPDIR/digest.md"
 }
+
+# ---------------------------------------------------------------------------
+# WP-016: write confinement (hardening, refs private WP-016; D-extra-1 option B).
+# The stub claude ignores permission rules, so these tests pin what the WORKER does: which
+# paths it grants, what it detects afterwards, and how it launches the child. Whether the
+# real Claude Code honours the rule form is an operator check (OPERATOR-TASKS B1), and
+# nothing below depends on it.
+# ---------------------------------------------------------------------------
+
+# allowed_rules: the --allowedTools part of the logged stub invocation.
+allowed_rules() {
+  local l; l="$(claude_line)"; l="${l#*--allowedTools }"; printf '%s' "${l%% --disallowedTools*}"
+}
+
+# clear_run: forget the previous worker run (stub call log, hook log) so a test can run twice.
+clear_run() { : > "$STUB_LOG"; : > "$LOG"; }
+
+@test "a tracked LOGS symlink to a dir outside cwd and private is refused: no rule, nothing written there" {
+  mk_tx 6
+  OUTD="$MOCK_HOOK_ROOT/outside"; mkdir -p "$OUTD"
+  rmdir "$P/LOGS"; ln -s "$OUTD" "$P/LOGS"
+  touch -h -t 202001010000 "$P/LOGS"          # a tracked, old link, as in a real checkout
+  export STUB_CLAUDE_MODE=handoff-fallback
+  run_worker
+  lacks "$(allowed_rules)" "$OUTD"
+  lacks "$(allowed_rules)" "$(cd "$OUTD" && pwd -P)"
+  [ -z "$(ls -A "$OUTD")" ]
+  log_has "target-refused=symlink-outside"
+  log_has "action=done"                       # the run itself still works, via the fallback dir
+}
+
+@test "the the-grid layout (LOGS symlinked into the private repo) still resolves and commits" {
+  mk_tx 6
+  mkprivate
+  touch -h -t 202001010000 "$P/LOGS"
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  contains "$(allowed_rules)" "$(edit_rule "$(cd "$GRID_PRIVATE_DIR/LOGS" && pwd -P)")"
+  refute log_has "target-refused"
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+" "$LOG"
+}
+
+@test "table rows pointing at HOME, above cwd or into ~/.ssh are refused" {
+  mkdir -p "$HOME/.ssh"
+  export STUB_CLAUDE_MODE=handoff-fallback
+  local row n=0
+  for row in '~' '../..' '~/.ssh'; do
+    n=$((n + 1))
+    mk_tx 6
+    printf '| proj | %s |\n' "$row" > "$GRID_PRIVATE_DIR/handoff-locations.md"
+    SID="11111111-1111-4111-8111-11111111111$n"
+    clear_run
+    run_worker
+    refute log_has "action=error"
+    log_has "target-refused="
+    lacks "$(allowed_rules)" "$(edit_rule "$HOME")"
+    lacks "$(allowed_rules)" "$(edit_rule "$HOME/.ssh")"
+    lacks "$(allowed_rules)" "$(edit_rule "$MOCK_HOOK_ROOT")"
+  done
+}
+
+@test "a table row outside cwd and outside any git work tree is refused" {
+  mk_tx 6
+  mkdir -p "$MOCK_HOOK_ROOT/plain"
+  printf '| proj | %s |\n' "$MOCK_HOOK_ROOT/plain" > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  export STUB_CLAUDE_MODE=handoff-fallback
+  run_worker
+  lacks "$(allowed_rules)" "$MOCK_HOOK_ROOT/plain"
+  log_has "target-refused=not-a-git-work-tree"
+}
+
+@test "the locations table is read from GRID_PRIVATE_DIR first, then from ~/.the-grid-private" {
+  mk_tx 6
+  mkdir -p "$P/notes/handoffs" "$P/other" "$HOME/.the-grid-private"
+  rmdir "$P/LOGS"
+  printf '| proj | notes/handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  printf '| proj | other |\n' > "$HOME/.the-grid-private/handoff-locations.md"
+  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$P/notes/handoffs"
+  run_worker
+  contains "$(allowed_rules)" "$(edit_rule "$P/notes/handoffs")"
+  lacks "$(allowed_rules)" "$P/other"
+  log_has "action=done"
+}

@@ -194,8 +194,11 @@ FALLBACK_REAL="$(rp "$FALLBACK" 2>/dev/null)" || FALLBACK_REAL="$FALLBACK"
 # Sets TARGET to an absolute, EXISTING directory, or "" (no rule for it is then
 # granted and the child can write only to the fallback dir).
 resolve_target() {
-  TARGET=""
-  local table="$HOME/.the-grid-private/handoff-locations.md" base line c1 c2 loc e matched=0
+  TARGET=""; TARGET_ROW=0; ROW_LOC=""
+  # The table lives with the private data: GRID_PRIVATE_DIR first, then the default home
+  # location (the skill documents ~/.the-grid-private/ and reads only that one).
+  local table="$PRIVATE/handoff-locations.md" base line c1 c2 loc e matched=0
+  [ -r "$table" ] || table="$HOME/.the-grid-private/handoff-locations.md"
   base="$(basename "$CWD")"
   if [ -r "$table" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
@@ -216,7 +219,8 @@ resolve_target() {
         case "$loc" in \~|\~/*) loc="$HOME${loc#\~}" ;; esac
         case "$loc" in /*) ;; *) loc="$CWD/$loc" ;; esac
         loc="${loc%/}"
-        [ -d "$loc" ] && TARGET="$loc"
+        ROW_LOC="$loc"
+        [ -d "$loc" ] && { TARGET="$loc"; TARGET_ROW=1; }
         return 0
       fi
     done < "$table"
@@ -227,8 +231,50 @@ resolve_target() {
   return 0
 }
 resolve_target
-TARGET_REAL=""
-[ -n "$TARGET" ] && TARGET_REAL="$(rp "$TARGET")"
+
+# accept_target: containment for the directory the child will be granted write access to.
+# `[ -d ]` follows symlinks, so a tracked LOGS -> <any dir> link, or a table row (the agent
+# can edit that file), used to turn into a write grant anywhere (R07.sec.F1, high). The
+# resolved path must now be under the cwd or the private repo. The one designed exception
+# is a table row naming another repo (tests: "mapped location outside cwd"): absolute,
+# no `..` component, inside a git work tree, and not HOME, / or a sensitive dir. Anything
+# else is refused: TARGET stays empty, only the fallback dir is granted, and the spawn log
+# line says why (target-refused=<why>).
+PRIVATE_REAL="$(rp "$PRIVATE" 2>/dev/null)" || PRIVATE_REAL="$PRIVATE"
+HOME_REAL="$(rp "$HOME" 2>/dev/null)" || HOME_REAL="$HOME"
+TARGET_REAL=""; TARGET_WHY=""
+accept_target() {
+  [ -n "$TARGET" ] || return 0
+  local real s
+  real="$(rp "$TARGET")" || { TARGET=""; return 0; }
+  case "$real/" in
+    "$CWD_REAL"/*|"$PRIVATE_REAL"/*) TARGET_REAL="$real"; return 0 ;;
+  esac
+  if [ "$TARGET_ROW" != 1 ]; then
+    TARGET_WHY="symlink-outside"
+  else
+    case "$ROW_LOC/" in
+      */../*) TARGET_WHY="dotdot" ;;
+    esac
+    if [ -z "$TARGET_WHY" ]; then
+      case "$real" in
+        /|"$HOME"|"$HOME_REAL") TARGET_WHY="home-or-root" ;;
+      esac
+    fi
+    if [ -z "$TARGET_WHY" ]; then
+      for s in .ssh .claude .config .gnupg .aws; do
+        case "$real/" in "$HOME/$s"/*|"$HOME_REAL/$s"/*) TARGET_WHY="sensitive-dir" ;; esac
+      done
+      [ -n "${CLAUDE_CONFIG_DIR:-}" ] && case "$real/" in "$CLAUDE_CONFIG_DIR"/*) TARGET_WHY="sensitive-dir" ;; esac
+    fi
+    if [ -z "$TARGET_WHY" ] && [ "$(git -C "$real" rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
+      TARGET_WHY="not-a-git-work-tree"
+    fi
+    [ -z "$TARGET_WHY" ] && { TARGET_REAL="$real"; return 0; }
+  fi
+  TARGET=""
+}
+accept_target
 
 # Path-scoped write rules: Edit(//<abs path>/**) in default permission mode is the form
 # Claude Code enforces (tests/fixtures/hooks/README.md, task 0.6); `//` anchors at the
@@ -269,7 +315,7 @@ perl -e 'my $t = time - 2; utime $t, $t, $ARGV[0]' "$STAMP"
 TARGET_TEXT="${TARGET:-none (use the fallback directory)}"
 PROMPT="/handoff Source conversation is the digest file $DIGEST, not this session. Target directory: $TARGET_TEXT. Fallback directory: $FALLBACK."
 
-log spawn ok "turns=$TURNS${END_REASON:+ end=${END_REASON//[^A-Za-z0-9_-]/}}"
+log spawn ok "turns=$TURNS${END_REASON:+ end=${END_REASON//[^A-Za-z0-9_-]/}}${TARGET_WHY:+ target-refused=$TARGET_WHY}"
 cd "$CWD" || finish_skip bad-payload
 OUT="$SNAP_DIR/child.out"
 # GRID_AUTOHANDOFF_CHILD=1 is the recursion guard (the child's own SessionEnd hook
@@ -430,7 +476,6 @@ fi
 # ---- 10: push, only the private repo and only our own commit -----------------------
 PUSH=""
 if [ "$COMMIT" != "none" ]; then
-  PRIVATE_REAL="$(rp "$PRIVATE" 2>/dev/null)" || PRIVATE_REAL="$PRIVATE"
   if [ "$T" != "$PRIVATE_REAL" ]; then
     PUSH="no-not-private"
   elif ! git -C "$T" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
