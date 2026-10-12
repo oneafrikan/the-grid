@@ -342,4 +342,9 @@ class _Parser:
 
 def loads(text):
     """Parse restricted YAML text. Raises ParseError(line, msg) on anything else."""
-    return _Parser(text).parse_document()
+    try:
+        return _Parser(text).parse_document()
+    except RecursionError:
+        # Pathologically nested flow collections / blocks: a parse error like any
+        # other, not an interpreter traceback (callers expect ParseError only).
+        raise ParseError(0, "nesting too deep")
