@@ -577,6 +577,8 @@ EOF
   grep -q '^tools:' "$REPO_ROOT/plugins/grid-agents/agents/grid-security-reviewer.md"
   missing="$(for f in "$REPO_ROOT"/plugins/*/agents/*.md; do grep -L '^tools:' "$f"; done | wc -l)"
   [ "$missing" -lt 24 ]
+}
+
 # plugin_tree_problems DIR -> one line per thing a shipped bundle must not carry: a symlink,
 # an executable file, a hooks/ directory, an MCP config, or a `hooks:` frontmatter key. A plugin
 # that ships any of these runs code or opens a connection on the installer's machine, so the

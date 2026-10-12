@@ -11,3 +11,4 @@ tests/test_audit.bats	# fixtures deliberately contain flaggable home-path string
 openspec/changes/vetting/design.md	# quotes the audit test fixtures verbatim (home paths, PEM header); the strings are the spec
 openspec/changes/hook-profiles/design.md	# quotes a placeholder-token fixture the hook must exempt; the string is the spec
 the-grid.png	# hero image is over the size limit; remove this line when the front-door change replaces it
+plugins/*/LICENSE	# byte copy of the repo-root LICENSE that each plugin bundle ships; its copyright line names the rights holder, which the licence requires (allow rules are match-level, so this is a path exemption)
