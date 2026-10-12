@@ -1072,7 +1072,7 @@ cwd_lock() { printf '%s/handoff/cwd-%s.lock\n' "$GRID_HOOK_STATE_DIR" "$(printf 
   sessionend_payload "$SID" "$TXN" "$P" | PATH="$shim:$PATH" GRID_AUTOHANDOFF_TIMEOUT=100 GRID_AUTOHANDOFF_WAIT=7 \
     bash "$REPO_ROOT/hooks/run.sh" auto-handoff
   wait_for 5 test -s "$shim/alarm"
-  [ "$(cat "$shim/alarm")" -eq 287 ]
+  [ "$(cat "$shim/alarm")" -eq 308 ]
 }
 
 @test "timeout kills the grandchild too, and the log keeps only decision lines" {
@@ -1470,4 +1470,119 @@ mkrepo() {
   pid="$(cat "$STUB_DIR/claude.pid")"
   gone() { ! kill -0 "$pid" 2>/dev/null; }
   wait_for 5 gone || { kill -9 "$pid" 2>/dev/null; false; }
+}
+
+# ---------------------------------------------------------------------------
+# Delta review follow-ups (auto-handoff hardening)
+# ---------------------------------------------------------------------------
+
+# An ssh-style remote must still reach ssh: `-c core.sshCommand=` (an EMPTY command) made git
+# fail with "cannot run" before ssh was ever started, so every push to a git@host remote died.
+@test "a push to an ssh-style remote invokes ssh (the worker's git does not blank the ssh command)" {
+  mk_tx 6
+  mkprivate
+  git -C "$GRID_PRIVATE_DIR" remote set-url origin git@example.invalid:o/r.git
+  mkdir -p "$BATS_TEST_TMPDIR/sshstub"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" > "%s/ssh.called"\nexit 255\n' "$BATS_TEST_TMPDIR" > "$BATS_TEST_TMPDIR/sshstub/ssh"
+  chmod +x "$BATS_TEST_TMPDIR/sshstub/ssh"
+  export PATH="$BATS_TEST_TMPDIR/sshstub:$PATH"
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+ push=failed" "$LOG"
+  [ -s "$BATS_TEST_TMPDIR/ssh.called" ]
+}
+
+@test "an absolute row inside the cwd that resolves outside through a tracked symlink is refused" {
+  mkrepo "$MOCK_HOOK_ROOT/victim"; mkdir -p "$MOCK_HOOK_ROOT/victim/sub"
+  mkdir -p "$P/docs"; ln -s "$MOCK_HOOK_ROOT/victim/sub" "$P/docs/handoffs"; touch -h -t 202001010000 "$P/docs/handoffs"
+  printf '| proj | %s |\n' "$P/docs/handoffs" > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-fallback
+  run_worker
+  lacks "$(allowed_rules)" "$MOCK_HOOK_ROOT/victim"
+  log_has "target-refused="
+  [ -z "$(ls -A "$MOCK_HOOK_ROOT/victim/sub")" ]
+}
+
+@test "a target that resolves into a git dir, or is the whole cwd, is refused" {
+  mkrepo "$GRID_PRIVATE_DIR"
+  local n=0 what
+  export STUB_CLAUDE_MODE=handoff-fallback
+  for what in "$P/.git" "$GRID_PRIVATE_DIR/.git" "$P/.git/hooks"; do
+    n=$((n + 1))
+    mk_tx 6
+    rm -rf "$P/LOGS"; ln -s "$what" "$P/LOGS"; touch -h -t 202001010000 "$P/LOGS"
+    SID="11111111-1111-4111-8111-66666666666$n"
+    clear_run
+    run_worker
+    log_has "target-refused=git-dir" || { echo "target $what" >&2; cat "$LOG" >&2; return 1; }
+    lacks "$(allowed_rules)" "$P/LOGS"
+  done
+  # the whole cwd as a target (a row of "."): refused as cwd-root
+  rm -f "$P/LOGS"; mkdir "$P/LOGS"
+  printf '| proj | . |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  mk_tx 6
+  SID="11111111-1111-4111-8111-666666666669"
+  clear_run
+  run_worker
+  log_has "target-refused=cwd-root"
+}
+
+@test "a relative row with a .. component is refused" {
+  mkdir -p "$P/notes/handoffs"
+  printf '| proj | notes/../notes/handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-fallback
+  run_worker
+  log_has "target-refused=dotdot"
+  lacks "$(allowed_rules)" "notes/handoffs"
+}
+
+@test "the locations table itself is watched: a change to it is unexpected-file" {
+  printf '| nothing | LOGS |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  touch -t 202001010000 "$GRID_PRIVATE_DIR/handoff-locations.md"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$GRID_PRIVATE_DIR/handoff-locations.md"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "handoff-locations.md"
+}
+
+# ~/.local/bin holds the claude launcher link into a ~1 GB versions dir: it is watched by
+# names, types, link targets and sizes, never by content (no hashing, no following links).
+@test "a new file in ~/.local/bin is detected; the watch does not hash content" {
+  mkdir -p "$HOME/.local/bin"
+  ln -s /etc/hostname "$HOME/.local/bin/tool"; touch -h -t 202001010000 "$HOME/.local/bin/tool"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$HOME/.local/bin/evil"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF ".local/bin/evil"
+  # a same-size rewrite of an existing file is NOT seen (documented limit of the cheap watch)
+  rm -f "$HOME/.local/bin/evil"; printf 'aaaa' > "$HOME/.local/bin/plain"; touch -t 202001010000 "$HOME/.local/bin/plain"
+  SID="11111111-1111-4111-8111-777777777777"
+  clear_run
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=done"
+}
+
+@test "the handoff commit runs with repository hooks off (the repo's own pre-commit does not run)" {
+  mk_tx 6
+  printf '#!/bin/sh\ntouch "%s/hook-ran"\n' "$MOCK_HOOK_ROOT" > "$P/.git/hooks/pre-commit"; chmod +x "$P/.git/hooks/pre-commit"
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=done"
+  [ ! -e "$MOCK_HOOK_ROOT/hook-ran" ]
+}
+
+@test "a locked commit repo ends repo-busy with the pair left on disk, uncommitted" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs GRID_AUTOHANDOFF_WAIT=1
+  mkdir -p "$GRID_HOOK_STATE_DIR/handoff/repo-$(printf '%s' "$(cd "$P" && pwd -P)" | cksum | cut -d' ' -f1).lock"
+  before="$(commits "$P")"
+  run_worker
+  log_has "action=error reason=repo-busy"
+  [ "$(commits "$P")" -eq "$before" ]
+  [ -f "$P/LOGS/2026-01-01-testhost-stub-handoff.md" ]
 }

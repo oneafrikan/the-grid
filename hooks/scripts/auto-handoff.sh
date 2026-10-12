@@ -51,7 +51,7 @@ if [ -z "$transcript" ] || [ -z "$cwd" ] || [ ! -d "$cwd" ]; then skip_bad "$sid
 # Detach: perl setsid() gives the worker its own session (it survives this process and
 # the session's process group), alarm bounds a hung worker, and the redirects leave it no
 # handle on this process's stdio. The alarm is the child timeout plus everything the worker
-# may legitimately do around it: 60 s of git, 120 s for the digest and the cwd-lock wait. perl ships on macOS, Ubuntu and
+# may legitimately do around it: 60 s of git, 120 s for the digest and up to four lock waits (cwd, two write dirs, repo). perl ships on macOS, Ubuntu and
 # Arch; setsid(1) does not on macOS.
 timeout="${GRID_AUTOHANDOFF_TIMEOUT:-900}"
 [[ "$timeout" =~ ^[0-9]+$ ]] || timeout=900
@@ -63,7 +63,7 @@ if ! command -v perl >/dev/null 2>&1; then
   grid_log "$LOG" "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ) session=$sid action=skip reason=no-perl"
   exit 0
 fi
-perl -MPOSIX -e 'POSIX::setsid(); alarm shift; exec @ARGV' "$((timeout + 60 + 120 + wait_s))" \
+perl -MPOSIX -e 'POSIX::setsid(); alarm shift; exec @ARGV' "$((timeout + 60 + 120 + 4 * wait_s))" \
   bash "$HERE/lib/auto-handoff-worker.sh" "$sid" "$transcript" "$cwd" "$end_reason" \
   < /dev/null >> "$LOG" 2>&1 &
 exit 0

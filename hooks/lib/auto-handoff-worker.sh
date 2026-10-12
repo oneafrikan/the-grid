@@ -50,14 +50,16 @@ GRID_ROOT="$(cd "$HERE/../.." && pwd -P)"
 SECRET_STRICT=1
 
 # Every git command the worker runs AFTER the child has been near the file system goes
-# through WGIT: no fsmonitor, no hooks and no ssh command from configuration, and the
-# `ext::` transport off, so a config the child managed to plant cannot execute anything
-# even if the detection in 7a missed it. Consequence: the repo's own hooks do not run for
-# the handoff commit (the worker's strict secret scan stands in). The usual git
-# environment overrides are dropped too.
+# through WGIT: no fsmonitor, no hooks and the `ext::` transport off, so a config the
+# child managed to plant cannot execute anything even if the detection in 7a missed it.
+# Consequence: the repo's own hooks do not run for the handoff commit (the worker's strict
+# secret scan stands in). The ssh setup is deliberately NOT touched: blanking
+# core.sshCommand makes every ssh remote fail, and the operator's own GIT_SSH* and config
+# are the operator's (a planted config is unreachable: only pre-run git dirs are used).
+# The usual git environment overrides are dropped.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
-      GIT_COMMON_DIR GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_EXEC_PATH GIT_SSH GIT_SSH_COMMAND
-WGIT=(git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.sshCommand= -c protocol.ext.allow=never)
+      GIT_COMMON_DIR GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_EXEC_PATH
+WGIT=(git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c protocol.ext.allow=never)
 
 # ---- knobs (a non-numeric value falls back to the default) -----------------------
 num() { if [[ "${1:-}" =~ ^[0-9]+$ ]]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
@@ -354,7 +356,20 @@ accept_target() {
   [ -n "$TARGET" ] || return 0
   local real s top
   real="$(rp "$TARGET")" || { TARGET=""; return 0; }
+  # Never a target, wherever it came from: the private repo's root, the whole cwd, or
+  # anything that is (or sits inside) a git dir: a grant there lets the child rewrite
+  # config or hooks that the worker's own commit would then trust.
   if [ "$real" = "$PRIVATE_REAL" ]; then TARGET_WHY="private-root"; TARGET=""; return 0; fi
+  if [ "$real" = "$CWD_REAL" ]; then TARGET_WHY="cwd-root"; TARGET=""; return 0; fi
+  case "$real/" in */.git/*) TARGET_WHY="git-dir"; TARGET=""; return 0 ;; esac
+  if [ "$(git -C "$real" rev-parse --is-inside-git-dir 2>/dev/null)" = true ]; then
+    TARGET_WHY="git-dir"; TARGET=""; return 0
+  fi
+  # A `..` in a table row is refused outright: the lexical and the resolved meaning of
+  # `<link>/../x` differ, and a rule built from either would be the wrong one.
+  if [ "$TARGET_ROW" = 1 ]; then
+    case "$ROW_LOC/" in */../*) TARGET_WHY="dotdot"; TARGET=""; return 0 ;; esac
+  fi
   case "$real/" in
     "$CWD_REAL"/*|"$PRIVATE_REAL"/*) TARGET_REAL="$real"; return 0 ;;
   esac
@@ -363,8 +378,10 @@ accept_target() {
   elif [ "$ROW_ABS" != 1 ]; then
     TARGET_WHY="outside-cwd"
   else
+    # An absolute row that LOOKS inside the cwd or the private repo but resolves outside
+    # (a tracked symlink on the way) is the same redirect as a relative one.
     case "$ROW_LOC/" in
-      */../*) TARGET_WHY="dotdot" ;;
+      "$CWD"/*|"$CWD_REAL"/*|"$PRIVATE"/*|"$PRIVATE_REAL"/*) TARGET_WHY="symlink-outside" ;;
     esac
     if [ -z "$TARGET_WHY" ]; then
       case "$real" in
@@ -450,6 +467,7 @@ state_lines() {
     find -P "$p" \( -type f -o -type l \) -print 2>/dev/null
   done | sort -u | while IFS= read -r f; do
     if [ -L "$f" ]; then printf '%s\tL\t%s\n' "$f" "$(readlink "$f")"
+    elif [ "${1:-}" = lite ]; then printf '%s\tF\t%s\n' "$f" "$(wc -c < "$f" 2>/dev/null | tr -d ' ')"
     else printf '%s\tF\t%s\n' "$f" "$(cksum < "$f" 2>/dev/null | tr ' ' ':')"; fi
   done
 }
@@ -487,13 +505,22 @@ home_watch() {
   local f
   for f in .bashrc .bash_profile .bash_login .profile .bash_logout .zshrc .zshenv .zprofile \
            .zlogin .zlogout .gitconfig .xprofile .npmrc .pam_environment .ssh/authorized_keys .ssh/authorized_keys2 \
-           .ssh/config .ssh/rc .ssh/environment .config/git/config .config/git/attributes .local/bin .config/autostart .bashrc.d; do
+           .ssh/config .ssh/rc .ssh/environment .config/git/config .config/git/attributes .config/autostart .bashrc.d; do
     printf '%s\n' "$HOME/$f"
   done
   local c="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
   printf '%s\n' "$c"/settings*.json "$c/.credentials.json" "$c/CLAUDE.md" "$c/hooks" "$c/commands" "$HOME/.config/systemd/user"
+  # The table that decides future write grants.
+  printf '%s\n' "$PRIVATE/handoff-locations.md" "$HOME/.the-grid-private/handoff-locations.md"
 }
-home_watch | state_lines > "$SNAP_DIR/home.state"
+# Big directories: names, types, link targets and sizes only (no content hashing, no
+# following links). ~/.local/bin holds the claude launcher link into a ~1 GB versions
+# directory; hashing that would be slow, and a self-update mid-run would be a false alarm
+# on content. A same-size rewrite of a file there is not seen (documented in the README).
+home_watch_lite() { printf '%s\n' "$HOME/.local/bin"; }
+# home_state: the whole home-side state, in one stable order.
+home_state() { { home_watch | state_lines; home_watch_lite | state_lines lite; } | sort -u; }
+home_state > "$SNAP_DIR/home.state"
 
 # Roots the verification scans: ONLY the directories the child may write to: the cwd, the
 # fallback dir and the target dir. Not the whole work tree of the repo the commit lands in:
@@ -703,7 +730,7 @@ for d in "${GITDIRS[@]}"; do
   while IFS= read -r p; do [ -n "$p" ] && CHANGED+=("$p"); done < <(git_state "$d" | state_diff "$SNAP_DIR/git$i.state")
   i=$((i + 1))
 done
-while IFS= read -r p; do [ -n "$p" ] && CHANGED+=("$p"); done < <(home_watch | state_lines | state_diff "$SNAP_DIR/home.state")
+while IFS= read -r p; do [ -n "$p" ] && CHANGED+=("$p"); done < <(home_state | state_diff "$SNAP_DIR/home.state")
 # A git dir that did not exist before the run (VS1): refuse before any git command runs.
 NEWGIT=()
 while IFS= read -r p; do [ -n "$p" ] && NEWGIT+=("$(disp "$p")"); done \
