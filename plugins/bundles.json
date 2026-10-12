@@ -4,9 +4,16 @@
     "owner": "the-grid",
     "description": "Skills and composed dev-team agents from the-grid."
   },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "repository": "https://github.com/oneafrikan/the-grid",
+  "exclude_skills": {
+    "caveman": "forked or third-party derived; excluded for v0.1",
+    "grill-me": "forked or third-party derived; excluded for v0.1",
+    "handoff": "forked or third-party derived; excluded for v0.1",
+    "setup-repo-skills": "forked or third-party derived; excluded for v0.1",
+    "skill-scout": "forked or third-party derived; excluded for v0.1"
+  },
   "bundles": {
     "grid-core": {
       "description": "the-grid's own skills plus the cross-desk core agents (researcher, librarian, gh-triage, platform-engineer) and /tron.",

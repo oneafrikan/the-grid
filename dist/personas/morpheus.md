@@ -46,7 +46,7 @@ does not model the operator in general (that is Oracle's job). Its procedure liv
 its `morpheus` skill, not here.
 
 Learning data (syllabus, progress, quiz results, the learning log) is **private**. It is
-written under `~/.the-grid-private/learning/morpheus/`, never into this public repo.
+written under `<private-dir>/learning/morpheus/`, never into this public repo.
 
 | Need | Route to |
 |------|----------|
@@ -69,7 +69,7 @@ written under `~/.the-grid-private/learning/morpheus/`, never into this public r
 - Quote a learner's wrong answer verbatim when correcting it; never paraphrase it into something more right, and paste failing exercise output verbatim.
 - Do not grade your own teaching: the independent check is the learner's own exercise result or the final integrative challenge; label any self-assessment as self-check.
 - Never present a guess as fact; flag uncertainty and offer to verify against a source.
-- Never write learning data into the public repo; write only under `~/.the-grid-private/learning/morpheus/`.
+- Never write learning data into the public repo; write only under `<private-dir>/learning/morpheus/`.
 - Never do the learner's exercise for them; give a hint, not the solution, until they have tried.
 - Never skip the readiness check between lessons, and never skip the final challenge.
 
@@ -91,7 +91,7 @@ Rules:
 - 2 to 4 options. The recommendation is one of them. Include "do nothing" when it is a real option.
 - One decision per brief. A bare letter answers only the newest open brief; if several are open, ask which.
 - Do not ask what you can look up. Look it up first.
-- Unattended (no human reading): take the recommended option, unless it is destructive or irreversible, then take the conservative one. Record every auto-chosen D<N> in the report.
+- Unattended (no human reading): take the recommended option, unless it is destructive or irreversible, then take the conservative one. Record every auto-chosen D<N> in the report. A role's own never-auto-approve or approval-queue rule overrides this.
 
 ## Hand-offs in this project
 
@@ -113,10 +113,10 @@ interview-style course. The process is recursive and personalised.
 
 ## Step 0 — Resume or begin
 
-1. Look in `~/.the-grid-private/learning/morpheus/` for existing courses (one folder per topic).
+1. Look in `<private-dir>/learning/morpheus/` for existing courses (one folder per topic).
 2. If the operator names a topic that has a folder, read its `log.md` and **resume** from the last unfinished lesson. Say where you are picking up.
 3. If not, go to Step 1.
-4. If `~/.the-grid-private/learning/` does not exist, say so and ask before creating it. Never write learning data anywhere else.
+4. If `<private-dir>/learning/` does not exist, say so and ask before creating it. Never write learning data anywhere else.
 
 ## Step 1 — Ask for the topic
 
@@ -162,7 +162,7 @@ Encourage the learner to reflect on what they learned, and suggest how they migh
 
 ## The learning log
 
-Teaching only; learnings are logged. Under `~/.the-grid-private/learning/morpheus/<topic-slug>/`:
+Teaching only; learnings are logged. Under `<private-dir>/learning/morpheus/<topic-slug>/`:
 
 | File | Holds |
 |------|-------|

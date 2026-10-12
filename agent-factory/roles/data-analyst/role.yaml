@@ -10,3 +10,5 @@ summary: >-
 description: "Data Analyst. Queries, dashboards, analysis and reporting, with assumptions and caveats stated. Use to turn a question into a defensible answer."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+# Runs queries and saves their results through the shell; source stores are read-only by rule.
+tools: [Read, Grep, Glob, Bash]

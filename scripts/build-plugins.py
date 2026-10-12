@@ -7,6 +7,7 @@ Output (generated, committed):
     plugins/<bundle>/.claude-plugin/plugin.json
     plugins/<bundle>/skills/<name>/...      owned skills + composed orchestrator skills
     plugins/<bundle>/agents/<name>.md       composed specialists + root-owned agents
+    plugins/<bundle>/LICENSE, THIRD-PARTY-NOTICES.md   byte-identical copies of the repo root's
 
 Never hand-edit the output: re-run this script instead.
 
@@ -35,6 +36,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -42,14 +44,18 @@ from pathlib import Path
 
 # ---- manifest schema -------------------------------------------------------
 # Unknown keys are a hard error (typos must not silently drop content).
-TOP_REQUIRED = {"marketplace", "version", "license", "repository", "bundles"}
+TOP_REQUIRED = {"marketplace", "version", "license", "repository", "exclude_skills", "bundles"}
 MARKETPLACE_REQUIRED = {"name", "owner", "description"}
 BUNDLE_REQUIRED = {"description", "skills", "compose", "agents"}
 MAX_DESCRIPTION = 200  # marketplace listing budget; enforced, never truncated
+# Repo-root files copied byte-identically into every bundle dir.
+BUNDLE_NOTICE_FILES = ("LICENSE", "THIRD-PARTY-NOTICES.md")
 
 # Component names become path segments, so refuse anything that could escape a dir.
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-# Files never copied into (or counted from) the generated tree.
+# Files never copied into the generated tree from a SOURCE dir. The disk side is NOT
+# filtered (see disk_files): a committed .DS_Store under plugins/ must show up as `extra:`
+# instead of letting arbitrary bytes pass --check.
 IGNORED = {".DS_Store"}
 
 # A rendered file: (bytes, is_executable). The exec bit is part of the content because
@@ -79,11 +85,21 @@ def load_manifest(grid):
     if not path.is_file():
         raise GuardError(f"manifest not found: {path}")
     try:
-        m = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
+        m = json.loads(read_regular(path).decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise GuardError(f"{path}: invalid JSON: {e}")
 
     check_keys(m, TOP_REQUIRED, "bundles.json")
+    # exclude_skills: {skill name: one-line reason}. Every skills/<d>/SKILL.md must be in a
+    # bundle or listed here, so a new root skill is never silently left out of the plugins.
+    ex = m["exclude_skills"]
+    if not isinstance(ex, dict):
+        raise GuardError("bundles.json: 'exclude_skills' must be an object")
+    bad = [str(k) for k, v in ex.items()
+           if not (NAME_RE.match(k) and isinstance(v, str) and v.strip())]
+    if bad:
+        raise GuardError("bundles.json: 'exclude_skills' must map plain skill names to a "
+                         f"non-empty reason string; bad entr(ies): {', '.join(bad)}")
     check_keys(m["marketplace"], MARKETPLACE_REQUIRED, "bundles.json marketplace")
     for k in ("version", "license", "repository"):
         if not isinstance(m[k], str) or not m[k]:
@@ -112,17 +128,70 @@ def load_manifest(grid):
 
 
 # ---- file collection -------------------------------------------------------
-def collect(root, prefix):
-    """Map every file under `root` to {posix path under `prefix`: (bytes, exec)}."""
+def reject_odd(path):
+    """Raise GuardError unless `path` is a plain file, or a dir holding only plain files and dirs.
+
+    Symlinks (to files, dirs or nothing), FIFOs, sockets and devices are refused, at the top
+    and at every depth, without ever following a link. Dereferencing a link would copy bytes
+    from outside the source tree into the public tree; os.walk silently skips linked dirs;
+    reading a FIFO blocks forever; rmtree cannot remove a symlinked dir.
+    """
+    try:
+        mode = os.lstat(path).st_mode
+    except OSError as e:
+        raise GuardError(f"{path}: cannot stat: {e}")
+    if stat.S_ISLNK(mode):
+        raise GuardError(f"{path}: is a symlink (refusing to follow it)")
+    if stat.S_ISREG(mode):
+        return
+    if not stat.S_ISDIR(mode):
+        raise GuardError(f"{path}: not a regular file or directory")
+    # followlinks=False: a linked dir is listed in dirnames but never descended into.
+    for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+        for n in dirnames + filenames:
+            p = os.path.join(dirpath, n)
+            m = os.lstat(p).st_mode
+            if stat.S_ISLNK(m):
+                raise GuardError(f"{p}: is a symlink (refusing to follow it)")
+            if not (stat.S_ISREG(m) or stat.S_ISDIR(m)):
+                raise GuardError(f"{p}: not a regular file or directory")
+
+
+def read_regular(path):
+    """Read a plain file without following a link, or raise GuardError.
+
+    reject_odd already vetted the tree; this re-checks on the opened descriptor so a path
+    swapped for a link or FIFO in between cannot be dereferenced or block (O_NOFOLLOW
+    refuses links, O_NONBLOCK lets a FIFO open so fstat can reject it).
+    """
+    if os.path.islink(path):
+        raise GuardError(f"{path}: is a symlink (refusing to follow it)")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        raise GuardError(f"{path}: cannot read as a plain file: {e}")
+    with os.fdopen(fd, "rb") as fh:
+        if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+            raise GuardError(f"{path}: not a regular file")
+        return fh.read()
+
+
+def collect(root, prefix, ignore=True):
+    """Map every file under `root` to {posix path under `prefix`: (bytes, exec)}.
+
+    `ignore` skips IGNORED names (source side only). Raises GuardError on any symlink or
+    non-regular entry anywhere under (or at) `root`.
+    """
+    reject_odd(root)
     out = {}
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         dirnames.sort()
         for fn in sorted(filenames):
-            if fn in IGNORED:
+            if ignore and fn in IGNORED:
                 continue
             p = Path(dirpath) / fn
             rel = p.relative_to(root).as_posix()
-            out[f"{prefix}/{rel}"] = (p.read_bytes(), os.access(p, os.X_OK))
+            out[f"{prefix}/{rel}"] = (read_regular(p), os.access(p, os.X_OK))
     return out
 
 
@@ -213,14 +282,14 @@ def render_bundle(grid, name, b, manifest, repo_skills, tmp):
         ag_root = out / "agents"
         if ag_root.is_dir():
             for f in sorted(ag_root.glob("*.md")):
-                add_agent(f.stem, (f.read_bytes(), os.access(f, os.X_OK)), f"compose {p}")
+                add_agent(f.stem, (read_regular(f), os.access(f, os.X_OK)), f"compose {p}")
 
     # Root-owned hand-authored agents from agents/.
     for a in b["agents"]:
         f = grid / "agents" / f"{a}.md"
         if not f.is_file():
             raise GuardError(f"bundle '{name}': listed agent '{a}' has no {f}")
-        add_agent(a, (f.read_bytes(), os.access(f, os.X_OK)), "agents/")
+        add_agent(a, (read_regular(f), os.access(f, os.X_OK)), "agents/")
 
     if not skills and not agents:
         raise GuardError(f"bundle '{name}' has no components")
@@ -241,6 +310,15 @@ def render_bundle(grid, name, b, manifest, repo_skills, tmp):
         "repository": manifest["repository"],
     }
     files[f"{base}/.claude-plugin/plugin.json"] = (dump_json(plugin), False)
+
+    # Licence and third-party notice travel with every bundle (a plugin install copies only
+    # its own dir, so the repo-root files would not reach the user). Byte-identical copies
+    # of the root files; a missing or odd root file is a guard error, never skipped.
+    for fname in BUNDLE_NOTICE_FILES:
+        src = grid / fname
+        if not os.path.lexists(src):
+            raise GuardError(f"bundle '{name}': root file {fname} is missing ({src})")
+        files[f"{base}/{fname}"] = (read_regular(src), False)
     return files
 
 
@@ -264,6 +342,35 @@ def render_marketplace(manifest):
     return {".claude-plugin/marketplace.json": (dump_json(doc), False)}
 
 
+def check_skill_classification(grid, manifest):
+    """Every skills/<d>/SKILL.md must be bundled or listed in exclude_skills (with a reason).
+
+    Without this a new root skill is silently never shipped, and an exclusion has no recorded
+    reason. Also refuses a stale exclusion (skill gone) and a skill that is both bundled and
+    excluded, so the list cannot rot.
+    """
+    bundled = {s for b in manifest["bundles"].values() for s in b["skills"]}
+    excluded = set(manifest["exclude_skills"])
+    skills_dir = grid / "skills"
+    on_disk = set()
+    if skills_dir.is_dir():
+        for d in sorted(skills_dir.iterdir()):
+            if os.path.lexists(d / "SKILL.md"):
+                on_disk.add(d.name)
+    both = sorted(bundled & excluded)
+    if both:
+        raise GuardError(f"skill(s) both bundled and in exclude_skills: {', '.join(both)}")
+    ghost = sorted(excluded - on_disk)
+    if ghost:
+        raise GuardError(f"exclude_skills names skill(s) with no skills/<name>/SKILL.md: "
+                         f"{', '.join(ghost)}")
+    unclassified = sorted(on_disk - bundled - excluded)
+    if unclassified:
+        raise GuardError(
+            f"skill(s) in no bundle and not in exclude_skills: {', '.join(unclassified)} "
+            "(add each to a bundle in plugins/bundles.json, or to 'exclude_skills' with a reason)")
+
+
 def render(grid, manifest, tmp):
     """Render every generated file: {path: FileSpec}. Raises GuardError before any write."""
     repo_skills = repos_skill_names(grid)
@@ -272,22 +379,39 @@ def render(grid, manifest, tmp):
     files = {}
     for name, b in manifest["bundles"].items():
         files.update(render_bundle(grid, name, b, manifest, repo_skills, tmp))
+    check_skill_classification(grid, manifest)
     files.update(render_marketplace(manifest))
     return files
 
 
 # ---- disk state, check, write ----------------------------------------------
 def disk_files(grid):
-    """Every file the builder owns on disk: all of plugins/<dir>/** plus marketplace.json."""
+    """Every file the builder owns on disk: all of plugins/<dir>/** plus marketplace.json.
+
+    Raises GuardError (never lists) when any of it is a symlink or odd file, so --check and
+    write mode both refuse before anything is deleted. .DS_Store is NOT ignored here.
+    """
     found = {}
     plugins = grid / "plugins"
+    if plugins.is_symlink():
+        raise GuardError(f"{plugins}: is a symlink (refusing to follow it)")
     if plugins.is_dir():
         for d in sorted(plugins.iterdir()):
-            if d.is_dir():  # plugins/bundles.json (a file) is input, not output
-                found.update(collect(d, f"plugins/{d.name}"))
-    mp = grid / ".claude-plugin" / "marketplace.json"
-    if mp.is_file():
-        found[".claude-plugin/marketplace.json"] = (mp.read_bytes(), os.access(mp, os.X_OK))
+            # lstat-based: a symlink is refused before is_dir() could follow it.
+            m = os.lstat(d).st_mode
+            if stat.S_ISLNK(m):
+                raise GuardError(f"{d}: is a symlink (refusing to follow it)")
+            if stat.S_ISDIR(m):
+                found.update(collect(d, f"plugins/{d.name}", ignore=False))
+            elif not stat.S_ISREG(m):  # plugins/bundles.json (a file) is input, not output
+                raise GuardError(f"{d}: not a regular file or directory")
+    cp = grid / ".claude-plugin"
+    mp = cp / "marketplace.json"
+    if cp.is_symlink():
+        raise GuardError(f"{cp}: is a symlink (refusing to follow it)")
+    if os.path.lexists(mp):
+        reject_odd(mp)
+        found[".claude-plugin/marketplace.json"] = (read_regular(mp), os.access(mp, os.X_OK))
     return found
 
 
@@ -313,6 +437,9 @@ def do_check(grid, files):
 
 def do_write(grid, manifest, files):
     plugins = grid / "plugins"
+    # Guard FIRST: refuse a symlinked or odd tree before the first rmtree, so a refusal can
+    # never leave the generated tree half-deleted (disk_files raises GuardError, exit 2).
+    disk_files(grid)
     # Replace wholesale: every bundle dir (and any stale dir for a removed bundle) is
     # deleted first so files dropped from a bundle do not linger.
     if plugins.is_dir():
@@ -358,6 +485,11 @@ def main():
         return 0
     except GuardError as e:
         print(f"build-plugins: {e}", file=sys.stderr)
+        return 2
+    except OSError as e:
+        # Exit 1 means "drift" to callers; an I/O failure (unreadable file, full disk)
+        # must not masquerade as that.
+        print(f"build-plugins: I/O error: {e}", file=sys.stderr)
         return 2
 
 

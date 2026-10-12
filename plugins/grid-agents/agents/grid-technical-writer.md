@@ -3,6 +3,7 @@ name: grid-technical-writer
 description: 'Technical Writer. Keeps a repo''s documentation true to its code: README,
   agent guidance files, references, onboarding, changelogs, agent briefs. Use for
   documentation work.'
+tools: Read, Grep, Glob, Write, Edit, Bash
 model: sonnet
 ---
 

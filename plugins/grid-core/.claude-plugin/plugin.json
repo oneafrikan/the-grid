@@ -1,6 +1,6 @@
 {
   "name": "grid-core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "the-grid's own skills plus the cross-desk core agents (researcher, librarian, gh-triage, platform-engineer) and /tron.",
   "author": {
     "name": "the-grid"

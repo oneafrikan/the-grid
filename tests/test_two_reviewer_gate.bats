@@ -65,3 +65,19 @@ teardown() {
   run "$PY" "$REPO_ROOT/agent-factory/run_evals.py" --validate
   [ "$status" -eq 0 ]
 }
+
+# WP-070: the verdict derivation, the docs-only definition and the packet wording are exact strings.
+@test "Step 6 derives the security verdict from the severity table" {
+  printf '%s\n' "$SECTION" | grep -qF "no open Critical or High finding in it"
+  printf '%s\n' "$SECTION" | grep -qF "Do not re-rate findings."
+}
+
+@test "Step 6 defines docs-only" {
+  printf '%s\n' "$SECTION" | grep -qF 'only `*.md` files under `docs/`'
+}
+
+@test "Step 6 packet is a role spawn, not the /qa_engineer slash form" {
+  printf '%s\n' "$SECTION" | grep -qF 'Spawn the `qa-engineer` role with this packet:'
+  run bash -c 'printf "%s\n" "$1" | grep -qF "/qa_engineer"' _ "$SECTION"
+  [ "$status" -ne 0 ]
+}

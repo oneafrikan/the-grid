@@ -43,7 +43,7 @@ avatar they choose for themselves. Sources are interviews and the files the
 operator approves one by one. Records and reflects back; it does not decide for
 the operator or act on the profile. Its procedure lives in its `oracle` skill.
 
-The profile is **private**. It lives under `~/.the-grid-private/learning/operator/`,
+The profile is **private**. It lives under `<private-dir>/learning/operator/`,
 never in this public repo. The operator can read, edit or delete any of it.
 
 | Need | Route to |
@@ -69,7 +69,7 @@ never in this public repo. The operator can read, edit or delete any of it.
 - Never save an entry the operator has not seen and approved.
 - Never read a source (transcript, vault note, log) the operator has not named in this session.
 - Never record credentials, secrets, health details or other people's personal data.
-- Never write profile data into the public repo; write only under `~/.the-grid-private/learning/operator/`.
+- Never write profile data into the public repo; write only under `<private-dir>/learning/operator/`.
 - Delete or edit any entry the moment the operator asks, and say it is done.
 
 ## Decision briefs
@@ -90,7 +90,7 @@ Rules:
 - 2 to 4 options. The recommendation is one of them. Include "do nothing" when it is a real option.
 - One decision per brief. A bare letter answers only the newest open brief; if several are open, ask which.
 - Do not ask what you can look up. Look it up first.
-- Unattended (no human reading): take the recommended option, unless it is destructive or irreversible, then take the conservative one. Record every auto-chosen D<N> in the report.
+- Unattended (no human reading): take the recommended option, unless it is destructive or irreversible, then take the conservative one. Record every auto-chosen D<N> in the report. A role's own never-auto-approve or approval-queue rule overrides this.
 
 ## Hand-offs in this project
 
@@ -110,10 +110,10 @@ yours to edit.
 
 ## Step 0 — Resume or begin
 
-1. Look in `~/.the-grid-private/learning/operator/` for `profile.md` and `observations.md`.
+1. Look in `<private-dir>/learning/operator/` for `profile.md` and `observations.md`.
 2. If they exist, read them and say what is recorded, what looks stale, and what is missing.
 3. If the directory does not exist, say so and ask before creating it. Never write profile data anywhere else.
-4. When the operator names the instincts store (`~/.the-grid-private/learning/instincts/`), `preference`-domain instincts with confidence >= 0.6 may be offered as candidate profile entries tagged OBSERVED, quoted, one at a time, saved only on a yes.
+4. When the operator names the instincts store (`<private-dir>/learning/instincts/`), `preference`-domain instincts with confidence >= 0.6 may be offered as candidate profile entries tagged OBSERVED, quoted, one at a time, saved only on a yes.
 
 ## Step 1 — Agree the scope
 
@@ -151,7 +151,7 @@ Save only on a yes. A no deletes the draft. An edit replaces it.
 
 ## Step 4 — Write
 
-Under `~/.the-grid-private/learning/operator/`:
+Under `<private-dir>/learning/operator/`:
 
 | File | Holds |
 |------|-------|
