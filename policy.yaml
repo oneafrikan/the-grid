@@ -64,7 +64,7 @@ rules:
     message: npx -y runs whatever is currently published; pin pkg@x.y.z
     regex: '\bnpx\s+(?:-y|--yes)\b|"args"\s*:\s*\[\s*"(?:-y|--yes)"'
     ignore_regex: '\bnpx\s+(?:(?:-y|--yes)\s+)+(?:--?\S+\s+)*@?[\w./-]+@\d|"(?:-y|--yes)"\s*,\s*"@?[\w./-]+@\d'
-    downgrade: [negation, comment]
+    downgrade: [comment]
   - id: latest-tag
     severity: low
     severity_by_class: {script: high, hook: high, config: high}
