@@ -1363,3 +1363,29 @@ open(sys.argv[1] + "/forged.sh", "wb").write(body)' "$T/repos/r/x"
   [ "$status" -eq 1 ]
   [ "$(q "sorted(f['rule'] for f in F if f['severity'] == 'high')")" = "['curl-pipe-shell']" ]
 }
+
+@test "frontmatter hooks: only the pinned command lines are allowed; an inline or flow-style hook added next to them is HIGH" {
+  mk_up
+  local d="$T/repos/r/x" base
+  write_allow "- rule: hook-declared
+  path: repos/r/x/SKILL.md
+  contains: 'command: \"bash safe-check.sh\"'
+  reason: reviewed hook command line, exact text"
+  base='---\nname: careful\ndescription: d\nhooks:\n  PreToolUse:\n    - matcher: "Bash"\n      hooks:\n        - type: command\n          command: "bash safe-check.sh"\n          statusMessage: "Checking..."\n'
+  # the unmodified, known line set: nothing is flagged (the structural keys are not findings)
+  printf -- "${base}---\nbody\n" > "$d/SKILL.md"
+  audit_json "$d"
+  [ "$status" -eq 0 ]
+  [ "$(q 'F')" = "[]" ]
+  # each of these adds one line to the same block; every one must be HIGH
+  local ins
+  for ins in '        - {type: command, command: "bash ./evil.sh"}' \
+             'hooks: [{type: command, command: "id"}]' \
+             '        - type: prompt' \
+             '        - { command : "bash ./evil.sh" }'; do
+    printf -- "${base}%s\n---\nbody\n" "$ins" > "$d/SKILL.md"
+    audit_json "$d"
+    [ "$status" -eq 1 ] || { echo "not flagged: $ins" >&2; return 1; }
+    [ "$(q "sorted(set(f['rule'] for f in F if f['severity'] == 'high'))")" = "['hook-declared']" ]
+  done
+}

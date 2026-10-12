@@ -184,30 +184,6 @@ Every entry is a line the scanner flags that was read in context and judged to b
   path: repos/anthropic/skills/claude-api/shared/managed-agents-scheduled-deployments.md
   contains: 'curl -fsSL https://api.anthropic.com/v1/deployments  -H "x-api-key: $ANTHROPIC_API_KEY"  -H "anthropic-version: 2023-06-01"  -H "anthropic-beta: managed-agents-2026-04-01"  -H "content-type: application/json"  -d @- <<EOF'
   reason: the vendor's own documented API call, posting a JSON body from a here-document to the vendor's endpoint with the user's own key; an example for a human, not run by the skill (the continuation lines are joined for matching)
-- rule: hook-declared
-  path: repos/gstack/autoplan/SKILL.md
-  contains: 'hooks:'
-  reason: the skill declares a PreToolUse hook in its frontmatter that runs a gstack helper script for phase publication; reviewed, the same behaviour as the other gstack hook skills, accepted with the gstack source trust
-- rule: hook-declared
-  path: repos/gstack/careful/SKILL.md
-  contains: 'hooks:'
-  reason: the careful skill is a guard; its frontmatter hook runs gstack's check-careful.sh to warn before destructive commands; reviewed, accepted with the gstack source trust
-- rule: hook-declared
-  path: repos/gstack/freeze/SKILL.md
-  contains: 'hooks:'
-  reason: the freeze skill's frontmatter hooks run gstack's check-freeze.sh to block edits outside the frozen directory; reviewed, accepted with the gstack source trust
-- rule: hook-declared
-  path: repos/gstack/guard/SKILL.md
-  contains: 'hooks:'
-  reason: the guard skill combines the careful and freeze checks as frontmatter hooks that run gstack helper scripts; reviewed, accepted with the gstack source trust
-- rule: hook-declared
-  path: repos/gstack/investigate/SKILL.md
-  contains: 'hooks:'
-  reason: the investigate skill's frontmatter hooks run gstack's freeze check to keep edits inside the investigated area; reviewed, accepted with the gstack source trust
-- rule: hook-declared
-  path: repos/gstack/plan-ceo-review/SKILL.md
-  contains: 'hooks:'
-  reason: the review skill declares a PostToolUse frontmatter hook that runs gstack's mode-handoff-hook helper script if present; reviewed, accepted with the gstack source trust
 - rule: powershell-iex
   path: repos/gstack/careful/bin/check-careful.sh
   contains: '"PowerShell Invoke-Expression (iex). ${_WHY_DYNAMIC}"'
