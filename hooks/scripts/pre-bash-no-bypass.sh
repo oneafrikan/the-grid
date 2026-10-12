@@ -39,6 +39,8 @@ case "$command" in
   *) exit 0 ;;
 esac
 
+grid_check_cmd_cap pre-bash-no-bypass "$command"
+
 grid_git_segments "$command"
 
 reasons=()

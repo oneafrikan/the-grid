@@ -34,6 +34,28 @@ grid_require_jq() {
   esac
 }
 
+# grid_check_cmd_cap <hook-name> <command>
+#   Input cap for the guards (WP-019). A timed-out PreToolUse hook does not block, so
+#   a command too large to tokenize inside the hook timeout must be refused, not
+#   waved through. GRID_GUARD_MAX_CMD (bytes, default 100000) is the limit. Exits 2
+#   when over the limit and the command mentions git; the caller's LC_ALL=C makes ${#}
+#   count bytes. The default is 100000, not 200000: many-small-words input costs about
+#   25 ms per KB to tokenize on a loaded 2020s box, and the whole hook must stay well
+#   inside its 5 s timeout.
+grid_check_cmd_cap() {
+  local max="${GRID_GUARD_MAX_CMD:-100000}"
+  [[ "$max" =~ ^[0-9]+$ ]] || max=100000
+  [ "${#2}" -gt "$max" ] || return 0
+  # Only a command that could matter to a guard (it mentions git, in any case, or
+  # HUSKY, which the assignment rule reads) is refused; anything else passes.
+  case "$2" in
+    *[gG][iI][tT]*|*[hH][uU][sS][kK][yY]*) ;;
+    *) return 0 ;;
+  esac
+  echo "BLOCKED by the-grid hook $1: command too long to inspect (${#2} bytes, limit $max). Write the content to a file with the Write tool and refer to the file in the command." >&2
+  exit 2
+}
+
 # grid_log <file> <message>
 #   Append one line to <file>. The directory is created 0700 (umask in a subshell
 #   so the caller's umask is untouched) because logs may name sessions and paths.
@@ -74,29 +96,64 @@ grid_log() {
 #   and \; or \" never split or open a span). Inside ": backslash escapes the next
 #   character and ' is literal. Inside ': everything is literal.
 _grid_tokenize() {
-  local s="$1" n i=0 c nx pv q=0
+  local s="$1" n i=0 c nx pv q=0 run buf wl base=0 abs start
+  # Linear-time scanning (WP-019). A long command used to take longer than the 5 s hook
+  # timeout, and a timed-out hook does not block. Two causes, both fixed here:
+  #   1. ${s:$i:k} costs O(i) in bash (it copies the whole string first), so indexing a
+  #      long command per character is quadratic. The text is therefore read through a
+  #      sliding window `buf` of at most 2048 bytes, so every index is O(2048). A window
+  #      starts one character early so the "previous character" test still works, and is
+  #      refilled when fewer than 4 characters remain (the longest look-ahead is 1).
+  #   2. runs of ordinary characters are consumed with one anchored regex (O(256) slice)
+  #      instead of one loop iteration each.
+  # Ordinary = not a quote, backslash, blank, newline or one of ; & | (the characters the
+  # per-character cases below handle). In a bracket expression a backslash is literal.
+  local _TK_ORD=$'^([^\'"\\ \t\n;&|]+)([ \t]?)' _TK_Q1=$'^[^\']+' _TK_Q2=$'^[^"\\]+'
   T_RAW=(); T_MASK=(); T_SEP=()
   _TK_RAW=""; _TK_MASK=""; _TK_IN=0
   n=${#s}
-  while [ "$i" -lt "$n" ]; do
-    c="${s:$i:1}"
+  buf="${s:0:2048}"; wl=${#buf}
+  while :; do
+    if [ $((i + 4)) -gt "$wl" ] && [ $((base + wl)) -lt "$n" ]; then
+      abs=$((base + i)); start=$((abs > 0 ? abs - 1 : 0))
+      buf="${s:$start:2048}"; wl=${#buf}; base=$start; i=$((abs - start))
+    fi
+    [ "$i" -lt "$wl" ] || break
+    c="${buf:$i:1}"
     case "$q" in
       1) # inside '...': literal until the next '
-        if [ "$c" = "'" ]; then q=0; else _TK_RAW+="$c"; fi ;;
+        if [ "$c" = "'" ]; then
+          q=0
+        elif [[ "${buf:$i:256}" =~ $_TK_Q1 ]]; then
+          run="${BASH_REMATCH[0]}"; _TK_RAW+="$run"; i=$((i + ${#run})); continue
+        else
+          _TK_RAW+="$c"
+        fi ;;
       2) # inside "...": backslash escapes, ' is literal
         if [ "$c" = '"' ]; then
           q=0
         elif [ "$c" = '\' ]; then
-          i=$((i + 1)); _TK_RAW+="${s:$i:1}"
+          i=$((i + 1)); _TK_RAW+="${buf:$i:1}"
+        elif [[ "${buf:$i:256}" =~ $_TK_Q2 ]]; then
+          run="${BASH_REMATCH[0]}"; _TK_RAW+="$run"; i=$((i + ${#run})); continue
         else
           _TK_RAW+="$c"
         fi ;;
       *) # outside quotes
+        if [[ "${buf:$i:256}" =~ $_TK_ORD ]]; then
+          run="${BASH_REMATCH[1]}"
+          _TK_RAW+="$run"; _TK_MASK+="$run"; _TK_IN=1
+          # A run followed by a blank ends the word: take the blank in the same step
+          # (half the iterations for ordinary "word word word" text).
+          [ -n "${BASH_REMATCH[2]}" ] && _grid_tk_word
+          i=$((i + ${#BASH_REMATCH[0]}))
+          continue
+        fi
         case "$c" in
           "'") q=1; _TK_IN=1; _TK_MASK+="Q" ;;
           '"') q=2; _TK_IN=1; _TK_MASK+="Q" ;;
           '\')
-            nx="${s:$((i + 1)):1}"
+            nx="${buf:$((i + 1)):1}"
             if [ "$nx" = $'\n' ]; then
               _grid_tk_word            # backslash-newline: a line continuation, acts as a space
             else
@@ -106,8 +163,8 @@ _grid_tokenize() {
           ' '|$'\t') _grid_tk_word ;;
           $'\n'|';') _grid_tk_word; _grid_tk_sep ;;
           '&')
-            nx="${s:$((i + 1)):1}"
-            pv=""; [ "$i" -gt 0 ] && pv="${s:$((i - 1)):1}"
+            nx="${buf:$((i + 1)):1}"
+            pv=""; [ "$i" -gt 0 ] && pv="${buf:$((i - 1)):1}"
             if [ "$nx" = '&' ]; then
               _grid_tk_word; _grid_tk_sep; i=$((i + 1))
             elif [ "$pv" = '>' ] || [ "$pv" = '<' ] || [ "$nx" = '>' ]; then
@@ -117,7 +174,7 @@ _grid_tokenize() {
               _grid_tk_word; _grid_tk_sep
             fi ;;
           '|')
-            nx="${s:$((i + 1)):1}"
+            nx="${buf:$((i + 1)):1}"
             _grid_tk_word; _grid_tk_sep
             [ "$nx" = '|' ] && i=$((i + 1)) ;;
           *) _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_IN=1 ;;
@@ -191,6 +248,8 @@ _grid_segment() {
   # is: its value is quoted, its name is not). Applies whatever the command is, so
   # `export HUSKY=0` and `env GIT_CONFIG_COUNT=1 ...` are caught too.
   for ((k = 0; k < n; k++)); do
+    # Cheap glob pre-test first: a regex per word made a 50 KB command slow (WP-019).
+    case "${m[$k]}" in GIT_CONFIG_*|HUSKY=*) ;; *) continue ;; esac
     if [[ "${m[$k]}" =~ $re_assign ]]; then
       GIT_VIOLATIONS+=("sets ${m[$k]%%=*} (a hook-disabling git config override)")
     elif [[ "${m[$k]}" == HUSKY=* && "${r[$k]}" == "HUSKY=0" ]]; then
