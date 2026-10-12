@@ -4,6 +4,7 @@
 
 bats_require_minimum_version 1.5.0
 load helpers/stubs
+load helpers/setup
 
 LIB="$BATS_TEST_DIRNAME/../scripts/lib/render-schedule.sh"
 
@@ -231,8 +232,22 @@ in_proc() {
   printf '%s\n' "$output" > "$T/t.service"
   rs render_systemd_timer "d" t.service daily:01:00
   printf '%s\n' "$output" > "$T/t.timer"
-  run systemd-analyze --user verify "$T/t.service" "$T/t.timer"
+  # Private runtime dir + probe-skip (see systemd_verify_private): never the live manager.
+  systemd_verify_private "$T/t.service" "$T/t.timer"
   [ "$status" -eq 0 ]
+}
+
+@test "systemd-analyze runs in a private XDG_RUNTIME_DIR" {
+  # A stub records the runtime dir it was given; the inherited (real) one must not reach it.
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/bash\necho "$XDG_RUNTIME_DIR" >> "%s/rt.log"\n' "$BATS_TEST_TMPDIR" > "$BATS_TEST_TMPDIR/bin/systemd-analyze"
+  chmod +x "$BATS_TEST_TMPDIR/bin/systemd-analyze"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" XDG_RUNTIME_DIR=/run/user/4242 systemd_verify_private /nonexistent.service
+  [ "$status" -eq 0 ]
+  [ -s "$BATS_TEST_TMPDIR/rt.log" ]
+  while IFS= read -r rt; do
+    [[ "$rt" == "$BATS_TEST_TMPDIR"/* ]] || { echo "runtime dir leaked: $rt"; false; }
+  done < "$BATS_TEST_TMPDIR/rt.log"
 }
 
 @test "no machine-specific values in the renderer" {

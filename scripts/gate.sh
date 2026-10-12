@@ -162,7 +162,32 @@ run_bats() {
   if [ ! -x tests/lib/bats-core/bin/bats ]; then
     echo "    bats missing — run: git submodule update --init" >&2; return 1
   fi
-  tests/lib/bats-core/bin/bats tests/
+  # Run under a per-run TMPDIR so a test that forgets its rm -rf is caught here: bats
+  # removes its own run dir on exit, so anything still in this dir was leaked by a test.
+  # Bash builtins only (the gate's own tests run with a minimal PATH).
+  local tmp rc=0 leftovers
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/grid-bats.XXXXXX")"
+  TMPDIR="$tmp" tests/lib/bats-core/bin/bats tests/ || rc=$?
+  shopt -s nullglob dotglob
+  leftovers=("$tmp"/*)
+  shopt -u nullglob dotglob
+  if [ "${#leftovers[@]}" -gt 0 ]; then
+    echo "    tests leaked temp files into their TMPDIR:" >&2
+    printf '      %s\n' "${leftovers[@]:0:20}" >&2
+    # Say what each entry is and who might still be running, so a leak seen only on a CI
+    # runner can be traced to its test without reproducing it. Best effort: a minimal PATH
+    # (the gate's own tests) simply prints less.
+    local e
+    for e in "${leftovers[@]:0:20}"; do
+      { ls -ldA -- "$e"
+        if [ -d "$e" ]; then find "$e" -maxdepth 2 | head -n 20; else head -c 300 -- "$e"; echo; fi
+      } 2>/dev/null | sed 's/^/        /' >&2 || true
+    done
+    { echo "      processes still running:"; ps -eo pid,etime,args --sort=etimes 2>/dev/null | grep -v -e ' ps -eo' -e grep -e ' \[' | head -n 25 | cut -c1-200 | sed 's/^/        /'; } >&2 || true
+    rc=1
+  fi
+  rm -rf "$tmp"
+  return "$rc"
 }
 
 check catalog    run_catalog_check
