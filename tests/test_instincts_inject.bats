@@ -55,6 +55,9 @@ mkrepo() {
   git -C "$1" remote add origin "https://example.com/acme/widgets.git"
   printf 'learning: on\n' > "$1/.grid/project.yaml"
   PID="$("$SH" project-id "$1")"
+  # The machine-local opt-in marker the emitter writes (flag AND marker are required).
+  mkdir -p "$GRID_STATE_DIR/instincts/enabled"
+  (cd "$1" && pwd -P) > "$GRID_STATE_DIR/instincts/enabled/$PID"
 }
 
 # hash of every file under the store and state dirs (byte-identity checks).
@@ -257,6 +260,17 @@ print(m["newer-retired"], m["older-retired"])'
   [ "$status" -eq 0 ]; [ -z "$output" ]
   # no remote
   git remote remove origin
+  run "$SH" inject
+  [ "$status" -eq 0 ]; [ -z "$output" ]
+}
+
+@test "inject: prints nothing when the flag is on but the machine-local marker is missing" {
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  fx "$PID" host-a good-habit 0.7 2026-W40
+  cd "$BATS_TEST_TMPDIR/repo"
+  run "$SH" inject
+  [ -n "$output" ]
+  rm "$GRID_STATE_DIR/instincts/enabled/$PID"
   run "$SH" inject
   [ "$status" -eq 0 ]; [ -z "$output" ]
 }

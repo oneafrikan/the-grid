@@ -46,7 +46,7 @@
       "fail": "open",
       "timeout": 2,
       "model_cost": false,
-      "cost": "0 tokens; about 30 ms per tool call; appends one scrubbed line to a local file under ~/.grid/instincts/, prints nothing.",
+      "cost": "0 tokens; about 70 ms per tool call; appends one scrubbed line to a local file under ~/.grid/instincts/, prints nothing.",
       "description": "Records which tool ran and a scrubbed, truncated summary of its input, only in a project with learning: on."
     },
     {
@@ -58,7 +58,7 @@
       "fail": "open",
       "timeout": 2,
       "model_cost": false,
-      "cost": "0 tokens; about 30 ms per failed tool call; appends one scrubbed line to a local file, prints nothing.",
+      "cost": "0 tokens; about 70 ms per failed tool call; appends one scrubbed line to a local file, prints nothing.",
       "description": "Records a failed tool call with an error flag, only in a project with learning: on."
     },
     {
@@ -69,7 +69,7 @@
       "fail": "open",
       "timeout": 2,
       "model_cost": false,
-      "cost": "0 tokens; about 30 ms per prompt; appends one scrubbed, truncated line to a local file, prints nothing.",
+      "cost": "0 tokens; about 70 ms per prompt; appends one scrubbed, truncated line to a local file, prints nothing.",
       "description": "Records a scrubbed, truncated copy of each prompt, only in a project with learning: on."
     },
     {

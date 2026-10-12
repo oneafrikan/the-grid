@@ -56,8 +56,17 @@ UNATTENDED_ENV = ("GRID_LOOP_HEADLESS", "GRID_AUTOHANDOFF_CHILD", "GRID_CRON")
 # A path or command touching one of these drops the whole observation: redaction
 # alone is not enough for key material and credential files.
 SENSITIVE_RE = re.compile(
-    r"\.env(?![A-Za-z0-9])|id_rsa|id_ed25519|\.pem(?![A-Za-z0-9])|credentials|\.netrc",
+    r"\.env(?![A-Za-z0-9])|\.envrc|id_rsa|id_ed25519|id_ecdsa|id_dsa|\.pem(?![A-Za-z0-9])"
+    r"|credentials|\.netrc|\.pgpass|\.npmrc|\.pypirc|\.kube(?![A-Za-z0-9])|\.docker/config"
+    r"|\.p12(?![A-Za-z0-9])|\.pfx(?![A-Za-z0-9])|\.key(?![A-Za-z0-9])|\.tfstate|secrets?\.ya?ml"
+    r"|\.ssh/|\.aws/|\.gnupg|\.git-credentials|\.htpasswd",
     re.I)
+
+# An absolute path that survived the root/HOME rewrite lies outside both. It is kept
+# as `(outside)/<last component>` (same rule as relative_path): the habit ("cat /etc/x")
+# is data, the directory layout and user names are not. The lookbehind skips URL paths
+# (`https://h/a`), `~/x`, `./x`, `a/b` and an already rewritten `(outside)/x`.
+_ABS_PATH = re.compile(r"(?<![\w.~$/)@%+-])/(?=[\w.])[^\s'\"`;|&<>()=:]*")
 
 
 def skip_by_env() -> bool:
@@ -77,12 +86,19 @@ def rewrite_paths(text: str, root: str) -> str:
     for prefix, repl in ((root, "."), (str(Path.home()), "~")):
         if len(prefix) > 1:
             text = re.sub(re.escape(prefix) + r"(?![\w.-])", repl, text)
-    return text
+    return _ABS_PATH.sub(lambda m: "(outside)/" + m.group(0).rstrip("/").rsplit("/", 1)[-1], text)
 
 
-def clean(text: str, root: str, limit: int) -> str:
-    """Rewrite paths, scrub secrets, flatten to one line, cap at `limit` chars."""
-    return lib.sanitize(lib.scrub(rewrite_paths(text[:MAX_RAW], root)), limit)
+def clean(text: str, root: str, limit: int, paths: bool = True) -> str:
+    """Rewrite paths, drop sensitive lines, scrub secrets, flatten to one line, cap at `limit`.
+
+    "" means nothing is left to record (every line held a secret keyword with a value,
+    a long token-like run, an email, a host, an IP...): the caller records no observation.
+    Dropping happens BEFORE redaction because redaction leaks the shape of a secret.
+    """
+    text = text[:MAX_RAW]
+    kept = lib.drop_sensitive_lines(rewrite_paths(text, root) if paths else text)
+    return lib.sanitize(lib.scrub(kept), limit) if kept.strip() else ""
 
 
 def tool_target(tool: str, tool_input: dict) -> str | None:
@@ -120,9 +136,13 @@ def build_observation(payload: dict, root: str) -> dict | None:
             return None
         prompt = prompt.lstrip()
         # A slash command records only the command word: its arguments are free text.
-        obs["in"] = clean(prompt.split()[0] if prompt.startswith("/") else prompt,
-                          root, MAX_PROMPT)
-        return obs
+        if prompt.startswith("/"):
+            # `/handoff` is a slash command, not a filesystem path: no path rewrite.
+            word = prompt.split()[0]
+            obs["in"] = clean(word, root, MAX_PROMPT, paths=not re.fullmatch(r"/[\w:.-]+", word))
+        else:
+            obs["in"] = clean(prompt, root, MAX_PROMPT)
+        return obs if obs["in"] else None
 
     tool = payload.get("tool_name")
     tool_input = payload.get("tool_input")
@@ -135,9 +155,12 @@ def build_observation(payload: dict, root: str) -> dict | None:
     # from tool_response; its output is never touched.
     text = target if tool == "Bash" else relative_path(target, root)
     response = payload.get("tool_response")
+    cleaned = clean(text, root, MAX_BASH)
+    if not cleaned:
+        return None
     obs.update({
         "tool": tool,
-        "in": clean(text, root, MAX_BASH),
+        "in": cleaned,
         "err": payload["hook_event_name"] == "PostToolUseFailure"
                or (isinstance(response, dict) and bool(response.get("is_error"))),
     })
@@ -153,15 +176,34 @@ def append_line(project: str, line: str) -> None:
     for d in (base, directory):                  # mkdir's mode is masked by umask (and
         os.chmod(d, 0o700)                       # parents get the default), so set it explicitly
     path = directory / f"obs-{year}-W{week:02d}.jsonl"
+    data = (line + "\n").encode("utf-8")
     try:
-        if path.stat().st_size > MAX_FILE_BYTES:
+        size = path.stat().st_size
+        if size > MAX_FILE_BYTES:
             return
     except FileNotFoundError:
-        pass
+        # A new week file: this is the moment to age out old ones, so retention does not
+        # depend on the analyser ever running.
+        size = 0
+        lib.prune_old_obs(directory, datetime.now(timezone.utc))
+    if size:
+        # A full disk can leave an unterminated last line; start on a fresh line so this
+        # record is not glued to the fragment (the fragment alone is invalid JSON and is skipped).
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(-1, os.SEEK_END)
+                if fh.read(1) != b"\n":
+                    data = b"\n" + data
+        except OSError:
+            pass
     # One O_APPEND write of a short line: concurrent hooks cannot interleave it.
     fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
     try:
-        os.write(fd, (line + "\n").encode("utf-8"))
+        if os.write(fd, data) < len(data):      # short write (disk full, file-size limit)
+            try:
+                os.write(fd, b"\n")             # terminate the fragment if there is still room
+            except OSError:
+                pass
     finally:
         os.close(fd)
 
@@ -177,10 +219,11 @@ def run() -> None:
     if not isinstance(cwd, str) or not cwd:
         return
     root = lib._git(cwd, "rev-parse", "--show-toplevel")
-    if not root or not lib.learning_enabled(root):
+    if not root:
         return
     project = lib.git_project_id(root)       # None without a remote: nothing recorded
-    if not project:
+    # Repo flag AND the machine-local marker (see lib.learning_enabled).
+    if not project or not lib.learning_enabled(root, project):
         return
     obs = build_observation(payload, root)
     if obs is not None:

@@ -200,6 +200,17 @@ sync_as() {
   [ "$(git -C "$PA" rev-parse HEAD)" = "$before" ]
 }
 
+@test "sync: 'pushed' is printed only when a commit went out; otherwise 'nothing to push'" {
+  mk_remote_and_clones
+  write_instinct "$PA" host-a
+  sync_as host-a "$PA"
+  [[ "$output" == *"sync: pushed"* ]]
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing to push"* ]]
+  [[ "$output" != *"sync: pushed"* ]]
+}
+
 @test "sync: stages only learning/instincts, never other files in the private repo" {
   mk_remote_and_clones
   write_instinct "$PA" host-a

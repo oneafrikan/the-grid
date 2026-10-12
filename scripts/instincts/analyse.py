@@ -1018,18 +1018,12 @@ def analyse_project(pid, events, week, now, body, st) -> dict:
 def prune_observations(pid: str, now: dt.datetime) -> None:
     """After a successful run: delete local observation files older than 28 days.
 
-    Age is judged by the ISO week in the file name (the Sunday that ends it).
-    Analysed files younger than that stay so --force can re-run.
+    The rule lives in lib.prune_old_obs (capture also applies it whenever it creates a
+    new week file, so retention does not depend on this analyser running). Age is judged
+    by the ISO week in the file name (the Sunday that ends it). Analysed files younger
+    than that stay so --force can re-run.
     """
-    cutoff = now.date() - dt.timedelta(days=RETENTION_DAYS)
-    for f in obs_files(pid):
-        m = re.fullmatch(r"obs-(\d{4}-W\d{2})\.jsonl", f.name)
-        end = week_end(m.group(1)) if m else None
-        if end is not None and end < cutoff:
-            try:
-                f.unlink()
-            except OSError:
-                pass
+    lib.prune_old_obs(lib.instincts_state_dir() / pid, now, RETENTION_DAYS)
 
 
 # --------------------------------------------------------------------------
@@ -1262,6 +1256,11 @@ def run_sync() -> int:
             _sync_warn(f"push skipped: {args.stdout.strip()}")
             return 0
         remote, refspec = args.stdout.split()
+        # "pushed" is printed only when something was actually ahead of the upstream.
+        ahead = _private_git(priv, "rev-list", "--count", "@{u}..HEAD")
+        if ahead.returncode == 0 and ahead.stdout.strip() == "0":
+            print("instincts: sync: nothing to push")
+            return 0
         r = _private_git(priv, "-c", "push.default=nothing", "push", remote, refspec)
         if r.returncode != 0:
             _sync_warn("git push failed: " + (r.stderr.strip() or r.stdout.strip()))

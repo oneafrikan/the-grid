@@ -327,6 +327,8 @@ obs_lines() {
 
 @test "run.sh instincts-capture-prompt writes one observation in an opted-in repo" {
   yaml 'learning: on\n'
+  emit                                   # writes the machine-local marker capture requires
+  [ "$status" -eq 0 ]
   run bash "$REPO_ROOT/hooks/run.sh" instincts-capture-prompt < <(prompt_payload)
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -346,4 +348,103 @@ obs_lines() {
   run bash "$REPO_ROOT/hooks/run.sh" instincts-capture-prompt < <(prompt_payload)
   [ "$status" -eq 0 ]
   [ "$(obs_lines)" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# WP-028: one parser for emitter and capture, the machine-local marker, the notice
+# ---------------------------------------------------------------------------
+
+# marker_file — the machine-local marker the emitter writes for $PROJ.
+marker_file() { printf '%s/instincts/enabled/%s' "$GRID_STATE_DIR" "$(bash "$REPO_ROOT/scripts/instincts.sh" project-id "$PROJ")"; }
+
+@test "emitter and capture agree on every learning value (shared parser parity)" {
+  while IFS='|' read -r want text; do
+    rm -rf "$PROJ/.claude"
+    yaml "$text"
+    emit
+    [ "$status" -eq 0 ]
+    if [ "$want" = 1 ]; then
+      [ "$(owned_ids "$L")" = "$FOUR" ] || { echo "want on for: $text" >&2; false; }
+    else
+      [ ! -e "$PROJ/.claude" ] || { echo "want off for: $text" >&2; false; }
+    fi
+    # the capture-side reader says the same
+    got="$("$PY" -B -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import lib; print(int(lib.read_learning_flag(open(sys.argv[2]).read())))' "$REPO_ROOT/scripts/instincts" "$PROJ/.grid/project.yaml")"
+    [ "$got" = "$want" ] || { echo "capture parser says $got for: $text" >&2; false; }
+  done <<'EOF'
+1|learning: on\n
+1|learning: true\n
+1|learning: "ON"\n
+1|learning: 'on'\n
+1|learning: on # note\n
+1|learning: off\nlearning: on\n
+0|learning: on\nlearning: off\n
+0|learning: on\nname: x\nlearning: off\n
+0|learning: yes\n
+0|learning: Yes\n
+0|learning: 1\n
+0|learning: "maybe"\n
+EOF
+}
+
+@test "a trailing 'learning: off' removes the hooks that 'learning: on' emitted" {
+  yaml 'learning: on\n'
+  emit
+  [ "$(owned_ids "$L")" = "$FOUR" ]
+  yaml 'learning: on\nlearning: off\n'
+  emit
+  [ "$status" -eq 0 ]
+  [ -z "$(instincts_ids "$L" 2>/dev/null || true)" ]
+}
+
+@test "emitting the instincts hooks creates the 0600 marker holding the project root" {
+  yaml 'learning: on\n'
+  emit
+  [ "$status" -eq 0 ]
+  m="$(marker_file)"
+  [ -f "$m" ]
+  [ "$(stat -c %a "$m")" = 600 ]
+  [ "$(stat -c %a "$(dirname "$m")")" = 700 ]
+  [ "$(cat "$m")" = "$(cd "$PROJ" && pwd -P)" ]
+}
+
+@test "the marker is removed when learning goes off, and a second run is a clean no-op" {
+  yaml 'learning: on\n'
+  emit
+  [ -f "$(marker_file)" ]
+  yaml 'learning: off\n'
+  emit
+  [ "$status" -eq 0 ]
+  [ ! -e "$(marker_file)" ]
+  emit
+  [ "$status" -eq 0 ]
+  [ ! -e "$(marker_file)" ]
+}
+
+@test "--check and --dry-run create no marker and print no notice" {
+  yaml 'learning: on\n'
+  emit --dry-run
+  [ ! -e "$(marker_file)" ]
+  [[ "$output" != *"recorded locally"* ]] || false
+  emit --check || true
+  [ ! -e "$(marker_file)" ]
+}
+
+@test "the data-use notice is printed once per run that emits the instincts hooks" {
+  yaml 'learning: on\n'
+  emit
+  [ "$(grep -c 'recorded locally' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"sent to a model weekly"* ]] || false
+  yaml 'learning: off\n'
+  emit
+  [[ "$output" != *"recorded locally"* ]] || false
+}
+
+@test "no git remote: hooks are emitted, no marker, and the warning says capture stays off" {
+  git -C "$PROJ" remote remove origin
+  yaml 'learning: on\n'
+  emit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no git remote"* ]] || false
+  [ "$(owned_ids "$L")" = "$FOUR" ]
 }

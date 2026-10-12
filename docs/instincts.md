@@ -8,23 +8,25 @@ injected back at session start. Nothing here is on until you switch it on for a 
 
 - **Events:** Bash, Edit, Write, MultiEdit and NotebookEdit calls (and their failures), and the prompts you submit.
 - **Content:** the command, the file path and your prompt text. Never tool output and never file contents.
-- **Scrubbed before it is written:** API keys, bearer tokens, JWTs, PEM blocks and similar are replaced with `[REDACTED]`. Any call that touches `.env`, `id_rsa`, `id_ed25519`, `*.pem`, `credentials` or `.netrc` is dropped entirely.
+- **Dropped, then scrubbed, before it is written:** any line holding a secret word with a value ("my password is ...", `TOKEN=...`), a long letter-and-digit run, an email address, a host name, an IP address, an SSN-like or card-like number is removed, and a prompt or command with no line left is not recorded at all. What remains is scrubbed: API keys, bearer tokens, JWTs, PEM blocks, password flags and similar become `[REDACTED]`. Absolute paths outside the project and your home are stored as `(outside)/<file name>`.
+- **Never recorded:** any call that touches `.env`, `.envrc`, SSH keys, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `.netrc`, `.pgpass`, `.npmrc`, `.pypirc`, `.kube`, `.docker/config`, `.aws/`, `.ssh/`, `credentials`, `*.tfstate` or `secrets.yml` is dropped entirely.
 - **Not captured:** subagent calls, unattended sessions (loop worker, headless handoff child, cron), and any repo with no git remote (no stable project id).
 
 ## Privacy
 
 - Everything is private and outside the public repo: raw observations in `${GRID_STATE_DIR:-~/.grid}/instincts/` (local to the machine), instincts in `~/.the-grid-private/learning/instincts/`.
-- Raw observations are deleted 28 days after a successful analysis.
-- The project id is a 12-character hash of the git remote URL, not the URL.
+- Raw observations are deleted 28 days after the end of their ISO week, whether or not an analysis ran: capture prunes old week files whenever it starts a new one, and the analyser does the same after a run.
+- Store files are created `0600` and their directories `0700`.
+- The project id is the first 12 hex characters of a SHA-256 of the normalised git remote URL. It is an identifier, not a secret: anyone who can guess the remote URL can recompute it, so do not treat the directory name as anonymous.
 - `instincts.sh sync` (run at the end of every analysis) commits and pushes only `learning/instincts` in the private repo, and never touches your own work there: it is skipped while a rebase/merge is in progress, on a detached HEAD or with no upstream; the pull is skipped (no autostash) while tracked files outside the store are modified; files over 1 MiB are not committed; the push needs `<private>/.grid-private-remote` (first line = the push URL of the upstream remote, see `docs/usage.md`) and only own unpushed commits. A refused push because of a foreign unpushed commit makes `sync` exit 4; a missing or mismatched marker, or a remote with more than one push URL (`multiple-push-urls`), is a warning and exit 0.
-- The weekly analysis sends a digest of the scrubbed observations to a model (default `haiku`, `$0.05` cap per project). Do not enable it on a project whose prompts you would not send to a model.
+- The weekly analysis sends a digest of the scrubbed observations to a model (default `haiku`, `$0.05` cap per project). Do not enable it on a project whose prompts you would not send to a model. The emitter prints a one-line notice saying so each time it emits the instincts hooks.
 
 ## How to enable
 
-1. In the project's `.grid/project.yaml` add a top-level `learning: on` (`true` also works; anything else is off).
-2. Register the hooks with `agent-factory/deploy_hooks.py <project>` (from the hook-profiles change). The `instincts-*` hooks are emitted whenever the flag is on, under every hook profile including `off`.
+1. In the project's `.grid/project.yaml` add a top-level `learning: on` (`true` also works; anything else, including a bare `yes`, is off). If the key appears more than once the last one wins. The emitter and capture read it with the same parser.
+2. Register the hooks with `agent-factory/deploy_hooks.py <project>` (from the hook-profiles change). The `instincts-*` hooks are emitted whenever the flag is on, under every hook profile including `off`. The same run writes a machine-local marker (`${GRID_STATE_DIR:-~/.grid}/instincts/enabled/<project-id>`); capture and inject need the flag AND a marker that lists this checkout, so a cloned repo that ships `learning: on` (or another clone with the same remote) records nothing until you run the emitter in it yourself. The project needs a git remote. If you enabled instincts before this marker existed, re-run the emitter once.
 3. Default hook target is `local` (`.claude/settings.local.json`). With `hooks.target: shared`, a collaborator without the-grid sees a non-blocking hook error on each captured event.
-4. To stop: set `learning: off` (or remove the line) and re-run the emitter to remove the hooks. Capture and inject also re-check the flag, so a stale settings file stops recording at once.
+4. To stop: set `learning: off` (or remove the line) and re-run the emitter to remove the hooks and the marker. Capture and inject also re-check the flag, so a stale settings file stops recording at once.
 
 ## Read it
 
