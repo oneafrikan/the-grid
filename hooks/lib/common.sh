@@ -555,9 +555,9 @@ _grid_segment() {
       [[ "${r[$k]}" =~ $re_redir ]] && redir=1
       case "$b" in
         [gG][iI][tT]) hasgit=1 ;;
-        tee|truncate|chmod|rm|mv) cmdw=1 ;;     # ignored when the segment is a git call
-        sed) sedc=1 ;;
-        -i*|--in-place*) inplace=1 ;;
+        tee|truncate|chmod|rm|mv|cp|ln|install|dd|unlink|-delete) cmdw=1 ;;   # ignored when the segment is a git call
+        sed|perl) sedc=1 ;;
+        -i*|-[a-hj-zA-Z]*i*|--in-place*) inplace=1 ;;
       esac
     done
     [ "$sedc" = 1 ] && [ "$inplace" = 1 ] && cmdw=1
