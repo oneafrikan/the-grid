@@ -117,10 +117,13 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _env_float(name: str, default: float) -> float:
+    """Float env override; a missing, malformed or non-finite value (nan/inf defeat every
+    comparison and cap built on it) falls back to the default."""
     try:
-        return float(os.environ[name])
+        v = float(os.environ[name])
     except (KeyError, ValueError):
         return default
+    return v if math.isfinite(v) else default
 
 
 def min_obs() -> int:
@@ -644,7 +647,7 @@ def command_line(body: str) -> list[str]:
         "--no-session-persistence",
         "--max-turns", "1",
         "--output-format", "json",
-        "--max-budget-usd", os.environ.get("INSTINCTS_BUDGET_USD") or "0.05",
+        "--max-budget-usd", repr(_env_float("INSTINCTS_BUDGET_USD", 0.05)),   # never a raw nan/inf string
     ]
 
 
