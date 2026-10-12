@@ -169,22 +169,51 @@ Every run is in the log and in the run record (`scripts/run-record.sh`, role
 `auto-handoff`).
 
 **The child can only write.** It runs in the session's directory with
-`--tools Read,Write,Bash`, in default permission mode (no `--permission-mode` flag).
-Write access is path-scoped allow rules, `Edit(//<abs dir>/**)`, for the handoff target
-directory and the fallback directory only; `Edit` itself and `Bash(git:*)` are denied,
-and Bash is limited to `hostname`, `realpath`, `readlink`, `ls` and `date`. A system
-prompt (`lib/auto-handoff-system.md`) tells it to write only the two files and run no
-git. The target directory is resolved the way the handoff skill resolves it: the first
-matching row of `~/.the-grid-private/handoff-locations.md`, else an existing `logs`
-directory of the session's directory in any casing. If it does not exist the child
-writes to the fallback directory instead.
+`--tools Read,Write,Bash`. Write access is path-scoped allow rules,
+`Edit(//<abs dir>/**)`, for the handoff target directory and the fallback directory
+only; `Edit` itself and `Bash(git:*)` are denied, and Bash is limited to `hostname`,
+`realpath`, `readlink`, `ls` and `date`. A system prompt (`lib/auto-handoff-system.md`)
+tells it to write only the two files and run no git. The target directory is resolved
+the way the handoff skill resolves it: the first matching row of `handoff-locations.md`
+in the private dir (`$GRID_PRIVATE_DIR`, else `~/.the-grid-private/`), else an existing
+`logs` directory of the session's directory in any casing. If it does not exist the
+child writes to the fallback directory instead.
+
+**Confinement.** Whether Claude Code honours the `Edit(//<abs>/**)` rule form was not
+proven live (operator check B1), so the rules are not the only barrier:
+
+- The resolved target must lie under the session's directory or the private repo. A
+  `LOGS` symlink that points elsewhere is refused (only the fallback directory is
+  granted; the spawn log line says `target-refused=<why>`). A table row naming another
+  repo is accepted only if it is absolute, has no `..`, is inside a git work tree and is
+  not `$HOME`, `/`, or under `~/.ssh`, `.claude`, `.config`, `.gnupg` or `.aws`.
+- A path with a glob metacharacter (`* ? [ ] { } ( ) !`) or a newline, or with a `..`
+  component, gets no rule; the fallback directory name is sanitised the same way.
+- The child runs with `--permission-mode default`, `--setting-sources user` and
+  `--strict-mcp-config`, with extra denies for `~/.ssh`, `~/.claude`, `~/.config`,
+  `~/.gnupg`, `~/.aws`, shell startup files, `~/.gitconfig` and anything under a `.git`
+  directory.
+- It starts under `env -i`: it gets `PATH`, `HOME`, locale, `TMPDIR`,
+  `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN`, the recursion guard, and only the
+  variables named in `GRID_AUTOHANDOFF_KEEP_ENV` (comma list of names or `PREFIX*`).
+  `GH_TOKEN`, `ANTHROPIC_API_KEY`, cloud credentials and `SSH_AUTH_SOCK` are not passed;
+  if `claude` authenticates through an API key variable, list it there.
+- Afterwards the worker detects (it never reverts) changes it could not stop; see the
+  next list. It cannot see a write to an arbitrary path outside the directories and
+  files listed there.
 
 **What the worker does after the child.** It never trusts the model's side effects:
 
-1. A changed `.git/config` or `.git/hooks/` (snapshotted before, compared after) is
+1. A change (content compared, before and after) to git `config`, `HEAD`, `info/`,
+   `hooks/`, a submodule's config and hooks, a linked worktree's config, hooks and
+   info, or a `core.hooksPath` directory, in the session's repo, the target repo or the
+   fallback repo; or to shell startup files, `~/.ssh/{authorized_keys,config,rc}`,
+   `~/.gitconfig`, Claude's `settings*.json` or `~/.config/systemd/user`, is
    `unexpected-file`: no commit, changed paths logged, nothing moved.
-2. Every new file under the session's directory (any depth, `.git/` excluded), the
-   fallback directory and the target directory is collected. Exactly one
+2. Every new file or symlink (symlinks are not followed) under the session's directory
+   (any depth, `.git/` excluded), the fallback directory, the target directory and the
+   work trees of the repos the commit lands in is collected, and a symlink named
+   `*-handoff.md` or `*-context.md` is reported whatever its age. Exactly one
    `<p>-handoff.md` and at most one `<p>-context.md` with the same prefix, in the target
    or fallback directory, are expected. Anything else is `unexpected-file` (no commit,
    every path logged, nothing moved or deleted); no handoff file at all is
@@ -216,6 +245,7 @@ The worker creates it first.
 | `GRID_AUTOHANDOFF_FORCE` | unset | `1` skips the already-ran, short-session and marker checks (parity runs, tests) |
 | `GRID_HANDOFF_FALLBACK_DIR` | see above | where a handoff lands when the target directory is missing or denied |
 | `GRID_PRIVATE_DIR` | `~/.the-grid-private` | the one repo the worker may push |
+| `GRID_AUTOHANDOFF_KEEP_ENV` | unset | extra variables the child keeps under `env -i`: names or `PREFIX*`, comma separated (the stub in tests needs `STUB_*,GRID_*`) |
 | `GRID_CLAUDE` | `claude` | the binary the worker runs (tests point it at a stub) |
 | `GRID_HOOK_LOG_DIR` | `~/.grid/hook-logs` | log directory (mode 0700) |
 | `GRID_HOOK_STATE_DIR` | `~/.grid/hook-state` | per-session marker directory |
