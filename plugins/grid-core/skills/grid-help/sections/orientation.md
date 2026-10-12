@@ -39,7 +39,7 @@
   `explore → propose → apply → verify → archive`, specs as markdown in
   `openspec/`. Point at **`/openspec-help`** rather than explaining it here.
   `/spec-scout` audits adoption + spec↔code drift. Needs the CLI
-  (`npm i -g @fission-ai/openspec@latest`) or the skills dead-end.
+  (`npm i -g @fission-ai/openspec@1.12.0`) or the skills dead-end.
 - **Want to know which model to use for a job?**
   [docs/model-selection.md](../../docs/model-selection.md) — prices, independent
   benchmarks, worked cost maths, and an explicit list of what is *not* known.

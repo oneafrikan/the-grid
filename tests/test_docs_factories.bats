@@ -106,3 +106,12 @@ GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
   # the pattern README gets a status note pointing at the quarantine
   grep -q '_retired/issue-loop/RETIRED.md' automation-factory/patterns/issue-loop/README.md
 }
+
+@test "shipped skills, plugins and the landing page pin the openspec CLI (no @latest)" {
+  cd "$GRID_ROOT"
+  # An unpinned npm install in text a user pastes is a supply-chain hole; the pin matches
+  # skills/openspec-help/sections/the-grid-specifics.md.
+  run grep -rn 'openspec@latest' skills plugins index.html
+  [ "$status" -eq 1 ]
+  grep -qF 'openspec@1.12.0' skills/grid-help/sections/orientation.md
+}

@@ -12,7 +12,8 @@ claude plugin install grid-core@the-grid
 claude plugin install grid-agents@the-grid
 ```
 
-Install either or both. To pin a version, add the marketplace at a tag.
+Install either or both. Installs follow the default branch; no release tags exist yet,
+so there is no pin.
 
 ## What is in each bundle
 
@@ -25,6 +26,24 @@ Install either or both. To pin a version, add the marketplace at a tag.
 
 The bundles hold the-grid's **own** content only. Third-party skills are not
 included; `grid install` handles those, with sha-pinned locks.
+
+## Limits of a plugin install
+
+The bundled skills and agents are the same text the repo wires with `wire.sh`; the
+builder does not adapt it. A plugin install lacks the rest of the repo, so some
+references in that text point at things that are not there:
+
+- `wire.sh` and the other `scripts/` (for example in `grid-help`).
+- `/ponytail` and `/skill-scout`, which are not shipped.
+- `docs/model-selection.md` and other repo docs.
+- `repos/openspec`, the wired `security-reviewer` skill and the jeffallan skills.
+- `/tron` reads `~/.claude` to see what is wired; on a plugin-only machine that is empty.
+- Orchestrator rosters name agents by bare name (`grid-qa-engineer`); installed agents
+  carry the `grid-agents:` namespace. Whether the bare name resolves is unverified.
+
+Each bundle carries `LICENSE` and `THIRD-PARTY-NOTICES.md` (copies of the repo root's).
+Not every root skill is shipped: `exclude_skills` in `plugins/bundles.json` records each
+one left out and why, and the builder refuses a skill that is in neither list.
 
 ## Namespacing
 
@@ -47,6 +66,10 @@ second under the `grid-agents:` namespace). Pick one channel per machine.
 hand-edit them.
 
 - Membership and version live in `plugins/bundles.json`.
+- Bump the version in `plugins/bundles.json` in any PR that changes generated output. It is
+  one static string, edited by hand; how a client treats an unchanged version on update is
+  unverified, so a bump is the safe signal. No tags are cut yet; do not document a tag
+  install until one exists.
 - Regenerate with `python3 scripts/build-plugins.py` (needs `agent-factory/.venv`).
 - `python3 scripts/build-plugins.py --check` reports drift and writes nothing.
 - Bundles are built with the neutral identity in `agent-factory/user.public.yaml`
