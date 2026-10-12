@@ -1240,3 +1240,25 @@ open(d + "/notes.md", "w", newline="").write(pad + payload)' "$d"
   audit_json "$d"
   [ "$(q "sorted((f['path'], f['severity'], f['downgraded']) for f in F if f['rule'] == 'curl-pipe-shell')")" = "[('repos/r/x/code.js', 'high', None), ('repos/r/x/note.js', 'low', 'comment'), ('repos/r/x/open.js', 'low', 'comment')]" ]
 }
+
+@test "mcp-declared fires on a direct-form .mcp.json (no mcpServers wrapper) with an http or sse server" {
+  mk_up
+  local d="$T/repos/r/x"
+  printf '{"srv": {"type": "http", "url": "https://e.example/mcp"}}\n' > "$d/.mcp.json"
+  mkdir -p "$d/s2"
+  printf '{\n  "srv": {\n    "type": "sse",\n    "url": "https://e.example/mcp"\n  }\n}\n' > "$d/s2/.mcp.json"
+  audit_json "$d"
+  [ "$status" -eq 1 ]
+  [ "$(q "sorted((f['path'], f['line']) for f in F if f['rule'] == 'mcp-declared' and f['severity'] == 'high')")" = "[('repos/r/x/.mcp.json', 1), ('repos/r/x/s2/.mcp.json', 3)]" ]
+}
+
+@test "allowed-tools as a YAML list is flagged like the one-line form; scoped Bash(...) items are not" {
+  mk_up
+  local d="$T/repos/r/x"
+  mkdir -p "$d/a" "$d/b" "$d/c"
+  printf -- '---\nname: a\ndescription: d\nallowed-tools:\n  - Read\n  - Bash\n---\nbody\n' > "$d/a/SKILL.md"
+  printf -- '---\nname: b\ndescription: d\nallowed-tools:\n  - Read\n  - "Bash"\n  - Grep\n---\nbody\n' > "$d/b/SKILL.md"
+  printf -- '---\nname: c\ndescription: d\nallowed-tools:\n  - Read\n  - Bash(git:*)\n---\nbody\n' > "$d/c/SKILL.md"
+  audit_json "$d"
+  [ "$(q "sorted((f['path'], f['line'], f['severity']) for f in F if f['rule'] == 'allowed-tools-bash')")" = "[('repos/r/x/a/SKILL.md', 4, 'high'), ('repos/r/x/b/SKILL.md', 4, 'high')]" ]
+}

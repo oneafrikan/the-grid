@@ -288,4 +288,168 @@ Every entry is a line the scanner flags that was read in context and judged to b
   path: repos/gstack/browse/test/dia-macos-qualification.test.ts
   contains: 'expect(prepareKeychainHome(home).before).toEqual({ Library: true, ''Library/Preferences'': true, ''Library/Keychains'': true });'
   reason: unit-test source of gstack's browse skill that names a macOS keychain path as test data or in a comment; the test fixtures never read a real keychain; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/autoplan/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Glob, Grep, WebSearch, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/benchmark/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Glob, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/browse/SKILL.md
+  contains: 'allowed-tools: Bash, Read, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/canary/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Glob, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/careful/SKILL.md
+  contains: 'allowed-tools: Bash, Read'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/codex/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/context-restore/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/context-save/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/design-consultation/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/design-html/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/design-review/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/design-shotgun/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/devex-review/SKILL.md
+  contains: 'allowed-tools: Read, Edit, Grep, Glob, Bash, AskUserQuestion, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/document-generate/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Grep, Glob, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/document-release/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Grep, Glob, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/freeze/SKILL.md
+  contains: 'allowed-tools: Bash, Read, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/guard/SKILL.md
+  contains: 'allowed-tools: Bash, Read, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/health/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/investigate/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Grep, Glob, AskUserQuestion, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/land-and-deploy/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Glob, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/landing-report/SKILL.md
+  contains: 'allowed-tools: Bash, Read'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/learn/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, AskUserQuestion, Glob, Grep'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/make-pdf/SKILL.md
+  contains: 'allowed-tools: Bash, Read, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/office-hours/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Grep, Glob, Write, Edit, AskUserQuestion, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/pair-agent/SKILL.md
+  contains: 'allowed-tools: Bash, Read, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/plan-ceo-review/SKILL.md
+  contains: 'allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/plan-design-review/SKILL.md
+  contains: 'allowed-tools: Read, Edit, Grep, Glob, Bash, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/plan-devex-review/SKILL.md
+  contains: 'allowed-tools: Read, Edit, Grep, Glob, Bash, AskUserQuestion, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/plan-eng-review/SKILL.md
+  contains: 'allowed-tools: Read, Write, Grep, Glob, AskUserQuestion, Bash, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/plan-tune/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, AskUserQuestion, Glob, Grep'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/qa-only/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, AskUserQuestion, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/qa/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/retro/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Glob, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/review/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Agent, AskUserQuestion, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/scrape/SKILL.md
+  contains: 'allowed-tools: Bash, Read, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/setup-browser-cookies/SKILL.md
+  contains: 'allowed-tools: Bash, Read, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/setup-deploy/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/ship/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Agent, AskUserQuestion, WebSearch'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/skillify/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/spec/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
+- rule: allowed-tools-bash
+  path: repos/gstack/unfreeze/SKILL.md
+  contains: 'allowed-tools: Bash, Read'
+  reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
 ```

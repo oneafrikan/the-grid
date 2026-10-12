@@ -240,6 +240,36 @@ def _search(rx, text, tick=None):
     return None
 
 
+def _frontmatter_tool_lists(lines):
+    """{index of the key line: "allowed-tools: a, b"} for an `allowed-tools:` key written as
+    a YAML block list in the frontmatter (`- Read` / `- Bash` on following lines). The
+    scanner's rules read one line, so the list is folded into the one-line spelling for
+    matching; findings still point at the key line and quote the folded line."""
+    out = {}
+    if not lines or lines[0].lstrip("\ufeff").rstrip("\r") != "---":
+        return out
+    i = 1
+    while i < len(lines):
+        text = lines[i].rstrip("\r")
+        if text in ("---", "..."):
+            break
+        if re.match(r"""^["']?allowed-tools["']?\s*:\s*(#.*)?$""", text):
+            items = []
+            j = i + 1
+            while j < len(lines):
+                m = re.match(r"""^\s*-\s+["']?([^"'#]*?)["']?\s*(#.*)?$""", lines[j].rstrip("\r"))
+                if not m:
+                    break
+                items.append(m.group(1).strip())
+                j += 1
+            if items:
+                out[i] = "allowed-tools: " + ", ".join(items)
+            i = j
+            continue
+        i += 1
+    return out
+
+
 def _logical_lines(lines, comment_prefixes=DEFAULT_COMMENT_PREFIXES):
     """[(first physical index, text, last physical index)] with backslash-continued
     lines and lines that end in a pipe joined to the following one (at most MAX_JOIN
@@ -780,11 +810,17 @@ class Scan:
         classes = self._line_classes(lines, fclass, name, rel_target, rel_root)
         ext = os.path.splitext(name)[1].lower()
         logical = _logical_lines(lines, COMMENT_PREFIXES_BY_EXT.get(ext, DEFAULT_COMMENT_PREFIXES))
+        tool_lists = (_frontmatter_tool_lists(lines)
+                      if name == "SKILL.md" or _is_agent_md(rel_target, rel_root, name) else {})
         for k, (idx, line, last) in enumerate(logical):
             if line == "":
                 continue
             self._tick(display)
             nxt = logical[k + 1][1] if k + 1 < len(logical) else ""
+            if idx in tool_lists:
+                # List-form allowed-tools: scan (and quote, and let an allowlist entry pin) the
+                # folded one-line spelling, so a changed tool list re-flags.
+                line = tool_lists[idx]
             self._scan_line(line, idx + 1, classes[idx], display, tier, file_sha, ext, nxt)
             for p in range(idx + 1, last + 1):         # lines the join swallowed
                 self._scan_line(lines[p].rstrip("\r"), p + 1, classes[p], display, tier,
