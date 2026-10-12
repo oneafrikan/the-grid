@@ -145,13 +145,13 @@ tok_jwt()       { printf '%s' "ey""JhbGciOiJIUzI1NiJ9.ey""JzdWIiOiIxMjM0NTY3ODkw
 
 @test "launcher: Path traversal id exits non-zero without running anything" {
   run bash "$REPO_ROOT/hooks/run.sh" '../../etc/passwd' < /dev/null
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 2 ]
   run bash "$REPO_ROOT/hooks/run.sh" 'Pre-Bash' < /dev/null
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 2 ]
   run bash "$REPO_ROOT/hooks/run.sh" 'no-such-hook' < /dev/null
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 2 ]
   run bash "$REPO_ROOT/hooks/run.sh" < /dev/null
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 2 ]
 }
 
 @test "launcher: unknown well-formed id obeys the kill switches (WP-019)" {
@@ -515,6 +515,103 @@ STUB
     'git push --mirrored-not-a-prefix-of-it origin'
   )
   for row in "${rows[@]}"; do expect_pass "$row"; done
+}
+
+# --- WP-021: a git call is a git call wherever shell syntax puts it.
+
+@test "no-bypass: compound keywords, subshells, wrappers and redirections do not hide a git call" {
+  rows=(
+    'if true; then git commit -n; fi'
+    'for i in 1; do git commit -n; done'
+    'while read x; do git push -f; done'
+    '(git commit -n)'
+    '{ git commit -n; }'
+    '! git commit -n'
+    'timeout 5 git commit -n'
+    'nohup git commit -n'
+    'setsid git commit -n'
+    'env -u X git commit -n'
+    'find . -exec git commit -n {} \;'
+    '>/dev/null git commit -n'
+    "dash -c 'git commit -n'"
+    "timeout 5 bash -c 'git commit -n'"
+    'env -S "git commit -n"'
+    'sudo -u git git push -f'
+    'echo $(git commit -n)'
+    'f() { git push -f; }; f'
+  )
+  for row in "${rows[@]}"; do expect_block "$row"; done
+}
+
+@test "no-bypass: git in any letter case is still git" {
+  expect_block 'GIT commit --no-verify'
+  expect_block 'Git commit -n'
+  expect_block '/usr/bin/GIT push -f'
+}
+
+@test "no-bypass: hook-disabling routes the guard now models are blocked" {
+  rows=(
+    'GIT_CONFIG_GLOBAL=f git commit -m x'
+    'GIT_CONFIG_SYSTEM=f git commit -m x'
+    'GIT_DIR=/tmp/x git commit -m x'
+    'GIT_EXEC_PATH=/tmp/x git commit -m x'
+    'git config --unset core.hooksPath'
+    'git config --unset-all core.hooksPath'
+    'git config set core.hooksPath /dev/null'
+    'git config core.HooksPath x'
+    'git config unset core.hooksPath'
+    'printf x >> .git/config'
+    'echo y > .git/hooks/pre-commit'
+    'rm .git/hooks/pre-commit'
+    'mv .git/hooks/pre-commit /tmp/x'
+    'chmod -x .git/hooks/pre-commit'
+    'sed -i s/a/b/ .git/config'
+    'tee .githooks/pre-commit < /dev/null'
+    'truncate -s 0 .git/hooks/pre-push'
+    'HUSKY_SKIP_HOOKS=1 git commit -m x'
+    'LEFTHOOK=0 git commit -m x'
+    'LEFTHOOK_EXCLUDE=lint git commit -m x'
+    'PRE_COMMIT_ALLOW_NO_CONFIG=1 git commit -m x'
+  )
+  for row in "${rows[@]}"; do expect_block "$row"; done
+}
+
+@test "no-bypass: ordinary commands near those forms still pass" {
+  rows=(
+    'git commit # -n'
+    'git commit -m x'
+    'git commit -m "$(cat <<'"'"'EOF'"'"'
+fix: do not use --no-verify
+EOF
+)"'
+    'SKIP=eslint git commit -m x'
+    'git config --get core.hooksPath'
+    'cat .git/config'
+    'ls .git/hooks 2>&1'
+    'git add .githooks/pre-commit'
+    'echo hello # git push -f'
+    'echo $((1 + 2))'
+    'git log --oneline | head -3'
+  )
+  for row in "${rows[@]}"; do expect_pass "$row"; done
+}
+
+@test "no-bypass: known by-design false blocks are pinned" {
+  # D37: HUSKY=0 on a non-git command and a hooksPath write are blocked on purpose.
+  expect_block 'HUSKY=0 npm ci'
+  expect_block 'git config core.hooksPath .githooks'
+  # the catch-all treats any word that is git as a git call
+  expect_block 'echo git commit -n'
+}
+
+@test "secret: both guards see a git call inside compound and wrapper forms" {
+  mkrepo
+  stage_line "key = \"$(tok_ghp)\""
+  for row in 'if true; then git commit -m x; fi' '(git commit -m x)' 'timeout 5 git commit -m x' \
+             '>/dev/null git commit -m x' 'GIT commit -m x' 'dash -c "git commit -m x"'; do
+    scan "$row"
+    [ "$status" -eq 2 ] || { echo "expected BLOCK for: $row: $output" >&2; false; }
+  done
 }
 
 @test "no-bypass: only the word that is an option's value is skipped" {

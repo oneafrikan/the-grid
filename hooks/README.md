@@ -267,15 +267,38 @@ high-severity finding.
 
 The guards do not inspect:
 
-- wrappers nested more than one level deep (`sudo env git ...`),
-- shell aliases and functions,
+- shell aliases and functions (a function body is read where it is defined, not where it
+  is called),
 - scripts that call git,
 - variables expanded at run time (`$CMD`),
 - `git -c alias.x=...` one-shot aliases,
-- heredoc bodies that sit outside quotes (each body line is read as a command, so a body
-  line that itself starts with `git push --force` is a false positive),
-- command substitution outside quotes (`$(git commit --no-verify)`),
-- ANSI-C escape decoding (`$'\x2d\x2dno-verify'`) and names spliced from `${x}`.
+- a bash/sh/eval payload nested more than one level deep (`bash -c "bash -c '...'"`),
+- ANSI-C escape decoding (`$'\x2d\x2dno-verify'`) and names spliced from `${x}`,
+- writes made with the Write, Edit or MultiEdit tools (a hook script or `.git/config`
+  edited that way is out of scope; only Bash commands are read).
+
+Where a git call is looked for: every word of a command segment that is `git` (any letter
+case, any path prefix) starts a git call, so `if ...; then git ...; fi`, `( git ... )`,
+`{ git ...; }`, `! git`, `timeout 5 git ...`, `nohup`, `setsid`, `env -u X`, `find -exec`,
+`>/dev/null git ...` and `$(git ...)` are all read. `bash|sh|zsh|dash|ksh|busybox -c`,
+`eval` and `env -S` payloads are re-read once. Parentheses end a segment and a
+word-initial `#` starts a comment, so `git commit # -n` is just `git commit`.
+
+Accepted false blocks (a mistake-catcher errs towards blocking):
+
+- any word that is `git` starts a git call, so `echo git commit -n` blocks,
+- `HUSKY=0 npm ci` and `echo HUSKY=0` block (the assignment is the signal, not the command),
+- `git config core.hooksPath <dir>` blocks even when the directory is a legitimate hooks dir,
+- a heredoc body outside quotes is read as ordinary text: an apostrophe in it opens a quote
+  span (not stripped, because `bash <<EOF` bodies really run).
+
+Hook-disabling routes that are blocked: `-c` / `--config-env` with a hooksPath key,
+`GIT_CONFIG_*`, `GIT_DIR`, `GIT_WORK_TREE`, `GIT_EXEC_PATH` and `GIT_TEMPLATE_DIR`
+assignments, `HUSKY=0`, `HUSKY_SKIP_HOOKS`, `LEFTHOOK=0`, `LEFTHOOK_EXCLUDE`,
+`PRE_COMMIT_ALLOW_NO_CONFIG`, `git config --unset[-all]` / `unset` of hooksPath, `git
+config set` of hooksPath, and a redirect, `tee`, `truncate`, `chmod`, `rm`, `mv` or
+`sed -i` that names `.git/config`, `.git/hooks` or `.githooks`. A bare `SKIP=...` is not
+matched. Anyone who must edit those files by shell uses the kill switch above.
 
 How flag words are read: quotes and backslashes are removed the way the shell removes
 them, so `"--no-verify"`, `\--no-verify` and `--no-ver""ify` are all `--no-verify`. The

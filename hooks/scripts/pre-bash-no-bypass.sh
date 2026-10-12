@@ -38,15 +38,20 @@ command="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')"
 # (g""it, g\it and "g"it are git); a command holding $ or a backtick may build a word
 # the text test cannot see, so it always goes to the tokenizer. (A name spliced in
 # from ${x} is a documented gap.)
+# Matched case-insensitively (GIT, Git: a case-insensitive filesystem runs them as git).
 stripped="${command//[\"\'\\]/}"
+shopt -s nocasematch
 case "$stripped" in
-  *git*|*GIT_CONFIG*|*HUSKY*) ;;
-  *)
-    case "$command" in
-      *'$'*|*'`'*) ;;
-      *) exit 0 ;;
-    esac ;;
+  *git*|*GIT_CONFIG*|*HUSKY*|*LEFTHOOK*|*PRE_COMMIT*) hit=1 ;;
+  *) hit=0 ;;
 esac
+shopt -u nocasematch
+if [ "$hit" = 0 ]; then
+  case "$command" in
+    *'$'*|*'`'*) ;;
+    *) exit 0 ;;
+  esac
+fi
 
 grid_check_cmd_cap pre-bash-no-bypass "$command"
 
@@ -115,17 +120,31 @@ for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
   if [ "$sub" = "config" ]; then
     # Collect positional words (key, then value), skipping options and the values
     # of value-taking options. Any read flag means the call is a read.
-    pos=(); is_read=0; skip=0
+    pos=(); is_read=0; is_unset=0; skip=0
     for ((k = start; k < start + len; k++)); do
-      w="${GIT_RAW[$k]}"
+      w="${GIT_FLAG[$k]}"
       if [ "$skip" = 1 ]; then skip=0; continue; fi
       case "$w" in
-        --get|--get-all|--get-regexp|--list|-l|get|--unset|--unset-all) is_read=1 ;;
+        --get|--get-all|--get-regexp|--list|-l|get) is_read=1 ;;
+        --unset|--unset-all) is_unset=1 ;;
         -f|--file|--blob|--type|--default|--comment) skip=1 ;;
         -*) ;;
         *) pos+=("$w") ;;
       esac
     done
+    # git 2.46+ spells writes `git config set <key> <value>` and `git config unset <key>`:
+    # the verb is the first positional word, not part of the key.
+    if [ "${#pos[@]}" -ge 1 ]; then
+      case "${pos[0]}" in
+        set) pos=("${pos[@]:1}") ;;
+        unset) is_unset=1; pos=("${pos[@]:1}") ;;
+      esac
+    fi
+    # Unsetting the hooksPath key switches off the hooks a hooksPath setting pointed at,
+    # so it is a write, not a read.
+    if [ "$is_unset" = 1 ] && [ "${#pos[@]}" -ge 1 ] && _grid_is_hookspath "${pos[0]}"; then
+      reasons+=("git config unsets core.hooksPath (disables git hooks)")
+    fi
     # A write has a key AND a value; a lone key is a read.
     if [ "$is_read" = 0 ] && [ "${#pos[@]}" -ge 2 ]; then
       if _grid_is_hookspath "${pos[0]}"; then
@@ -154,7 +173,13 @@ done
 if [ "${#reasons[@]}" -gt 0 ]; then
   {
     echo "BLOCKED by the-grid hook pre-bash-no-bypass:"
-    for r in "${reasons[@]}"; do echo "  - $r"; done
+    # A git word reached by two routes can report one reason twice: print each once.
+    shown="|"
+    for r in "${reasons[@]}"; do
+      case "$shown" in *"|$r|"*) continue ;; esac
+      shown+="$r|"
+      echo "  - $r"
+    done
     echo "Do not bypass git hooks or force-push; fix the underlying problem."
     echo "Human override: launch claude with GRID_DISABLED_HOOKS=pre-bash-no-bypass"
   } >&2
