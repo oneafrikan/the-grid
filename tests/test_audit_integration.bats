@@ -298,12 +298,18 @@ gitmodules_entry() {
   [ -L "$MOCK_SKILLS/s" ]
 }
 
-@test "wire (e): PATH without python3 wires with the loud notice" {
-  add_wired evil "$BAD"                       # would block if the audit ran
+@test "wire (e): PATH without python3 blocks with exit 3 and changes nothing; GRID_AUDIT=warn wires with a warning" {
+  add_wired evil "$BAD"                       # would be blocked if the audit ran
   nopy="$(path_without 'python3*' python)"
   PATH="$nopy" run_wire
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"python3 not found"* ]]
+  [ ! -e "$MOCK_SKILLS/s" ] && [ ! -L "$MOCK_SKILLS/s" ]    # nothing was changed
+  # The same escape hatch as a finding: warn once, wire anyway.
+  PATH="$nopy" GRID_AUDIT=warn run_wire
   [ "$status" -eq 0 ]
-  [[ "$output" == *"python3 missing - audit SKIPPED, skills wired unaudited"* ]]
+  [[ "$output" == *"python3 not found"* ]]
+  [[ "$output" == *"GRID_AUDIT=warn"* ]]
   [ -L "$MOCK_SKILLS/s" ]
 }
 
