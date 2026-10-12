@@ -226,7 +226,7 @@ assert_user_text() {
   [ ! -s "$CODEX_MD" ]
 }
 
-@test "a file holding only the block is deleted when the block is removed (rules.py behaviour)" {
+@test "a file holding only the block is truncated to 0 bytes and kept when the block is removed" {
   printf 'rules:fx\nharness:codex\n' > "$OVERLAY"
   mkdir -p "$GRID_HARNESS_HOME/.codex"
   : > "$CODEX_MD"
@@ -235,7 +235,15 @@ assert_user_text() {
   printf 'harness:codex\n' > "$OVERLAY"
   wire
   [ "$status" -eq 0 ]
-  [ ! -e "$CODEX_MD" ]
+  # The operator's opt-in file survives, empty.
+  [ -f "$CODEX_MD" ]
+  [ ! -s "$CODEX_MD" ]
+  # Re-enabling delivers the block into the kept file again (no rules-file-absent skip).
+  printf 'rules:fx\nharness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  grep -qF "$MARK" "$CODEX_MD"
+  ! grep -q 'rules-file-absent' "$MANIFEST"
 }
 
 @test "a directory at the instruction path is left alone and recorded" {

@@ -851,16 +851,24 @@ pad_pack() {
   [ -z "$output" ]
 }
 
-@test "emit agents-md: an empty --packs deletes a block-only file" {
+@test "emit agents-md: an empty --packs truncates a block-only file to 0 bytes and keeps it (and its mode)" {
   make_pack sql
+  : > "$R/GEMINI.md"
+  chmod 600 "$R/GEMINI.md"
   emit --harness gemini --packs sql --out "$R/GEMINI.md" >/dev/null
   run emit --harness gemini --packs "" --out "$R/GEMINI.md" --check
   [ "$status" -eq 1 ]
-  [ -f "$R/GEMINI.md" ]
+  [ -s "$R/GEMINI.md" ]
   run emit --harness gemini --packs "" --out "$R/GEMINI.md"
   [ "$status" -eq 0 ]
-  [ "$output" = "removed $R/GEMINI.md" ]
-  [ ! -e "$R/GEMINI.md" ]
+  [ "$output" = "wrote $R/GEMINI.md" ]
+  [ -f "$R/GEMINI.md" ]
+  [ ! -s "$R/GEMINI.md" ]
+  [ "$(stat -c %a "$R/GEMINI.md")" = 600 ]
+  # Removing again is a no-op on the kept empty file.
+  run emit --harness gemini --packs "" --out "$R/GEMINI.md"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "emit agents-md: an empty --packs on a missing file or a file with no block is a no-op" {

@@ -96,8 +96,8 @@ harness_path() {
 #   none                        nothing to do
 # The grid never creates an instruction file: the operator opts in by creating a regular
 # file (even an empty one). Removal is only ever attempted when the literal marker is
-# already in the file, because rules.py deletes a file that removal leaves empty, and an
-# operator's empty opt-in file with no block must never be touched.
+# already in the file, so an operator's empty opt-in file with no block is never touched
+# (rules.py itself keeps a file that removal leaves empty, truncated to 0 bytes).
 harness_rules_action() {
   local file="$1" active="$2" csv="$3"
   if [ "$active" = 1 ] && [ -n "$csv" ]; then
