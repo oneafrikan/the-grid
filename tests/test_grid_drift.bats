@@ -180,6 +180,75 @@ empty_dir() { [ -z "$(ls -A "$1")" ]; }
   contains "$(cat "$REPORTS/drift-latest.md")" '`up`: ref not found'
 }
 
+# git_shim: a `git` on PATH that logs "<GIT_ALLOW_PROTOCOL> <argv>" per call and
+# then runs the real git. An empty log proves no git child (so no network) ran.
+git_shim() {
+  local real
+  real=$(command -v git)
+  mkdir -p "$T/shim"
+  printf '#!/bin/sh\nprintf "%%s|%%s\\n" "${GIT_ALLOW_PROTOCOL-unset}" "$*" >> "%s"\nexec "%s" "$@"\n' \
+    "$T/git-calls" "$real" > "$T/shim/git"
+  chmod +x "$T/shim/git"
+  : > "$T/git-calls"
+  export PATH="$T/shim:$PATH"
+}
+
+@test "drift with a non-https source (GRID_ALLOW_FILE unset) exits 2, writes no report and starts no git network call" {
+  git_shim
+  run env -u GRID_ALLOW_FILE python3 -B "$GRID_BIN" --grid-dir "$G" drift
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not https"* ]]
+  [ ! -e "$REPORTS/drift-latest.md" ]
+  refute grep -Eq "[|].*(ls-remote|fetch|remote add|clone)" "$T/git-calls"
+}
+
+@test "drift with an authority-confusing https source exits 2, writes no report and starts no git network call" {
+  git_shim
+  printf 'version: 1\nsources:\n  up:\n    url: https://evil.invalid#@github.com/anthropics/skills.git\nwired:\n  baseline: baseline-submodules.example.txt\n' > "$G/grid.yaml"
+  run drift
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"'up'"* ]]
+  [ ! -e "$REPORTS/drift-latest.md" ]
+  refute grep -Eq "[|].*(ls-remote|fetch|remote add|clone)" "$T/git-calls"
+}
+
+@test "drift with an https source that policy.yaml does not allow exits 2 and starts no git network call" {
+  git_shim
+  printf 'version: 1\nsources:\n  up:\n    url: https://github.com/example-evil/skills.git\nwired:\n  baseline: baseline-submodules.example.txt\n' > "$G/grid.yaml"
+  run drift
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not allowed"* ]]
+  [ ! -e "$REPORTS/drift-latest.md" ]
+  refute grep -Eq "[|].*(ls-remote|fetch|remote add|clone)" "$T/git-calls"
+}
+
+@test "git children of drift get GIT_ALLOW_PROTOCOL set (https, plus file only behind GRID_ALLOW_FILE)" {
+  git_shim
+  upstream_change_alpha
+  : > "$T/git-calls"          # the fixture's own commits are not drift's calls
+  run env -u GIT_ALLOW_PROTOCOL python3 -B "$GRID_BIN" --grid-dir "$G" drift --quiet
+  [ "$status" -eq 0 ]
+  [ -s "$T/git-calls" ]
+  # every git call drift made carried the restriction (GRID_ALLOW_FILE=1 here)
+  refute grep -v '^https:file|' "$T/git-calls"
+}
+
+@test "git_env restricts protocols to https, and adds file only behind GRID_ALLOW_FILE=1" {
+  probe='
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("gridmod", sys.argv[1])
+spec = importlib.util.spec_from_loader("gridmod", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print(mod.git_env().get("GIT_ALLOW_PROTOCOL"))'
+  run env -u GRID_ALLOW_FILE -u GIT_ALLOW_PROTOCOL python3 -B -c "$probe" "$GRID_BIN"
+  [ "$status" -eq 0 ]
+  [ "$output" = "https" ]
+  run env -u GIT_ALLOW_PROTOCOL GRID_ALLOW_FILE=1 python3 -B -c "$probe" "$GRID_BIN"
+  [ "$status" -eq 0 ]
+  [ "$output" = "https:file" ]
+}
+
 @test "grid.lock, the ledger and repos/ are byte-identical before and after" {
   upstream_change_alpha
   upstream_delete_beta

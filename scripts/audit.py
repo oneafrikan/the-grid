@@ -28,6 +28,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 
 # Make scripts/lib importable no matter where we are called from.
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -658,26 +659,60 @@ def baseline_repos(path):
     return repos
 
 
+# Host and owner/repo name characters. Deliberately narrower than what git
+# accepts: a source URL that needs anything else is not a GitHub-style clone URL.
+_HOST_RE = r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?"
+_NAME_RE = r"[A-Za-z0-9_.-]+"
+_HTTPS_URL_RE = re.compile(r"https://(%s)(?::\d{1,5})?/(%s)/(%s)/?" % (_HOST_RE, _NAME_RE, _NAME_RE))
+_SSH_URL_RE = re.compile(r"ssh://(?:git@)?(%s)(?::\d{1,5})?/(%s)/(%s)/?" % (_HOST_RE, _NAME_RE, _NAME_RE))
+_SCP_URL_RE = re.compile(r"(?:git@)?(%s):(%s)/(%s)/?" % (_HOST_RE, _NAME_RE, _NAME_RE))
+# Anything outside printable ASCII, plus the characters that move the real
+# authority away from where a loose pattern reads it: `#` `?` backslash `%`.
+_URL_REJECT_RE = re.compile(r"[^\x21-\x7e]|[#?\\%]")
+
+
 def normalise_repo_url(url):
     """(host, 'owner/repo') lowercased for the URL forms used on GitHub, or None
-    when the form is not recognised. Accepted: scp-style `user@host:o/r(.git)`,
-    `ssh://[user@]host/o/r(.git)` and `https://[user@]host/o/r(.git)`, with an
-    optional trailing slash. Plain `http://`, `git://` and `file:` are deliberately
-    not recognised (unencrypted or local), so they can never match the allowlist."""
+    when the form is not recognised. Accepted: scp-style `[git@]host:o/r(.git)`,
+    `ssh://[git@]host[:port]/o/r(.git)` and `https://host[:port]/o/r(.git)`, with
+    an optional trailing slash. Plain `http://`, `git://` and `file:` are
+    deliberately not recognised (unencrypted or local), so they can never match
+    the allowlist.
+
+    The allowlist must judge the SAME host git and curl will contact, so this is
+    an exact grammar behind a reject-list, not a permissive parse. Any character
+    outside printable ASCII, and any of `#`, `?`, backslash and `%`, is refused:
+    `https://evil.invalid#@github.com/o/r` contacts evil.invalid although a loose
+    userinfo pattern reads github.com. An https URL carries NO userinfo (a clone
+    URL needs none, and `user:pw@` must fail); `git@` is the only userinfo, for
+    the ssh and scp forms. For `://` forms the host is cross-checked against
+    urllib's reading of the same string."""
     url = url.strip()
-    if "://" in url:
-        m = re.fullmatch(r"(?:https|ssh)://(?:[^@/\s]+@)?([^:/\s@]+)(?::\d+)?/(\S+)", url)
+    if _URL_REJECT_RE.search(url):
+        return None
+    if url.startswith("https://"):
+        m = _HTTPS_URL_RE.fullmatch(url)
+    elif url.startswith("ssh://"):
+        m = _SSH_URL_RE.fullmatch(url)
+    elif "://" in url:
+        return None
     else:
-        m = re.fullmatch(r"(?:[^@/\s]+@)?([^:/\s@]+):([^/\s]\S*)", url)
+        m = _SCP_URL_RE.fullmatch(url)
     if not m:
         return None
-    host, path = m.group(1), m.group(2).rstrip("/")
-    if path.lower().endswith(".git"):
-        path = path[:-4]
-    parts = path.split("/")
-    if len(parts) != 2 or not all(parts):
+    host, owner, repo = m.group(1).lower(), m.group(2), m.group(3)
+    if "://" in url:
+        try:
+            parts = urllib.parse.urlsplit(url)
+            if parts.hostname != host or parts.password is not None:
+                return None
+        except ValueError:
+            return None
+    if repo.lower().endswith(".git"):
+        repo = repo[:-4]
+    if owner in (".", "..") or repo in ("", ".", ".."):
         return None
-    return host.lower(), path.lower()
+    return host, ("%s/%s" % (owner, repo)).lower()
 
 
 def check_url(policy, url):
@@ -732,21 +767,46 @@ def curated_repos(path):
         return set(re.findall(r"^###[ \t]+repos/(\S+)[ \t]*$", fh.read(), re.M))
 
 
+def lock_sources(root):
+    """Source names (directory names under repos/) recorded in <root>/grid.lock.
+    A missing or unreadable lock is the empty set: it vouches for nothing."""
+    try:
+        with open(os.path.join(root, "grid.lock"), "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        return {e["source"] for e in doc["entries"]
+                if isinstance(e, dict) and isinstance(e.get("source"), str)}
+    except (OSError, ValueError, KeyError, TypeError):
+        return set()
+
+
 def source_checks(scan, root, curation_path, baseline):
     """One `source-not-allowed` / `source-uncurated` finding per upstream repo that
     a target lives under, reported at `.gitmodules:<line of its url>`. Severity is
     `high` for a repo named in the baseline, else the policy's (low) default, so an
-    overlay-only repo warns where a baseline repo blocks. No .gitmodules, or a repo
-    with no entry in it, means nothing to check (it is not a submodule)."""
+    overlay-only repo warns where a baseline repo blocks. No .gitmodules at all
+    means nothing to check, and neither does one that declares no submodule at
+    all (a checkout that does not use submodules). Otherwise a repo with no entry
+    in .gitmodules is a plain directory nobody vetted the source of: it is
+    `source-not-allowed` at `repos/<name>` too, unless grid.lock records it as an
+    install source."""
     modules_file = os.path.join(root, ".gitmodules")
     if not os.path.isfile(modules_file) or not scan.repos:
         return
     modules = parse_gitmodules(modules_file)
+    if not modules:
+        return
     curated = curated_repos(curation_path)
     base = {b.lower() for b in baseline or ()}
+    locked = lock_sources(root)
     for name in sorted(scan.repos):
         entry = modules.get("repos/" + name)
         if entry is None:
+            if name not in locked:
+                msg = ("repos/%s is not listed in .gitmodules and grid.lock has no source for it"
+                       % name)
+                sev = "high" if name.lower() in base else scan.policy.builtin["source-not-allowed"]
+                scan._add("source-not-allowed", sev, "repos/" + name, 0, "other", "upstream",
+                          msg, raw_line="repos/" + name)
             continue
         url, line = entry
         ok, why = check_url(scan.policy, url)
