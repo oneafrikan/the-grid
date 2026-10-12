@@ -181,6 +181,9 @@ case "${STUB_CLAUDE_MODE:-}" in
     # Keep a copy of the digest the prompt names, so a test can read what the child saw.
     digest="$(printf '%s' "$*" | sed -n 's/.*digest file \([^ ]*\), not this session.*/\1/p')"
     if [ -n "$digest" ] && [ -f "$digest" ] && [ -n "${STUB_DIR:-}" ]; then cp "$digest" "$STUB_DIR/claude.digest"; fi
+    # STUB_CLAUDE_GRANDCHILD=1: leave a long-lived grandchild behind (its pid in grandchild.pid), as a
+    # real child's tool process would; the worker's timeout must kill it too (WP-017).
+    if [ "${STUB_CLAUDE_GRANDCHILD:-0}" = 1 ]; then sleep 300 > /dev/null 2>&1 3>&- & echo $! > "$STUB_DIR/grandchild.pid"; fi
     if [ -n "${STUB_CLAUDE_SLEEP:-}" ]; then sleep "$STUB_CLAUDE_SLEEP"; fi
     # STUB_HANDOFF_PREFIX makes the pair's names distinct, so two sessions in one cwd (WP-017) can be told apart.
     hf="${STUB_HANDOFF_PREFIX:-}2026-01-01-testhost-stub-handoff.md"

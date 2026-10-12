@@ -1038,3 +1038,72 @@ cwd_lock() { printf '%s/handoff/cwd-%s.lock\n' "$GRID_HOOK_STATE_DIR" "$(printf 
   done
   [ ! -e "$STUB_DIR/claude.pid" ]
 }
+
+# ---- timeouts, signals and orphans ------------------------------------------------------
+
+# The hook's outer alarm must outlast everything the worker can legitimately do:
+# child timeout + 60 s (git phase) + 120 s (digest) + the cwd-lock wait.
+@test "the hook's outer alarm covers the timeout, the git phase, the digest and the cwd wait" {
+  mk_tx 6
+  shim="$BATS_TEST_TMPDIR/shim"; mkdir -p "$shim"
+  # A perl that only records the alarm argument (the 4th: -MPOSIX -e <code> <alarm> ...).
+  printf '#!/bin/sh\nprintf "%%s\\n" "$4" > "%s/alarm"\nexit 0\n' "$shim" > "$shim/perl"
+  chmod +x "$shim/perl"
+  sessionend_payload "$SID" "$TXN" "$P" | PATH="$shim:$PATH" GRID_AUTOHANDOFF_TIMEOUT=100 GRID_AUTOHANDOFF_WAIT=7 \
+    bash "$REPO_ROOT/hooks/run.sh" auto-handoff
+  wait_for 5 test -s "$shim/alarm"
+  [ "$(cat "$shim/alarm")" -eq 287 ]
+}
+
+@test "timeout kills the grandchild too, and the log keeps only decision lines" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs STUB_CLAUDE_SLEEP=30 STUB_CLAUDE_GRANDCHILD=1 GRID_AUTOHANDOFF_TIMEOUT=2
+  fire
+  wait_for 20 terminal_logged
+  log_has "action=error reason=timeout"
+  gp="$(cat "$STUB_DIR/grandchild.pid")"
+  gone() { ! kill -0 "$gp" 2>/dev/null; }
+  wait_for 5 gone || { kill "$gp" 2>/dev/null; false; }   # never leave the sleeper behind, pass or fail
+  gone
+  # every line is a decision line, a child| line or blank: no "Alarm clock" job noise
+  refute grep -vE '^(ts=|child\||$)' "$LOG"
+}
+
+@test "a missing claude binary is still exit 127 through the timeout wrapper" {
+  mk_tx 6
+  export GRID_CLAUDE=/nonexistent/grid-claude-tripwire
+  run_worker
+  log_has "action=error reason=claude-exit-127"
+}
+
+# The hook's outer alarm is SIGALRM to the worker. A foreground child would defer the
+# worker's trap until it finished, so the children run in the background and the worker
+# waits; the trap then unstages the pair and leaves nothing behind.
+@test "a slow pre-commit hook plus the outer alarm leaves the index clean" {
+  mk_tx 6
+  printf '#!/bin/sh\ntouch "%s"\nsleep 8\n' "$MOCK_HOOK_ROOT/hook-started" > "$P/.git/hooks/pre-commit"
+  chmod +x "$P/.git/hooks/pre-commit"
+  export STUB_CLAUDE_MODE=handoff-logs
+  bash "$WORKER" "$SID" "$TXN" "$P" other > /dev/null 2>&1 &
+  wpid=$!
+  wait_for 30 test -e "$MOCK_HOOK_ROOT/hook-started"
+  kill -ALRM "$wpid"
+  wait "$wpid" || true
+  [ -z "$(git -C "$P" diff --cached --name-only)" ]
+  [ ! -e "$P/.git/index.lock" ]
+  log_has "action=error reason=terminated"
+  [ ! -d "$(lock_dir)" ]                              # the EXIT trap still ran
+}
+
+@test "a terminated worker removes its temp dirs (no leak into TMPDIR)" {
+  mk_tx 6
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
+  export STUB_CLAUDE_MODE=handoff-logs STUB_CLAUDE_SLEEP=20
+  bash "$WORKER" "$SID" "$TXN" "$P" other > /dev/null 2>&1 &
+  wpid=$!
+  wait_for 20 test -s "$STUB_DIR/claude.pid"
+  kill -TERM "$wpid"
+  wait "$wpid" || true
+  [ -z "$(ls -A "$TMPDIR")" ]
+  kill "$(cat "$STUB_DIR/claude.pid")" 2>/dev/null || true
+}

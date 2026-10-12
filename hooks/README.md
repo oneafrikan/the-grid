@@ -160,7 +160,18 @@ exits 1. A symlinked settings file or config dir is refused (a warning from `wir
   (`no-new-turns`).
 
 Only real human turns count: tool results, meta lines, attachments and subagent
-(sidechain) lines do not.
+(sidechain) lines do not. Only a message that STARTS with the `/handoff` command tag
+counts as having run it; the tag quoted mid-sentence does not.
+
+**One run at a time.** A worker takes a per-session lock (`<state dir>/handoff/<id>.lock`,
+taken over when older than the timeout plus 5 minutes, released on every exit) and a
+per-directory lock, so repeated SessionEnd payloads for one session spawn one model run
+and two sessions in one directory take turns. The turn marker is written before the
+child runs, so a failed run is not repeated until the session gains `MIN_TURNS` more
+turns. What the child changed is judged by a before/after snapshot of the scanned
+directories, so a file you edited just before the session ended is not blamed on it; a
+build or editor writing into the directory *during* the run still is (`unexpected-file`).
+The child runs in its own process group and the whole group is killed at the timeout.
 
 **Cost.** One Sonnet run per qualifying session. Bounds: `--max-budget-usd`
 (`GRID_AUTOHANDOFF_MAX_USD`, default 1.00; it may not bind on a subscription plan),
@@ -210,7 +221,8 @@ proven live (operator check B1), so the rules are not the only barrier:
    fallback repo; or to shell startup files, `~/.ssh/{authorized_keys,config,rc}`,
    `~/.gitconfig`, Claude's `settings*.json` or `~/.config/systemd/user`, is
    `unexpected-file`: no commit, changed paths logged, nothing moved.
-2. Every new file or symlink (symlinks are not followed) under the session's directory
+2. Every file or symlink (symlinks are not followed) that is new or changed during the run,
+   under the session's directory
    (any depth, `.git/` excluded), the fallback directory, the target directory and the
    work trees of the repos the commit lands in is collected, and a symlink named
    `*-handoff.md` or `*-context.md` is reported whatever its age. Exactly one
@@ -242,6 +254,7 @@ The worker creates it first.
 | `GRID_AUTOHANDOFF_MAX_BYTES` | 300000 | digest size cap (the middle is elided past it) |
 | `GRID_AUTOHANDOFF_TIMEOUT` | 900 | seconds before the child is killed (`reason=timeout`) |
 | `GRID_AUTOHANDOFF_MAX_USD` | 1.00 | `--max-budget-usd` for the child |
+| `GRID_AUTOHANDOFF_WAIT` | 120 | seconds a second session in the same directory waits for the first before skipping as `cwd-busy` |
 | `GRID_AUTOHANDOFF_FORCE` | unset | `1` skips the already-ran, short-session and marker checks (parity runs, tests) |
 | `GRID_HANDOFF_FALLBACK_DIR` | see above | where a handoff lands when the target directory is missing or denied |
 | `GRID_PRIVATE_DIR` | `~/.the-grid-private` | the one repo the worker may push |
@@ -261,12 +274,17 @@ line per decision:
 ts=<UTC time> session=<id> action=<skip|spawn|done|error> reason=<token> [turns=N] [commit=<none|sha>] [push=<token>] [paths=...]
 ```
 
-- `action=skip`: `bad-payload`, `no-transcript`, `already-ran`, `short-session`,
-  `no-new-turns`.
+- `action=skip`: `bad-payload` (including a session id over 64 characters),
+  `no-transcript`, `already-ran`, `short-session`, `no-new-turns`, `already-running`
+  (another worker holds this session's lock), `cwd-busy` (another session held the
+  directory's lock for `GRID_AUTOHANDOFF_WAIT` seconds; no marker is written, so a later
+  end may retry), `cwd-too-broad` (the session directory is `/`, `$HOME` or a parent of
+  it) and `no-perl` (written by the hook: without perl it cannot detach or time out).
 - `action=spawn reason=ok`: the child started (`end=` is the SessionEnd reason).
 - `action=done reason=ok`: the files were written and checked; `commit=` is `none` or the
   short sha.
-- `action=error`: `timeout`, `claude-exit-<n>` (127 means the binary could not be run),
+- `action=error`: `terminated` (the worker got TERM, HUP or the hook's outer alarm; a
+  half-made commit was unstaged), `timeout`, `claude-exit-<n>` (127 means the binary could not be run),
   `no-handoff-file`, `unexpected-file` (see `paths=`), `secret`, `commit-failed`,
   `digest-failed`.
 - `push=`: `yes`; `no-not-private` (not the private repo); `no-upstream`;
