@@ -47,6 +47,9 @@
 #     claude.pgid, claude.pid, claude.umask, claude.env (the full environment it received)
 #     (auto-handoff tests). WP-016 modes: handoff-outside ($STUB_OUTSIDE_FILE), handoff-home-dotfile
 #     ($HOME/.bashrc), handoff-symlink, handoff-githook-other (git internals of $STUB_HANDOFF_DIR's repo).
+#     WP-017/018 knobs for handoff-* modes: STUB_HANDOFF_PREFIX (distinct pair names), STUB_CLAUDE_GRANDCHILD=1
+#     (a lingering grandchild, pid in grandchild.pid), STUB_CLAUDE_SLEEP_AFTER (linger after writing),
+#     STUB_CLAUDE_PRINT (text printed on stdout); modes handoff-modify (edits base.txt), handoff-secret-third.
 #     STUB_CLAUDE_MODE         unset = the behaviour above. handoff-logs | handoff-fallback | handoff-target |
 #                              handoff-extra | handoff-stray act like the auto-handoff child: write
 #                              2026-01-01-testhost-stub-{handoff,context}.md (body ${STUB_HANDOFF_BODY:-stub}) into
@@ -224,7 +227,14 @@ case "${STUB_CLAUDE_MODE:-}" in
         printf '#!/bin/sh\n' > "$g/hooks/post-commit"
         echo '# planted' >> "$g/info/exclude"
         : > "$g/HEAD.evil" ;;
+      handoff-secret-third)  # the pair (give it a secret body), plus an innocent third file (WP-018)
+        write_pair "$PWD/LOGS"
+        echo plain > "$PWD/LOGS/third.md" ;;
     esac
+    # STUB_CLAUDE_PRINT: text the child prints on stdout (the worker logs it, masked).
+    # STUB_CLAUDE_SLEEP_AFTER: seconds to linger AFTER writing (a timeout with files on disk).
+    if [ -n "${STUB_CLAUDE_PRINT:-}" ]; then printf '%s\n' "$STUB_CLAUDE_PRINT"; fi
+    if [ -n "${STUB_CLAUDE_SLEEP_AFTER:-}" ]; then sleep "$STUB_CLAUDE_SLEEP_AFTER"; fi
     exit "${STUB_CLAUDE_EXIT:-0}" ;;
 esac
 # issue number from the worktree name (issue-N), if any
