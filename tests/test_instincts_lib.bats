@@ -652,6 +652,30 @@ EOF
   [ ! -e "$GRID_STATE_DIR/instincts/enabled" ] || [ -z "$(ls -A "$GRID_STATE_DIR/instincts/enabled")" ]
 }
 
+@test "marker: a checkout path with a newline or control character is refused, nothing is written" {
+  # The marker is one root per line: a directory named `x<NL>/other` would add `/other` as a
+  # second authorised root.
+  for bad in "$BATS_TEST_TMPDIR/x"$'\n'"/other" "$BATS_TEST_TMPDIR/y"$'\r'"z" "$BATS_TEST_TMPDIR/v"$'\v'"z" "$BATS_TEST_TMPDIR/t"$'\t'"z"; do
+    run pylib 'lib.write_marker("0123456789ab", sys.argv[2])' "$bad"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"no marker written"* ]]
+  done
+  [ ! -e "$GRID_STATE_DIR/instincts/enabled/0123456789ab" ]
+}
+
+@test "marker: relative, empty and control-character lines are ignored when the marker is read" {
+  mkdir -p "$GRID_STATE_DIR/instincts/enabled"
+  printf '/good/root\nrelative/path\n\n./dot\n/with\vvt\n/with\x01ctl\n/second/root\n' > "$GRID_STATE_DIR/instincts/enabled/0123456789ab"
+  run pylib 'print(lib.marker_roots("0123456789ab"))'
+  [ "$output" = "['/good/root', '/second/root']" ]
+  # a root that was only ever a forged line does not enable a checkout
+  mkdir -p "$BATS_TEST_TMPDIR/evil/.grid"
+  printf 'learning: on\n' > "$BATS_TEST_TMPDIR/evil/.grid/project.yaml"
+  printf '/good/root\nrelative\n' > "$GRID_STATE_DIR/instincts/enabled/0123456789ab"
+  run pylib 'sys.exit(0 if lib.learning_enabled(sys.argv[2], "0123456789ab") else 1)' "$BATS_TEST_TMPDIR/evil"
+  [ "$status" -eq 1 ]
+}
+
 # --- drop_sensitive_lines (WP-028, D40) --------------------------------------------
 
 # dropped <text> — print the text left after lib.drop_sensitive_lines (repr).

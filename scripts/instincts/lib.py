@@ -512,13 +512,28 @@ def marker_path(pid: str) -> Path:
 MAX_MARKER_ROOTS = 8       # checkouts of one project the marker remembers
 
 
+def _valid_root(r: object) -> bool:
+    """A marker root must be an absolute path with no control or line-separator character.
+
+    The marker is one root per line, so a checkout directory whose NAME holds a newline would
+    write a second, attacker-chosen line that reads back as another authorised root; a relative
+    line would depend on the reader's cwd.
+    """
+    return (isinstance(r, str) and os.path.isabs(r)
+            and not any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in r))
+
+
 def marker_roots(pid: str) -> list[str] | None:
-    """The checkout roots recorded in the marker (one per line), or None when there is no marker."""
+    """The checkout roots recorded in the marker (one per line), or None when there is no marker.
+
+    Lines that are not a valid root (relative, empty, holding control characters) are ignored.
+    Split on "\n" only: splitlines() would also cut at VT, FF, U+2028 and friends.
+    """
     try:
         text = marker_path(pid).read_text(encoding="utf-8", errors="replace")[:8192]
     except (OSError, ValueError):
         return None
-    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return [ln for ln in text.split("\n") if _valid_root(ln)]
 
 
 def _store_marker(pid: str, roots: list[str]) -> Path:
@@ -543,6 +558,8 @@ def write_marker(pid: str, root: str | os.PathLike) -> Path:
     run there too. The analyser re-reads each recorded root to see whether the flag is still on.
     """
     r = os.path.realpath(str(root))
+    if not _valid_root(r):
+        raise ValueError("checkout path has a newline or control character; no marker written")
     roots = [x for x in (marker_roots(pid) or []) if x != r] + [r]
     return _store_marker(pid, roots[-MAX_MARKER_ROOTS:])
 
