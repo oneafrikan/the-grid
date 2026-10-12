@@ -772,7 +772,7 @@ teardown_rule_links
 
 # valid_link_name <name>: a skill dir / agent file name safe to link and to record. The
 # manifest is tab-separated with one row per line, so a TAB or newline in a name would add
-# columns or forge a row. Wider than skill_portable's lower-case grammar on purpose: Claude-side
+# columns or fake a row. Wider than skill_portable's lower-case grammar on purpose: Claude-side
 # wiring has always accepted upstream names with capitals and underscores, and a strict rule
 # would silently unwire them. C collation so [A-Za-z] cannot match other letters.
 valid_link_name() {

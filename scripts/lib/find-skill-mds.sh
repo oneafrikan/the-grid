@@ -35,7 +35,7 @@
 # Only real, regular-file, single-line SKILL.md paths are returned, identically in
 # both branches: a symlinked SKILL.md (it can point outside the repo), a directory
 # named SKILL.md, a dangling link, and any path holding a line break (CR or LF; the
-# output is one path per line, so a break would forge extra "paths") are skipped,
+# output is one path per line, so a break would fake extra "paths") are skipped,
 # the last with a stderr warning. Callers also check containment (wire.sh).
 #
 # Fallback: a directory that is not its own git checkout (an uninitialised
