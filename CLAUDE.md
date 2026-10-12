@@ -331,10 +331,20 @@ Agents and sessions must not leave stale worktrees or local branches behind.
   manifest layer (default `$GRID_DIR/baseline-submodules.txt`); machine overlays
   still load from `$GRID_DIR/machines/`. Tests and CI use it to wire from
   `baseline-submodules.example.txt` when there is no personal baseline.
-- **Teardown scope:** teardown removes only links whose target is under `$GRID_DIR/`
-  (trailing slash: a sibling dir like `${GRID_DIR}-private` is never matched) and
-  follows a skills/agents dir that is itself a symlink (`find -H`), in both the
-  wire and `--check` paths.
+- **Teardown scope:** teardown removes only links whose target RESOLVES to a path under
+  `$GRID_DIR/` (`target_is_ours`: the target's parent is resolved physically, a missing
+  parent is normalised lexically; trailing slash, so a sibling dir like
+  `${GRID_DIR}-private` and `$GRID_DIR/../x` are never matched). `GRID_DIR` itself is
+  canonicalised (`pwd -P`) at start, so every link carries one spelling. It follows a
+  skills/agents dir that is itself a symlink (`find -H`) and tolerates newline names,
+  in both the wire and `--check` paths. The link steps never replace a real file, a
+  dangling link or a foreign link that shares a grid name (`skip (not managed)`).
+- **Failure safety (no lock):** registry dirs are resolved and every written dir is
+  checked writable BEFORE the first `rm`; an unresolvable dir of an active harness or an
+  unwritable dir is **exit 2, nothing changed**. Removed links are logged and an
+  EXIT/INT/TERM/HUP trap restores any that are still absent unless the run completed
+  (SIGKILL cannot be trapped: re-run wire). There is deliberately no lock: **one wire at a
+  time** is the supported use (cron plus a manual run can race, so don't).
 - **Machine hooks:** wire.sh keeps one generated `auto-handoff` SessionEnd entry in
   `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json` via
   `agent-factory/deploy_hooks.py --user` (stdlib only; hand-written hooks and keys are

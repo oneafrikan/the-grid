@@ -44,8 +44,13 @@
 #   GRID_HARNESS_HOME — base for every non-Claude harness dir (default: $HOME). Tests point
 #                   it at a temp dir; GRID_DRY_HOME overrides it (see above).
 #
-# Exit codes: 0 wired | 1 --check found drift | 2 bad harness name / python3 missing
-#             for an active harness (nothing changed) | 3 blocked by the audit (nothing changed)
+# Exit codes: 0 wired | 1 --check found drift | 2 bad harness name / python3 missing for an
+#             active harness / a dir that must be written is unwritable or an active
+#             harness dir cannot be resolved (HOME unset); nothing changed in every case |
+#             3 blocked by the audit (nothing changed)
+# Safety: GRID_DIR is canonicalised (pwd -P); link ownership is by resolved path; removed
+#         links are restored by an exit trap if a run fails or is interrupted before it
+#         completes. No lock: run one wire at a time.
 #
 # Usage:
 #   bash wire.sh           # wire (idempotent)
@@ -531,27 +536,95 @@ if [ -z "${GRID_SKIP_AUDIT:-}" ] && [ -z "${GRID_SKIP_CATALOG:-}" ]; then
   fi
 fi
 
-# --- 1. Tear down ALL grid-owned symlinks (rebuilt below) ---
-# A symlink is grid-owned if its target is under GRID_DIR. We remove every one
-# and recreate only the wired set, so moving a repo to library-only actually
-# drops its links — not just broken/stale ones (their targets still exist).
-# Foreign symlinks (target outside GRID_DIR) are never touched. Applied to both
-# the skills dir and the agents dir (composed subagents land in the latter).
-teardown_grid_links() {
-  local dir="$1" link target
+# --- 0b. Preflight and rollback: a failed or interrupted wire never leaves zero links ---
+# Teardown (step 1) removes every grid link before the wired set is rebuilt, so a failure in
+# between used to leave the machine skill-less until the next run. Two guards, no lock (D07:
+# a single writer is assumed, see CLAUDE.md):
+#   preflight  every dir that will be written is checked writable BEFORE any rm; else exit 2
+#   rollback   each removed link is logged ("link NUL target NUL") and an EXIT/INT/TERM/HUP
+#              trap re-creates every logged link that is absent again, unless the run
+#              reached WIRE_COMPLETE=1 (just before the manifest is written). SIGKILL cannot
+#              be trapped: re-running wire recovers fully.
+# The restore only puts back what THIS run removed; if the failure came mid-link the result is
+# old and new links mixed, never zero.
+#
+# owned_links <dir> [find args]: NUL-separated paths of the symlinks under <dir> whose target
+# is ours. find -H follows <dir> itself when it is a symlink to the real dir (without it find
+# lists nothing and stale grid links silently survive). -print0 / read -d '': a link name with
+# a newline must not be split into two bogus paths.
+owned_links() {
+  local dir="$1" link target; shift
   [ -d "$dir" ] || return 0
-  # -print0 / read -d '': a link name holding a newline must not be split into two
-  # bogus paths (readlink of a half-name failed under set -e and aborted every run).
   while IFS= read -r -d '' link; do
     target=$(readlink "$link") || continue
     # target_is_ours compares resolved paths against "$GRID_DIR"/ (with the slash):
     # a bare prefix would also match a sibling dir such as ${GRID_DIR}-private and
     # delete a foreign link into it.
     target_is_ours "$target" || continue   # not ours, leave it alone
-    rm "$link"
-  # find -H: follow $dir itself when it is a symlink to the real skills dir
-  # (without it find lists nothing and stale grid links silently survive).
-  done < <(find -H "$dir" -maxdepth 1 -type l -print0 2>/dev/null)
+    printf '%s\0' "$link"
+  done < <(find -H "$dir" "$@" -type l -print0 2>/dev/null)
+}
+has_owned_links() { local _x; IFS= read -r -d '' _x < <(owned_links "$@"); }
+
+# Dirs that must be writable: the Claude dirs always (they are relinked), the others only when
+# they hold grid links that teardown has to remove.
+preflight_bad=""
+for pf_dir in "$SKILLS_DIR" "$AGENTS_DIR"; do
+  if [ ! -d "$pf_dir" ] || [ ! -w "$pf_dir" ] || [ ! -x "$pf_dir" ]; then preflight_bad="$preflight_bad $pf_dir"; fi
+done
+for pf_dir in "${HD_DIR[@]:-}"; do
+  [ -n "$pf_dir" ] && [ -d "$pf_dir" ] && [ ! -w "$pf_dir" ] || continue
+  ! has_owned_links "$pf_dir" -maxdepth 1 || preflight_bad="$preflight_bad $pf_dir"
+done
+if [ -d "$RULES_DIR/grid" ] && [ ! -w "$RULES_DIR/grid" ] && has_owned_links "$RULES_DIR/grid"; then
+  preflight_bad="$preflight_bad $RULES_DIR/grid"
+fi
+if [ -n "$preflight_bad" ]; then
+  echo "wire: not writable:$preflight_bad" >&2
+  echo "wire: nothing was changed" >&2
+  exit 2
+fi
+
+UNDO_FILE="$(mktemp "${TMPDIR:-/tmp}/wire-undo.XXXXXX")"
+WIRE_COMPLETE=0
+TEARDOWN_FAILED=0
+wire_exit() {
+  local rc="$1" link target
+  trap - EXIT INT TERM HUP          # the restore below must not re-enter the trap
+  if [ "$WIRE_COMPLETE" != 1 ] && [ -s "$UNDO_FILE" ]; then
+    while IFS= read -r -d '' link && IFS= read -r -d '' target; do
+      if [ ! -e "$link" ] && [ ! -L "$link" ]; then
+        mkdir -p "$(dirname "$link")" 2>/dev/null || true   # a rules pack dir teardown emptied
+        ln -s "$target" "$link" 2>/dev/null || true
+      fi
+    done < "$UNDO_FILE"
+    echo "wire: failed or interrupted; the links it had removed were restored" >&2
+  fi
+  rm -f "$UNDO_FILE"
+  exit "$rc"
+}
+trap 'wire_exit $?' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+# --- 1. Tear down ALL grid-owned symlinks (rebuilt below) ---
+# A symlink is grid-owned if its target is under GRID_DIR. We remove every one
+# and recreate only the wired set, so moving a repo to library-only actually
+# drops its links — not just broken/stale ones (their targets still exist).
+# Foreign symlinks (target outside GRID_DIR) are never touched. Applied to both
+# the skills dir and the agents dir (composed subagents land in the latter).
+# A failed rm is reported and counted, not fatal (the run ends non-zero after relinking).
+teardown_grid_links() {
+  local dir="$1" link target
+  while IFS= read -r -d '' link; do
+    target=$(readlink "$link") || continue
+    printf '%s\0%s\0' "$link" "$target" >> "$UNDO_FILE"
+    if ! rm "$link"; then
+      echo "wire: cannot remove $link" >&2
+      TEARDOWN_FAILED=$((TEARDOWN_FAILED + 1))
+    fi
+  done < <(owned_links "$dir" -maxdepth 1)
 }
 teardown_grid_links "$SKILLS_DIR"
 teardown_grid_links "$AGENTS_DIR"
@@ -574,9 +647,12 @@ teardown_rule_links() {
   [ -d "$root" ] || return 0
   while IFS= read -r -d '' link; do
     target=$(readlink "$link") || continue
-    target_is_ours "$target" || continue   # not ours, leave it alone
-    rm "$link"
-  done < <(find -H "$root" -type l -print0 2>/dev/null)
+    printf '%s\0%s\0' "$link" "$target" >> "$UNDO_FILE"
+    if ! rm "$link"; then
+      echo "wire: cannot remove $link" >&2
+      TEARDOWN_FAILED=$((TEARDOWN_FAILED + 1))
+    fi
+  done < <(owned_links "$root")
   # -empty -delete only removes directories with nothing in them (-delete implies -depth,
   # so a pack dir emptied by the loop above goes, and so does a parent emptied by that).
   find "$root" -mindepth 1 -type d -empty -delete 2>/dev/null || true
@@ -1016,6 +1092,9 @@ while IFS= read -r h_name; do
   esac
 done < <(harness_names)
 
+# Every link is in place: from here a failure must not roll the new links back.
+WIRE_COMPLETE=1
+
 # --- 3d. Write the wiring manifest (audit trail) ---
 # One row per decision (kind, name, target, status, reason), sorted, no
 # timestamp — so an unchanged wiring leaves the file byte-identical and it is
@@ -1047,6 +1126,11 @@ if [ -f "$SCRIPT_DIR/catalog.sh" ] && [ -z "${GRID_SKIP_CATALOG:-}" ] && [ -z "$
   GRID_DIR="$GRID_DIR" GRID_BASELINE="$catalog_baseline" bash "$SCRIPT_DIR/catalog.sh" "$GRID_DIR/SKILLS.md"
 fi
 
+# Stale links that could not be removed fail the run, after everything else has run.
+if [ "$TEARDOWN_FAILED" != 0 ]; then
+  echo "wire: done, but $TEARDOWN_FAILED stale link(s) could not be removed (see above)" >&2
+  exit 1
+fi
 # Rules delivery (3f) finishes every other step first, then fails the run.
 if [ "$rules_failed" != 0 ]; then
   echo "wire: done, but rules delivery failed (see above)" >&2
