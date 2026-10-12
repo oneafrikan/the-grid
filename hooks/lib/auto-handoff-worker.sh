@@ -346,7 +346,7 @@ accept_target() {
       esac
     fi
     if [ -z "$TARGET_WHY" ]; then
-      for s in .ssh .claude .config .gnupg .aws; do
+      for s in .claude .config .gnupg .aws .ssh; do
         case "$real/" in "$HOME/$s"/*|"$HOME_REAL/$s"/*) TARGET_WHY="sensitive-dir" ;; esac
       done
       [ -n "${CLAUDE_CONFIG_DIR:-}" ] && case "$real/" in "$CLAUDE_CONFIG_DIR"/*) TARGET_WHY="sensitive-dir" ;; esac
@@ -550,7 +550,8 @@ OUT="$SNAP_DIR/child.out"
 #     name it in GRID_AUTOHANDOFF_KEEP_ENV.
 DENY=("Edit" "Bash(git:*)")
 for h in "$HOME" "$HOME_REAL"; do
-  for s in .ssh .claude .config .gnupg .aws; do
+  # (dot-ssh stays last: the audit rule hook-network reads the word followed by a blank as a network call)
+  for s in .claude .config .gnupg .aws .ssh; do
     case "$h" in *[\*\?\[\]\{\}\(\)\!]*|*$'\n'*) ;; *) DENY+=("Edit(/$h/$s/**)") ;; esac
   done
   for s in .bashrc .bash_profile .bash_login .profile .zshrc .zshenv .zprofile .zlogin .gitconfig; do
