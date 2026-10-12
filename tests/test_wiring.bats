@@ -395,3 +395,27 @@ make_fake_real_home() {
   [ "$status" -eq 0 ]
   [ "$(readlink "$MOCK_SKILLS/skill-alpha")" = "$MOCK_GRID/skills/skill-alpha/" ]
 }
+
+# --- WP-007: ownership is decided by the resolved path, not a string prefix ----
+
+@test "wire via a symlinked clone path then the real path removes a stale link and --check exits 0" {
+  ln -s "$MOCK_GRID" "$BATS_TEST_TMPDIR/clone"
+  # A stale grid link left in the OTHER spelling of the clone path (an older wire).
+  ln -s "$BATS_TEST_TMPDIR/clone/repos/gone" "$MOCK_SKILLS/gone-skill"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ ! -L "$MOCK_SKILLS/gone-skill" ]
+  # Wired through the symlinked spelling, checked through the real one: no false drift.
+  GRID_DIR="$BATS_TEST_TMPDIR/clone" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 0 ]
+}
+
+@test "a link to GRID_DIR/../elsewhere/x survives teardown" {
+  # Textually under "$GRID_DIR/", physically outside it: not ours.
+  ln -s "$MOCK_GRID/../elsewhere/x" "$MOCK_SKILLS/dotdot"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/dotdot" ]
+}
