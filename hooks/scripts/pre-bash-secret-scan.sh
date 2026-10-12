@@ -182,7 +182,7 @@ consume_stream() {
 #   union of the pattern table keeps only lines some pattern could match, and only those
 #   reach the slow per-line bash matcher.
 scan_diff() {
-  consume_stream < <(git "${GITARGS[@]}" -c core.quotepath=false diff -U0 --no-color --no-ext-diff --text \
+  consume_stream < <(git "${GITARGS[@]}" -c core.quotepath=false -c diff.relative=false diff -U0 --no-color --no-ext-diff --no-textconv --text \
                        --src-prefix=a/ --dst-prefix=b/ "$@" 2>/dev/null \
                      | tr -d '\000-\010\013-\037' \
                      | awk -v sep="$US" '
@@ -206,7 +206,7 @@ check_sensitive_names() {
     if secret_sensitive_name "${name##*/}"; then
       add_finding "$(clean_name "$name"): sensitive-file"
     fi
-  done < <(git "${GITARGS[@]}" -c core.quotepath=false diff --name-only -z --diff-filter=d "$@" 2>/dev/null)
+  done < <(git "${GITARGS[@]}" -c core.quotepath=false -c diff.relative=false diff --name-only --no-textconv -z --diff-filter=d "$@" 2>/dev/null)
 }
 
 # scan_chained_add <pathspecs, US separated> <update-only 0|1>

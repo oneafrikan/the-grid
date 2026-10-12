@@ -1256,6 +1256,26 @@ big_file() {
   [ "$status" -eq 2 ] || { echo "nul: $output" >&2; false; }
 }
 
+@test "secret: repository diff settings (textconv, diff.relative) cannot hide a staged secret" {
+  mkrepo
+  # a textconv filter that rewrites what the diff shows
+  git -C "$R" config diff.hide.textconv 'echo clean'
+  printf '*.txt diff=hide\n' > "$R/.gitattributes"
+  stage_line "key = \"$(tok_ghp)\""
+  scan 'git commit -m x'
+  [ "$status" -eq 2 ] || { echo "textconv: $output" >&2; false; }
+  # diff.relative with the payload cwd in a sub-directory: a sibling path would drop out
+  mkrepo
+  git -C "$R" config diff.relative true
+  mkdir -p "$R/sub" "$R/other"
+  echo one > "$R/sub/a.txt"; git -C "$R" add sub/a.txt; git -C "$R" commit -q -m sub
+  printf 'key = "%s"\n' "$(tok_ghp)" > "$R/other/x.txt"
+  git -C "$R" add other/x.txt
+  run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x' "$R/sub")"
+  [ "$status" -eq 2 ] || { echo "relative: $output" >&2; false; }
+  [[ "$output" == *"other/x.txt:1:"* ]] || { echo "$output" >&2; false; }
+}
+
 @test "secret: a secret in the commit message is blocked" {
   mkrepo
   stage_line 'harmless line'
