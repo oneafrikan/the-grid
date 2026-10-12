@@ -333,3 +333,65 @@ make_fake_real_home() {
   [ -L "$MOCK_SKILLS/sk-one" ]
   [ ! -e "$MOCK_SKILLS/sk-two" ]
 }
+
+# --- WP-006: never replace a foreign link or a real file that shares a grid name ---
+
+@test "a foreign symlink at a grid skill name survives wire" {
+  mkdir -p "$OTHER_DIR/mine"
+  ln -s "$OTHER_DIR/mine" "$MOCK_SKILLS/skill-alpha"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$MOCK_SKILLS/skill-alpha")" = "$OTHER_DIR/mine" ]   # not re-pointed
+  [[ "$output" == *"skip (not managed): skill-alpha"* ]]
+  grep -q "^skill	skill-alpha	.*	skipped	not managed$" "$MOCK_GRID/.wired.manifest"
+  [ -L "$MOCK_SKILLS/skill-beta" ]                                   # the rest still wires
+}
+
+@test "a regular file at a grid skill name survives wire" {
+  printf 'keep me\n' > "$MOCK_SKILLS/skill-alpha"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ ! -L "$MOCK_SKILLS/skill-alpha" ]
+  [ "$(cat "$MOCK_SKILLS/skill-alpha")" = "keep me" ]
+  [[ "$output" == *"skip (not managed): skill-alpha"* ]]
+  # A file must not be reported with the real-dir wording reconcile.sh parses.
+  [[ "$output" != *"skip (real dir, not managed): skill-alpha"* ]]
+  grep -q "^skill	skill-alpha	.*	skipped	not managed$" "$MOCK_GRID/.wired.manifest"
+}
+
+@test "a dangling foreign symlink at a grid skill name survives wire" {
+  ln -s "$OTHER_DIR/does-not-exist" "$MOCK_SKILLS/skill-alpha"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$MOCK_SKILLS/skill-alpha")" = "$OTHER_DIR/does-not-exist" ]
+  [[ "$output" == *"skip (not managed): skill-alpha"* ]]
+}
+
+@test "a foreign symlink at a grid agent name survives wire" {
+  mkdir -p "$MOCK_GRID/agents"
+  printf -- '---\nname: zz-a\n---\n' > "$MOCK_GRID/agents/zz-a.md"
+  printf 'mine\n' > "$OTHER_DIR/zz-a.md"
+  ln -s "$OTHER_DIR/zz-a.md" "$MOCK_AGENTS/zz-a.md"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$MOCK_AGENTS/zz-a.md")" = "$OTHER_DIR/zz-a.md" ]
+  [[ "$output" == *"skip (not managed): zz-a.md"* ]]
+  grep -q "^agent	zz-a.md	.*	skipped	not managed$" "$MOCK_GRID/.wired.manifest"
+}
+
+@test "wire --check exits 0 when a foreign link shadows a grid skill name" {
+  mkdir -p "$OTHER_DIR/mine"
+  ln -s "$OTHER_DIR/mine" "$MOCK_SKILLS/skill-alpha"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scripts/wire.sh"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 0 ]
+}
+
+@test "a symlink into the grid at a skill name is still replaced (override precedence)" {
+  # A repo skill and a root skill share a name: the root copy is wired second and must
+  # replace the repo link wire just made (a link into the grid is ours).
+  make_skill "$MOCK_GRID/repos/r1/skill-alpha" "skill-alpha"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$MOCK_SKILLS/skill-alpha")" = "$MOCK_GRID/skills/skill-alpha/" ]
+}

@@ -102,6 +102,21 @@ while IFS= read -r h_name; do
   if [ "$h_dir" != "-" ] && ! in_list "$h_dir" "${HARNESS_AGENT_DIRS[@]:-}"; then HARNESS_AGENT_DIRS+=("$h_dir"); fi
 done < <(harness_names)
 
+# link_is_ours <path>: true when <path> is a symlink whose target lies under GRID_DIR.
+# Accepts both spellings of GRID_DIR (as given, and the physical one from pwd -P): an
+# earlier wire through a symlinked clone path leaves links in the other spelling, and
+# refusing to replace them would turn that stale-link bug into a permanent skip.
+# Used by the link steps (wire_skill / wire_agent) and by the --check shadow filter so a
+# foreign link, a dangling one or a real file at a grid name is never replaced.
+GRID_DIR_PHYS="$(cd "$GRID_DIR" 2>/dev/null && pwd -P || printf '%s' "$GRID_DIR")"
+link_is_ours() {
+  [ -L "$1" ] || return 1
+  local t
+  t="$(readlink "$1")" || return 1
+  case "$t" in "$GRID_DIR"/*|"$GRID_DIR_PHYS"/*) return 0 ;; esac
+  return 1
+}
+
 # --- --check: dry-run drift detector ----------------------------------------
 # Wires into throwaway dirs with the same inputs, then compares the grid-owned
 # symlinks (name -> target) against the live SKILLS_DIR / AGENTS_DIR. Foreign
@@ -114,15 +129,16 @@ if [ "${1:-}" = "--check" ]; then
     bash "$0" >/dev/null
   chk_skills="$tmp/home/.claude/skills"; chk_agents="$tmp/home/.claude/agents"
   # "name -> target" lines for grid-owned links only, sorted (C locale: stable).
-  # $2 (optional) = live dir: names shadowed there by a REAL dir/file are skipped,
-  # because a real wire skips them too ("not managed") — they can never be drift.
+  # $2 (optional) = live dir: names shadowed there by a real dir/file, or by a link that
+  # is not into the grid (foreign or dangling), are skipped, because a real wire skips
+  # them too ("not managed") — they can never be drift.
   links() { # $1 = dir to list, $2 = live dir for the shadow filter
     [ -d "$1" ] || return 0
     # -H: follow the command-line dir if it is itself a symlink (a symlinked
     # skills dir), otherwise find lists nothing and drift is never reported.
     find -H "$1" -maxdepth 1 -type l | while IFS= read -r l; do
       t="$(readlink "$l")"; n="$(basename "$l")"
-      if [ -n "${2:-}" ] && [ -e "$2/$n" ] && [ ! -L "$2/$n" ]; then continue; fi
+      if [ -n "${2:-}" ] && { [ -e "$2/$n" ] || [ -L "$2/$n" ]; } && ! link_is_ours "$2/$n"; then continue; fi
       case "$t" in "$GRID_DIR"/*) printf '%s -> %s\n' "$n" "$t" ;; esac
     done | LC_ALL=C sort
   }
@@ -470,7 +486,10 @@ teardown_rule_links() {
 teardown_rule_links
 
 # Wire a skill directory to SKILLS_DIR.
-# Skips real directories (not symlinks) — those are not managed by the-grid.
+# Replaces only what the grid owns: a free name, or a link into the grid (a root skill
+# overriding a repo skill wired a moment ago). A real dir, a regular file, a dangling
+# link or a link to somewhere else is the user's: skipped, never replaced. The real-dir
+# wording is parsed by reconcile.sh and must stay exactly as it is, for real dirs only.
 wire_skill() {
   local skill_dir="$1"
   local name
@@ -480,6 +499,11 @@ wire_skill() {
   if [ -d "$target" ] && [ ! -L "$target" ]; then
     echo "  skip (real dir, not managed): $name"
     MANIFEST_ROWS+=("skill	$name	$skill_dir	skipped	real dir, not managed")
+    return
+  fi
+  if { [ -e "$target" ] || [ -L "$target" ]; } && ! link_is_ours "$target"; then
+    echo "  skip (not managed): $name"
+    MANIFEST_ROWS+=("skill	$name	$skill_dir	skipped	not managed")
     return
   fi
 
@@ -500,6 +524,12 @@ wire_agent() {
   if [ -e "$target" ] && [ ! -L "$target" ]; then
     echo "  skip (real file, not managed): $name"
     MANIFEST_ROWS+=("agent	$name	$agent_file	skipped	real file, not managed")
+    return
+  fi
+  # A foreign or dangling symlink is the user's too; only a link into the grid is replaced.
+  if [ -L "$target" ] && ! link_is_ours "$target"; then
+    echo "  skip (not managed): $name"
+    MANIFEST_ROWS+=("agent	$name	$agent_file	skipped	not managed")
     return
   fi
 
