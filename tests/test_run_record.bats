@@ -57,3 +57,13 @@ PY
   [ "$status" -eq 2 ]
   [ ! -e "$GRID_RUN_LOG" ]
 }
+
+
+@test "GRID_HOST names the host in the run log (same name as the instincts host)" {
+  GRID_HOST=host-a run "$RR" --role a --action x --outcome ok
+  [ "$status" -eq 0 ]
+  python3 - <<PY
+import json
+assert json.loads(open("$GRID_RUN_LOG").read())["host"] == "host-a"
+PY
+}

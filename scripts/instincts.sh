@@ -168,7 +168,10 @@ case "$cmd" in
     exit 0 ;;
   inject)
     # SessionStart hook body; inject.py puts its own directory on sys.path (-I drops it).
-    exec python3 -I "$SCRIPT_DIR/instincts/inject.py" "$@" ;;
+    # A hook must never fail or print: no exec (python3 missing would be exit 127), stderr dropped,
+    # status forced to 0.
+    python3 -I "$SCRIPT_DIR/instincts/inject.py" "$@" 2>/dev/null
+    exit 0 ;;
   analyse|status|sync)
     # analyse.py adds its own directory to sys.path (python3 -I does not).
     exec python3 -I "$ANALYSE" "$cmd" "$@" ;;

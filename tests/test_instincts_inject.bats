@@ -461,3 +461,42 @@ print(m["only-pending"]["status"], m["both"]["status"], m["both"]["confidence"],
   run "$SH" forget $PA --yes
   [ ! -e "$STORE/$PA/META.json" ]
 }
+
+
+# --- WP-057: fail-silent hook, env clamp, trigger re-scrub -------------------------------------
+
+@test "inject hook: with no python3 on PATH the wrapper prints nothing and exits 0" {
+  mkdir -p "$BATS_TEST_TMPDIR/onlybash"
+  ln -s "$(command -v bash)" "$BATS_TEST_TMPDIR/onlybash/bash"
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  fx "$PID" host-a good-habit 0.7 2026-W40
+  cd "$BATS_TEST_TMPDIR/repo"
+  PATH="$BATS_TEST_TMPDIR/onlybash" run "$(command -v bash)" "$REPO_ROOT/hooks/scripts/instincts-inject.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "inject: INSTINCTS_MAX_CHARS, _MAX_ITEMS and _MIN_CONF cannot lift the design caps" {
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  long_a="$(printf 'a%.0s' {1..190})"
+  for i in 1 2 3 4 5 6 7 8 9 10; do fx "$PID" host-a "wide-habit-$i" 0.7 2026-W40 active "$long_a"; done
+  fx "$PID" host-a "weak-habit" 0.3 2026-W40
+  cd "$BATS_TEST_TMPDIR/repo"
+  INSTINCTS_MAX_CHARS=100000 INSTINCTS_MAX_ITEMS=100000 INSTINCTS_MIN_CONF=0 run "$SH" inject
+  [ "$status" -eq 0 ]
+  [ "${#output}" -le 1500 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^- ')" -le 6 ]
+  [[ "$output" != *weak-habit* ]]
+}
+
+@test "inject: a token-shaped value in the stored TRIGGER is redacted at inject time" {
+  mkrepo "$BATS_TEST_TMPDIR/repo"
+  secret="ghp_$(printf 'B%.0s' {1..36})"
+  fx "$PID" host-a trigger-leak 0.7 2026-W40 active "do the thing" "when using $secret"
+  cd "$BATS_TEST_TMPDIR/repo"
+  run "$SH" inject
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"trigger-leak"* || "$output" == *"[REDACTED]"* ]]
+  [[ "$output" != *"$secret"* ]]
+  [[ "$output" == *"[REDACTED]"* ]]
+}

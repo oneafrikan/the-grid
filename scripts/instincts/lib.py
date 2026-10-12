@@ -117,10 +117,11 @@ def _is_hidden(ch: str) -> bool:
     """True for characters that are invisible or can steer rendering/injection.
 
     Cc control chars, Cf format chars (bidi overrides, zero-width space/joiner,
-    soft hyphen, tag characters U+E0000..), Zl/Zp line and paragraph separators,
-    plus the variation selectors (category Mn, but used to smuggle hidden text).
+    soft hyphen, tag characters U+E0000..), Cs lone surrogates (they cannot be encoded
+    as UTF-8), Zl/Zp line and paragraph separators, plus the variation selectors
+    (category Mn, but used to smuggle hidden text).
     """
-    if unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp"):
+    if unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Zl", "Zp"):
         return True
     cp = ord(ch)
     return 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF
@@ -715,14 +716,15 @@ def validate_instinct(obj) -> dict | None:
     out["id"] = i
     trigger = _clean_text(obj.get("trigger"), MAX_TRIGGER)
     action = _clean_text(obj.get("action"), MAX_ACTION)
-    if trigger is None or action is None or obj.get("domain") not in DOMAINS:
+    if trigger is None or action is None or not isinstance(obj.get("domain"), str) \
+            or obj["domain"] not in DOMAINS:
         return None
     out.update(trigger=trigger, action=action, domain=obj["domain"])
 
     # Enum-valued optionals.
     for key, allowed in (("kind", KINDS), ("scope", SCOPES), ("status", STATUSES)):
         if key in obj:
-            if obj[key] not in allowed:
+            if not isinstance(obj[key], str) or obj[key] not in allowed:
                 return None
             out[key] = obj[key]
     if "evidence" in obj:
@@ -744,7 +746,7 @@ def validate_instinct(obj) -> dict | None:
             if isinstance(n, bool) or not isinstance(n, int) or n < 0:
                 return None
             out[key] = n
-    for key in ("first_seen", "last_seen"):
+    for key in ("first_seen", "last_seen", "last_decay_week", "last_contradict_week"):
         if key in obj:
             if not (isinstance(obj[key], str) and WEEK_RE.match(obj[key])):
                 return None
@@ -773,7 +775,8 @@ PROJECT_DIR_RE = re.compile(r"^[0-9a-f]{12}$")
 # silently drops unknown keys, but a stored line carrying extras is tampered or
 # from a different writer, so the reader rejects it outright.
 _STORED_KEYS = frozenset(["id", "trigger", "action", "domain", "scope", "project", "confidence",
-                          "weeks_seen", "first_seen", "last_seen", "misses", "status", "host"])
+                          "weeks_seen", "first_seen", "last_seen", "misses", "status", "host",
+                          "last_decay_week", "last_contradict_week"])
 _STORED_REQUIRED = ("confidence", "last_seen", "status")
 
 
@@ -813,12 +816,15 @@ def read_lines(scope_dir: str) -> list[dict]:
         for raw in raw_lines:
             try:
                 obj = json.loads(raw)
-            except ValueError:
+            except (ValueError, RecursionError):
                 continue
             if not isinstance(obj, dict) or not set(obj) <= _STORED_KEYS \
                     or any(k not in obj for k in _STORED_REQUIRED):
                 continue
-            v = validate_instinct(obj)
+            try:
+                v = validate_instinct(obj)
+            except (TypeError, ValueError):
+                continue
             if v is not None:
                 v["_file"] = f.stem
                 out.append(v)
@@ -887,7 +893,8 @@ PROMOTE_MIN_PROJECTS = 2
 
 # Key order of a written line, as in the design's example (stable, diff-friendly).
 _LINE_KEY_ORDER = ("id", "trigger", "action", "domain", "scope", "project", "confidence",
-                   "weeks_seen", "first_seen", "last_seen", "misses", "status", "host")
+                   "weeks_seen", "first_seen", "last_seen", "misses", "status", "host", "last_decay_week",
+                   "last_contradict_week")
 
 
 def _stored_line(m: dict, host: str) -> dict:
@@ -1132,12 +1139,19 @@ def cmd_clusters() -> str:
 # CLI (called by scripts/instincts.sh as `python3 -I lib.py <cmd> ...`)
 # --------------------------------------------------------------------------
 
+MAX_SCRUB_INPUT = 64 * 1024     # bytes the `scrub` CLI reads
+
+
 def main(argv: list[str]) -> int:
-    """CLI entry: a data path inside the repo is a one-line error, never a traceback."""
+    """CLI entry: a data path inside the repo, or a file the store cannot write, is a one-line
+    error, never a traceback."""
     try:
         return _main(argv)
     except RepoPathError as e:
         print(f"instincts: {e}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"instincts: {e.strerror or type(e).__name__}: {e.filename or ''}".rstrip(": "), file=sys.stderr)
         return 1
 
 
@@ -1151,9 +1165,13 @@ def _main(argv: list[str]) -> int:
         print(pid)
         return 0
     if cmd == "scrub" and len(argv) == 1:
-        # Binary-safe-ish: undecodable bytes are replaced rather than crashing.
-        data = sys.stdin.buffer.read().decode("utf-8", errors="replace")
-        sys.stdout.write(scrub(data))
+        # Binary-safe-ish: undecodable bytes are replaced rather than crashing. Input is
+        # bounded (a capture line is a few hundred characters) so a huge pipe cannot run for minutes.
+        raw = sys.stdin.buffer.read(MAX_SCRUB_INPUT + 1)
+        if len(raw) > MAX_SCRUB_INPUT:
+            raw = raw[:MAX_SCRUB_INPUT]
+            print(f"instincts: scrub input truncated to {MAX_SCRUB_INPUT} bytes", file=sys.stderr)
+        sys.stdout.write(scrub(raw.decode("utf-8", errors="replace")))
         return 0
     if cmd in ("promote", "clusters") and len(argv) == 1:
         if cmd == "clusters":
