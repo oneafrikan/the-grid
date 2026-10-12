@@ -11,3 +11,5 @@ owns: >-
   README, CLAUDE.md-style guidance, API/env/command references, onboarding and architecture notes, changelogs, agent briefs and skills as documentation.
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+# Edits docs and must run commands to verify what it documents; Bash can still write anywhere.
+tools: [Read, Grep, Glob, Write, Edit, Bash]

@@ -2,6 +2,7 @@
 name: grid-project-manager
 description: Project Manager. Turns a plan or PRD into tracked tasks with owners,
   estimates and dependencies; runs standups, reports status. Use for delivery tracking.
+tools: Read, Grep, Glob, Write, Edit
 model: sonnet
 ---
 
