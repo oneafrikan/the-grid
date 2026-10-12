@@ -103,6 +103,107 @@ assert_sandboxed_without_home() ( unset HOME; assert_sandboxed )
   [[ "$output" == *"REFUSING"* ]] || false
 }
 
+# One test per guarded variable (R16.qa.F6): the loops in assert_sandboxed were only
+# exercised through SKILLS_DIR, so deleting any other variable from them went
+# unnoticed. tripwire_attempt <VAR> <subpath-of-fake-real-home> points VAR at that
+# subpath and runs the tripwire; the subshell keeps the exports away from the test.
+tripwire_attempt() (
+  fake_home=$(mktemp -d); mkdir -p "$fake_home/$2"
+  export REAL_HOME="$fake_home"
+  export "$1=$fake_home/$2"
+  assert_sandboxed
+)
+
+@test "tripwire refuses AGENTS_DIR inside the real home" {
+  run tripwire_attempt AGENTS_DIR .claude/agents
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses RULES_DIR inside the real home" {
+  run tripwire_attempt RULES_DIR .claude/rules
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses CLAUDE_CONFIG_DIR inside the real home" {
+  run tripwire_attempt CLAUDE_CONFIG_DIR .claude
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses GRID_HOOK_LOG_DIR inside the real home" {
+  run tripwire_attempt GRID_HOOK_LOG_DIR .grid/logs
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses GRID_HOOK_STATE_DIR inside the real home" {
+  run tripwire_attempt GRID_HOOK_STATE_DIR .grid/state
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses GRID_HANDOFF_FALLBACK_DIR inside the real home" {
+  run tripwire_attempt GRID_HANDOFF_FALLBACK_DIR .grid/fallback
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses GRID_PRIVATE_DIR inside the real home" {
+  run tripwire_attempt GRID_PRIVATE_DIR .the-grid-private
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses GRID_STATE_DIR inside the real home" {
+  run tripwire_attempt GRID_STATE_DIR .grid
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses GRID_LEARNING_DIR inside the real home" {
+  run tripwire_attempt GRID_LEARNING_DIR .the-grid-private/learning
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses LAUNCH_AGENTS_DIR inside the real home" {
+  run tripwire_attempt LAUNCH_AGENTS_DIR Library/LaunchAgents
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "tripwire refuses SYSTEMD_USER_DIR inside the real home" {
+  run tripwire_attempt SYSTEMD_USER_DIR .config/systemd/user
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+# ~/.the-grid-private is one of the three roots in real_dirs: a dir inside it must
+# be refused even when the variable is not the private-dir one.
+@test "tripwire refuses a hook dir inside a real ~/.the-grid-private" {
+  run tripwire_attempt GRID_HOOK_LOG_DIR .the-grid-private/logs
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+# XDG_RUNTIME_DIR is outside $HOME (/run/user/<uid>), so it is compared against the
+# real runtime dir captured by common_setup, not against the real home.
+@test "tripwire refuses XDG_RUNTIME_DIR equal to the real runtime dir" {
+  fake_rt=$(mktemp -d)
+  REAL_XDG_RUNTIME_DIR="$fake_rt" XDG_RUNTIME_DIR="$fake_rt" run assert_sandboxed
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING"* ]] || false
+}
+
+@test "common_setup points GRID_STATE_DIR and XDG_RUNTIME_DIR at sandbox dirs" {
+  [ -n "$GRID_STATE_DIR" ]
+  [ -n "$XDG_RUNTIME_DIR" ]
+  [[ "$GRID_STATE_DIR" == "$MOCK_HOOK_ROOT"/* ]] || false
+  [[ "$XDG_RUNTIME_DIR" == "$MOCK_HOOK_ROOT"/* ]] || false
+}
+
 @test "tripwire accepts the sandbox dirs" {
   run assert_sandboxed
   [ "$status" -eq 0 ]
