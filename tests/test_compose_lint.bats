@@ -257,6 +257,25 @@ EOT
 # reports E_YAML_PARSE, and lint_authoring must not crash on the same file with a traceback
 # (it re-reads role.yaml via role_meta). Injected through the private tree and the
 # GRID_AUTHORED_ROLES_FILE override so the real roles and authored list are untouched.
+# Same, when role.yaml parses fine but to a non-mapping (a bare string, a list): lint_role
+# reports E_YAML_SHAPE and lint_authoring must not call .get on it.
+@test "lint-roles: an authored role whose role.yaml is a string or a list reports E_YAML_SHAPE, no traceback" {
+  make_role shaped
+  printf '# agents\n' > "$PRIV/shaped/AGENTS.md"
+  printf 'shaped\n' > "$PRIV/authored.txt"
+  export GRID_AUTHORED_ROLES_FILE="$PRIV/authored.txt"
+  local body
+  for body in 'just a string' '- a
+- list'; do
+    printf '%s\n' "$body" > "$PRIV/shaped/role.yaml"
+    run "$PY" "$COMPOSE" --lint-roles
+    echo "$output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"E_YAML_SHAPE"* ]] || false
+    [[ "$output" != *"Traceback"* ]] || false
+  done
+}
+
 @test "lint-roles: an authored role with malformed role.yaml reports E_YAML_PARSE, no traceback" {
   make_role broken
   printf '# agents\n' > "$PRIV/broken/AGENTS.md"

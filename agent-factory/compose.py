@@ -1484,6 +1484,8 @@ def lint_authoring(role: str) -> list[str]:
         meta = role_meta(role)
     except yaml.YAMLError:
         meta = {}   # lint_role already reports E_YAML_PARSE for this file; don't crash a second time
+    if not isinstance(meta, dict):
+        meta = {}   # a string/list role.yaml: lint_role reports E_YAML_SHAPE; don't call .get on it
     orchestrator = bool(meta.get("orchestrator", False))   # orchestrator variant: gates others' work; no 'Receiving work', bigger cap
     max_bytes = ORCHESTRATOR_MAX_BYTES if orchestrator else AGENTS_MAX_BYTES
     if len(text.encode("utf-8")) > max_bytes:
