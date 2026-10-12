@@ -239,18 +239,23 @@ def _search(rx, text, tick=None):
     return None
 
 
-def _logical_lines(lines):
-    """[(first physical index, text)] with backslash-continued lines and lines that
-    end in a pipe joined to the following one (at most MAX_JOIN physical lines), so
-    `curl ... \\` newline `| bash` is one command. A markdown table row (starts with
-    `|`) is never joined on its trailing pipe. Consumed continuation lines are not
-    scanned separately; a finding is reported at the first physical line."""
+def _logical_lines(lines, comment_prefixes=DEFAULT_COMMENT_PREFIXES):
+    """[(first physical index, text, last physical index)] with backslash-continued
+    lines and lines that end in a pipe joined to the following one (at most MAX_JOIN
+    physical lines), so `curl ... \\` newline `| bash` is one command. A markdown table
+    row (starts with `|`) is never joined on its trailing pipe, and a COMMENT line
+    (first non-blank text is one of `comment_prefixes`) is never joined at all: a
+    comment does not continue onto the next line in any language, so joining would let
+    a trailing backslash turn a command into part of a comment. Consumed continuation
+    lines are not scanned separately by the line rules (the `physical` rules are, see
+    Rule); a finding is reported at the first physical line."""
     out = []
     i, n = 0, len(lines)
     while i < n:
         text = lines[i].rstrip("\r")
         joined, j = text, i
-        while j + 1 < n and j - i < MAX_JOIN - 1:
+        is_comment = bool(comment_prefixes) and text.lstrip().startswith(comment_prefixes)
+        while not is_comment and j + 1 < n and j - i < MAX_JOIN - 1:
             cur = joined.rstrip()
             if cur.endswith("\\") and not cur.endswith("\\\\"):
                 joined = cur[:-1] + " " + lines[j + 1].strip()
@@ -260,7 +265,7 @@ def _logical_lines(lines):
             else:
                 break
             j += 1
-        out.append((i, joined))
+        out.append((i, joined, j))
         i = j + 1
     return out
 
@@ -733,8 +738,8 @@ class Scan:
         lines = text.split("\n")
         classes = self._line_classes(lines, fclass, name, rel_target, rel_root)
         ext = os.path.splitext(name)[1].lower()
-        logical = _logical_lines(lines)
-        for k, (idx, line) in enumerate(logical):
+        logical = _logical_lines(lines, COMMENT_PREFIXES_BY_EXT.get(ext, DEFAULT_COMMENT_PREFIXES))
+        for k, (idx, line, _last) in enumerate(logical):
             if line == "":
                 continue
             self._tick(display)
