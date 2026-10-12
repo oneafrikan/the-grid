@@ -48,11 +48,10 @@ make_user_file() {
   printf '# My notes\n\nKeep replies short.\n' > "$1"
 }
 
-# assert_user_text FILE ORIG: ORIG (the operator's text) is still the exact leading bytes
-# of FILE. After a block is removed, rules.py leaves the one blank separator line it added
-# before the block, so the file is ORIG plus that newline rather than byte-equal to ORIG.
+# assert_user_text FILE ORIG: FILE is byte-identical to ORIG (the operator's text). Removing
+# a block takes back the separator newline the append added, so nothing is left over.
 assert_user_text() {
-  head -c "$(wc -c < "$2")" "$1" | cmp - "$2"
+  cmp "$1" "$2"
 }
 
 # ---------------------------------------------------------------- creation rules
@@ -94,7 +93,7 @@ assert_user_text() {
   grep -qF "$MARK" "$CODEX_MD"
   grep -qF 'Quote every expansion.' "$CODEX_MD"
   # The user text is the exact prefix of the new file.
-  assert_user_text "$CODEX_MD" "$BATS_TEST_TMPDIR/user.orig"
+  head -c "$(wc -c < "$BATS_TEST_TMPDIR/user.orig")" "$CODEX_MD" | cmp - "$BATS_TEST_TMPDIR/user.orig"
   sum1="$(cksum < "$CODEX_MD")"
   wire
   [ "$status" -eq 0 ]

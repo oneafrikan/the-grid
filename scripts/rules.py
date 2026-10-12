@@ -695,6 +695,12 @@ def render_block(root, packs):
     return data
 
 
+def detect_eol(data):
+    """CRLF only when every newline in `data` is a CRLF; otherwise LF (also for no newline)."""
+    n = data.count(b"\n")
+    return b"\r\n" if n and data.count(b"\r\n") == n else b"\n"
+
+
 def plan_block(root, packs, out):
     """Work out the new content of the --out file without touching disk.
 
@@ -716,6 +722,11 @@ def plan_block(root, packs, out):
         raise Refusal("%s: expected exactly one BEGIN and one END marker, BEGIN first "
                       "(found %d BEGIN, %d END); fix the markers by hand" % (out, len(begins), len(ends)))
     block = render_block(root, packs)
+    # The block takes the file's line ending, so a CRLF file stays uniformly CRLF and
+    # --check compares like with like after an editor re-save.
+    eol = detect_eol(old or b"")
+    if block is not None and eol == b"\r\n":
+        block = block.replace(b"\n", b"\r\n")
 
     if begins:
         # Replace (or drop) the region from the BEGIN line through the END line's newline.
@@ -724,13 +735,19 @@ def plan_block(root, packs, out):
         if old[end:end + 1] == b"\n":
             end += 1
         before, after = old[:start], old[end:]
+        if block is None and after == b"" and before.endswith(b"\n"):
+            # Removal at EOF: take back the one newline the append added as a separator,
+            # so emit then emit '' round-trips the operator's bytes.
+            before = before[:-len(eol)] if before.endswith(eol) else before[:-1]
         new = before + (block or b"") + after
     elif block is None:
         return old, old                    # nothing to remove, nothing to add
     else:
-        # No block yet: append, separated from existing text by a blank line.
+        # No block yet: append, separated from existing text by one blank line: one extra
+        # newline after a newline-terminated text, two after text with no final newline,
+        # none for an empty file. (A file with no final newline thus gains one on removal.)
         before = old or b""
-        sep = b"" if (not before or before.endswith(b"\n\n")) else (b"\n" if before.endswith(b"\n") else b"\n\n")
+        sep = b"" if not before else (eol if before.endswith(b"\n") else eol * 2)
         new = before + sep + block
     # Removing the block from a file that held nothing else leaves a 0-byte file, never a
     # deletion: an empty file is the operator's opt-in to receive rules (the grid never
