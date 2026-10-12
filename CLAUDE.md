@@ -276,6 +276,16 @@ tests/lib/bats-core/bin/bats tests/
 
 All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint + `compose.py --check`, `check-personal.sh`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`.
 
+## Worktree hygiene
+
+Agents and sessions must not leave stale worktrees or local branches behind.
+
+- Remove what you created before finishing, once its PR is merged or abandoned: `git worktree remove <path>`.
+- Delete the branch with `git branch -D <branch>` only after confirming the PR is MERGED or the branch is fully contained in `origin/next`.
+- Never leave scratch worktrees under `.claude/worktrees` or `/tmp` registered in `git worktree list`; run `git worktree prune`.
+- Session start: run `git worktree list`, report and prune stale entries. Session end: list any worktree left open and why.
+- Untracked `__pycache__` is not a reason to keep a worktree.
+
 ## wire.sh contract
 
 - `GRID_DIR` env var overrides the repo root (default: script's own directory).
