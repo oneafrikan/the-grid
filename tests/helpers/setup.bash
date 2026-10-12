@@ -69,6 +69,10 @@ common_setup() {
   mkdir -p "$MOCK_HARNESS_HOME"
   export GRID_HARNESS_HOME="$MOCK_HARNESS_HOME"
   unset GRID_HARNESS XDG_CONFIG_HOME GRID_DRY_HOME
+  # wire.sh fails closed when policy.yaml is missing (exit 3), and most mock grids have none:
+  # skip the audit by default. The audit's own tests (test_audit_integration.bats and the
+  # grid_fixture users) unset it again.
+  export GRID_SKIP_AUDIT=1
   assert_sandboxed
 }
 
@@ -149,7 +153,7 @@ common_teardown() {
   unset AGENTS_DIR SKILLS_DIR RULES_DIR GRID_PRIVATE_ROLES_DIR CLAUDE_CONFIG_DIR GRID_HOOK_LOG_DIR \
         GRID_HOOK_STATE_DIR GRID_HANDOFF_FALLBACK_DIR GRID_PRIVATE_DIR GRID_RUN_LOG GRID_CLAUDE \
         GRID_HARNESS_HOME GRID_HARNESS MOCK_HARNESS_ROOT MOCK_HARNESS_HOME \
-        GRID_STATE_DIR XDG_RUNTIME_DIR REAL_XDG_RUNTIME_DIR
+        GRID_STATE_DIR XDG_RUNTIME_DIR REAL_XDG_RUNTIME_DIR GRID_SKIP_AUDIT
 }
 
 # systemd_verify_private <unit file>... — `run` `systemd-analyze --user verify` against a
