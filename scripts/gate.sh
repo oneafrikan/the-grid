@@ -2,13 +2,19 @@
 # gate.sh — the commit gate: everything that must be true before a commit lands.
 #
 # Checks (each runs even if an earlier one fails; one PASS/FAIL summary at the end):
-#   lint         shellcheck warnings and errors in scripts/, contexts/, .githooks/, hooks/ and automation-factory/patterns/
-#   catalog      SKILLS.md is current           (catalog.sh --check)
+#   lint         shellcheck warnings and errors in scripts/, contexts/, .githooks/, hooks/, automation-factory/patterns/,
+#                the factory scripts (agent-factory/scripts, project-factory/scripts + lamp templates) and tests/helpers/
+#                (_retired/ is archived and never linted)
+#   pysyntax     every tracked *.py and scripts/grid parses (stdlib ast; no new dependency; skipped with a notice
+#                if python3 is absent)
+#   catalog      SKILLS.md is current           (catalog.sh --check, rendered from the TRACKED example
+#                baseline so CI and every machine agree; skipped with a notice if submodules are uninitialised)
+#   sources      docs/SOURCES.md is current     (sources.sh --check-drift; offline, example baseline)
 #   lock         grid.lock matches the submodule checkouts (grid lock --check; skipped with a
 #                notice if python3 or scripts/grid is absent, or a locked source is not checked out)
 #   budget       skill/role description listing stays within docs/budget-target.json
-#                (budget.py --check; the baseline half is skipped with a notice where
-#                there is no baseline-submodules.txt / initialised submodules)
+#                (budget.py --check against the example baseline; the baseline half is skipped
+#                with a notice where submodules are not initialised)
 #   compose      every role lints clean (compose.py --lint-roles) and composed
 #                output is current for every public project (compose.py --check; skipped with a notice if the venv is absent)
 #   plugins      generated plugin bundles + marketplace.json are current
@@ -34,6 +40,13 @@
 #   gate.sh --pre-commit  same, but first abort if tracked files have unstaged
 #                         changes (the checks read the disk, so a divergent index
 #                         would pass while a different, unchecked version is committed)
+#   gate.sh --strict      same, but a check that was SKIPPED and is not named in
+#                         GRID_GATE_EXPECT_SKIPPED (space-separated) fails the gate:
+#                         "gate: FAIL (unexpected skip: ...)". CI runs this, so a removed
+#                         venv step or check script cannot silently drop a check. An
+#                         explicit flag, not CI=true detection, so a local run under a
+#                         CI-like environment behaves as before.
+#   (the flags combine, in any order)
 #
 # Installing: running this script once sets core.hooksPath=.githooks, so a fresh
 # clone is armed by the first manual run. Git refuses to auto-run versioned hooks.
@@ -47,6 +60,17 @@ set -uo pipefail  # NOT -e: aggregate every failure
 GRID_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$GRID_DIR" || exit 2
 
+# --- arguments -------------------------------------------------------------------
+PRE_COMMIT=0
+STRICT=0
+for arg in "$@"; do
+  case "$arg" in
+    --pre-commit) PRE_COMMIT=1 ;;
+    --strict)     STRICT=1 ;;
+    *) echo "usage: gate.sh [--pre-commit] [--strict]" >&2; exit 2 ;;
+  esac
+done
+
 # --- self-install the hook -----------------------------------------------------
 if [ "$(git config --get core.hooksPath || true)" != ".githooks" ]; then
   git config core.hooksPath .githooks
@@ -54,7 +78,7 @@ if [ "$(git config --get core.hooksPath || true)" != ".githooks" ]; then
 fi
 
 # --- pre-commit: refuse a divergent index --------------------------------------
-if [ "${1:-}" = "--pre-commit" ] && ! git diff --quiet; then
+if [ "$PRE_COMMIT" = 1 ] && ! git diff --quiet; then
   echo "gate: ABORT — unstaged changes to tracked files; the checks would lint a" >&2
   echo "      different tree than the one being committed. Stage them, or:" >&2
   echo "      git stash push --keep-index" >&2
@@ -77,35 +101,86 @@ check() {
 
 run_shellcheck() {
   command -v shellcheck >/dev/null || { echo "    shellcheck not installed — skipped"; SKIPPED+=(shellcheck); return 0; }
-  shellcheck -S warning scripts/*.sh scripts/lib/*.sh scripts/usage/*.sh contexts/*.sh .githooks/pre-commit \
-    automation-factory/patterns/*/*.sh automation-factory/patterns/*/hooks/*.sh \
+  local files
+  # nullglob: a group with no match (a stub grid, a fork that dropped a dir) adds nothing,
+  # instead of reaching shellcheck as a literal pattern it reports as a missing file.
+  # _retired/ is deliberately not listed: it is archived, with stale paths.
+  shopt -s nullglob
+  files=(scripts/*.sh scripts/lib/*.sh scripts/usage/*.sh contexts/*.sh .githooks/pre-commit
+    automation-factory/patterns/*/*.sh automation-factory/patterns/*/hooks/*.sh
     hooks/*.sh hooks/lib/*.sh hooks/scripts/*.sh
+    agent-factory/scripts/*.sh project-factory/scripts/*.sh project-factory/templates/*/scripts/*.sh
+    tests/helpers/*.bash)
+  shopt -u nullglob
+  [ "${#files[@]}" -gt 0 ] || return 0
+  shellcheck -S warning "${files[@]}"
 }
 
 run_compose_check() {
   local py=agent-factory/.venv/bin/python rc=0 cfg
   [ -x "$py" ] || { echo "    agent-factory venv absent — skipped"; SKIPPED+=(compose); return 0; }
   "$py" agent-factory/compose.py --lint-roles || rc=1
-  for cfg in core grid finance-desk; do
-    # Not yet composed on this machine is not a commit-time failure; stale output is.
-    [ -d "agent-factory/projects/$cfg" ] || { echo "    $cfg not composed here — skipped"; continue; }
+  for cfg in core grid finance-desk learning-desk; do
+    # Not yet composed on this machine is not a commit-time failure; stale output is. The skip
+    # is RECORDED (compose-<cfg>) so `--strict` and the summary show which projects were not
+    # checked: composed output is git-ignored, so CI never composes and always lists all four.
+    [ -d "agent-factory/projects/$cfg" ] || { echo "    $cfg not composed here — skipped"; SKIPPED+=("compose-$cfg"); continue; }
     "$py" agent-factory/compose.py "agent-factory/examples/$cfg.yaml" --target claude-code --check || rc=1
   done
   return $rc
 }
 
+# Every tracked *.py plus scripts/grid (a python CLI with no .py extension) must parse. Stdlib
+# `ast` only: a linter such as pyflakes would be a new CI dependency. A bare syntax slip in a
+# script no test imports would otherwise ship. Names the files that fail.
+run_pysyntax() {
+  command -v python3 >/dev/null || { echo "    python3 absent — skipped"; SKIPPED+=(pysyntax); return 0; }
+  local files=() f
+  while IFS= read -r f; do files+=("$f"); done < <(git ls-files '*.py')
+  [ -f scripts/grid ] && files+=(scripts/grid)
+  [ "${#files[@]}" -gt 0 ] || return 0
+  python3 - "${files[@]}" <<'PYEOF'
+import ast, sys
+bad = 0
+for name in sys.argv[1:]:
+    try:
+        with open(name, "rb") as fh:
+            ast.parse(fh.read(), filename=name)
+    except (SyntaxError, ValueError) as exc:
+        print(f"    {name}: {exc}", file=sys.stderr)
+        bad += 1
+sys.exit(1 if bad else 0)
+PYEOF
+}
+
 check shellcheck run_shellcheck
-# SKILLS.md is generated from the PERSONAL (gitignored) baseline + whichever
-# submodules are initialised, so comparing it only means something on a machine
-# that has both. Elsewhere the check is skipped loudly, not failed.
+check pysyntax   run_pysyntax
+# SKILLS.md, docs/SOURCES.md and the budget ratchet are all rendered/measured from the TRACKED
+# example baseline (baseline-submodules.example.txt), never the personal gitignored one, so the
+# same inputs give the same answer in CI and on every machine (a personal baseline is not gated).
+# GRID_BASELINE_PIN is empty only where that file is absent (a stub grid, an odd checkout), and
+# then each check skips loudly instead of silently judging a different baseline.
+GRID_BASELINE_PIN=""
+[ ! -f "$GRID_DIR/baseline-submodules.example.txt" ] || GRID_BASELINE_PIN="$GRID_DIR/baseline-submodules.example.txt"
+
 run_catalog_check() {
-  if [ ! -f baseline-submodules.txt ]; then
-    echo "    no baseline-submodules.txt on this machine — skipped"; SKIPPED+=(catalog); return 0
+  if [ -z "$GRID_BASELINE_PIN" ]; then
+    echo "    no baseline-submodules.example.txt — skipped"; SKIPPED+=(catalog); return 0
   fi
+  # Uninitialised submodules mean the skill counts cannot match the committed file: skip loudly.
   if git submodule status 2>/dev/null | grep -q '^-'; then
     echo "    uninitialised submodules — skipped (git submodule update --init)"; SKIPPED+=(catalog); return 0
   fi
-  bash scripts/catalog.sh --check
+  GRID_BASELINE="$GRID_BASELINE_PIN" bash scripts/catalog.sh --check
+}
+
+# docs/SOURCES.md is a pure function of .gitmodules + the example baseline: offline, needs no
+# submodule checkout, so it is checked everywhere (no uninitialised-submodule skip).
+run_sources_check() {
+  if [ ! -f scripts/sources.sh ] || [ -z "$GRID_BASELINE_PIN" ]; then
+    echo "    scripts/sources.sh or baseline-submodules.example.txt absent — skipped"; SKIPPED+=(sources); return 0
+  fi
+  GRID_BASELINE="$GRID_BASELINE_PIN" bash scripts/sources.sh --check-drift
 }
 
 # grid.lock must describe the committed submodule state, so a pointer bump or a
@@ -135,7 +210,8 @@ run_budget_check() {
   fi
   local rc=0
   # GRID_DIR pinned so a stray exported GRID_DIR cannot point it at another tree.
-  GRID_DIR="$GRID_DIR" python3 scripts/budget.py --check || rc=$?
+  # Pinned to the example baseline (empty = unset where that file is absent).
+  GRID_DIR="$GRID_DIR" GRID_BASELINE="$GRID_BASELINE_PIN" python3 scripts/budget.py --check || rc=$?
   if [ "$rc" -eq 3 ]; then SKIPPED+=(budget-baseline); return 0; fi
   return "$rc"
 }
@@ -159,6 +235,13 @@ run_personal_check() {
 }
 
 run_bats() {
+  # A fresh worktree has no submodule checkouts, so the hook would block every commit there
+  # until someone ran the init by hand. Try that one init (only this submodule; it reuses the
+  # shared module objects, no network when they are present) before failing.
+  if [ ! -x tests/lib/bats-core/bin/bats ]; then
+    echo "    bats missing — trying: git submodule update --init tests/lib/bats-core"
+    git submodule update --init tests/lib/bats-core >/dev/null 2>&1 || true
+  fi
   if [ ! -x tests/lib/bats-core/bin/bats ]; then
     echo "    bats missing — run: git submodule update --init" >&2; return 1
   fi
@@ -178,14 +261,16 @@ run_bats() {
     printf '      %s\n' "${leftovers[@]:0:20}" >&2
     # Say what each entry is and who might still be running, so a leak seen only on a CI
     # runner can be traced to its test without reproducing it. Best effort: a minimal PATH
-    # (the gate's own tests) simply prints less.
+    # (the gate's own tests) simply prints less. This output goes to a public CI log, so it
+    # carries NAMES, SIZES and process NAMES only: never a leaked file's contents (it may hold
+    # a token a test wrote) and never process arguments (a command line may carry one).
     local e
     for e in "${leftovers[@]:0:20}"; do
       { ls -ldA -- "$e"
-        if [ -d "$e" ]; then find "$e" -maxdepth 2 | head -n 20; else head -c 300 -- "$e"; echo; fi
+        if [ -d "$e" ]; then find "$e" -maxdepth 2 | head -n 20; fi
       } 2>/dev/null | sed 's/^/        /' >&2 || true
     done
-    { echo "      processes still running:"; ps -eo pid,etime,args --sort=etimes 2>/dev/null | grep -v -e ' ps -eo' -e grep -e ' \[' | head -n 25 | cut -c1-200 | sed 's/^/        /'; } >&2 || true
+    { echo "      processes still running:"; ps -eo pid,etime,comm --sort=etimes 2>/dev/null | grep -v -e ' ps$' -e grep | head -n 25 | cut -c1-200 | sed 's/^/        /'; } >&2 || true
     rc=1
   fi
   rm -rf "$tmp"
@@ -193,6 +278,7 @@ run_bats() {
 }
 
 check catalog    run_catalog_check
+check sources    run_sources_check
 check lock       run_lock_check
 check budget     run_budget_check
 check compose    run_compose_check
@@ -227,7 +313,16 @@ check plugins-validate run_plugins_validate
 run_audit() {
   [ -f scripts/audit.sh ] || { echo "    scripts/audit.sh absent - skipped"; SKIPPED+=(audit); return 0; }
   command -v python3 >/dev/null || { echo "    python3 absent - skipped"; SKIPPED+=(audit); return 0; }
-  bash scripts/audit.sh --gate --quiet
+  local out rc=0
+  out="$(bash scripts/audit.sh --gate --quiet 2>&1)" || rc=$?
+  printf '%s\n' "$out"
+  # audit.sh skips the wired half itself where submodules are uninitialised and only says so
+  # in its output. Record that as a skip too (same technique as personal-denylist), so it
+  # reaches the summary and `--strict` instead of passing silently. Match the script's own line.
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q '^audit: wired set not scanned'; then
+    SKIPPED+=(audit-wired)
+  fi
+  return "$rc"
 }
 check audit      run_audit
 # Portable personas (dist/personas) are committed output of compose.py --target portable.
@@ -258,9 +353,28 @@ check rules      run_rules_check
 check bats       run_bats
 
 echo
-if [ "${#FAILED[@]}" -eq 0 ]; then
-  if [ "${#SKIPPED[@]}" -gt 0 ]; then echo "gate: PASS (skipped: ${SKIPPED[*]})"; else echo "gate: PASS"; fi
-else
+# --strict: every skip must be expected. GRID_GATE_EXPECT_SKIPPED is a space-separated list of
+# check names (the names in the "skipped:" summary). Whole-word match, so `compose` does not
+# hide behind `compose-core`.
+UNEXPECTED=()
+if [ "$STRICT" = 1 ]; then
+  for s in ${SKIPPED[@]+"${SKIPPED[@]}"}; do
+    case " ${GRID_GATE_EXPECT_SKIPPED:-} " in
+      *" $s "*) ;;
+      *) UNEXPECTED+=("$s") ;;
+    esac
+  done
+fi
+
+if [ "${#FAILED[@]}" -gt 0 ]; then
   echo "gate: FAIL — ${FAILED[*]}" >&2
+  [ "${#UNEXPECTED[@]}" -eq 0 ] || echo "gate: FAIL (unexpected skip: ${UNEXPECTED[*]})" >&2
   exit 1
+elif [ "${#UNEXPECTED[@]}" -gt 0 ]; then
+  echo "gate: FAIL (unexpected skip: ${UNEXPECTED[*]})" >&2
+  exit 1
+elif [ "${#SKIPPED[@]}" -gt 0 ]; then
+  echo "gate: PASS (skipped: ${SKIPPED[*]})"
+else
+  echo "gate: PASS"
 fi

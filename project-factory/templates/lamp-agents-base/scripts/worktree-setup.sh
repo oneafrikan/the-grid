@@ -6,6 +6,9 @@
 # autonomous agents never clash on a shared DB or port. Safe to re-run:
 # the same worktree path always yields the same schema/port, and schema
 # creation is IF NOT EXISTS.
+# The env file path is computed at run time, so shellcheck cannot follow `source` (file-wide:
+# a directive before `set -a; source ...` would only cover `set -a`).
+# shellcheck disable=SC1090
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

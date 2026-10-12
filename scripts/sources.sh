@@ -13,6 +13,9 @@
 #   bash scripts/sources.sh              # write docs/SOURCES.md
 #   bash scripts/sources.sh /tmp/x.md    # write somewhere else (tests)
 #   bash scripts/sources.sh --check      # LINT: HEAD every URL, report failures
+#   bash scripts/sources.sh --check-drift  # is docs/SOURCES.md current? offline, read-only;
+#                                        # exit 0 current, 1 stale, 2 error. Defaults to the
+#                                        # tracked example baseline; GRID_BASELINE pins another.
 #
 # --check is the rot detector. Upstream repos get renamed, deleted, or made
 # private, and a submodule URL keeps pointing at nothing without any local
@@ -28,15 +31,39 @@ set -euo pipefail
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 CHECK_MODE=0
-OUT="$GRID_DIR/docs/SOURCES.md"
-if [ "${1:-}" = "--check" ]; then
-  CHECK_MODE=1
+DRIFT_MODE=0
+COMMITTED="$GRID_DIR/docs/SOURCES.md"
+OUT="$COMMITTED"
+case "${1:-}" in
+  --check)       CHECK_MODE=1 ;;
+  --check-drift) DRIFT_MODE=1 ;;
+  *)             OUT="${1:-$OUT}" ;;
+esac
+
+# Baseline: GRID_BASELINE pins it (same override wire.sh, catalog.sh and budget.py take). The
+# committed SOURCES.md is rendered from the TRACKED example baseline, so --check-drift defaults
+# to that file (the only baseline CI has); plain generation keeps defaulting to the personal one.
+# A pin naming a missing file is an error (exit 2), never a silent "everything wired" render.
+if [ -n "${GRID_BASELINE:-}" ]; then
+  BASELINE="$GRID_BASELINE"
+elif [ "$DRIFT_MODE" -eq 1 ]; then
+  BASELINE="$GRID_DIR/baseline-submodules.example.txt"
 else
-  OUT="${1:-$OUT}"
+  BASELINE="$GRID_DIR/baseline-submodules.txt"
+fi
+if [ -n "${GRID_BASELINE:-}" ] || [ "$DRIFT_MODE" -eq 1 ]; then
+  [ -f "$BASELINE" ] || { echo "sources.sh: baseline not found: $BASELINE" >&2; exit 2; }
+fi
+
+if [ "$DRIFT_MODE" -eq 1 ]; then
+  # Read-only: render into a temp file, compare at the end, never touch docs/SOURCES.md.
+  [ -f "$COMMITTED" ] || { echo "sources.sh: no $COMMITTED to compare against" >&2; exit 2; }
+  OUT="$(mktemp)"
+  trap 'rm -f "$OUT"' EXIT
 fi
 
 GITMODULES="$GRID_DIR/.gitmodules"
-[ -f "$GITMODULES" ] || { echo "sources.sh: no .gitmodules at $GITMODULES" >&2; exit 1; }
+[ -f "$GITMODULES" ] || { echo "sources.sh: no .gitmodules at $GITMODULES" >&2; exit "$((1 + DRIFT_MODE))"; }
 
 # --- Baseline manifest → wired / partial / library tier ----------------------
 # Same baseline wire.sh and catalog.sh read. Per-machine overlays are ignored on
@@ -50,7 +77,6 @@ WIRED_SKILLS=()
 DENY_REPOS=()
 wire_all_repos=1
 
-BASELINE="$GRID_DIR/baseline-submodules.txt"
 if [ -f "$BASELINE" ]; then
   wire_all_repos=0
   while IFS= read -r line; do
@@ -200,6 +226,17 @@ mkdir -p "$(dirname "$OUT")"
   printf '| `openspec` CLI | every `repos/openspec` skill (`allowed-tools: Bash(openspec:*)`) | `npm i -g @fission-ai/openspec@latest` (Node >= 20.19.0) | <https://openspec.dev> |\n'
   printf '\n'
 } > "$OUT"
+
+if [ "$DRIFT_MODE" -eq 1 ]; then
+  # Exit 0 current, 1 stale (a short diff says how), 2 error (handled above).
+  if cmp -s "$OUT" "$COMMITTED"; then
+    echo "sources: docs/SOURCES.md is current"
+    exit 0
+  fi
+  diff -u "$COMMITTED" "$OUT" | head -n 40 >&2 || true
+  echo "sources: docs/SOURCES.md is stale; regenerate with: bash scripts/sources.sh" >&2
+  exit 1
+fi
 
 count="$(read_submodules | wc -l | tr -d ' ')"
 echo "Wrote $OUT ($count submodules)."

@@ -1,3 +1,5 @@
+> **RETIRED - do not deploy.** This is the archived loop instance; its relative links and paths are stale. See [RETIRED.md](../RETIRED.md).
+
 # loop/ — issue-loop automation (instantiated)
 
 Cut from `automation-factory/patterns/issue-loop` (re-cut for PR mode and the headless
@@ -19,7 +21,7 @@ How the pattern works, and why it is built this way, is in
 - **Base branch:** `next`. Every PR the loop opens targets `next`; nothing here pushes `main`.
 - **Mode:** `pr` (the headless runner refuses `direct`).
 - **Issue label:** `ready-for-agent` (opt-in gate: only a trusted person's label counts; see the trust gate in the pattern README).
-- **Verify gate:** `GRID_REQUIRE_DENYLIST=1 bash scripts/gate.sh` (shellcheck, catalogue, role lint, bats, leak scan). The loop never commits a red build.
+- **Verify gate:** `GRID_REQUIRE_DENYLIST=1 bash scripts/gate.sh` (shellcheck, catalogue, role lint, bats, leak scan). The loop never commits a red build (not enforced, see RETIRED.md: `VERIFY_CMD` is never executed, the rule is prompt-only).
 - **State labels:** `ready-for-human` (PR waiting), `needs-human` (ambiguous or refused by the trust gate), `blocked` (could not land it).
 - **Role labels:** `role:grid-backend-dev`, `role:grid-devops`, `role:grid-technical-writer`, `role:grid-sdet`, `role:grid-prompt-engineer`, `role:core-platform-engineer` route an issue to that builder agent; read-only roles end `blocked`.
 - **Label budgets:** `LABEL_BUDGETS=ws:rule-packs=15` raises the worker spend cap to 15 USD for rule-pack content issues (default cap 5).

@@ -51,6 +51,7 @@ run_hook() {
 
 # expect_block <command> [cwd]: pre-bash-no-bypass must exit 2 for <command>.
 # On failure the command is printed so a table row is attributable.
+# shellcheck disable=SC2154  # status/output are set by bats' `run`
 expect_block() {
   run_hook "${HOOK_ID:-pre-bash-no-bypass}" "$(hook_payload "$1" "${2:-}")"
   if [ "$status" -ne 2 ]; then
