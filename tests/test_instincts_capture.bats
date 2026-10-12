@@ -493,3 +493,35 @@ PY
   capture "$(bash_payload ls)"
   [ "$(stat -c %a "$(only_file)")" = 600 ]
 }
+
+# --- WP-028 round 2: whitespace other than a space must not glue a secret flag to its value ----
+
+# SEPS — printf escapes for the separators under test: tab, VT, FF, NBSP, ideographic space,
+# U+2028, U+2029, U+0085. Each is a real gap between words for some tool or terminal.
+SEPS=('\t' '\v' '\f' '\302\240' '\343\200\200' '\342\200\250' '\342\200\251' '\302\205')
+
+@test "whitespace: a tab, VT, FF, NBSP, ideographic space, U+2028/9 or NEL before a secret flag still redacts" {
+  # Deleting the separator (rather than reading it as a space) glued `mysql -p x` into
+  # `mysql-px`, and the rules, which need whitespace before the flag, matched nothing.
+  local sep cmd
+  for sep in "${SEPS[@]}"; do
+    for cmd in "mysql${sep}-p${sep}hunter2x" \
+               "docker${sep}login${sep}-u${sep}me${sep}-p${sep}hunter2x" \
+               "curl${sep}-u${sep}user:hunter2x${sep}https://example.test/x" \
+               "zip${sep}-P${sep}hunter2x${sep}out.zip${sep}in.txt" \
+               "sshpass${sep}-p${sep}hunter2x${sep}ssh${sep}host"; do
+      capture "$(bash_payload "$(printf "$cmd")")"
+    done
+  done
+  # Something was stored (so the absence below is not vacuous) and no stored line holds the secret.
+  f="$(only_file)"
+  [ "$(wc -l < "$f")" -gt 0 ]
+  absent "$f" hunter2x
+}
+
+@test "whitespace: a tab-separated secret flag is redacted, not glued (exact stored form)" {
+  capture "$(bash_payload "$(printf 'mysql\t-p\thunter2x')")"
+  f="$(only_file)"
+  absent "$f" hunter2x
+  [ "$(field "$f" 1 in)" = "mysql -p [REDACTED]" ]
+}
