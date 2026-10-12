@@ -250,3 +250,13 @@ YAML
   [[ "$output" == *"E_RANGE"* ]]
   [ ! -e "$TMP/leak" ]
 }
+
+@test "docs: --max-total is described as capping every plan, and the README lists the eval: rule form" {
+  # The cap became global in WP-029; these pinned the old "--changed only" wording.
+  # (a bare `! grep` does not fail a bats test, so the negatives go through `run`)
+  run grep -c -- '--changed only' "$EVALS"
+  [ "$output" = 0 ]
+  run grep -c -- '`--changed` exits 2' "$REPO_ROOT/evals/README.md"
+  [ "$output" = 0 ]
+  grep -q 'eval: <name>' "$REPO_ROOT/evals/README.md"
+}
