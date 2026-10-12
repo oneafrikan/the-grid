@@ -68,9 +68,11 @@ def build(project_id: str, shown: list | None = None) -> str:
 
     `shown`, when given, receives one `id:conf` string per hint that made it into the text.
     """
-    min_conf = _env_num("INSTINCTS_MIN_CONF", 0.5, float)
-    max_items = _env_num("INSTINCTS_MAX_ITEMS", 6, int)
-    max_chars = _env_num("INSTINCTS_MAX_CHARS", 1500, int)
+    # The env knobs may tighten the design bounds (0.5 / 6 / 1500) but never lift them: what reaches
+    # a session is capped no matter what the environment says.
+    min_conf = max(_env_num("INSTINCTS_MIN_CONF", 0.5, float), 0.5)
+    max_items = min(_env_num("INSTINCTS_MAX_ITEMS", 6, int), 6)
+    max_chars = min(_env_num("INSTINCTS_MAX_CHARS", 1500, int), 1500)
 
     # Project copies first so that, for an id present in both scopes, the project
     # copy is the one kept (design: ranking prefers the project copy).

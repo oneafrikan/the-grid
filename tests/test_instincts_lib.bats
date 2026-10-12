@@ -852,3 +852,52 @@ vjson() {
   [ "$status" -eq 1 ]
   [[ "$output" != *$'\x1b'* ]]
 }
+
+
+# --- WP-057: tampered lines, OSError, bounded scrub ---------------------------------------------
+
+@test "read_lines: a stored line with a list domain, kind or status is skipped, not a crash" {
+  d="$GRID_LEARNING_DIR/instincts/0123456789ab"; mkdir -p "$d"
+  {
+    echo '{"id":"good-habit","trigger":"when x","action":"do y","domain":"testing","scope":"project","project":"0123456789ab","confidence":0.6,"last_seen":"2026-W40","status":"active","host":"host-a"}'
+    echo '{"id":"list-domain","trigger":"when x","action":"do y","domain":["git"],"scope":"project","project":"0123456789ab","confidence":0.6,"last_seen":"2026-W40","status":"active","host":"host-a"}'
+    echo '{"id":"list-status","trigger":"when x","action":"do y","domain":"git","scope":"project","project":"0123456789ab","confidence":0.6,"last_seen":"2026-W40","status":["active"],"host":"host-a"}'
+    echo '{"id":"dict-scope","trigger":"when x","action":"do y","domain":"git","scope":{"a":1},"project":"0123456789ab","confidence":0.6,"last_seen":"2026-W40","status":"active","host":"host-a"}'
+  } > "$d/host-a.jsonl"
+  run pylib 'print([l["id"] for l in lib.read_lines("0123456789ab")])'
+  [ "$status" -eq 0 ]
+  [ "$output" = "['good-habit']" ]
+  run "$SH" show 0123456789ab
+  [ "$status" -eq 0 ]
+  [[ "$output" == *good-habit* && "$output" != *list-domain* ]]
+}
+
+@test "validate_instinct: non-string kind, domain and scope are rejected without raising" {
+  for f in '"domain":["git"]' '"domain":{"a":1}' '"kind":["new"]' '"scope":["project"]' '"status":{"a":1}'; do
+    run validate "{\"id\":\"some-habit\",\"trigger\":\"when x\",\"action\":\"do y\",\"domain\":\"git\",$f}"
+    [ "$status" -eq 0 ]
+    [ "$output" = "None" ] || { echo "accepted: $f"; return 1; }
+  done
+}
+
+@test "retire on an unwritable store prints one line, exits 1, no traceback" {
+  d="$GRID_LEARNING_DIR/instincts/0123456789ab"; mkdir -p "$d"
+  echo '{"id":"good-habit","trigger":"when x","action":"do y","domain":"testing","scope":"project","project":"0123456789ab","confidence":0.6,"last_seen":"2026-W40","status":"active","host":"host-a"}' > "$d/host-a.jsonl"
+  chmod 500 "$d"; chmod 400 "$d/host-a.jsonl"
+  GRID_HOST=host-a run "$SH" retire good-habit 0123456789ab
+  chmod 700 "$d"; chmod 600 "$d/host-a.jsonl"
+  [ "$status" -eq 1 ]
+  [[ "$output" != *Traceback* ]]
+  [ "$(printf '%s\n' "$output" | wc -l)" -eq 1 ]
+}
+
+@test "scrub CLI: input is bounded to 64 KiB with a notice on stderr, and finishes fast" {
+  python3 -c "print('a1 token=x ' * 40000)" > "$BATS_TEST_TMPDIR/huge.txt"
+  start=$SECONDS
+  run --separate-stderr "$SH" scrub < "$BATS_TEST_TMPDIR/huge.txt"
+  [ "$status" -eq 0 ]
+  # only the first 64 KiB of the input is read (redaction can lengthen it, so bound the output loosely)
+  [ "${#output}" -le 140000 ]
+  [[ "$stderr" == *"truncated"* ]]
+  [ $((SECONDS - start)) -lt 10 ]
+}

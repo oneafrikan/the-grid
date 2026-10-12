@@ -50,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import argparse  # noqa: E402
 import datetime as dt  # noqa: E402
+import fcntl  # noqa: E402
 import hashlib  # noqa: E402
 import json  # noqa: E402
 import math  # noqa: E402
@@ -99,6 +100,7 @@ CONF_MAX = 0.9
 CONF_MIN = 0.3            # below this an instinct is retired
 DECAY_AFTER_MISSES = 4
 DECAY_STEP = 0.1
+CONTRADICT_STEP = 0.3     # a contradict demotes; the < CONF_MIN rule retires
 
 # Ordering hint only (design: Digest): a likely correction or stated preference.
 CORR_RE = re.compile(r"\b(instead|rather than|not|don'?t|never|always|stop|wrong|again|i said|prefer)\b", re.I)
@@ -126,7 +128,7 @@ def min_obs() -> int:
 
 
 def max_projects() -> int:
-    return _env_int("INSTINCTS_MAX_PROJECTS", 5)
+    return max(1, _env_int("INSTINCTS_MAX_PROJECTS", 5))      # a negative cap must not slice from the end
 
 
 # --------------------------------------------------------------------------
@@ -171,7 +173,8 @@ def atomic_write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-" + path.name + ".")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        # errors="replace": a lone surrogate that slipped through must never turn into a crash mid-write
+        with os.fdopen(fd, "w", encoding="utf-8", errors="replace") as fh:
             fh.write(text)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
@@ -264,6 +267,8 @@ def load_observations(pid: str, since_ts: str | None) -> list[dict]:
                 continue
             if not isinstance(o.get("in"), str):
                 continue
+            if o["ev"] == "tool" and not isinstance(o.get("tool"), str):
+                continue          # a list or dict here would crash the builders (unhashable)
             ts = o.get("ts") if isinstance(o.get("ts"), str) else ""
             if since_ts is not None and ts <= since_ts:
                 continue
@@ -302,7 +307,7 @@ def read_host_lines(path: Path) -> list:
             continue
         try:
             obj = lib.validate_instinct(json.loads(ln))
-        except ValueError:
+        except (ValueError, TypeError, RecursionError):
             obj = None
         out.append(obj if obj is not None else ln)
     return out
@@ -611,6 +616,12 @@ def load_prompt() -> tuple[str, str, str]:
 # Model call and reply parsing
 # --------------------------------------------------------------------------
 
+class Reply(str):
+    """The model's reply text; `cost_flag` names a cost problem (`cost-invalid`, `cost-over-cap`)."""
+
+    cost_flag: str | None = None
+
+
 class CallError(Exception):
     """The call did not produce a usable reply; .reason is timeout|exit|budget|not-json|not-array."""
 
@@ -698,9 +709,16 @@ def call_model(body: str, digest: str) -> tuple[str, float | None]:
         env_json = json.loads(text)
     except ValueError:
         env_json = None
-    cost = None
-    if isinstance(env_json, dict) and isinstance(env_json.get("total_cost_usd"), (int, float)):
-        cost = float(env_json["total_cost_usd"])
+    cost, cost_flag = None, None
+    if isinstance(env_json, dict) and isinstance(env_json.get("total_cost_usd"), (int, float)) \
+            and not isinstance(env_json.get("total_cost_usd"), bool):
+        raw_cost = float(env_json["total_cost_usd"])
+        if math.isfinite(raw_cost) and raw_cost >= 0:
+            cost = raw_cost
+            if cost > _env_float("INSTINCTS_BUDGET_USD", 0.05):
+                cost_flag = "cost-over-cap"           # the CLI's cap is soft; say so when it was exceeded
+        else:
+            cost_flag = "cost-invalid"                # NaN or negative: never logged as a cost
     if proc.returncode != 0:
         raise CallError("exit", cost)
     if not isinstance(env_json, dict):
@@ -711,7 +729,9 @@ def call_model(body: str, digest: str) -> tuple[str, float | None]:
     result = env_json.get("result")
     if not isinstance(result, str):
         raise CallError("not-json", cost)
-    return result, cost
+    reply = Reply(result)
+    reply.cost_flag = cost_flag
+    return reply, cost
 
 
 def parse_reply(result: str) -> list:
@@ -725,7 +745,7 @@ def parse_reply(result: str) -> list:
         s = "\n".join(lines[1:-1]).strip()
     try:
         parsed = json.loads(s)
-    except ValueError:
+    except (ValueError, RecursionError):       # deeply nested input raises RecursionError
         raise CallError("not-json")
     if not isinstance(parsed, list):
         raise CallError("not-array")
@@ -738,12 +758,18 @@ def parse_reply(result: str) -> list:
 
 def check_field_shapes(item: dict) -> bool:
     """bad-field: types, id regex, length caps and enums, before the unsafe-text check."""
-    if item["kind"] not in lib.KINDS or not isinstance(item["id"], str) or not lib.ID_RE.fullmatch(item["id"]):
+    # Types first: a list or dict is unhashable and would raise on a frozenset lookup.
+    if not (isinstance(item["kind"], str) and isinstance(item["id"], str) and isinstance(item["domain"], str)):
+        return False
+    if item["kind"] not in lib.KINDS or not lib.ID_RE.fullmatch(item["id"]):
         return False
     t, a = item["trigger"], item["action"]
     if not (isinstance(t, str) and isinstance(a, str)):
         return False
     if not t.strip() or not a.strip() or len(t) > lib.MAX_TRIGGER or len(a) > lib.MAX_ACTION:
+        return False
+    # The prompt requires a trigger that starts with when, before or after.
+    if not re.match(r"(?i)(?:when|before|after)\b", t.strip()):
         return False
     if item["domain"] not in lib.DOMAINS:
         return False
@@ -800,19 +826,22 @@ def validate_items(items: list, digest: Digest, known: dict[str, dict]):
         seen_ids.add(raw["id"])
         kind = raw["kind"]
         was_new = kind == "new"
-        if kind == "new" and raw["id"] in known:
-            kind = "confirm"            # a `new` with a stored id is a confirm, judged as one
         if kind in ("confirm", "contradict") and raw["id"] not in known:
             drops["unknown-id"] += 1
             continue
         if any(e not in digest.refs for e in raw["evidence"]):
             drops["bad-ref"] += 1
             continue
-        if kind == "new":
-            sids = set().union(*(digest.refs[e] for e in raw["evidence"]))
-            if len(sids) < 2:
-                drops["thin-evidence"] += 1
-                continue
+        # Evidence bars (D46): "confirm" means the habit showed up again, so it must cite at
+        # least one real observation item (P, C, F or E: a K ref only points at the stored
+        # instinct itself) covering two sessions. A `new` is judged as a new FIRST, so re-using
+        # a stored id cannot dodge the two-session rule by being re-typed to a confirm.
+        sids = set().union(*(digest.refs[e] for e in raw["evidence"]))
+        if kind in ("new", "confirm") and len(sids) < 2:
+            drops["thin-evidence"] += 1
+            continue
+        if kind == "new" and raw["id"] in known:
+            kind = "confirm"            # a `new` with a stored id is a confirm, judged as one
         if kind == "contradict" and not any(e in digest.corr_refs for e in raw["evidence"]):
             drops["no-correction"] += 1
             continue
@@ -883,9 +912,17 @@ def apply_items(pid: str, valid: list[dict], week: str):
         cur = dict(entries[i]) if i is not None and entries[i].get("status") != "retired" else dict(base)
         cur["host"] = host
         if v["kind"] == "contradict":
-            cur.update(status="retired", last_seen=week, misses=0)
+            # One correction line is not proof: demote by CONTRADICT_STEP (the < CONF_MIN rule
+            # retires it once it falls low enough). Counted once per ISO week, like decay.
+            if cur.get("last_contradict_week") == week:
+                continue
+            cur["confidence"] = round(cur.get("confidence", CONF_NEW) - CONTRADICT_STEP, 2)
+            cur["last_contradict_week"] = week
+            cur["misses"] = 0
+            if cur["confidence"] < CONF_MIN - 1e-9:
+                cur.update(status="retired", last_seen=week)
+                stats["retired"] += 1
             put(cur)
-            stats["retired"] += 1
             stats["kept"] += 1
             continue
         # confirm: counted at most once per ISO week (the merged last_seen is the truth
@@ -904,7 +941,10 @@ def apply_items(pid: str, valid: list[dict], week: str):
     for i, e in enumerate(entries):
         if not isinstance(e, dict) or e.get("status") == "retired" or e["id"] in touched:
             continue
+        if e.get("last_decay_week") == week:
+            continue                    # decay is once per ISO week: --force or a crash retry must not repeat it
         e = dict(e)
+        e["last_decay_week"] = week
         e["misses"] = e.get("misses", 0) + 1
         if e["misses"] >= DECAY_AFTER_MISSES:
             e["confidence"] = round(e.get("confidence", CONF_NEW) - DECAY_STEP, 2)
@@ -955,17 +995,38 @@ def load_status() -> dict:
 
     Our keys are `version` and `projects` (per-project funnel). Other writers add
     their own top-level keys (promote records `pending_global`); they must survive
-    our rewrite, and are never treated as project ids.
+    our rewrite, and are never treated as project ids. A file that exists but cannot be
+    parsed is NOT silently reset: a warning goes to stderr and a copy is kept as
+    status.json.bak before the next save replaces it.
     """
     data: dict = {}
+    path = status_path()
     try:
-        loaded = json.loads(status_path().read_text(encoding="utf-8"))
+        loaded = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             data = loaded
-    except (OSError, ValueError):
+        else:
+            raise ValueError("not a JSON object")
+    except FileNotFoundError:
         pass
+    except (OSError, ValueError, RecursionError) as e:
+        print(f"instincts: warning: status.json is unreadable ({e}); starting a new one, old copy kept as status.json.bak",
+              file=sys.stderr)
+        try:
+            shutil.copyfile(path, path.with_name(path.name + ".bak"))
+        except OSError:
+            pass
     if not isinstance(data.get("projects"), dict):
         data["projects"] = {}
+    # A hand-edited or partial entry must not crash status/analyse: keep only well-shaped parts.
+    for pid, ps in list(data["projects"].items()):
+        if not isinstance(ps, dict):
+            data["projects"][pid] = {}
+            continue
+        if not isinstance(ps.get("runs"), list) or not all(isinstance(r, dict) for r in ps.get("runs", [])):
+            ps.pop("runs", None)
+        if "last_run" in ps and not isinstance(ps["last_run"], dict):
+            ps.pop("last_run")
     data.setdefault("version", 1)
     return data
 
@@ -1001,6 +1062,8 @@ def run_note(run: dict, pv: str) -> str:
     parts.append(f"pv={pv}")
     if run.get("err"):
         parts.append(f"err={run['err']}")
+    if run.get("flag"):
+        parts.append(f"flag={run['flag']}")
     return " ".join(parts)
 
 
@@ -1037,17 +1100,47 @@ def plan(pids: list[str], force: bool, now: dt.datetime, st: dict):
     return todo[:max_projects()], skipped
 
 
+def acquire_lock():
+    """Non-blocking exclusive lock on <state>/instincts/.analyse.lock, or None when held.
+
+    Two overlapping real runs (cron plus a manual run) would each call the model and the
+    last status.json writer would win; the second now stops. The descriptor stays open for
+    the life of the process, which is the lock's life.
+    """
+    path = lib.instincts_state_dir() / ".analyse.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
+
 def cmd_analyse(args) -> int:
     if os.environ.get("GRID_INSTINCTS") == "0":
         # The kill switch stops analysis (and its upload) as well as capture; even --dry-run.
         print("instincts: GRID_INSTINCTS=0: analysis disabled, nothing sent")
         return 0
+    lock = None
+    if not args.dry_run:
+        # Before status.json is read: a run that starts while another finishes must not work from
+        # (and then overwrite with) a stale copy.
+        lock = acquire_lock()
+        if lock is None:
+            print("instincts: already running (another analysis holds the lock); nothing done")
+            return 0
     now = now_utc()
     week = iso_week(now.date())
     st = load_status()
     pids = project_dirs()
     if args.project:
-        pids = [p for p in pids if p == args.project]
+        if args.project not in pids:
+            print(f"instincts: unknown project '{lib.sanitize(args.project, 40)}' (no observation directory)",
+                  file=sys.stderr)
+            return 2
+        pids = [args.project]
     body, version, h8 = load_prompt()
     pv = f"{version}:{h8}"
     todo, skipped = plan(pids, args.force, now, st)
@@ -1068,7 +1161,17 @@ def cmd_analyse(args) -> int:
         return 0
 
     errors = 0
-    before = json.dumps(st, sort_keys=True)
+    saved = json.dumps(st, sort_keys=True)
+
+    def save_if_changed() -> None:
+        # Saved after every project, so a crash later in the loop cannot lose finished work
+        # (and the next run cannot repeat a paid call).
+        nonlocal saved
+        now_text = json.dumps(st, sort_keys=True)
+        if now_text != saved:
+            save_status(st)
+            saved = now_text
+
     for pid, reason, obs in skipped:
         # An already-analysed week changes nothing (a second run is a true no-op
         # apart from its run-log line); other skips note why in status.json.
@@ -1077,7 +1180,14 @@ def cmd_analyse(args) -> int:
         record_run(pid, "skipped", None, f"obs={obs if obs is not None else '-'} reason={reason} pv={pv}")
         print(f"project {pid}: skipped ({reason})")
     for pid, events in todo:
-        run = analyse_project(pid, events, week, now, body, st)
+        try:
+            run = analyse_project(pid, events, week, now, body, st)
+        except lib.RepoPathError:
+            raise                       # a data path inside the repo is a configuration error, not a crash
+        except Exception as e:  # noqa: BLE001 - one bad project must not abort the weekly run
+            print(f"instincts: project {pid}: {type(e).__name__}", file=sys.stderr)
+            run = {"week": week, "at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "obs": len(events),
+                   "outcome": "error", "cost": None, "err": "crash"}
         run["pv"] = pv
         ps = st["projects"].setdefault(pid, {})
         runs = ps.setdefault("runs", [])
@@ -1097,8 +1207,8 @@ def cmd_analyse(args) -> int:
             prune_observations(pid, now)
         else:
             print(f"project {pid}: error ({run['err']})")
-    if json.dumps(st, sort_keys=True) != before:
-        save_status(st)
+        save_if_changed()
+    save_if_changed()
     if not (skipped or todo):
         print("instincts: no projects to analyse")
     run_promote()
@@ -1137,6 +1247,8 @@ def analyse_project(pid, events, week, now, body, st) -> dict:
     try:
         result, cost = call_model(body, digest.text)
         run["cost"] = cost
+        if getattr(result, "cost_flag", None):
+            run["flag"] = result.cost_flag
         items = parse_reply(result)
     except CallError as e:
         run["err"] = e.reason
@@ -1191,11 +1303,11 @@ def verdict(run: dict) -> str:
     """Name which kind of zero this is (they need different fixes)."""
     if run.get("outcome") != "ok":
         return "run errored"
-    if run["ret"] == 0:
+    if run.get("ret") == 0:
         return "model returned nothing (no habit seen)"
-    if run["valid"] == 0:
+    if run.get("valid") == 0:
         return "validator dropped everything (prompt and validator disagree)"
-    if run["kept"] == 0:
+    if run.get("kept") == 0:
         return "valid items changed nothing (nothing new)"
     return "store changed"
 
@@ -1217,10 +1329,11 @@ def cmd_status(args) -> int:
         print(f"  last analysis week: {ps.get('last_week', 'never')}")
         run = ps.get("last_run")
         if run:
-            print(f"  last run: {run['outcome']} ({run['week']})")
-            if run["outcome"] == "ok":
-                print(f"  funnel: ret={run['ret']} valid={run['valid']} kept={run['kept']}")
-                print(f"  top drop reasons: {fmt_dropped(dict(list(sorted(run['dropped'].items(), key=lambda kv: -kv[1]))[:3]))}")
+            print(f"  last run: {run.get('outcome', '?')} ({run.get('week', '?')})")
+            if run.get("outcome") == "ok":
+                print(f"  funnel: ret={run.get('ret', '?')} valid={run.get('valid', '?')} kept={run.get('kept', '?')}")
+                dropped = run.get("dropped") if isinstance(run.get("dropped"), dict) else {}
+                print(f"  top drop reasons: {fmt_dropped(dict(list(sorted(dropped.items(), key=lambda kv: -kv[1]))[:3]))}")
             else:
                 print(f"  error reason: {run.get('err', '?')}")
             print(f"  reading: {verdict(run)}")
@@ -1412,11 +1525,18 @@ def run_sync() -> int:
 # --------------------------------------------------------------------------
 
 def main(argv: list[str]) -> int:
+    # Digest text can hold characters the terminal's codec cannot print: replace, never raise.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(prog="instincts.sh", add_help=True)
     sub = ap.add_subparsers(dest="cmd")
     a = sub.add_parser("analyse", help="weekly analysis of local observations")
-    a.add_argument("--all", action="store_true", help="every opted-in project (the default)")
-    a.add_argument("--project", metavar="ID", help="only this project id")
+    grp = a.add_mutually_exclusive_group()
+    grp.add_argument("--all", action="store_true", help="every opted-in project (the default)")
+    grp.add_argument("--project", metavar="ID", help="only this project id")
     a.add_argument("--dry-run", action="store_true", help="print the digest and plan; call and write nothing")
     a.add_argument("--force", action="store_true", help="re-analyse even if done this ISO week")
     a.add_argument("--no-sync", action="store_true", help="do not pull/commit/push the private repo afterwards")

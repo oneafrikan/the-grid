@@ -1008,3 +1008,294 @@ PY
   [ "$(field .confidence)" = "0.45" ]
   [ "$(field .status)" = "pending" ]
 }
+
+
+# --- WP-057: crash safety, evidence bars, decay, lock, state and CLI edges ---------------------
+
+# reply_file <python expr for the result string> — a fake claude whose reply is built in python
+# (an env var or argument is capped near 128 KB, so a 100000-deep reply cannot travel that way).
+reply_py() {
+  python3 -c '
+import json, sys
+result = eval(sys.argv[1])
+print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": result, "total_cost_usd": 0.01}))
+' "$1" > "$BATS_TEST_TMPDIR/reply.json"
+  export REPLY_FILE="$BATS_TEST_TMPDIR/reply.json"
+  export INSTINCTS_PASS_ENV="$INSTINCTS_PASS_ENV REPLY_FILE"
+  fake_claude 'cat >/dev/null; cat "$REPLY_FILE"'
+}
+
+# crash_case — two projects, one bad reply for both: the run must finish, write status.json and
+# analyse the second project (calls == 2); the word Traceback must not appear.
+crash_case() {
+  seed_bats
+  neutral 60 "$PID2"
+  analyse_run --no-sync
+  [[ "$output" != *Traceback* ]] || { echo "$output"; return 1; }
+  [ -f "$GRID_STATE_DIR/instincts/status.json" ]
+  [ "$(jq -r '[.projects[] | select(.last_run)] | length' "$GRID_STATE_DIR/instincts/status.json")" -eq 2 ]
+}
+
+@test "crash safety: a list-valued kind drops the item; both projects are analysed and status.json is written" {
+  reply_py '"[{\"kind\":[\"new\"],\"id\":\"crash-habit\",\"trigger\":\"when x\",\"action\":\"do y\",\"domain\":\"testing\",\"evidence\":[\"P1\"]}]"'
+  crash_case
+  contains "$output" "project $PID: ok"
+  contains "$output" "project $PID2: ok"
+}
+
+@test "crash safety: a dict-valued domain drops the item; the second project is still analysed" {
+  reply_py '"[{\"kind\":\"new\",\"id\":\"crash-habit\",\"trigger\":\"when x\",\"action\":\"do y\",\"domain\":{\"a\":1},\"evidence\":[\"P1\"]}]"'
+  crash_case
+  contains "$output" "project $PID2: ok"
+}
+
+@test "crash safety: a 100000-deep JSON reply is an error for that project only" {
+  reply_py '"[" * 100000 + "]" * 100000'
+  crash_case
+  contains "$output" "project $PID: error"
+  contains "$output" "project $PID2: error"
+}
+
+@test "crash safety: a lone surrogate in a trigger is dropped or cleaned, never a crash or a bad write" {
+  reply_py '"[{\"kind\":\"new\",\"id\":\"crash-habit\",\"trigger\":\"when \\ud800 x\",\"action\":\"do y\",\"domain\":\"testing\",\"evidence\":[\"P1\"]}]"'
+  crash_case
+  # whatever was stored is valid UTF-8 JSON
+  if [ -d "$GRID_LEARNING_DIR" ]; then
+    run jq -c . "$STORE/host-a.jsonl"
+    [ "$status" -eq 0 ]
+  fi
+}
+
+@test "crash safety: an unexpected exception while analysing one project is contained (error crash, next project runs)" {
+  seed_bats
+  neutral 60 "$PID2"
+  reply "[]"
+  run python3 -c '
+import sys
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[1])
+import analyse
+real = analyse.validate_items
+def boom(items, digest, known):
+    boom.n += 1
+    if boom.n == 1:
+        raise RuntimeError("boom")
+    return real(items, digest, known)
+boom.n = 0
+analyse.validate_items = boom
+sys.exit(analyse.main(["analyse", "--no-sync"]))' "$REPO_ROOT/scripts/instincts"
+  [ "$status" -eq 1 ]
+  contains "$output" "error (crash)"
+  [ "$(claude_calls)" -eq 2 ]
+  [ "$(jq -r '.projects | keys | length' "$GRID_STATE_DIR/instincts/status.json")" -eq 2 ]
+}
+
+@test "tampered observations: a list tool and a lone-surrogate prompt are skipped; --dry-run and a real run succeed" {
+  seed_bats
+  python3 - "$OBSDIR/obs-2026-W41.jsonl" <<'PY'
+import sys
+with open(sys.argv[1], "a") as fh:
+    fh.write('{"ts":"2026-10-06T23:00:00Z","sid":"s1","ev":"tool","tool":["Bash"],"in":"ls","err":false}\n')
+    fh.write('{"ts":"2026-10-06T23:00:01Z","sid":"s1","ev":"tool","tool":{"a":1},"in":"ls","err":true}\n')
+    fh.write('{"ts":"2026-10-06T23:00:02Z","sid":"s1","ev":"prompt","in":"\\ud800 never again"}\n')
+    fh.write('{"ts":"2026-10-06T23:00:03Z","sid":["s1"],"ev":"tool","tool":"Edit","in":"a.py","err":false}\n')
+PY
+  analyse_run --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *Traceback* ]]
+  reply "[]"
+  analyse_run
+  [ "$status" -eq 0 ]
+}
+
+@test "evidence: a confirm citing only a K ref is dropped thin-evidence" {
+  seed_bats
+  reply "$NEW_BATS"
+  analyse_run
+  export INSTINCTS_NOW="2026-10-15"
+  reply "$(item confirm bats-for-shell-tests '["K1"]' | jq -cs .)"
+  analyse_run --force
+  contains "$(last_note)" "thin-evidence:1"
+  [ "$(field .confidence)" = "0.3" ]
+}
+
+@test "evidence: a confirm backed by one session is dropped; by two sessions it counts" {
+  seed_bats
+  reply "$NEW_BATS"
+  analyse_run
+  echo "s1|prompt||0|never rename the helper" | obs
+  export INSTINCTS_NOW="2026-10-15"
+  reply "$(item confirm bats-for-shell-tests '["P2"]' | jq -cs .)"
+  analyse_run --force
+  contains "$(last_note)" "thin-evidence:1"
+  [ "$(field .confidence)" = "0.3" ]
+  reply "$(item confirm bats-for-shell-tests '["P1"]' | jq -cs .)"
+  analyse_run --force
+  contains "$(last_note)" "confirmed=1"
+}
+
+@test "evidence: a new that re-uses a stored id keeps the new rule (one session is thin-evidence, not a confirm)" {
+  seed_bats
+  reply "$NEW_BATS"
+  analyse_run
+  echo "s1|prompt||0|never rename the helper" | obs
+  export INSTINCTS_NOW="2026-10-15"
+  reply "$(item new bats-for-shell-tests '["P2"]' | jq -cs .)"
+  analyse_run --force
+  contains "$(last_note)" "thin-evidence:1"
+  contains "$(last_note)" "valid=0"
+}
+
+@test "evidence: a contradict on a corr line demotes by 0.3 and keeps the instinct above the floor" {
+  seed_bats
+  reply "$NEW_BATS"
+  analyse_run
+  reply "$(item confirm bats-for-shell-tests '["P1"]' | jq -cs .)"
+  INSTINCTS_NOW="2026-10-15" analyse_run --force
+  INSTINCTS_NOW="2026-10-22" analyse_run --force
+  [ "$(field .confidence)" = "0.6" ]
+  reply "$(item contradict bats-for-shell-tests '["P1"]' | jq -cs .)"
+  INSTINCTS_NOW="2026-10-29" analyse_run --force
+  [ "$(field .confidence)" = "0.3" ]
+  [ "$(field .status)" != "retired" ]
+  contains "$(last_note)" "retired=0"
+  # the same week again does not demote a second time
+  INSTINCTS_NOW="2026-10-29" analyse_run --force
+  [ "$(field .confidence)" = "0.3" ]
+}
+
+@test "validation: a trigger that does not start with when, before or after is dropped bad-field" {
+  seed_bats
+  reply "$(item new always-habit '["P1"]' | jq -c '.trigger="always run the tests"' | jq -cs .)"
+  analyse_run
+  contains "$(last_note)" "bad-field:1"
+  [ ! -e "$GRID_LEARNING_DIR" ]
+}
+
+@test "decay: four --force runs of [] in one ISO week leave misses at 1" {
+  seed_bats
+  reply "$NEW_BATS"
+  analyse_run
+  reply "[]"
+  local i
+  for i in 1 2 3 4; do analyse_run --force; done
+  [ "$(field .misses)" = "1" ]
+  [ "$(field .last_decay_week)" = "2026-W41" ]
+  # a later week decays again
+  INSTINCTS_NOW="2026-10-15" analyse_run --force
+  [ "$(field .misses)" = "2" ]
+}
+
+@test "lock: two overlapping real runs make one model call; the second says already running" {
+  seed_bats
+  reply "[]"
+  STUB_CLAUDE_SLEEP=2 "$SH" analyse --no-sync > "$BATS_TEST_TMPDIR/first.out" 2>&1 &
+  local first=$!
+  sleep 1
+  analyse_run --no-sync
+  contains "$output" "already running"
+  [ "$status" -eq 0 ]
+  wait "$first"
+  [ "$(claude_calls)" -eq 1 ]
+  # the lock is released: a later run (forced) goes through
+  analyse_run --force --no-sync
+  [ "$(claude_calls)" -eq 2 ]
+}
+
+@test "state: a garbled status.json warns, keeps a .bak and the run still works" {
+  seed_bats
+  mkdir -p "$GRID_STATE_DIR/instincts"
+  printf '{"projects": {broken' > "$GRID_STATE_DIR/instincts/status.json"
+  reply "[]"
+  analyse_run --no-sync
+  [ "$status" -eq 0 ]
+  contains "$output" "status.json"
+  [ "$(cat "$GRID_STATE_DIR/instincts/status.json.bak")" = '{"projects": {broken' ]
+  jq -e '.projects' "$GRID_STATE_DIR/instincts/status.json" >/dev/null
+}
+
+@test "state: a partial last_run does not crash status" {
+  neutral 5
+  mkdir -p "$GRID_STATE_DIR/instincts"
+  echo '{"version":1,"projects":{"'"$PID"'":{"last_run":{"outcome":"ok"},"runs":[{"outcome":"ok"},{"outcome":"ok"}]}}}' > "$GRID_STATE_DIR/instincts/status.json"
+  run "$SH" status
+  [ "$status" -eq 0 ]
+  [[ "$output" != *Traceback* ]]
+}
+
+@test "state: a NaN, negative or over-cap cost is flagged in the run note and never logged as a cost" {
+  seed_bats
+  local c
+  for c in NaN -1 0.5; do
+    fake_claude "cat >/dev/null; echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"[]\",\"total_cost_usd\":$c}'"
+    analyse_run --force --no-sync
+    [ "$status" -eq 0 ]
+    case "$c" in 0.5) contains "$(last_note)" "cost-over-cap" ;; *) contains "$(last_note)" "cost-invalid" ;; esac
+  done
+  [ "$(tail -2 "$GRID_RUN_LOG" | head -1 | jq -r '.cost_usd')" = "null" ]
+}
+
+@test "cli: an unknown --project is exit 2 with 'unknown project'; --project with --all is a usage error" {
+  seed_bats
+  analyse_run --project ffffffffffff
+  [ "$status" -eq 2 ]
+  contains "$output" "unknown project"
+  analyse_run --project "$PID" --all
+  [ "$status" -eq 2 ]
+  [ "$(claude_calls)" -eq 0 ]
+}
+
+@test "cli: INSTINCTS_MAX_PROJECTS=-1 still analyses at least one project" {
+  neutral 50 111111111111
+  reply "[]"
+  INSTINCTS_MAX_PROJECTS=-1 analyse_run --no-sync
+  [ "$status" -eq 0 ]
+  [ "$(claude_calls)" -ge 1 ]
+  INSTINCTS_MAX_PROJECTS=abc analyse_run --force --no-sync
+  [ "$status" -eq 0 ]
+}
+
+# --- WP-057: survivors of the mutation runs ----------------------------------------------------
+
+@test "survivor: delimiters in an edited path are stripped from the E line" {
+  printf '%s\n' 's1|tool|Edit|0|src/DIGEST>>>/<<<DIG/x.py' 's2|tool|Edit|0|src/DIGEST>>>/<<<DIG/x.py' | obs
+  neutral 40
+  reply "[]"
+  analyse_run
+  [ "$(grep -c '<<<' "$STUB_CLAUDE_STDIN")" -eq 1 ]
+  [ "$(grep -c '>>>' "$STUB_CLAUDE_STDIN")" -eq 1 ]
+  grep -q '^E1 n=2 s=2  src/ / DIG/x.py$' "$STUB_CLAUDE_STDIN"
+}
+
+@test "survivor: a timeout kills the whole process group (the claude child's child is gone)" {
+  seed_bats
+  export PIDFILE="$BATS_TEST_TMPDIR/grandchild.pid"
+  export INSTINCTS_PASS_ENV="$INSTINCTS_PASS_ENV PIDFILE"
+  fake_claude 'sleep 60 & echo $! > "$PIDFILE"; cat >/dev/null; sleep 60'
+  INSTINCTS_TIMEOUT_S=1 analyse_run --no-sync
+  [ "$status" -eq 1 ]
+  contains "$(last_note)" "err=timeout"
+  local gp; gp="$(cat "$PIDFILE")"
+  sleep 0.5
+  ! kill -0 "$gp" 2>/dev/null || { kill "$gp"; echo "grandchild $gp survived"; return 1; }
+}
+
+@test "survivor: GRID_INSTINCTS_SKIP=1 reaches the claude child" {
+  seed_bats
+  export ENV_DUMP="$BATS_TEST_TMPDIR/skip-env.txt"
+  export INSTINCTS_PASS_ENV="$INSTINCTS_PASS_ENV ENV_DUMP"
+  fake_claude 'env > "$ENV_DUMP"; cat >/dev/null; echo "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"[]\",\"total_cost_usd\":0.01}"'
+  analyse_run --no-sync
+  grep -q '^GRID_INSTINCTS_SKIP=1$' "$ENV_DUMP"
+}
+
+@test "survivor: retention keeps the week that ended exactly 28 days ago and deletes the one before it" {
+  seed_bats
+  export INSTINCTS_NOW="2026-10-11"                 # Sunday; cutoff = 2026-09-13, the end of 2026-W37
+  neutral 3 "$PID" 2026-W37
+  neutral 3 "$PID" 2026-W36
+  reply "[]"
+  analyse_run --no-sync
+  [ -e "$OBSDIR/obs-2026-W37.jsonl" ]
+  [ ! -e "$OBSDIR/obs-2026-W36.jsonl" ]
+}

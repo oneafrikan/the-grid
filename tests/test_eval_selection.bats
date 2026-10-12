@@ -219,3 +219,34 @@ YAML
   run "$PY" "$EVALS" --repo "$R" --cases-dir "$R/evals/cases" --budget nan --dry-run
   [ "$status" -eq 2 ]
 }
+
+
+# --- WP-057: selection rules that mutation runs left unpinned ---------------------------------
+
+@test "an explicit roles list in a touchfile rule selects exactly those roles" {
+  cat > "$R/evals/touchfiles.yaml" <<'YAML'
+rules:
+  - paths: ["README.md"]
+    roles: [qa-engineer]
+YAML
+  commit "explicit roles"
+  touch_commit README.md
+  changed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"selected roles: qa-engineer"* ]]
+}
+
+@test "renaming a role's file selects the role (both the old and the new path count)" {
+  git -C "$R" mv agent-factory/roles/qa-engineer/AGENTS.md agent-factory/roles/qa-engineer/OLD.md
+  commit "rename"
+  changed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"selected roles: qa-engineer"* ]]
+}
+
+@test "a range that starts with a dash is rejected as E_RANGE and never reaches git as an option" {
+  run "$PY" "$EVALS" --repo "$R" --cases-dir "$R/evals/cases" "--changed=--output=$TMP/leak" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"E_RANGE"* ]]
+  [ ! -e "$TMP/leak" ]
+}

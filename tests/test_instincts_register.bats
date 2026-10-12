@@ -91,8 +91,9 @@ instincts_ids() {
     [ -f "$f" ]
     grep -q '^exec bash "$(cd "$(dirname "$0")/../.." && pwd -P)/scripts/instincts.sh" capture$' "$f"
   done
-  grep -q '^exec bash "$(cd "$(dirname "$0")/../.." && pwd -P)/scripts/instincts.sh" inject$' \
-    "$REPO_ROOT/hooks/scripts/instincts-inject.sh"
+  # the inject wrapper is fail-silent: output of a failed run is dropped and the status is always 0
+  grep -q 'scripts/instincts.sh" inject 2>/dev/null$' "$REPO_ROOT/hooks/scripts/instincts-inject.sh"
+  [ "$(tail -1 "$REPO_ROOT/hooks/scripts/instincts-inject.sh")" = "exit 0" ]
 }
 
 # ---------------------------------------------------------------------------

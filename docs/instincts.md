@@ -42,6 +42,9 @@ injected back at session start. Nothing here is on until you switch it on for a 
 
 - `scripts/instincts.sh retire ID [PROJECT] [--global]` — stop using one instinct in a project. A GLOBAL instinct (shared by every project) is retired only with `--global`.
 - `scripts/instincts.sh forget PROJECT --yes` — delete the local observations, this machine's instinct file, the project's status entry, its opt-in marker and (when no other host file remains) its `META.json`. It does not touch other hosts' files, derived `_global` lines or the git history of the private repo: purge those by hand. Capture stays off until the emitter is re-run; set `learning: off` to keep it off.
+- Confidence rules worth knowing: a `confirm` needs evidence from two sessions; a `contradict` lowers confidence by 0.3 (once per ISO week) and retires only when it falls under 0.3; decay is once per ISO week however often the analysis is re-run.
+- Overlapping real runs: a second `analyse` while one is running stops with "already running" (lock file `<state>/instincts/.analyse.lock`, harmless to leave). A `status.json` that cannot be parsed is kept as `status.json.bak` and a new one is started, with a warning.
+- `INSTINCTS_MIN_CONF`, `INSTINCTS_MAX_ITEMS` and `INSTINCTS_MAX_CHARS` can only tighten the injection caps (0.5, 6, 1500); they never lift them.
 - Thresholds are environment variables, not a config file: `INSTINCTS_MODEL`, `INSTINCTS_BUDGET_USD`, `INSTINCTS_TIMEOUT_S`, `INSTINCTS_MIN_OBS`, `INSTINCTS_MAX_PROJECTS`, `INSTINCTS_MIN_CONF`, `INSTINCTS_MAX_ITEMS`, `INSTINCTS_MAX_CHARS`.
 
 ## Kill switches
