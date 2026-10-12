@@ -311,8 +311,14 @@ a known, accepted false positive. git accepts any unique prefix of a long option
 `--no-verify` is blocked from 7 characters (`--no-ve`) and `git push --mirror` from 5
 (`--mir`); `--force` has no valid abbreviation.
 
-The secret scan covers the patterns in `lib/secret-patterns.sh` only (no entropy
-scoring). What it reads for a command:
+The secret scan covers the patterns in `lib/secret-patterns.sh` and nothing else: no
+entropy scoring, no token split over several lines, and an unquoted assigned value that
+is made only of letters is not flagged (an assignment value counts when it is quoted and
+16+ characters, or unquoted, 16+ characters, with a digit and no parentheses; a value
+that starts with `$`, `<` or `{` is a template and is skipped). A match is passed over
+when the matched token itself holds a placeholder word such as `example` or `changeme`;
+a placeholder word elsewhere on the line does not exempt a real token. What it reads for
+a command:
 
 - the repository the command targets: `-C <dir>`, `--git-dir`, `--work-tree` and a
   preceding `cd <dir>` are followed (a `cd` that cannot be known, such as `cd $VAR`, falls
@@ -333,14 +339,6 @@ Not covered: `git commit -F <file>` (the message file), a secret split across li
 encoded, and anything git does not show as an added line. Names in the block message are
 cut at 100 characters and control characters are shown as `?`, so a hostile file name
 cannot inject text into the agent's view.
-
-## The `grid:allow-secret` pragma (for humans)
-
-A line that carries the text `grid:allow-secret` is skipped by the secret scan, for a
-known false positive such as a documented sample key. Lines containing `example`,
-`placeholder`, `changeme`, `your_`, `xxxxxxxx` or `redacted` (any case) are skipped as
-well. The block message never mentions the pragma: an agent that reads the message
-should not learn how to silence the check.
 
 ## Other harnesses
 
