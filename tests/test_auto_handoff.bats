@@ -546,6 +546,8 @@ mkprivate() {
   age_tree "$GRID_PRIVATE_DIR"
   rmdir "$P/LOGS"
   ln -s "$GRID_PRIVATE_DIR/LOGS" "$P/LOGS"
+  # A tracked link is old: a link newer than the run's stamp now counts as a new symlink.
+  touch -h -t 202001010000 "$P/LOGS"
 }
 
 @test "private repo: pushed when the handoff is the only unpushed commit" {
@@ -735,4 +737,88 @@ clear_run() { : > "$STUB_LOG"; : > "$LOG"; }
   log_has "action=done"
   lacks "$(allowed_rules)" ".."
   contains "$(allowed_rules)" "$(edit_rule "$(cd "$P" && pwd -P)/LOGS")"
+}
+
+# ---- post-run detection: what the child touched beyond the pair ----------------------
+# Detect-only by design: nothing is moved or deleted, the run ends error/unexpected-file with
+# no commit, and the path is named in the log. (Writes anywhere else on disk cannot be seen
+# from here; that is what the grants, the deny rules and the environment are for.)
+
+# mkother: $OR, a second git repo (the mapped handoff target), with the table row for it.
+mkother() {
+  OR="$MOCK_HOOK_ROOT/other-repo"
+  mkdir -p "$OR"
+  git -C "$OR" init -q
+  git -C "$OR" config user.email t@example.com
+  git -C "$OR" config user.name t
+  echo o > "$OR/o.txt"; git -C "$OR" add o.txt; git -C "$OR" commit -q -m base
+  age_tree "$OR"
+  printf '| proj | %s |\n' "$OR" > "$GRID_PRIVATE_DIR/handoff-locations.md"
+}
+
+@test "a file written elsewhere in the repo that receives the commit is detected" {
+  mk_tx 6
+  mkprivate
+  touch -h -t 202001010000 "$P/LOGS"
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$GRID_PRIVATE_DIR/outside.txt"
+  before="$(commits "$GRID_PRIVATE_DIR")"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "outside.txt"
+  [ "$(commits "$GRID_PRIVATE_DIR")" -eq "$before" ]
+}
+
+@test "git internals of the OTHER repo (hook, info/exclude) are detected and nothing is committed" {
+  mk_tx 6
+  mkother
+  export STUB_CLAUDE_MODE=handoff-githook-other STUB_HANDOFF_DIR="$OR"
+  before="$(commits "$OR")"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "hooks/post-commit"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "info/exclude"
+  [ "$(commits "$OR")" -eq "$before" ]
+}
+
+@test "a new symlink beside the pair is unexpected-file" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-symlink
+  before="$(commits "$P")"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "evil-link"
+  [ "$(commits "$P")" -eq "$before" ]
+  [ -L "$P/LOGS/evil-link" ]            # detect only: nothing is deleted
+}
+
+@test "a pre-planted symlink at the handoff path is not accepted as the handoff" {
+  mk_tx 6
+  : > "$MOCK_HOOK_ROOT/elsewhere.md"
+  ln -s "$MOCK_HOOK_ROOT/elsewhere.md" "$P/LOGS/2026-01-01-testhost-stub-handoff.md"
+  touch -h -t 202001010000 "$P/LOGS/2026-01-01-testhost-stub-handoff.md"
+  export STUB_CLAUDE_MODE=handoff-logs
+  before="$(commits "$P")"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "2026-01-01-testhost-stub-handoff.md"
+  [ "$(commits "$P")" -eq "$before" ]
+}
+
+@test "a changed shell rc file in HOME is detected" {
+  mk_tx 6
+  printf 'export A=1\n' > "$HOME/.bashrc"
+  export STUB_CLAUDE_MODE=handoff-home-dotfile
+  before="$(commits "$P")"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF ".bashrc"
+  [ "$(commits "$P")" -eq "$before" ]
+}
+
+@test "a HOME rc file the child did not touch is not reported" {
+  mk_tx 6
+  printf 'export A=1\n' > "$HOME/.bashrc"
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=done"
 }

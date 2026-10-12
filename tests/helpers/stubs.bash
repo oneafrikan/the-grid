@@ -44,7 +44,9 @@
 #     STUB_STDIN_DUMP          path: the last `-p` call's stdin is copied there
 #     STUB_CLAUDE_STDIN        path: every `-p` call's drained stdin is copied there (same as STUB_STDIN_DUMP)
 #     Every call also records, in $STUB_DIR: claude.cwd, claude.child-env (GRID_AUTOHANDOFF_CHILD),
-#     claude.pgid, claude.pid, claude.umask (auto-handoff tests).
+#     claude.pgid, claude.pid, claude.umask, claude.env (the full environment it received)
+#     (auto-handoff tests). WP-016 modes: handoff-outside ($STUB_OUTSIDE_FILE), handoff-home-dotfile
+#     ($HOME/.bashrc), handoff-symlink, handoff-githook-other (git internals of $STUB_HANDOFF_DIR's repo).
 #     STUB_CLAUDE_MODE         unset = the behaviour above. handoff-logs | handoff-fallback | handoff-target |
 #                              handoff-extra | handoff-stray act like the auto-handoff child: write
 #                              2026-01-01-testhost-stub-{handoff,context}.md (body ${STUB_HANDOFF_BODY:-stub}) into
@@ -170,6 +172,7 @@ if [ -n "${STUB_DIR:-}" ]; then
   ps -o pgid= -p $$ | tr -d ' ' > "$STUB_DIR/claude.pgid"
   echo $$ > "$STUB_DIR/claude.pid"
   umask > "$STUB_DIR/claude.umask"
+  env > "$STUB_DIR/claude.env"   # the environment the worker handed the child (WP-016)
 fi
 # STUB_CLAUDE_MODE=handoff-* acts like the real child of hooks/lib/auto-handoff-worker.sh:
 # it writes the two handoff files and leaves. Unset (the default) = the old behaviour below.
@@ -197,6 +200,23 @@ case "${STUB_CLAUDE_MODE:-}" in
         write_pair "$PWD/LOGS"
         mkdir -p "$PWD/a/b/c/d/e"
         echo stray > "$PWD/a/b/c/d/e/stray.md" ;;
+      # WP-016: the write-only boundary failing in ways the original scan could not see.
+      handoff-outside)  # the pair, plus a file at $STUB_OUTSIDE_FILE (outside the target dir)
+        write_pair "$PWD/LOGS"
+        printf 'x\n' > "$STUB_OUTSIDE_FILE" ;;
+      handoff-home-dotfile)  # the pair, plus a line appended to the shell rc file
+        write_pair "$PWD/LOGS"
+        echo 'echo planted' >> "$HOME/.bashrc" ;;
+      handoff-symlink)  # the pair, plus a new symlink beside it
+        write_pair "$PWD/LOGS"
+        ln -s /etc/hostname "$PWD/LOGS/evil-link" ;;
+      handoff-githook-other)  # the pair into $STUB_HANDOFF_DIR (a repo), plus git internals of THAT repo
+        write_pair "$STUB_HANDOFF_DIR"
+        g="$(git -C "$STUB_HANDOFF_DIR" rev-parse --absolute-git-dir)"
+        mkdir -p "$g/hooks" "$g/info"
+        printf '#!/bin/sh\n' > "$g/hooks/post-commit"
+        echo '# planted' >> "$g/info/exclude"
+        : > "$g/HEAD.evil" ;;
     esac
     exit "${STUB_CLAUDE_EXIT:-0}" ;;
 esac
