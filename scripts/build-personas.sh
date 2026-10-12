@@ -48,6 +48,9 @@ trap 'rm -rf "$tmp"' EXIT
 
 # Pin the private roles dir to empty: private roles must never be exported.
 export GRID_PRIVATE_ROLES_DIR=
+# Same for the install identity: an operator-specific user.yaml (or a GRID_USER_CONFIG left in the
+# environment) must not reach a committed export. Same pin as build-plugins.py and compose-goldens.sh.
+export GRID_USER_CONFIG=agent-factory/user.public.yaml
 
 # Compose every public config's portable target, then flatten into $tmp/personas.
 # Glob expansion order is locale-dependent, so LC_ALL=C above pins it.
