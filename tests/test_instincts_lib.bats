@@ -901,3 +901,25 @@ vjson() {
   [[ "$stderr" == *"truncated"* ]]
   [ $((SECONDS - start)) -lt 10 ]
 }
+
+# --- WP-028 round 2: whitespace is normalised to a space, never deleted -----------------------
+
+@test "drop_sensitive_lines and sanitize: tab, VT, FF, NBSP, U+2028 and friends become a space, not nothing" {
+  run pylib 'for sep in ["\t", "\x0b", "\x0c", "\xa0", "　", " ", " ", "\x85", "\r"]:
+    a = lib.drop_sensitive_lines("mysql" + sep + "-p" + sep + "x")
+    b = lib.sanitize("mysql" + sep + "-p" + sep + "x")
+    assert "mysql" in a and "-p" in a and "mysql-p" not in a, (repr(sep), a)
+    assert b == "mysql -p x", (repr(sep), b)
+print("ok")'
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "scrub: a secret flag separated by any whitespace class is redacted" {
+  run pylib 'for sep in ["\t", "\x0b", "\x0c", "\xa0", "　", " ", "\x85"]:
+    out = lib.scrub("mysql" + sep + "-p" + sep + "hunter2x")
+    assert "hunter2x" not in out and "[REDACTED]" in out, (repr(sep), out)
+print("ok")'
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}

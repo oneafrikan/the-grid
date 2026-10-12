@@ -128,8 +128,20 @@ def _is_hidden(ch: str) -> bool:
 
 
 def _strip_hidden(text: str, keep: str = "") -> str:
-    """Drop hidden/control characters, except any character listed in `keep`."""
-    return "".join(c for c in text if c in keep or not _is_hidden(c))
+    """Drop hidden/control characters, except any character listed in `keep`.
+
+    A hidden character that is also whitespace (tab, VT, FF, CR, NEL, U+2028/2029, the
+    C0 separators) becomes a space instead of vanishing: deleting it would glue the words
+    either side together (`mysql<TAB>-p<TAB>x` -> `mysql-px`), and the secret-flag rules,
+    which need whitespace before the flag, would then match nothing.
+    """
+    out = []
+    for c in text:
+        if c in keep or not _is_hidden(c):
+            out.append(c)
+        elif c.isspace():
+            out.append(" ")
+    return "".join(out)
 
 
 # Key names whose value is a secret. `auth` must not eat `author(s|ed)`, but must

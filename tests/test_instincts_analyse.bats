@@ -904,6 +904,23 @@ sys.exit(analyse.main(["analyse"]))'
   contains "$output" "git status"
 }
 
+@test "digest: a secret flag separated by a tab or NBSP is redacted, not glued into one word" {
+  # (VT/FF/U+2028 are covered at unit level in test_instincts_lib: the obs helper splits lines on them.)
+  {
+    printf 's%s|tool|Bash|0|mysql\t-p\thunter2x\n' 1 2
+    printf 's%s|tool|Bash|0|docker\302\240login\302\240-u\302\240me\302\240-p\302\240hunter2x\n' 1 2
+    printf 's%s|tool|Bash|0|curl\t-u\tuser:hunter2x\thttps://example.test/x\n' 1 2
+    printf 's%s|tool|Bash|0|git status\n' 1 2
+  } | obs
+  neutral 40
+  analyse_run --dry-run
+  [ "$status" -eq 0 ]
+  lacks "$output" "hunter2x"
+  lacks "$output" "mysql-p"
+  lacks "$output" "docker-login"
+  contains "$output" "git status"
+}
+
 @test "validation: an item holding an email, IPv4, SSN or absolute path is dropped as pii" {
   seed_bats
   local at='@'
