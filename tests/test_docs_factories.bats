@@ -43,16 +43,29 @@ GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
   cd "$GRID_ROOT"
   [ -f automation-factory/patterns/issue-loop/run-issues.sh ]
   [ -f automation-factory/patterns/issue-loop/README.md ]
-  # the pattern's own README is not bannered as retired, only given a status note
-  ! grep -q 'RETIRED - do not deploy' automation-factory/patterns/issue-loop/README.md
+  # nothing under automation-factory/ carries the retired banner: the factory is not retired
+  # (its pattern README gets a status note, the generic playbook a neutral one)
+  ! grep -rqiE 'retired[ -]+do not deploy' automation-factory
 }
 
 @test "retired loop docs carry the banner" {
   cd "$GRID_ROOT"
-  run grep -l 'RETIRED - do not deploy' docs/uplift-runbook.md automation-factory/docs/secure-agent-loop.md \
+  run grep -l 'RETIRED - do not deploy' docs/uplift-runbook.md \
     _retired/issue-loop/loop/README.md _retired/issue-loop/RETIRED.md
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | wc -l)" -eq 4 ]
+  [ "$(printf '%s\n' "$output" | wc -l)" -eq 3 ]
+}
+
+@test "the generic secure-loop playbook carries a neutral status note, not the retired banner" {
+  cd "$GRID_ROOT"
+  local f=automation-factory/docs/secure-agent-loop.md
+  # the note points at RETIRED.md and says the instance (not the playbook) is retired
+  head -n 3 "$f" | grep -q '_retired/issue-loop/RETIRED.md'
+  head -n 3 "$f" | grep -qi 'instance'
+  head -n 3 "$f" | grep -qi 'validate'
+  # the factual status paragraph and the table annotation stay
+  grep -q 'Status of the code this playbook drives' "$f"
+  grep -q 'not enforced, see RETIRED.md' "$f"
 }
 
 @test "retired loop: RETIRED.md exists and names the GitHub cleanup order" {

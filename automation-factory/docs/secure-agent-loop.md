@@ -1,4 +1,4 @@
-> **RETIRED - do not deploy.** The-grid's own unattended issue-loop is abandoned; this playbook is kept as history, not as a procedure to follow. See [_retired/issue-loop/RETIRED.md](../../_retired/issue-loop/RETIRED.md).
+> **Status.** The-grid's own unattended issue-loop instance is retired and quarantined (see [_retired/issue-loop/RETIRED.md](../../_retired/issue-loop/RETIRED.md)). This generic playbook remains the factory reference, but its isolation claims were not fully enforced in that instance (RETIRED.md lists the known defects), so validate each property before relying on it.
 
 # Secure unattended agent loop: OS user + GitHub App + trust gate
 
