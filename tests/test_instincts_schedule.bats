@@ -347,6 +347,28 @@ sync_as() {
   [ "$(git -C "$REMOTE" rev-parse main)" = "$(git -C "$PA" rev-parse main)" ]
 }
 
+@test "sync: a second push URL on the remote is refused, in either order: nothing reaches it" {
+  mk_remote_and_clones
+  git init -q --bare "$BATS_TEST_TMPDIR/elsewhere.git"
+  # marker URL first, extra URL second: `get-url --push` alone would show only the first
+  git -C "$PA" remote set-url --add --push origin "$REMOTE"
+  git -C "$PA" remote set-url --add --push origin "$BATS_TEST_TMPDIR/elsewhere.git"
+  write_instinct "$PA" host-a
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"push skipped"* ]]
+  [ -z "$(git -C "$BATS_TEST_TMPDIR/elsewhere.git" for-each-ref refs/heads)" ]
+  [ "$(git -C "$REMOTE" rev-list --count main)" -eq 1 ]
+  # reverse order
+  git -C "$PA" config --unset-all remote.origin.pushurl
+  git -C "$PA" remote set-url --add --push origin "$BATS_TEST_TMPDIR/elsewhere.git"
+  git -C "$PA" remote set-url --add --push origin "$REMOTE"
+  sync_as host-a "$PA"
+  [ "$status" -eq 0 ]
+  [ -z "$(git -C "$BATS_TEST_TMPDIR/elsewhere.git" for-each-ref refs/heads)" ]
+  [ "$(git -C "$REMOTE" rev-list --count main)" -eq 1 ]
+}
+
 @test "sync: a branch pushRemote pointing at another remote is not used" {
   mk_remote_and_clones
   git init -q --bare "$BATS_TEST_TMPDIR/elsewhere.git"
@@ -374,6 +396,8 @@ sync_as() {
   # from the working tree), locally or on the remote.
   [ "$(git -C "$REMOTE" rev-parse main)" = "$before" ]
   [ "$(git -C "$PA" rev-parse HEAD)" = "$before" ]
+  # Nothing is left staged either (the refusal unstages what the run staged).
+  [ -z "$(git -C "$PA" diff --cached --name-only)" ]
 }
 
 @test "sync: a non-ASCII file name under the path does not make the guard reject the job's own commit" {

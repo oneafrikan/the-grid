@@ -335,6 +335,26 @@ install() {
   [ "$(git -C "$T/remote.git" rev-parse main)" = "$(git -C "$GRID_PRIVATE_DIR" rev-parse main)" ]
 }
 
+@test "a second push URL on the remote is refused, in either order: nothing reaches it" {
+  private_repo
+  mark_remote
+  git init -q --bare "$T/elsewhere.git"
+  # marker URL first, extra URL second: `get-url --push` alone would show only the first
+  git -C "$GRID_PRIVATE_DIR" remote set-url --add --push origin "$T/remote.git"
+  git -C "$GRID_PRIVATE_DIR" remote set-url --add --push origin "$T/elsewhere.git"
+  run bash "$WEEKLY"
+  [ "$status" -eq 0 ]
+  grep -q 'push skipped' "$T/state/usage.log"
+  [ -z "$(git -C "$T/elsewhere.git" for-each-ref refs/heads)" ]
+  # reverse order
+  git -C "$GRID_PRIVATE_DIR" config --unset-all remote.origin.pushurl
+  git -C "$GRID_PRIVATE_DIR" remote set-url --add --push origin "$T/elsewhere.git"
+  git -C "$GRID_PRIVATE_DIR" remote set-url --add --push origin "$T/remote.git"
+  run bash "$WEEKLY"
+  [ "$status" -eq 0 ]
+  [ -z "$(git -C "$T/elsewhere.git" for-each-ref refs/heads)" ]
+}
+
 @test "a branch pushRemote pointing at another remote is not used: only the verified remote is pushed to" {
   private_repo
   mark_remote
