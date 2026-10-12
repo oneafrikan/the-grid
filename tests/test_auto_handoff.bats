@@ -885,3 +885,95 @@ disallowed_rules() {
   log_has "action=done"
   [ ! -e "$BATS_TEST_TMPDIR/pwned" ]
 }
+
+# ---------------------------------------------------------------------------
+# WP-017: concurrency and false failures (hardening, refs private WP-017)
+# ---------------------------------------------------------------------------
+
+# lock_dir: the per-session lock the worker takes.
+lock_dir() { printf '%s\n' "$GRID_HOOK_STATE_DIR/handoff/$SID.lock"; }
+
+@test "five parallel hooks for one session spawn exactly one claude" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs STUB_CLAUDE_SLEEP=2
+  local i
+  for i in 1 2 3 4 5; do fire & done
+  wait
+  five_logged() { [ "$(grep -cE 'action=(done|error|skip)' "$LOG" 2>/dev/null)" -eq 5 ]; }
+  wait_for 30 five_logged
+  [ "$(grep -c '^claude ' "$STUB_LOG")" -eq 1 ]
+  [ "$(grep -c 'action=spawn' "$LOG")" -eq 1 ]
+  [ "$(grep -c 'reason=already-running' "$LOG")" -eq 4 ]
+}
+
+@test "a fresh lock for the session skips with already-running; a stale one is taken over" {
+  mk_tx 6
+  mkdir -p "$(lock_dir)"
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=skip reason=already-running"
+  [ ! -e "$STUB_DIR/claude.pid" ]
+  [ -d "$(lock_dir)" ]                      # not ours: left alone
+  touch -t 202001010000 "$(lock_dir)"       # older than TIMEOUT + 300 s
+  : > "$LOG"
+  run_worker
+  log_has "action=done"
+  [ ! -d "$(lock_dir)" ]                    # released by the run that took it
+}
+
+@test "the session lock is released on every exit path" {
+  mk_tx 6
+  export STUB_CLAUDE_EXIT=3
+  run_worker
+  log_has "action=error reason=claude-exit-3"
+  [ ! -d "$(lock_dir)" ]
+}
+
+# The marker is written before the child spawns, so an error run is not retried by every
+# later SessionEnd of the same session (each retry is a paid model call).
+@test "an errored run still leaves the turn marker: the next end is no-new-turns" {
+  mk_tx 6
+  export STUB_CLAUDE_EXIT=3
+  run_worker
+  log_has "action=error reason=claude-exit-3"
+  : > "$LOG"; : > "$STUB_LOG"
+  run_worker
+  log_has "action=skip reason=no-new-turns"
+  [ "$(grep -c '^claude ' "$STUB_LOG")" -eq 0 ]
+}
+
+@test "PATH without perl logs skip reason=no-perl and starts nothing" {
+  mk_tx 6
+  nop="$(path_without 'perl*')"
+  sessionend_payload "$SID" "$TXN" "$P" | PATH="$nop" bash "$REPO_ROOT/hooks/run.sh" auto-handoff
+  log_has "session=$SID action=skip reason=no-perl"
+  [ ! -e "$STUB_DIR/claude.pid" ]
+}
+
+@test "a 300-character session id is bad-payload, in the hook and in the worker" {
+  mk_tx 6
+  long="$(printf 'a%.0s' $(seq 300))"
+  sessionend_payload "$long" "$TXN" "$P" | bash "$REPO_ROOT/hooks/run.sh" auto-handoff
+  [ "$(grep -c 'action=skip reason=bad-payload' "$LOG")" -eq 1 ]
+  [ ! -e "$STUB_DIR/claude.pid" ]
+  : > "$LOG"
+  SID="$long"
+  run_worker
+  log_has "action=skip reason=bad-payload"
+  [ ! -e "$STUB_DIR/claude.pid" ]
+}
+
+@test "the handoff command tag typed mid-text is not already-ran; a real /handoff line still is" {
+  tx human-string "q1 please explain <command-name>/handoff</command-name> to me" > "$TXN"
+  local i
+  for ((i = 2; i <= 6; i++)); do tx human-string "question $i" >> "$TXN"; done
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  refute log_has "reason=already-ran"
+  log_has "action=done"
+  : > "$LOG"
+  rm -rf "$GRID_HOOK_STATE_DIR/handoff"
+  tx slash-handoff "scratch" >> "$TXN"
+  run_worker
+  log_has "action=skip reason=already-ran"
+}

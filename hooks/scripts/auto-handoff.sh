@@ -43,8 +43,9 @@ transcript="$(printf '%s' "$payload" | jq -r '.transcript_path // empty | string
 cwd="$(printf '%s' "$payload" | jq -r '.cwd // empty | strings')"
 end_reason="$(printf '%s' "$payload" | jq -r '.reason // empty | strings')"
 
-# The session id becomes a file name under the state dir: letters, digits, _ and - only.
-if ! [[ "$sid" =~ ^[A-Za-z0-9_-]+$ ]]; then skip_bad unknown; fi
+# The session id becomes a file name under the state dir: letters, digits, _ and -, 1 to 64
+# characters (a long id would break the marker, lock and quarantine names).
+if ! [[ "$sid" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then skip_bad unknown; fi
 if [ -z "$transcript" ] || [ -z "$cwd" ] || [ ! -d "$cwd" ]; then skip_bad "$sid"; fi
 
 # Detach: perl setsid() gives the worker its own session (it survives this process and
@@ -54,6 +55,11 @@ if [ -z "$transcript" ] || [ -z "$cwd" ] || [ ! -d "$cwd" ]; then skip_bad "$sid
 timeout="${GRID_AUTOHANDOFF_TIMEOUT:-900}"
 [[ "$timeout" =~ ^[0-9]+$ ]] || timeout=900
 mkdir -p "$(dirname "$LOG")" 2>/dev/null
+# No perl means no detach and no timeout: say so in the log instead of silently doing nothing.
+if ! command -v perl >/dev/null 2>&1; then
+  grid_log "$LOG" "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ) session=$sid action=skip reason=no-perl"
+  exit 0
+fi
 perl -MPOSIX -e 'POSIX::setsid(); alarm shift; exec @ARGV' "$((timeout + 60))" \
   bash "$HERE/lib/auto-handoff-worker.sh" "$sid" "$transcript" "$cwd" "$end_reason" \
   < /dev/null >> "$LOG" 2>&1 &

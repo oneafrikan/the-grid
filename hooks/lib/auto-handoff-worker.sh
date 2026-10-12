@@ -62,10 +62,14 @@ FALLBACK_ROOT="${GRID_HANDOFF_FALLBACK_DIR:-$PRIVATE/handoffs}"
 
 # Temp state, all removed by the EXIT trap (the digest is a copy of the conversation).
 DIGEST_DIR=""; SNAP_DIR=""; STAMP=""
+# Lock directories this process holds (see take_lock); released here on every exit path.
+LOCKS=()
 cleanup() {
+  local l
   [ -n "$DIGEST_DIR" ] && rm -rf "$DIGEST_DIR"
   [ -n "$SNAP_DIR" ] && rm -rf "$SNAP_DIR"
   [ -n "$STAMP" ] && rm -f "$STAMP"
+  for l in "${LOCKS[@]}"; do rmdir "$l" 2>/dev/null; done
   return 0
 }
 trap cleanup EXIT
@@ -134,9 +138,29 @@ JQ_DEFS='
 
 # ---- 0/1: payload and transcript --------------------------------------------------
 case "$SID" in ''|*[!A-Za-z0-9_-]*) SID="unknown"; finish_skip bad-payload ;; esac
+# The id is a file name (marker, lock, quarantine dir): cap it well under NAME_MAX.
+[ "${#SID}" -le 64 ] || { SID="unknown"; finish_skip bad-payload; }
 if [ -z "$TRANSCRIPT" ] || [ -z "$CWD" ] || [ ! -d "$CWD" ]; then finish_skip bad-payload; fi
 CWD_REAL="$(rp "$CWD")" || finish_skip bad-payload
 if [ ! -f "$TRANSCRIPT" ] || [ ! -r "$TRANSCRIPT" ]; then finish_skip no-transcript; fi
+
+# ---- per-session lock ------------------------------------------------------------------
+# SessionEnd can fire several times for one session (5 simultaneous payloads gave 5 paid
+# model runs, 4 of them commit-failed). mkdir is the atomic test-and-set; a lock older than
+# TIMEOUT + 300 s belongs to a worker that died without its EXIT trap and is taken over.
+# take_lock <dir>: 0 and registered for release in cleanup(), or 1 when someone holds it.
+take_lock() {
+  local d="$1" mins=$(( (TIMEOUT + 300 + 59) / 60 ))
+  if ! mkdir "$d" 2>/dev/null; then
+    [ -n "$(find "$d" -maxdepth 0 -mmin "+$mins" 2>/dev/null)" ] || return 1
+    rmdir "$d" 2>/dev/null
+    mkdir "$d" 2>/dev/null || return 1
+  fi
+  LOCKS+=("$d")
+  return 0
+}
+mkdir -p "$STATE" 2>/dev/null
+take_lock "$STATE/$SID.lock" || finish_skip already-running
 
 # Human-turn count (always computed: the marker stores it, the log shows it).
 TURNS="$(prefilter | jq -n "$JQ_DEFS"'[inputs | select(human)] | length' 2>/dev/null)"
@@ -145,7 +169,9 @@ TURNS="$(prefilter | jq -n "$JQ_DEFS"'[inputs | select(human)] | length' 2>/dev/
 if [ "$FORCE" != 1 ]; then
   # ---- 2: has a handoff already run in this session? -------------------------------
   # Three signals, anywhere in the session:
-  #   a) a user/system line whose TEXT holds <command-name>/handoff</command-name>
+  #   a) a user/system line whose TEXT STARTS with <command-name>/handoff</command-name>
+  #      (after the optional <command-message> line Claude Code emits first; a tag typed
+  #      mid-sentence is not a handoff, D33)
   #      (or /<plugin>:handoff); tool_result blocks never count, because the same tag
   #      appears inside tool output whenever a transcript is cat-ed
   #   b) an assistant Skill tool_use whose input.skill is handoff or <x>:handoff
@@ -153,7 +179,7 @@ if [ "$FORCE" != 1 ]; then
   if prefilter | jq -e -n "$JQ_DEFS"'
       any(inputs;
         ((.type == "user" or .type == "system")
-           and any((.message.content?, .content?) | texts; type == "string" and test("<command-name>/([^<>:/]+:)?handoff</command-name>")))
+           and any((.message.content?, .content?) | texts; type == "string" and test("^\\s*(<command-message>[^<]*</command-message>\\s*)?<command-name>/([^<>:/]+:)?handoff</command-name>")))
         or (.type == "assistant"
            and any(.message.content[]?; type == "object" and .type == "tool_use" and .name == "Skill"
                    and ((.input.skill // "") | test("(^|:)handoff$"))))
@@ -380,6 +406,10 @@ perl -e 'my $t = time - 2; utime $t, $t, $ARGV[0]' "$STAMP"
 TARGET_TEXT="${TARGET:-none (use the fallback directory)}"
 PROMPT="/handoff Source conversation is the digest file $DIGEST, not this session. Target directory: $TARGET_TEXT. Fallback directory: $FALLBACK."
 
+# The turn marker is written BEFORE the child runs: whatever the outcome, this session
+# is not paid for again until it gains MIN_TURNS new turns (an error outcome used to leave
+# no marker, so every later SessionEnd of the session ran the model again).
+printf '%s\n' "$TURNS" > "$STATE/$SID" 2>/dev/null
 log spawn ok "turns=$TURNS${END_REASON:+ end=${END_REASON//[^A-Za-z0-9_-]/}}${TARGET_WHY:+ target-refused=$TARGET_WHY}"
 cd "$CWD" || finish_skip bad-payload
 OUT="$SNAP_DIR/child.out"
@@ -609,7 +639,6 @@ if [ "$COMMIT" != "none" ]; then
 fi
 
 # ---- 11: marker, log, record -------------------------------------------------------
-mkdir -p "$STATE" 2>/dev/null && printf '%s\n' "$TURNS" > "$STATE/$SID" 2>/dev/null
 log 'done' ok "turns=$TURNS commit=$COMMIT${PUSH:+ push=$PUSH}"
 record ok "commit=$COMMIT${PUSH:+ push=$PUSH}"
 exit 0
