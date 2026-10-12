@@ -116,69 +116,69 @@ rules:
     downgrade: [comment]
   - id: credential-read
     severity: low
-    severity_by_class: {script: high, hook: high}
+    severity_by_class: {script: high, hook: high, test: high}
     message: reads a credential store
-    regex: '(?:~|\$HOME|\$\{HOME\})/(?:\.ssh/(?!known_hosts|config\b|\s|$)|\.aws/|\.kube/|\.config/gcloud|\.config/gh/hosts\.yml|\.netrc|\.docker/config\.json|\.npmrc|\.git-credentials)|Library/Keychains|security\s+find-(?:generic|internet)-password|\b(?:cat|less|more|head|tail|base64|xxd|cp|scp)\s+(?:\S{0,64}/)?\.env(?:\.(?!example|sample|template)\w+)?(?=\s|$)|@\.env\b'
+    regex: '(?:~|\$HOME|\$\{HOME\})/(?:\.ssh/(?!known_hosts|config\b|\s|$)|\.aws/|\.kube/|\.config/gcloud|\.config/gh/hosts\.yml|\.netrc|\.docker/config\.json|\.npmrc|\.git-credentials)|Library/Keychains|security\s+find-(?:generic|internet)-password|\b(?:cat|less|more|head|tail|base64|xxd|cp|scp)\s+(?:\S{0,64}/)?\.env(?:\.(?!example|sample|template)\w+)?(?=\s|$)|@\.env\b|\b(?:tar|zip|7z|rsync|scp|cp\s+-\w*r\w*)\b[^\n|;&]{0,80}(?:~|\$HOME|\$\{HOME\})/\.(?:ssh|aws|kube|gnupg)\b'
     downgrade: [comment]
   - id: decode-and-exec
     severity: low
-    severity_by_class: {script: high, hook: high, config: high}
+    severity_by_class: {script: high, hook: high, config: high, test: high}
     message: decodes a payload and pipes it to an interpreter
     regex: '(?:\bbase64\s+(?:-d|-D|--decode)\b|\bxxd\s+-r\b|\bopenssl\s+(?:enc|base64)\b[^\n|]{0,100}\s-d\b)[^\n|]{0,100}(?:\|[^\n|]{0,100}){0,2}\|\s*(?:\S{0,64}/)?(?:sudo(?:\s+-\S+){0,4}\s+)?(?:(?:\S{0,64}/)?env\s+)?(?:\S{0,64}/)?(?:(?:ba|z|k|da|a|c|tc|fi)?sh|python[\d.]*|node|ruby|perl|php|pwsh|deno|bun)\b'
     downgrade: [comment]
   - id: download-then-run
     severity: low
-    severity_by_class: {script: high, hook: high, config: high}
+    severity_by_class: {script: high, hook: high, config: high, test: high}
     message: downloads a file and then runs it
     regex: '\b(?:curl|wget)\b[^\n]{0,300}?(?:\s-o\s*|\s-O\s+|--output(?:=|\s+)|--output-document(?:=|\s+)|>\s*)(?P<f>[^\s;&|]+)[^\n]{0,200}?(?:chmod\s+(?:\+x|[0-7]{3,4})\s+(?:\S+\s+)?(?P=f)(?=[\s;&|)]|$)|\b(?:ba|z|k|da|a|c|tc|fi)?sh\s+(?:-\S+\s+)*(?P=f)(?=[\s;&|)]|$)|\./(?P=f)(?=[\s;&|)]|$))'
     downgrade: [comment]
   - id: eval-cat
     severity: low
-    severity_by_class: {script: high, hook: high, config: high}
+    severity_by_class: {script: high, hook: high, config: high, test: high}
     message: evals the contents of a file
     regex: '\beval\s+[\"\x27]?(?:\$\(|\x60)\s*cat\b'
     downgrade: [comment]
   - id: exec-urlopen
     severity: low
-    severity_by_class: {script: high, hook: high, config: high}
+    severity_by_class: {script: high, hook: high, config: high, test: high}
     message: executes code fetched at run time
     regex: '\bexec\s*\([^\n]{0,200}\burlopen\b|\.then\s*\(\s*eval\b|\beval\s*\(\s*await\s+fetch\b'
     downgrade: [comment]
   - id: powershell-iex
     severity: low
-    severity_by_class: {script: high, hook: high, config: high}
+    severity_by_class: {script: high, hook: high, config: high, test: high}
     message: PowerShell Invoke-Expression runs a string as code
     regex: '(?i)\b(?:iex|invoke-expression)\b'
     ignore_regex: '\|\s*iex\b|\biex\s*\(\s*(?:iwr|irm)\b'
     downgrade: [comment]
   - id: pip-git-install
     severity: low
-    severity_by_class: {script: high, hook: high, config: high}
+    severity_by_class: {script: high, hook: high, config: high, test: high}
     message: installs a package straight from a git URL (unpinned source)
     regex: '\b(?:pip3?|uv\s+pip|pipx)\s+install\b[^\n]{0,200}\bgit\+'
     downgrade: [comment]
   - id: runner-unpinned
     severity: low
-    severity_by_class: {script: high, hook: high, config: high}
+    severity_by_class: {script: high, hook: high, config: high, test: high}
     message: package runner without a pinned version
     regex: '(?:^\s*(?:\$\s+)?|[;&|(]\s*|\brun:\s*|\$\(\s*|\bexec\s+|\bsudo\s+)(?:npx|bunx|pnpm\s+dlx|yarn\s+dlx)\s+(?:--?[A-Za-z][\w-]*(?:=\S+)?\s+)*@?[\w.][\w./-]*'
     ignore_regex: '(?:^\s*(?:\$\s+)?|[;&|(]\s*|\brun:\s*|\$\(\s*|\bexec\s+|\bsudo\s+)(?:npx|bunx|pnpm\s+dlx|yarn\s+dlx)\s+(?:--?[A-Za-z][\w-]*(?:=\S+)?\s+)*@?[\w./-]+@(?:\d|latest\b)|\bnpx\s+(?:--?\S+\s+)*(?:-y|--yes)\b'
     downgrade: [comment]
   - id: exfil-pipe
     severity: low
-    severity_by_class: {script: high, hook: high, config: high}
+    severity_by_class: {script: high, hook: high, config: high, test: high}
     message: sends local files or the environment to a remote host
     regex: '\b(?:curl|wget)\b[^\n]{0,300}(?:\s(?:-d|--data\S*|-F|--form\S*)\s*=?\s*[\"\x27]?@|\s(?:-T|--upload-file)\s+\S)|\b(?:env|printenv)\b\s*(?:\|[^\n|]{0,100}){0,2}\|\s*(?:curl|wget|nc|ncat|socat)\b'
     downgrade: [comment]
   - id: destructive-system
     severity: low
-    severity_by_class: {script: high, hook: high, config: high}
+    severity_by_class: {script: high, hook: high, config: high, test: high}
     message: deletes the home directory or edits sudoers
     regex: '\brm\s+-[A-Za-z]*[rR][A-Za-z]*\s+(?:-\S+\s+)*(?:~|\$HOME|\$\{HOME\})/?\*?(?=\s|$|;|&|\|)|/etc/sudoers(?:\.d)?\b'
     downgrade: [comment]
   - id: claude-config-write
     severity: low
-    severity_by_class: {script: high, hook: high, config: high}
+    severity_by_class: {script: high, hook: high, config: high, test: high}
     message: writes under ~/.claude/ (the agent's own configuration)
     regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install|rsync)\b[^\n|;&]{0,200}?|\bsed\s+-i\S*[^\n|;&]{0,200}?)\s*[\"\x27]?(?:~|\$HOME|\$\{HOME\})/\.claude/'
     downgrade: [comment]
@@ -202,7 +202,7 @@ rules:
     owned_severity: low
     message: package.json lifecycle script runs on install
     regex: '"(?:preinstall|install|postinstall|prepare)"\s*:\s*"'
-    applies: [config]
+    applies: [config, hook, test]
     downgrade: []
   - id: allowed-tools-bash
     severity: high
