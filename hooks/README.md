@@ -103,9 +103,8 @@ Tuning (read by the two guards; defaults are fine for normal use):
 
 Claude Code treats a hook that times out as non-blocking, so a slow guard is an
 absent guard. Both guards therefore bound their work with caps rather than rely on the
-tokenizer being fast on every input: a command over the byte or token cap, with more
-than 8 heredocs, or with substitutions nested deeper than 16, is refused instead of
-tokenized (the cost at the caps is about 1 to 2 s of CPU on a busy machine, not zero);
+tokenizer being fast on every input: a command over the byte or token cap, or with
+substitutions nested deeper than 16, is refused instead of tokenized (the cost at the caps is about 1 to 2 s of CPU on a busy machine, not zero);
 the secret scan stops at its line cap, its 1 MB matcher-input cap or a 3 s time budget
 (`oversize-scan`), and a candidate line over 256 KB blocks as `oversize-line`. These
 are bounds, not a proof: an unusual input can still cost more than measured. Both catalogue entries carry
@@ -294,9 +293,11 @@ The guards do not inspect:
 - other shell expansions that build a word: brace expansion (`{git,commit,-n}`,
   `--no-{verify,x}`), pathname globs in a command word (`/usr/bin/g?t commit -n`), and
   `${x}` / `$((..))` results,
-- a heredoc opened inside backticks or `$( )` and closed before its terminator, and a
-  heredoc delimiter that contains a quote or backslash (that one fails closed, see below),
 - nested escaped backticks (`` `echo \`git commit -n\`` ``),
+- data written to a file and executed later (`cat > run.sh <<EOF ... EOF; sh run.sh`): the
+  same hole as a script written with the Write tool,
+- an interpreter that runs git from a quoted string (`python3 -c "os.system('git ...')"`,
+  `node -e "execSync('git ...')"`),
 - `cp`, `ln -sf`, `dd`, `install`, `unlink` and `find -delete` are read as writers, but a
   hook file changed by a program the guard does not know (a script, `git` itself via
   `core.hooksPath`) is not,
@@ -314,25 +315,26 @@ Parentheses end a segment and a word-initial `#` starts a comment, so `git commi
 just `git commit`. A backslash-newline joins a word (`git commit --no-\<newline>verify` is
 `--no-verify`).
 
-Quote state is tracked so that one quote cannot hide a later command: a heredoc body never
-drives quote tracking (each body line starts with fresh quote state); `$'..'` strings end
-at an unescaped `'`; `$( )` inside double quotes has its own quotes.
+Quote state is tracked so that one quote cannot hide a later command: `$'..'` strings end
+at an unescaped `'`, and `$( )` or backticks inside double quotes have their own quotes. If
+a quote or substitution is still open at the end of a command that names git, the guard
+blocks with "a quote or substitution in this command is not closed": it cannot tell where
+later commands start, so it fails closed.
 
-Heredoc bodies default to CODE. The decision is made when the body starts, from the whole
-line that holds `<<`: the body is skipped as data only when nothing on that line is a shell
-or interpreter (`sh`, `bash`, `eval`, `source`, `.`, `xargs`, `env`, `sudo`, `ssh`,
-`python`, `perl`, `ruby`, `node`, `-c`), the delimiter is a plain word (`[A-Za-z0-9_]+`,
-optionally in one matching pair of quotes), and a data sink is on the line (`cat`, `tee`,
-`read`, `git ... -F`, `gh ... --body-file`). That keeps a commit message or PR body that
-says "git push --force" from blocking, while `cat <<'EOF' | sh`, `source /dev/stdin <<EOF`
-and `bash -s` bodies are read. Under an unquoted delimiter a data body line holding `$(`
-or a backtick is read too (the shell runs it). `<<` is not a heredoc inside `(( ))`, right
-after a digit, `)` or `]`, as `<<<`, or as `<<-` followed by a blank or digit: the text
-stays code. A heredoc delimiter with a backslash or a stray quote, more than 8 heredocs,
-or substitutions nested deeper than 16 block with "command too complex to inspect"
-(only for a command that names git). If a quote or substitution is still open at the end
-of the command, the guard blocks with "a quote or substitution in this command is not
-closed": it cannot tell where later commands start, so it fails closed.
+Heredoc bodies are plain code. There is no heredoc modelling: `<<` is an ordinary word and
+a body is read like any other lines of shell text, whatever consumes it (`| sh`,
+`source /dev/stdin <<EOF`, `python3<<EOF`, a nested heredoc, arithmetic `1<<2`). That
+removes every way to get a "data" heredoc wrong, at a known cost:
+
+- a body that merely MENTIONS a git flag blocks (`cat <<'EOF'` holding `git commit --no-verify`
+  text, a commit message that says "never git push --force"). Write such text with the
+  Write tool and use `git commit -F <file>`;
+- an apostrophe in a body opens a quote. An odd number leaves it open at the end, so the
+  command blocks with the "not closed" message (the usual case: `don't` in a commit message
+  inside `git commit -m "$(cat <<'EOF' ... EOF)"`; avoid the apostrophe or use `-F <file>`).
+  An EVEN number pairs up and swallows the text between the apostrophes, which can hide a
+  later git call in the same command (rare, accepted: it needs two stray apostrophes and a
+  git call after them in one command).
 
 Accepted false blocks (a mistake-catcher errs towards blocking):
 
