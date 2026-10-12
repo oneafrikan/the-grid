@@ -490,3 +490,13 @@ gitmodules_entry() {
   [[ "$output" != *"source-uncurated"* ]]
   [ -L "$MOCK_SKILLS/o" ]
 }
+
+@test "--gate: an uninitialised baseline repo is named once even when several of its skills are listed" {
+  mk_skill "$T/repos/ex" s "Plain prose."
+  printf 'ex/s\nex/t\nex\n' > "$T/baseline-submodules.example.txt"
+  mk_skill "$T/skills" x
+  submodule_stub ex
+  PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$AUDIT" --gate
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"(uninitialised baseline submodules: ex)"* ]]
+}
