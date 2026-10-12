@@ -33,6 +33,11 @@ Usage (python3 scripts/budget.py ...):
 Environment: GRID_DIR (repo root; default: parent of scripts/), GRID_BASELINE
 (baseline manifest, passed through to wire.sh).
 
+Fail closed: a SKILL.md or role.yaml this reader cannot measure faithfully (UTF-8 BOM,
+invalid UTF-8, quoted top-level key, indented `---` in the frontmatter, duplicate key, no
+description) fails --check by path and reason instead of counting 0 characters. For
+baseline (upstream) skills the same problems are only warned on stderr.
+
 Stdlib only. --check also enforces the sections/ integrity rule for split
 SKILL.md bodies (every sections/*.md indexed from SKILL.md, every index line
 resolves, no section over SECTION_MAX_BYTES).
@@ -91,6 +96,11 @@ TOTALS = [
 # whitespace-collapsed, with a flag saying whether it is "single line".
 
 KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):(?:[ \t]+(.*))?$")
+# A top-level key written in quotes is valid YAML that KEY_RE would skip, so the entry would
+# measure 0 characters while the gate printed OK (R20.sec.F8). It is reported, not skipped.
+QUOTED_KEY_RE = re.compile(r"""^["'][A-Za-z_][\w-]*["']\s*:""")
+BOM = "\ufeff"
+NO_FRONTMATTER = "no `---` frontmatter block at the top of the file"
 
 
 def _collapse(text: str) -> str:
@@ -131,43 +141,85 @@ def _scalar(rest: str, cont: list):
     return _collapse(" ".join(parts)), True
 
 
-def parse_top_level(lines: list) -> dict:
-    """{key: (value, single_line)} for every top-level `key:` in `lines`."""
-    out, i = {}, 0
+def parse_top_level(lines: list):
+    """({key: (value, single_line)}, problems) for every top-level `key:` in `lines`.
+
+    `problems` lists what this reader cannot measure faithfully (quoted key, duplicate
+    key); the caller reports them, so a form it mishandles fails the gate instead of
+    silently measuring 0 characters."""
+    out, problems, i = {}, [], 0
     while i < len(lines):
         m = KEY_RE.match(lines[i])
+        if QUOTED_KEY_RE.match(lines[i]):
+            problems.append(f"top-level key is quoted ({lines[i].split(':')[0].strip()}): "
+                            "the budget reader only understands bare keys; write it unquoted")
         i += 1
         if not m:
             continue
         key, rest = m.group(1), m.group(2) or ""
+        if key in out:
+            problems.append(f"duplicate top-level key {key!r} (parsers disagree on which one wins)")
         cont = []
         # Continuation = blank or indented lines directly after the key.
         while i < len(lines) and (not lines[i].strip() or lines[i][0] in " \t"):
             cont.append(lines[i]); i += 1
         out[key] = _scalar(rest, cont)
-    return out
+    return out, problems
 
 
-def read_frontmatter(path: str) -> dict:
-    """Parsed top-level keys of a SKILL.md's `---` frontmatter ({} if none)."""
-    with open(path, encoding="utf-8") as fh:
-        lines = fh.read().splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}
-    end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), len(lines))
-    return parse_top_level(lines[1:end])
+def read_text(path: str):
+    """(text or None, problems). Strict UTF-8: a file that is not valid UTF-8 is a named
+    problem, never a traceback. A leading BOM is stripped (so the entry is still measured
+    as the author meant it) and reported, because a reader that does not strip it sees no
+    frontmatter at all."""
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return None, [f"not valid UTF-8 (byte {exc.start}): the description cannot be measured"]
+    if text.startswith(BOM):
+        return text[1:], ["begins with a UTF-8 BOM before the first line (a reader that does "
+                          "not strip it sees no frontmatter); remove the BOM"]
+    return text, []
 
 
-def read_yaml(path: str) -> dict:
-    with open(path, encoding="utf-8") as fh:
-        return parse_top_level(fh.read().splitlines())
+def read_frontmatter(path: str):
+    """({key: (value, single_line)}, problems) for a SKILL.md's `---` frontmatter.
+
+    The block ends at the first COLUMN-0 `---`, as in YAML. An indented `---` before it
+    (inside a block scalar) is content to YAML but ended the block for older readers, so
+    it is reported; the text after it is still measured."""
+    text, problems = read_text(path)
+    if text is None:
+        return {}, problems
+    lines = text.splitlines()
+    if not lines or lines[0].rstrip() != "---":
+        return {}, problems + [NO_FRONTMATTER]
+    end = next((i for i in range(1, len(lines)) if lines[i].rstrip() == "---"), len(lines))
+    if any(ln.strip() == "---" for ln in lines[1:end]):
+        problems.append("an indented `---` inside the frontmatter: some readers end the "
+                        "block there; rewrite the text so no line is only `---`")
+    fm, more = parse_top_level(lines[1:end])
+    return fm, problems + more
+
+
+def read_yaml(path: str):
+    """({key: (value, single_line)}, problems) for a role.yaml."""
+    text, problems = read_text(path)
+    if text is None:
+        return {}, problems
+    meta, more = parse_top_level(text.splitlines())
+    return meta, problems + more
 
 
 # --------------------------------------------------------------------------
 # Measurement
 # --------------------------------------------------------------------------
-def make_entry(name, path, desc, single_line, wtu, disabled, truncate_at):
-    """One listing entry. `path` is repo-relative (printed in failures)."""
+def make_entry(name, path, desc, single_line, wtu, disabled, truncate_at, problems=()):
+    """One listing entry. `path` is repo-relative (printed in failures). `problems` are
+    what the reader could not measure faithfully; --check fails on them for owned entries
+    and only warns for baseline (upstream) ones."""
     if disabled:
         listing = ""                         # description never reaches context
     else:
@@ -180,15 +232,22 @@ def make_entry(name, path, desc, single_line, wtu, disabled, truncate_at):
         "chars": len(name) + len(listing) + ENTRY_OVERHEAD,
         "single_line": single_line,
         "disabled": disabled,
+        "problems": list(problems),
     }
 
 
 def skill_entry(name, skill_md, rel, truncate_at):
-    fm = read_frontmatter(skill_md)
+    fm, problems = read_frontmatter(skill_md)
     desc, single = fm.get("description", ("", True))
     wtu = fm.get("when_to_use", ("", True))[0]
     disabled = fm.get("disable-model-invocation", ("", True))[0].lower() == "true"
-    e = make_entry(name, rel, desc, single, wtu, disabled, truncate_at)
+    # A skill that is never listed (disable-model-invocation) has no description to
+    # under-count, so it may omit the key. An unreadable file or missing block already
+    # has its own problem above.
+    if "description" not in fm and not disabled and not any(
+            p == NO_FRONTMATTER or p.startswith("not valid UTF-8") for p in problems):
+        problems = problems + ["no description key (the entry would be measured as 0 characters)"]
+    e = make_entry(name, rel, desc, single, wtu, disabled, truncate_at, problems)
     e["body_bytes"] = os.path.getsize(skill_md)
     return e
 
@@ -216,15 +275,24 @@ def measure(grid, truncate_at):
         ry = os.path.join(rdir, name, "role.yaml")
         if name == "_retired" or not os.path.isfile(ry):
             continue
-        meta = read_yaml(ry)
+        meta, problems = read_yaml(ry)
         if "description" in meta:
             desc, single = meta["description"]
-        else:  # legacy formula: "<title>. <summary>"
+        else:  # fallback formula: "<title>. <summary>", still measured so a total exists
             title = meta.get("title", (name, True))[0]
             desc, single = f"{title}. {meta.get('summary', ('', True))[0]}", True
+            # compose.py builds the composed listing text with its own description
+            # functions (agent-factory/compose.py subagent_description), which differ from
+            # this fallback. budget.py is stdlib-only and runs without the agent-factory
+            # venv, so it cannot call them: it requires description: instead.
+            if not any(p.startswith("not valid UTF-8") for p in problems):
+                problems = problems + [f"role {name} has no description; the composed "
+                                       "listing text differs from the measured fallback"]
         orch = meta.get("orchestrator", ("", True))[0].lower() == "true"
+        # Accepted small under-count: the entry name here is the bare role dir, while the
+        # composed agent is named "<slug>-<role>", so len(name) is a few characters short.
         e = make_entry(name, os.path.join("agent-factory", "roles", name, "role.yaml"),
-                       desc, single, "", False, truncate_at)
+                       desc, single, "", False, truncate_at, problems)
         entries["orchestrator_roles" if orch else "agent_roles"].append(e)
 
     # baseline: skills the baseline manifest wires (None = not measurable here)
@@ -261,11 +329,29 @@ def load_target(grid):
     path = os.path.join(grid, TARGET_REL)
     try:
         with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
+            data = json.load(fh)
     except FileNotFoundError:
         return None
-    except ValueError as exc:
+    except ValueError as exc:       # bad JSON and invalid UTF-8 (UnicodeDecodeError) alike
         sys.exit(f"budget: {TARGET_REL} is not valid JSON: {exc}")
+    # Every later step does target.get(...), so a list, string or number would end in a
+    # traceback; a mistyped limit would crash a comparison. Say which, once, here.
+    if not isinstance(data, dict):
+        sys.exit(f"budget: {TARGET_REL} must be a JSON object")
+    for section in ("owned", "baseline"):
+        if section in data and not isinstance(data[section], dict):
+            sys.exit(f"budget: {TARGET_REL}: {section} must be a JSON object")
+    numbers = [("truncate_at", data.get("truncate_at")),
+               ("per_entry_max_chars", data.get("per_entry_max_chars"))]
+    for section in ("owned", "baseline"):
+        numbers += [(f"{section}.{k}", v) for k, v in data.get(section, {}).items()
+                    if k.endswith(("_chars", "_bytes"))]
+    for key, val in numbers:
+        # null is allowed here: run_checks reports a missing limit by name. bool is an int
+        # subclass in Python, so it is refused explicitly.
+        if val is not None and (isinstance(val, bool) or not isinstance(val, int)):
+            sys.exit(f"budget: {TARGET_REL}: {key} must be an integer (or null), got {val!r}")
+    return data
 
 
 def current_numbers(summary):
@@ -283,7 +369,8 @@ def check_sections(grid, rel_skill_md):
     """Sections integrity for one owned skill; failure strings (each names a path)."""
     skill_rel = os.path.dirname(rel_skill_md)
     sdir = os.path.join(grid, skill_rel, "sections")
-    with open(os.path.join(grid, rel_skill_md), encoding="utf-8") as fh:
+    # errors="replace": invalid UTF-8 is already a named failure from the frontmatter read.
+    with open(os.path.join(grid, rel_skill_md), encoding="utf-8", errors="replace") as fh:
         refs = set(SECTION_REF_RE.findall(fh.read()))
     on_disk = set()
     if os.path.isdir(sdir):
@@ -329,6 +416,10 @@ def run_checks(summary, target, grid=None):
     per_entry = target.get("per_entry_max_chars")
     for group in ("skills", "orchestrator_roles", "agent_roles"):
         for e in summary["entries"][group]:
+            # forms the reader cannot measure faithfully fail closed (owned files are ours
+            # to fix; baseline ones only warn, see baseline_warnings)
+            for problem in e["problems"]:
+                fails.append(f"{e['path']}: {problem}")
             if e["disabled"]:
                 continue                       # not listed, so no listing limit
             if not e["single_line"]:
@@ -347,6 +438,13 @@ def run_checks(summary, target, grid=None):
         for e in summary["entries"]["skills"]:
             fails.extend(check_sections(grid, e["path"]))
     return fails
+
+
+def baseline_warnings(summary):
+    """Problems in baseline (upstream) skills: warned, never failed, because upstream files
+    cannot be edited here and a hard failure would be unfixable."""
+    return [f"{e['path']}: {p}" for e in summary["entries"].get("baseline_skills", [])
+            for p in e["problems"]]
 
 
 def update_target(grid, summary, target, allow_raise):
@@ -431,6 +529,8 @@ def main():
         else:
             for f in fails:
                 print(f"budget: FAIL {f}")
+            for w in baseline_warnings(summary):
+                print(f"budget: WARN {w}", file=sys.stderr)
             if not fails:
                 print("budget: OK (owned totals within docs/budget-target.json)")
         if fails:

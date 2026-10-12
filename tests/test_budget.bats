@@ -82,6 +82,14 @@ skill_raw() {
   [ "$(jget "$output" owned.agent_roles.chars)" = "61" ]
   [ "$(jget "$output" owned.agent_roles.count)" = "2" ]
   [ "$(jget "$output" owned.orchestrator_roles.chars)" = "22" ]
+  # The fallback still gives a number, but a role without description: is now a --check
+  # failure (the composed listing text differs from "<title>. <summary>"; WP-060).
+  write_target 1000 1000 1000 0 250 100000
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"agent-factory/roles/legacy/role.yaml: role legacy has no description"* ]] || false
+  [[ "$output" == *"agent-factory/roles/boss/role.yaml: role boss has no description"* ]] || false
+  [[ "$output" != *"roles/explicit"* ]] || false
 }
 
 # --- (b) --check against the target -------------------------------------------
@@ -434,6 +442,163 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
   printf 'x\n' > "$OTHER_DIR/baseline.txt"; export GRID_BASELINE="$OTHER_DIR/baseline.txt"
   budget --json; first="$output"
   budget --json; [ "$output" = "$first" ]
+}
+
+# --- frontmatter the gate cannot measure faithfully fails closed (WP-060) ------------------
+# Before this, a BOM, a quoted key or an indented `---` made the description disappear from the
+# measurement and --check still printed OK. Each form below must now fail by NAME. (Whether the
+# real harness reads these forms as YAML is an operator check; the gate fails closed regardless.)
+
+@test "a UTF-8 BOM before the frontmatter fails --check, naming the file and BOM" {
+  mkdir -p "$MOCK_GRID/skills/bom"
+  printf '\xef\xbb\xbf---\nname: bom\ndescription: %s\n---\nbody\n' "$(head -c 251 /dev/zero | tr '\0' d)" \
+    > "$MOCK_GRID/skills/bom/SKILL.md"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/bom/SKILL.md: "*"BOM"* ]] || false
+}
+
+@test "a BOM-prefixed description is still measured (the total is not hidden by the failure)" {
+  mkdir -p "$MOCK_GRID/skills/bom"
+  printf '\xef\xbb\xbf---\nname: bom\ndescription: Does a thing\n---\nbody\n' > "$MOCK_GRID/skills/bom/SKILL.md"
+  budget --json
+  [ "$status" -eq 0 ]
+  [ "$(jget "$output" owned.skills.chars)" = "19" ]     # 3 + 12 + 4
+}
+
+@test "invalid UTF-8 in a SKILL.md fails --check with a named message and no traceback" {
+  mkdir -p "$MOCK_GRID/skills/bad"
+  printf -- '---\nname: bad\ndescription: caf\xe9\n---\nbody\n' > "$MOCK_GRID/skills/bad/SKILL.md"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/bad/SKILL.md: "*"UTF-8"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+}
+
+@test "invalid UTF-8 in a role.yaml fails --check with a named message and no traceback" {
+  mkdir -p "$MOCK_GRID/agent-factory/roles/bad"
+  printf 'name: bad\ndescription: caf\xe9\n' > "$MOCK_GRID/agent-factory/roles/bad/role.yaml"
+  write_target 1000 1000 1000 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL agent-factory/roles/bad/role.yaml: "*"UTF-8"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+}
+
+@test "a budget-target.json that is not an object exits non-zero with a named message, no traceback" {
+  skill_raw alpha "name: alpha" "description: Does a thing"
+  local body
+  for body in '[]' '"x"' '3' 'null'; do
+    printf '%s\n' "$body" > "$MOCK_GRID/docs/budget-target.json"
+    budget --check
+    echo "$body -> $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"docs/budget-target.json must be a JSON object"* ]] || false
+    [[ "$output" != *"Traceback"* ]] || false
+  done
+}
+
+@test "a budget-target.json with a mistyped section or number exits non-zero, no traceback" {
+  skill_raw alpha "name: alpha" "description: Does a thing"
+  local body
+  for body in '{"schema":1,"owned":[]}' '{"schema":1,"baseline":3}' \
+              '{"schema":1,"per_entry_max_chars":"250"}' '{"schema":1,"truncate_at":"x"}' \
+              '{"schema":1,"owned":{"skills_max_chars":true}}'; do
+    printf '%s\n' "$body" > "$MOCK_GRID/docs/budget-target.json"
+    budget --check
+    echo "$body -> $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"docs/budget-target.json"* ]] || false
+    [[ "$output" != *"Traceback"* ]] || false
+  done
+}
+
+@test "a quoted top-level key fails --check and names the file" {
+  skill_raw q "name: q" '"description": Quoted key probe text'
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/q/SKILL.md: "*"quoted"* ]] || false
+}
+
+@test "single-quoted keys fail too, and quoted VALUES stay fine" {
+  skill_raw sq "name: sq" "'description': x"
+  skill_raw ok "name: ok" "description: 'a quoted value'"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/sq/SKILL.md: "* ]] || false
+  [[ "$output" != *"skills/ok/SKILL.md"* ]] || false
+}
+
+@test "an indented --- inside a block scalar fails --check; the text after it is still counted" {
+  skill_raw ind "name: ind" "description: >" "  first" "  ---" "  after"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/ind/SKILL.md: "*"---"* ]] || false
+  # The block ends only at a column-0 `---`, as YAML does: "first --- after" is 15 chars.
+  budget --json
+  [ "$(jget "$output" entries.skills.0.listing_chars)" = "15" ]
+}
+
+@test "a duplicate top-level key fails --check and names the file and the key" {
+  skill_raw dup "name: dup" "description: first" "description: second"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/dup/SKILL.md: "*"duplicate"*"description"* ]] || false
+}
+
+@test "an owned skill with no description key fails --check; a disabled one is exempt" {
+  skill_raw nodesc "name: nodesc"
+  skill_raw off "name: off" "disable-model-invocation: true"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/nodesc/SKILL.md: "*"no description"* ]] || false
+  [[ "$output" != *"skills/off/SKILL.md"* ]] || false
+}
+
+@test "a SKILL.md with no frontmatter block fails --check and names the file" {
+  mkdir -p "$MOCK_GRID/skills/plain"
+  printf 'just text, no frontmatter\n' > "$MOCK_GRID/skills/plain/SKILL.md"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/plain/SKILL.md: "* ]] || false
+}
+
+@test "a role.yaml without description: fails --check and names the role" {
+  mkdir -p "$MOCK_GRID/agent-factory/roles/nodesc"
+  printf 'name: nodesc\ntitle: T\nsummary: S\n' > "$MOCK_GRID/agent-factory/roles/nodesc/role.yaml"
+  write_target 1000 1000 1000 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL agent-factory/roles/nodesc/role.yaml: role nodesc has no description"* ]] || false
+}
+
+@test "a baseline (upstream) skill with a quoted key only warns: the exit status is unchanged" {
+  mkdir -p "$MOCK_GRID/repos/x/skills/q"
+  printf -- '---\nname: q\n"description": Quoted key probe text\n---\nbody\n' > "$MOCK_GRID/repos/x/skills/q/SKILL.md"
+  printf 'x\n' > "$OTHER_DIR/baseline.txt"
+  export GRID_BASELINE="$OTHER_DIR/baseline.txt"
+  write_target 1000 0 0 1000 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"budget: WARN repos/x/skills/q/SKILL.md: "*"quoted"* ]] || false
+  [[ "$output" != *"FAIL"* ]] || false
 }
 
 # --- the real repo --------------------------------------------------------------
