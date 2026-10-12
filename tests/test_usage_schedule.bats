@@ -37,10 +37,13 @@ setup() {
   # PATH of symlinked essentials: no scheduler binary can be found.
   BIN="$T/bin"; mkdir -p "$BIN"
   local c
-  for c in bash uname mkdir rm cat dirname; do ln -s "$(command -v "$c")" "$BIN/$c"; done
+  # mktemp + mv: the installer writes unit files via a temp file and an atomic rename.
+  for c in bash uname mkdir rm cat dirname mktemp mv; do ln -s "$(command -v "$c")" "$BIN/$c"; done
 }
 
 teardown() {
+  # A test may leave a read-only dir behind; make everything removable first.
+  chmod -R u+w "$T" 2>/dev/null || true
   rm -rf "$T"
   common_teardown
 }
@@ -424,6 +427,112 @@ paths_ok() {
   GRID_STATE_DIR="$T/bad state" install launchd
   [ "$status" -eq 2 ]
   [ ! -e "$LAUNCH_AGENTS_DIR" ]
+}
+
+# --- install-schedule.sh: uninstall, symlinks, environment (WP-027) --------------
+
+# mode_of <path> — octal permission bits (portable: no stat flags).
+mode_of() { python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$1"; }
+
+@test "install with the probe passing, --uninstall with the probe failing (cron fallback) removes both unit files" {
+  # A fake `uname` (Linux) and a `systemctl` whose probe succeeds: the installer picks systemd.
+  mkdir -p "$T/probe"
+  printf '#!/bin/sh\necho Linux\n' > "$T/probe/uname"
+  printf '#!/bin/sh\nexit 0\n' > "$T/probe/systemctl"
+  chmod +x "$T/probe/uname" "$T/probe/systemctl"
+  run --separate-stderr env -u GRID_SCHEDULER PATH="$T/probe:$BIN" DISPLAY=:0 "$(command -v bash)" "$INSTALL"
+  [ "$status" -eq 0 ]
+  [ -f "$SYSTEMD_USER_DIR/grid-usage.service" ] && [ -f "$SYSTEMD_USER_DIR/grid-usage.timer" ]
+  # Now the probe fails (no systemctl on PATH): detection falls back to cron.
+  run --separate-stderr env -u GRID_SCHEDULER PATH="$T/probe-less:$BIN" DISPLAY=:0 "$(command -v bash)" "$INSTALL" --uninstall
+  [ "$status" -eq 0 ]
+  [ -z "$(find "$SYSTEMD_USER_DIR" -type f)" ]
+  [[ "$output" == *"removed "* ]]
+  [[ "$output" == *"systemctl --user disable --now grid-usage.timer"* ]]
+}
+
+@test "--uninstall from a copy of the scripts under a path with a space exits 0 and removes files" {
+  install systemd; [ "$status" -eq 0 ]
+  install launchd; [ "$status" -eq 0 ]
+  mkdir -p "$T/un safe/scripts"
+  cp -R "$BATS_TEST_DIRNAME/../scripts/usage" "$BATS_TEST_DIRNAME/../scripts/lib" "$T/un safe/scripts/"
+  # One uninstall removes the files of every scheduler, whichever one is named.
+  run --separate-stderr env PATH="$BIN" GRID_SCHEDULER=systemd "$(command -v bash)" "$T/un safe/scripts/usage/install-schedule.sh" --uninstall
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"removed "* ]]
+  [ -z "$(find "$LAUNCH_AGENTS_DIR" "$SYSTEMD_USER_DIR" -type f)" ]
+  # And a second run is a clean no-op.
+  run --separate-stderr env PATH="$BIN" GRID_SCHEDULER=launchd "$(command -v bash)" "$T/un safe/scripts/usage/install-schedule.sh" --uninstall
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"absent "* ]]
+}
+
+@test "a symlinked grid-usage.service is replaced, its target untouched, mode 0600" {
+  mkdir -p "$SYSTEMD_USER_DIR"
+  printf 'victim-original\n' > "$T/victim.txt"
+  ln -s "$T/victim.txt" "$SYSTEMD_USER_DIR/grid-usage.service"
+  install systemd
+  [ "$status" -eq 0 ]
+  [ "$(cat "$T/victim.txt")" = "victim-original" ]
+  [ ! -L "$SYSTEMD_USER_DIR/grid-usage.service" ]
+  [ "$(mode_of "$SYSTEMD_USER_DIR/grid-usage.service")" = 600 ]
+  [ "$(mode_of "$SYSTEMD_USER_DIR/grid-usage.timer")" = 600 ]
+  [[ "$output" == *"replaced symlink"* ]]
+  # No temp file left behind.
+  [ -z "$(find "$SYSTEMD_USER_DIR" -name '.*' -type f)" ]
+}
+
+@test "a relative GRID_STATE_DIR or GRID_PRIVATE_DIR exits 2 and writes nothing" {
+  GRID_STATE_DIR=rel install launchd
+  [ "$status" -eq 2 ]
+  [ ! -e "$LAUNCH_AGENTS_DIR" ]
+  GRID_PRIVATE_DIR=rel install systemd
+  [ "$status" -eq 2 ]
+  [ ! -e "$SYSTEMD_USER_DIR" ]
+}
+
+@test "the state dir exists after a launchd install" {
+  GRID_STATE_DIR="$T/fresh-state" install launchd
+  [ "$status" -eq 0 ]
+  [ -d "$T/fresh-state" ]
+}
+
+@test "a custom GRID_STATE_DIR / GRID_PRIVATE_DIR / GRID_HOST prints the not-carried note" {
+  GRID_STATE_DIR="$T/state" install systemd
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"not carried into the scheduled job"* ]]
+  # Nothing set: no note.
+  run --separate-stderr env -i PATH="$BIN" HOME="$T/home" GRID_SCHEDULER=systemd SYSTEMD_USER_DIR="$T/sd2" "$(command -v bash)" "$INSTALL"
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"not carried"* ]]
+}
+
+@test "a read-only state dir: weekly.sh exits 1 with a message" {
+  chmod 555 "$T/state"
+  # Root ignores modes; fail loudly instead of passing without testing anything.
+  [ ! -w "$T/state" ]
+  run bash "$WEEKLY"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not writable"* ]]
+}
+
+@test "weekly.sh: a pull that conflicts on the job's own file aborts its rebase, exits 0, logs it" {
+  private_repo
+  mark_remote
+  # Another clone commits a DIFFERENT usage/testhost.json first, so the job's commit conflicts.
+  git clone -q -b main "$T/remote.git" "$T/other" 2>/dev/null
+  mkdir -p "$T/other/usage"
+  printf '{"schema": 1, "other": true}\n' > "$T/other/usage/testhost.json"
+  git -C "$T/other" add usage
+  git -C "$T/other" commit -q -m "other host copy"
+  git -C "$T/other" push -q origin main
+  run bash "$WEEKLY"
+  [ "$status" -eq 0 ]
+  [ ! -d "$GRID_PRIVATE_DIR/.git/rebase-merge" ] && [ ! -d "$GRID_PRIVATE_DIR/.git/rebase-apply" ]
+  grep -q 'rebase aborted' "$T/state/usage.log"
+  grep -q 'git pull rc=[1-9]' "$T/state/usage.log"
+  # The local commit survived the abort.
+  [ "$(git -C "$GRID_PRIVATE_DIR" log -1 --format=%s | cut -c1-6)" = "usage:" ]
 }
 
 @test "(h) the plist passes plutil -lint when plutil exists" {

@@ -120,7 +120,16 @@ cmd_schedule() {
     activate="$(render_activation_commands systemd "$unit.timer")" || return 2
   fi
 
+  # The units and the cron line cannot carry these variables (that would need quoting the
+  # renderer deliberately does not do), so say so rather than let the setting look effective.
+  if [ -n "${GRID_STATE_DIR:-}${GRID_PRIVATE_DIR:-}${GRID_HOST:-}" ]; then
+    echo "instincts: note: GRID_STATE_DIR, GRID_PRIVATE_DIR and GRID_HOST are not carried into the scheduled job; it runs with their defaults. Only the log path uses the state dir ($state)." >&2
+  fi
+
   echo "# Weekly instincts analysis (Mon 06:00 local). Nothing below has been installed."
+  # The job is not free and not offline: say so before anyone pastes it.
+  # shellcheck disable=SC2016
+  echo '# Each run makes up to 5 paid model calls (cap 0.05 USD each) and needs `claude` on the job PATH (~/.local/bin is on it).'
   echo
   if [ -n "$plist_text" ]; then
     echo "# launchd: save as $plist_path"

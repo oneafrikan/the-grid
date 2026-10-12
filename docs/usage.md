@@ -114,9 +114,22 @@ identical files and prints `unchanged`.
 - launchd runs a missed job when the Mac wakes.
 - The installer exits 2 and writes nothing if the repo path or state dir contains
   a character outside `A-Z a-z 0-9 _ . / @ + -` (the shared renderer cannot escape
-  it). Move the checkout to a plain path.
-- Per-run log: `~/.grid/usage.log` (override: `GRID_STATE_DIR`). Under launchd the
-  scheduler's own stdout and stderr go to `~/.grid/io.the-grid.usage.log`.
+  it). Move the checkout to a plain path. `--uninstall` renders nothing, so it still
+  works from such a path.
+- `--uninstall` removes the plist AND both unit files whatever scheduler the probe
+  picks now (the probe can differ from install time), then prints the deactivation
+  command for each scheduler it touched.
+- Unit files are written through a private temp file and renamed (mode 0600), so a
+  symlink at the unit path is replaced (`replaced symlink` is printed), never
+  followed. If you keep your units as symlinks into a dotfiles repo, expect a plain
+  file after the next install.
+- Per-run log: `~/.grid/usage.log` (override: `GRID_STATE_DIR`, which must be an
+  absolute path; so must `GRID_PRIVATE_DIR`). Under launchd the scheduler's own
+  stdout and stderr go to `~/.grid/io.the-grid.usage.log`; the installer creates the
+  state dir for it. `GRID_STATE_DIR`, `GRID_PRIVATE_DIR` and `GRID_HOST` are NOT
+  carried into the scheduled job (only the log path uses the state dir); the
+  installer prints a note when any is set. `weekly.sh` exits 1 when the state dir
+  is not writable.
 - Test it once by hand before trusting the schedule: `bash scripts/usage/weekly.sh`.
 
 What `weekly.sh` does each run: extract into `<private>/usage/`; if the private
