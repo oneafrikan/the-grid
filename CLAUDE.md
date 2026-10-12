@@ -191,8 +191,10 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
   It runs `check-personal.sh` as the `personal` check; with no private denylist on the
   machine (CI, forks) it passes and prints `gate: PASS (skipped: personal-denylist)`.
   It runs `audit.sh --gate --quiet` as the `audit` check (owned assets + the baseline's
-  wired set; skipped loudly if `python3` or `scripts/audit.sh` is absent, and the wired half
-  is skipped by `audit.sh` while submodules are uninitialised).
+  wired set; skipped loudly if `python3` or `scripts/audit.sh` is absent). If a baseline
+  submodule is uninitialised, `audit.sh --gate` exits 2 ("wired set NOT scanned") unless
+  `--allow-partial` is given; `gate.sh` passes it only when `CI` is unset and then lists
+  `audit-wired` as skipped, so CI stays strict.
 - Read-only drift detectors (exit 1 on drift, write nothing): `catalog.sh --check`,
   `wire.sh --check`, `agent-factory/compose.py <cfg> --target claude-code --check`,
   `compose.py --lint-roles` (every role; stable `E_*` codes; `roles/_retired/` is an
