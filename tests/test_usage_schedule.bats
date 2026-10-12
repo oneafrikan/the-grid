@@ -590,6 +590,8 @@ mode_of() { python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 
   [ "$(git -C "$GRID_PRIVATE_DIR" log -1 --format=%s | cut -c1-6)" = "usage:" ]
 }
 
+# plutil ships only with macOS, so this test is skipped on every Linux CI run: the plist is
+# NOT lint-checked by CI. Run this file on a Mac to cover it (R16.qa.F13).
 @test "(h) the plist passes plutil -lint when plutil exists" {
   command -v plutil >/dev/null || skip "plutil not available"
   install launchd

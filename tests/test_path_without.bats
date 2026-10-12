@@ -42,6 +42,34 @@ teardown() { PATH="$OLDPATH"; }
   [ ! -e "$d/python3.12" ]
 }
 
+# R16.qa.F11: hiding python3 must hide the whole interpreter family, or a script that falls
+# back to python2.7 / pydoc3 still finds a python and the "no python" test proves nothing.
+@test "path_without 'python3*' python also hides python2.7 and pydoc*, nothing else" {
+  local n
+  for n in python2.7 pydoc3 pydoc2.7 python; do
+    printf '#!/bin/sh\n:\n' > "$BIN/$n"; chmod +x "$BIN/$n"
+  done
+  PATH="$BIN"
+  local d
+  d="$(path_without 'python3*' python)"
+  PATH="$OLDPATH"
+  for n in python3.12 python2.7 pydoc3 pydoc2.7 python; do
+    [ ! -e "$d/$n" ] || { echo "still on PATH: $n"; false; }
+  done
+  [ -e "$d/jq" ]
+  [ -e "$d/keepme" ]
+}
+
+@test "path_without with no python glob leaves the python family alone" {
+  printf '#!/bin/sh\n:\n' > "$BIN/python2.7"; chmod +x "$BIN/python2.7"
+  PATH="$BIN"
+  local d
+  d="$(path_without jq)"
+  PATH="$OLDPATH"
+  [ -e "$d/python2.7" ]
+  [ -e "$d/python3.12" ]
+}
+
 @test "path_without caches per bats file: same globs reuse the dir, different globs do not" {
   PATH="$BIN"
   local a b c

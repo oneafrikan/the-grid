@@ -234,6 +234,10 @@ run_personal_check() {
   return "$rc"
 }
 
+# The bats-core version the suite is written for; must equal tests/lib/bats-core's package.json
+# (tests/test_gate.bats checks that). Bump both together when the submodule pointer moves.
+PINNED_BATS_VERSION="1.13.0"
+
 run_bats() {
   # A fresh worktree has no submodule checkouts, so the hook would block every commit there
   # until someone ran the init by hand. Try that one init (only this submodule; it reuses the
@@ -244,6 +248,15 @@ run_bats() {
   fi
   if [ ! -x tests/lib/bats-core/bin/bats ]; then
     echo "    bats missing — run: git submodule update --init" >&2; return 1
+  fi
+  # A moved submodule pointer or a wrong checkout must not pass silently (R16.qa.F14).
+  # `bats --version` prints "Bats X.Y.Z".
+  local bats_ver
+  bats_ver="$(tests/lib/bats-core/bin/bats --version 2>/dev/null)" || bats_ver=""
+  if [ "${bats_ver#Bats }" != "$PINNED_BATS_VERSION" ]; then
+    echo "    bats version is '${bats_ver:-unknown}', the gate pins $PINNED_BATS_VERSION" >&2
+    echo "    fix: git submodule update --init tests/lib/bats-core (or bump PINNED_BATS_VERSION with the submodule)" >&2
+    return 1
   fi
   # Run under a per-run TMPDIR so a test that forgets its rm -rf is caught here: bats
   # removes its own run dir on exit, so anything still in this dir was leaked by a test.

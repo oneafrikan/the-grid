@@ -34,7 +34,7 @@
 #     STUB_REVIEW_JSON, STUB_REVIEW_EXIT   the same for the review call (the one without
 #                              $LOOP_OUTCOME_FILE); default result "- [nit] stub review\nVERDICT: approve"
 #     STUB_CLAUDE_HELP         text printed for `claude --help` (default: no --max-turns)
-#     STUB_CLAUDE_LOGGED_IN    1 (default) or 0: `claude auth status --json`
+#     STUB_CLAUDE_LOGGED_IN    1 (default) or 0: `claude auth status --json` (0 also exits 1, as the real one does)
 #     STUB_ENV_LOG             per `-p` call: GH_TOKEN, GITHUB_TOKEN, CLAUDE_CODE_OAUTH_TOKEN
 #                              (value or <unset>), stdin byte count, cwd (default $STUB_DIR/env.log)
 #     STUB_WORKER_COMMIT[_N]=1 a worker call (LOOP_OUTCOME_FILE set) creates and commits a file in its cwd
@@ -95,7 +95,8 @@
 #     STUB_LOGINCTL_FAIL       1 makes every loginctl call exit 1
 #
 #   timeout
-#     Drops `-k N` / `--kill-after N` and the SECS argument, then execs the rest.
+#     Drops `-k N` / `--kill-after N|=N`, `-s SIG` / `--signal SIG|=SIG`, `--foreground`,
+#     `--preserve-status` and the SECS argument, then execs the rest (tests/test_stubs.bats).
 #
 #   systemctl, launchctl, crontab
 #     Log their argv and do nothing: a test asserts they were never called.
@@ -160,9 +161,10 @@ case "${1:-}" in
     else printf 'Usage: claude [options]\n  --model <m>\n  --max-budget-usd <n>\n  --output-format <f>\n'; fi
     exit 0 ;;
   auth)
-    if [ "${STUB_CLAUDE_LOGGED_IN:-1}" = 1 ]; then echo '{"loggedIn": true, "authMethod": "stub"}'
-    else echo '{"loggedIn": false}'; fi
-    exit 0 ;;
+    # The real `claude auth status` exits 1 when logged out (R16.qa.F10), so a caller that
+    # forgets to handle that status is caught here, not only on a real logged-out machine.
+    if [ "${STUB_CLAUDE_LOGGED_IN:-1}" = 1 ]; then echo '{"loggedIn": true, "authMethod": "stub"}'; exit 0
+    else echo '{"loggedIn": false}'; exit 1; fi ;;
 esac
 stub_log claude "$@"
 # ---- auto-handoff worker call (hook-profiles group 3) ----
@@ -449,8 +451,14 @@ EOF
     printf '. %s\n' "$lib"
     cat <<'EOF'
 stub_log timeout "$@"
-while [ "${1:-}" = "-k" ] || [ "${1:-}" = "--kill-after" ]; do
-  shift 2
+# GNU timeout options we drop (R16.qa.F10): the ones that take a value as a separate word,
+# the attached forms (--kill-after=N, -k5, -sKILL), and the flags that take none.
+while :; do
+  case "${1:-}" in
+    -k|--kill-after|-s|--signal) shift 2 ;;
+    --kill-after=*|--signal=*|-k?*|-s?*|--foreground|--preserve-status) shift ;;
+    *) break ;;
+  esac
 done
 shift   # SECS
 exec "$@"
@@ -481,7 +489,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
     -w) fmt="$2"; shift 2 ;;
-    -X|-H|-d|--data|--max-time) shift 2 ;;
+    # options whose VALUE is a separate word: consume it so it is not mistaken for the URL (R16.qa.F10)
+    -X|-H|-d|--data|--max-time|--retry|--retry-delay|--connect-timeout|-u|--user) shift 2 ;;
     -*) shift ;;
     *) url="$1"; shift ;;
   esac
