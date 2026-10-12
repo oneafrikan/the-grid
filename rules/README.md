@@ -49,6 +49,10 @@ paths:
   (`E_STYLE`).
 - Size caps: 4096 bytes per rule file (`E_FILE_SIZE`), 9216 bytes per pack (`E_PACK_SIZE`).
 - File and pack names are lowercase kebab-case (`E_NAME`).
+- No line, fenced or not, may start with `<!-- BEGIN the-grid rules` or `<!-- END the-grid rules`
+  or contain `the-grid:rules` (`E_MARKER`): those strings delimit the managed block and the
+  generated Cursor files, and a copy inside a rule body would wedge delivery and removal.
+  Plain prose such as "the-grid rules" is fine.
 
 ## pack.yaml
 
@@ -158,3 +162,19 @@ fidelity: fetches every cited URL and quotes support for each bullet) and
   to the instruction file keeps the old content. Edit the file through one name only.
 - **Never through a symlink:** a symlinked `--out` (or a symlink at a Cursor target path,
   even one pointing at a marker-bearing file) is refused with exit 2.
+- **Empty file kept:** removing the block from a file that held nothing else truncates it
+  to 0 bytes; the operator's opt-in file is never deleted.
+- **Byte-exact removal:** the append adds one separator newline and removal takes it back,
+  so `emit` then `emit ''` restores a newline-terminated file byte for byte (a file with no
+  final newline gains one). A file whose newlines are all CRLF gets a CRLF block.
+- **Exact markers:** the managed block is the complete BEGIN line through the complete END
+  line, matched whole-line (a CR before the newline is allowed). A user note that merely
+  starts like a marker, or quotes one marker, is user text. Residual: a user fence that
+  quotes our complete BEGIN and END lines is still treated as our block.
+- **Re-validated delivery:** `emit` lints the rule files of every selected pack first
+  (frontmatter, paths, title, style, size, denylist and marker text). A failing pack is
+  excluded and named on stderr, the clean packs are still delivered, and the exit is 2 so
+  `wire.sh` shows red. If every selected pack fails, nothing is written.
+- **Registry limits:** `wire.sh` refuses (exit 2) a registry where two harnesses share a
+  `rules_file`, and only writes instruction files named `AGENTS.md`, `GEMINI.md` or
+  `CLAUDE.md` under `~/` (otherwise the manifest row says `rules-file-not-allowed`).
