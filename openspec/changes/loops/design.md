@@ -412,11 +412,11 @@ Signatures (stable interface; other changes call exactly these):
 | Function | Arguments | Output |
 |---|---|---|
 | `render_unit_slug` | TEXT | TEXT with every char outside `[A-Za-z0-9_.-]` replaced by `-` |
-| `render_systemd_service` | DESC WORKDIR TIMEOUT_SECS CMD [ARG…] | `[Unit]` Description; `[Service]` `Type=oneshot`, `WorkingDirectory=`, `Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin`, `ExecStart=CMD ARG…`, `TimeoutStartSec=` (TIMEOUT_SECS integer, `0` -> line omitted) |
+| `render_systemd_service` | DESC WORKDIR TIMEOUT_SECS CMD [ARG…] | `[Unit]` Description; `[Service]` `Type=oneshot`, `WorkingDirectory=`, `Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin`, `ExecStart=CMD ARG…`, `TimeoutStartSec=` (TIMEOUT_SECS integer, `0` -> line omitted) |
 | `render_systemd_timer` | DESC SERVICE_UNIT SCHEDULE [RANDOM_DELAY] | `[Timer]` `OnCalendar=*-*-* HH:MM:00` (daily) or `OnCalendar=DOW *-*-* HH:MM:00` (weekly), `Persistent=true` (always), `RandomizedDelaySec=RANDOM_DELAY` only when given, `Unit=SERVICE_UNIT`; `[Install]` `WantedBy=timers.target` |
-| `render_launchd_plist` | LABEL HOME_DIR WORKDIR LOG_DIR SCHEDULE CMD [ARG…] | plist with `Label`, `ProgramArguments` (CMD ARG…), `WorkingDirectory`, `EnvironmentVariables` `HOME`=HOME_DIR and `PATH`=HOME_DIR/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin, `StartCalendarInterval` `Hour`/`Minute` (+ `Weekday` 0=Sun…6=Sat for weekly), `StandardOutPath`/`StandardErrorPath` = LOG_DIR/LABEL.log |
+| `render_launchd_plist` | LABEL HOME_DIR WORKDIR LOG_DIR SCHEDULE CMD [ARG…] | plist with `Label`, `ProgramArguments` (CMD ARG…), `WorkingDirectory`, `EnvironmentVariables` `HOME`=HOME_DIR and `PATH`=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:HOME_DIR/.local/bin, `StartCalendarInterval` `Hour`/`Minute` (+ `Weekday` 0=Sun…6=Sat for weekly), `StandardOutPath`/`StandardErrorPath` = LOG_DIR/LABEL.log |
 | `render_crontab_line` | SCHEDULE LOG_FILE WORKDIR CMD [ARG…] | one line `MM HH * * DOW-or-* mkdir -p <dirname LOG_FILE> && cd WORKDIR && CMD ARG… >> LOG_FILE 2>&1` (DOW 0-6 for weekly) |
-| `render_activation_commands` | SCHEDULER NAME | `systemd`: `systemctl --user daemon-reload && systemctl --user enable --now NAME` (NAME = timer unit); `launchd`: `launchctl bootstrap gui/$(id -u) NAME` (NAME = plist path); `cron`: `(crontab -l 2>/dev/null; echo 'LINE') \| crontab -` with LINE = NAME. Printed text only. |
+| `render_activation_commands` | SCHEDULER NAME | `systemd`: `systemctl --user daemon-reload && systemctl --user enable --now NAME` (NAME = timer unit); `launchd`: `launchctl bootstrap gui/$(id -u) NAME` (NAME = plist path); `cron`: one guarded, idempotent line that saves `crontab -l` (aborting on any error but "no crontab"), drops an exact existing copy of LINE (= NAME), appends it and installs the file. Printed text only. |
 
 The issue-loop timer passes no RANDOM_DELAY (one fire time, Decided below);
 `budget-and-usage` passes one. A caller that receives 2 exits 2 itself ("install path
@@ -431,7 +431,7 @@ Description=issue-loop runner for owner/name
 [Service]
 Type=oneshot
 WorkingDirectory=/abs/path/to/target
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin
 ExecStart=/bin/bash /abs/path/to/target/loop/run-issues.sh
 TimeoutStartSec=<MAX_ISSUES*(ISSUE_TIMEOUT+REVIEW_TIMEOUT)+600>
 ```
@@ -526,7 +526,7 @@ from what is on disk, and nothing when identical.
 
 launchd (mac-mini profile): the plist runs `/bin/bash <target>/loop/run-issues.sh`
 directly, not `bash -l -c` as today (the runner fixes its own PATH, step 1), and sets
-`EnvironmentVariables` `HOME` and `PATH=$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`,
+`EnvironmentVariables` `HOME` and `PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin`,
 `WorkingDirectory`, and `StandardOutPath`/`StandardErrorPath` under `$HOME/.grid/logs/`
 (launchd does not create that directory; `instantiate.sh` runs `mkdir -p` on it, as
 it does for the unit dirs). A LaunchAgent only runs while the user has a GUI session,

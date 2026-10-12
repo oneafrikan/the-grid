@@ -180,7 +180,7 @@ As the dedicated loop user (all UNVERIFIED on a real box until the proving run i
 5. Enable the timer as that user (the command `instantiate.sh` printed): `systemctl --user daemon-reload && systemctl --user enable --now issue-loop-<owner>-<repo>.timer`.
 6. Fire one run by hand to look at the result first: `systemctl --user start issue-loop-<owner>-<repo>.service` (journal: `journalctl --user -u issue-loop-<owner>-<repo>.service`).
 
-The unit sets `Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin`, runs the runner as
+The unit sets `Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin`, runs the runner as
 `Type=oneshot` with `TimeoutStartSec = MAX_ISSUES x (ISSUE_TIMEOUT + REVIEW_TIMEOUT) + 600`, and has no
 `EnvironmentFile` and no `network-online.target` line (a user manager has no such unit; a network that
 is not up yet is caught by the runner's `git ls-remote` preflight, and the next timer fire retries).
