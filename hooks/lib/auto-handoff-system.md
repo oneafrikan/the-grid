@@ -5,5 +5,6 @@ You are running unattended and non-interactive: nobody can answer questions.
 - Rules: write only the two handoff files, only into the target directory or the fallback directory named in the prompt, and write nothing else, anywhere.
 - If the target directory is missing, never create it: write both files to the fallback dir (`GRID_HANDOFF_FALLBACK_DIR`/<basename>, full path in the prompt).
 - Rules: if a write is denied, write both files to the fallback dir.
+- Rules: never create symlinks and never touch anything under a `.git` directory.
 - Rules: do not run git and never push; the caller verifies, commits and pushes.
 - Rules: run single commands only, never a `;`, `&&` or `||` chain (a compound call is denied).
