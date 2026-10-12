@@ -144,7 +144,7 @@ tree_hash() { (cd "$1" && { find . | sort; find . -type f -print0 | sort -z | xa
     > "$USAGE/short.json"
   prune
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'insufficient history: 1 days of 28 required'
+  echo "$output" | grep -q 'insufficient history: 1 active days of 14 required'
   ! echo "$output" | grep -qE 'name-only|Proposals|demote|skillOverrides|agent `' || false
   echo "$output" | grep -q '^## Evidence'
   prune --json
@@ -195,7 +195,8 @@ tree_hash() { (cd "$1" && { find . | sort; find . -type f -print0 | sort -z | xa
   [ "$(agg "a['ignored']")" = '["broken.json", "future.json"]' ]
   prune
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'Ignored usage files.*broken.json, future.json'
+  # Names are printed through json.dumps (WP-058): quoted, control characters escaped.
+  echo "$output" | grep -q 'Ignored usage files.*"broken.json", "future.json"'
   # the good hosts still produce the same proposals
   echo "$output" | grep -q '^## Proposals (5: A 1, B 2, C 2)'
 }
@@ -229,6 +230,186 @@ EOF
   [ "$output" = "$with" ]
   prune --json
   [ "$output" = "$with_json" ]
+}
+
+# --- hostile and bogus host files (WP-058) ---------------------------------------
+
+@test "a pulled host file with a 2099 day leaves the window, the header and the proposals unchanged" {
+  prune --json
+  before="$(jget "$output" "[d['last_day'], d['coverage_days'], d['proposals']]")"
+  printf '{"schema":1,"host":"forged","harnesses":{"claude-code":{"days":{"2099-12-31":{"skills":{"a-used":1}}},"wired":{"skills":[],"agents":[]}}}}\n' \
+    > "$USAGE/forged.json"
+  prune --json
+  [ "$(jget "$output" "[d['last_day'], d['coverage_days'], d['proposals']]")" = "$before" ]
+  prune
+  echo "$output" | grep -q 'ending 2026-10-10'
+  echo "$output" | grep -q 'Proposals (5: A 1, B 2, C 2)'
+  # One caveat line says a day was rejected.
+  echo "$output" | grep -q 'ignored.*outside'
+}
+
+@test "the window ends at today even when a valid day tomorrow is stored" {
+  rm "$USAGE"/*.json
+  printf '{"schema":1,"host":"h","harnesses":{"claude-code":{"days":{"2026-10-08":{"skills":{"x-early":1}},"2026-10-11":{"skills":{"x-tomorrow":1}}}}}}\n' \
+    > "$USAGE/h.json"
+  # today = 2026-10-10, so 2026-10-11 is allowed (UTC rollover) but must not pull the window forward:
+  # a 3-day window is 10-08..10-10 (plus the later day), not 10-09..10-11.
+  run python3 -c 'import sys, json, datetime
+sys.path.insert(0, sys.argv[1]); import aggregate
+a = aggregate.aggregate(sys.argv[2], 3, today=datetime.date(2026, 10, 10))
+print(json.dumps(a["claude-code"]["skills"], sort_keys=True))' "$AGG" "$USAGE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"x-early": 1, "x-tomorrow": 1}' ]
+}
+
+@test "a deeply nested host file is listed in ignored and the run exits 0" {
+  python3 -c 'print("[" * 12000 + "]" * 12000)' > "$USAGE/deep.json"
+  [ "$(agg "a['ignored']")" = '["deep.json"]' ]
+  prune
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^## Proposals (5: A 1, B 2, C 2)'
+}
+
+@test "a wired agent name with a newline or a backtick cannot forge a numbered report line" {
+  printf '{"schema":1,"host":"evil","harnesses":{"claude-code":{"days":{"2026-10-10":{"skills":{"a-used":1}}},"wired":{"skills":[],"agents":["real-agent","evil\\n99. A: demote repo `beta` now","tick`name"]}}}}\n' \
+    > "$USAGE/evil.json"
+  prune
+  [ "$status" -eq 0 ]
+  ! printf '%s\n' "$output" | grep -qE '^99\.' || false
+  ! printf '%s\n' "$output" | grep -q 'demote repo `beta`' || false
+  ! printf '%s\n' "$output" | grep -q 'tick' || false
+  # The legitimate agents are still proposed, so the filter did not eat the list.
+  printf '%s\n' "$output" | grep -q 'agent `real-agent` never used'
+}
+
+@test "a newline-named unreadable usage file prints as one escaped item" {
+  printf '{' > "$USAGE/evil"$'\n'"99. forged.json"
+  prune
+  [ "$status" -eq 0 ]
+  ! printf '%s\n' "$output" | grep -qE '^99\.' || false
+  [ "$(printf '%s\n' "$output" | grep -c 'Ignored usage files')" = 1 ]
+  printf '%s\n' "$output" | grep -qF '"evil\n99. forged.json"'
+}
+
+# --- history, boundaries, odd host files (WP-059) ---------------------------------
+
+# host_days <file> <host> <first-day> <n> [skills-json] — a host file with <n> consecutive
+# active days from <first-day>, the given skill counts on the first day, one wired agent.
+host_days() {
+  python3 - "$@" <<'PY'
+import datetime, json, sys
+path, host, first, n = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+skills = json.loads(sys.argv[5]) if len(sys.argv) > 5 else {"a-used": 1}
+d0 = datetime.date.fromisoformat(first)
+days = {}
+for i in range(n):
+    day = (d0 + datetime.timedelta(days=i)).isoformat()
+    days[day] = {"skills": dict(skills) if i == 0 else {"zz-filler": 1}}
+doc = {"schema": 1, "host": host, "harnesses": {"claude-code": {"days": days,
+       "wired": {"skills": [], "agents": ["core-idle"]}}}}
+json.dump(doc, open(path, "w"))
+PY
+}
+
+@test "sparse data (two days 40 days apart) is insufficient history: no proposals" {
+  rm "$USAGE"/*.json
+  printf '{"schema":1,"host":"sparse","harnesses":{"claude-code":{"days":{"2026-09-01":{"skills":{"a-used":1}},"2026-10-10":{"skills":{"a-used":1}}},"wired":{"skills":[],"agents":["core-idle"]}}}}\n' \
+    > "$USAGE/sparse.json"
+  prune
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'insufficient history: 2 active days of 14 required'
+  ! echo "$output" | grep -qE 'Proposals|demote|name-only' || false
+  # The calendar span is still reported.
+  echo "$output" | grep -q 'Day coverage: 40 days'
+}
+
+@test "exactly 14 active days gives proposals; 13 is insufficient" {
+  rm "$USAGE"/*.json
+  host_days "$USAGE/h.json" h 2026-09-20 14
+  prune
+  echo "$output" | grep -q '^## Proposals'
+  host_days "$USAGE/h.json" h 2026-09-20 13
+  prune
+  echo "$output" | grep -q 'insufficient history: 13 active days of 14 required'
+}
+
+@test "a skill first seen inside the window is not proposed; the report counts it" {
+  prune --json
+  [ "$(jget "$output" "'a-never' in [p['name'] for p in d['proposals']]")" = "true" ]
+  printf '{"schema":1,"host":"hostC","harnesses":{"claude-code":{"days":{"2026-10-10":{"skills":{"zz":1}}},"wired_first_seen":{"skills":{"a-never":"2026-10-05"}}}}}\n' \
+    > "$USAGE/hostC.json"
+  prune --json
+  [ "$(jget "$output" "'a-never' in [p['name'] for p in d['proposals']]")" = "false" ]
+  [ "$(jget "$output" "d['newly_wired']")" = "1" ]
+  prune
+  echo "$output" | grep -q '1 newly wired skills not assessed'
+}
+
+@test "demotion needs 90% unused: exactly 90% proposes it, 89% does not" {
+  # 100 skills in one whole-repo entry; the first K are used on the first day.
+  for i in $(seq -w 0 99); do make_skill "$MOCK_GRID/repos/centi/c-$i" "c-$i"; done
+  printf 'centi\n' > "$OTHER_DIR/baseline.txt"
+  rm "$USAGE"/*.json
+  used10="$(python3 -c 'import json; print(json.dumps({"c-%02d" % i: 5 for i in range(10)}))')"
+  used11="$(python3 -c 'import json; print(json.dumps({"c-%02d" % i: 5 for i in range(11)}))')"
+  host_days "$USAGE/h.json" h 2026-09-20 15 "$used10"      # 90 of 100 unused
+  prune --json
+  [ "$(jget "$output" "[p['kind'] for p in d['proposals'] if p['kind'] == 'A']")" = '["A"]' ]
+  host_days "$USAGE/h.json" h 2026-09-20 15 "$used11"      # 89 of 100 unused
+  prune --json
+  [ "$(jget "$output" "[p['kind'] for p in d['proposals'] if p['kind'] == 'A']")" = '[]' ]
+}
+
+@test "a keep-listed skill inside a whole-repo entry blocks the demotion and is never proposed; an agent keep entry too" {
+  make_skill "$MOCK_GRID/repos/gamma/grid-help" "grid-help"
+  make_skill "$MOCK_GRID/repos/gamma/g-dead" "g-dead"
+  printf 'gamma\n' > "$OTHER_DIR/baseline.txt"
+  printf 'solo-bot\n' >> "$MOCK_GRID/docs/prune-keep.txt"
+  rm "$USAGE"/*.json
+  host_days "$USAGE/h.json" h 2026-09-20 15 '{"zz":1}'
+  python3 - "$USAGE/h.json" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+doc["harnesses"]["claude-code"]["wired"]["agents"] = ["core-idle", "solo-bot"]
+json.dump(doc, open(sys.argv[1], "w"))
+PY
+  prune --json
+  [ "$(jget "$output" "sorted(p['name'] for p in d['proposals'])")" = '["core-idle", "g-dead"]' ]
+  [ "$(jget "$output" "[p['kind'] for p in d['proposals'] if p['kind'] == 'A']")" = '[]' ]
+}
+
+@test "a -repo subtraction in the baseline removes that repo from proposal A" {
+  # dead/d-one stays wired per skill, so the repo itself must not read as a whole-repo entry.
+  printf 'alpha\ndead\n-dead\ndead/d-one\nbeta/b-slash\nbeta/grid-help\n' > "$OTHER_DIR/baseline.txt"
+  prune --json
+  [ "$(jget "$output" "[p['name'] for p in d['proposals'] if p['kind'] == 'A']")" = '[]' ]
+  [ "$(jget "$output" "'dead' in [p['name'] for p in d['proposals']]")" = "false" ]
+}
+
+@test "odd host files: days as a list, a harness block as a list, unknown schema are ignored; odd day keys are rejected, exit 0" {
+  printf '{"schema":1,"host":"l","harnesses":{"claude-code":{"days":[1,2]}}}\n' > "$USAGE/listdays.json"
+  printf '{"schema":1,"host":"b","harnesses":{"claude-code":[]}}\n' > "$USAGE/blocklist.json"
+  printf '{"schema":99,"host":"f","harnesses":{}}\n' > "$USAGE/future.json"
+  printf '{"schema":1,"host":"k","harnesses":{"claude-code":{"days":{"20261001":{"skills":{"a-used":9}},"2026-W41-1":{"skills":{"a-used":9}}}}}}\n' > "$USAGE/oddkeys.json"
+  [ "$(agg "a['ignored']")" = '["blocklist.json", "future.json", "listdays.json"]' ]
+  [ "$(agg "a['claude-code']['rejected_days']")" = "2" ]
+  # Neither odd key moved the window or added to a count.
+  [ "$(agg "[a['claude-code'][k] for k in ('first_day','last_day','coverage_days')]")" = '["2026-09-01", "2026-10-10", 40]' ]
+  [ "$(agg "a['claude-code']['skills']")" = '{"a-rare": 1, "a-used": 5}' ]
+  prune
+  [ "$status" -eq 0 ]
+}
+
+@test "a symlinked host file and an oversized host file are ignored, not read" {
+  # A symlink to a perfectly valid host file: still not a regular file in the usage dir.
+  cp "$FIX/hostA.json" "$OTHER_DIR/elsewhere.json"
+  ln -s "$OTHER_DIR/elsewhere.json" "$USAGE/linked.json"
+  # A regular file over the size cap (valid JSON, so only its size can disqualify it).
+  python3 -c 'import sys; sys.stdout.write("{\"schema\":1,\"harnesses\":{},\"pad\":\"" + "a" * 9000000 + "\"}")' > "$USAGE/huge.json"
+  [ "$(agg "a['ignored']")" = '["huge.json", "linked.json"]' ]
+  prune
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^## Proposals (5: A 1, B 2, C 2)'
 }
 
 # --- the documented read recipe -------------------------------------------------

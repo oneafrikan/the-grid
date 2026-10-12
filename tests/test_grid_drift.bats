@@ -258,7 +258,8 @@ assert d["ProgramArguments"][-2:] == ["drift", "--quiet"], d["ProgramArguments"]
   contains "$output" "00 09 * * 1"
   # The cron line is identified by its text, not by a tag comment.
   lacks "$output" "# the-grid drift"
-  contains "$output" "(crontab -l 2>/dev/null; echo '"
+  contains "$output" "crontab -l >"
+  contains "$output" "grep -vxF -- '"
 }
 
 @test "a grid path containing a space makes schedule install exit 2 and write nothing" {
@@ -310,6 +311,35 @@ assert d["ProgramArguments"][-2:] == ["drift", "--quiet"], d["ProgramArguments"]
   GRID_OS=Other run schedule remove
   [ "$status" -eq 0 ]
   contains "$output" 'crontab line containing `scripts/grid drift`'
+}
+
+@test "schedule remove with the probe failing still deletes the units and the plist" {
+  # Install under one scheduler, remove under another (what a failed probe does):
+  # remove deletes by the known file names, not by re-detecting the scheduler.
+  GRID_OS=Linux run schedule install
+  [ "$status" -eq 0 ]
+  GRID_OS=Darwin run schedule install
+  [ "$status" -eq 0 ]
+  GRID_OS=Other run schedule remove
+  [ "$status" -eq 0 ]
+  empty_dir "$SYSTEMD_USER_DIR"
+  empty_dir "$LAUNCH_AGENTS_DIR"
+  contains "$output" "systemctl --user disable --now grid-drift.timer"
+  contains "$output" 'launchctl bootout gui/$(id -u)/io.the-grid.drift'
+  contains "$output" 'crontab line containing `scripts/grid drift`'
+}
+
+@test "launchd install with an unwritable state dir prints one 'grid: cannot create' line, exit 1, no traceback" {
+  mkdir -p "$T/ro"
+  chmod 555 "$T/ro"
+  # Root ignores modes; fail loudly instead of passing without testing anything.
+  [ ! -w "$T/ro" ]
+  GRID_STATE_DIR="$T/ro" GRID_OS=Darwin run schedule install
+  chmod 755 "$T/ro"
+  [ "$status" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | grep -c 'grid: cannot create')" = 1 ]
+  lacks "$output" "Traceback"
+  empty_dir "$LAUNCH_AGENTS_DIR"
 }
 
 @test "schedule remove with nothing installed exits 0" {

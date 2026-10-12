@@ -1,15 +1,17 @@
 # Usage tracking
 
 Counts how often each skill, agent, slash command and hook is actually used, per
-machine, so the prune report (a later step) can show what is safe to drop from the
-always-loaded listing. A weekly job runs the extractor and commits one small JSON
+machine, so the prune report (`scripts/prune-report.sh`, documented below) can show
+what is safe to drop from the always-loaded listing. A weekly job runs the extractor and commits one small JSON
 file per host to your **private** repo. Nothing here is installed for you:
 activating the schedule is a manual step per machine (see [Install](#install)).
 
 ## What is collected
 
 Counts per UTC day, read from the Claude Code transcripts under
-`~/.claude/projects` (override: `CLAUDE_PROJECTS_DIR`):
+`~/.claude/projects` (override: `CLAUDE_PROJECTS_DIR`; or, when Claude Code's config
+dir is moved, `$CLAUDE_CONFIG_DIR/projects`, with skills, agents and `settings.json`
+read from the same dir):
 
 - Skill-tool calls, by skill name.
 - Agent/Task-tool calls, by subagent type.
@@ -20,15 +22,24 @@ Counts per UTC day, read from the Claude Code transcripts under
 - Which skills and agents are wired on the machine right now.
 
 Not collected: prompt or response text, file paths, project names, session ids,
-message ids, tool ids, hook commands or hook output. Skill, agent and slash names
-are stored **as seen**, so a private skill named after a client lands in the
-private repo. Keep the usage repo private.
+message ids, tool ids, hook commands or hook output. The file does hold NAMES: the
+skills and agents wired on the machine, hook names and model names. A skill, agent
+or slash name that is not wired on that machine is stored as `other`, so a private
+name (a client, a project) used from an unwired skill never leaves the machine. Keep
+the usage repo private all the same: the wired names are pushed.
 
 ## File schema
 
 One file per host: `<private>/usage/<host>.json` (default private dir
 `~/.the-grid-private`, override: `GRID_PRIVATE_DIR`). Only that host writes it, so
 git never conflicts. Keys are sorted, output is 2-space indented.
+
+The extractor rebuilds the file from a whitelist of the keys below on every write:
+anything else in an existing file (extra keys, strings, names that fail the filters)
+is dropped with a one-line stderr note. It writes through a unique temp file and a
+rename, and refuses (exit 2) a symlinked `--out` or host file, a `--host` starting
+with `.`, and an `--out` inside this checkout (checked against the script's own
+location as well as `GRID_DIR`).
 
 ```json
 {
@@ -48,6 +59,8 @@ git never conflicts. Keys are sorted, output is 2-space indented.
         }
       },
       "wired":   {"skills": ["handoff", "tdd"], "agents": ["grid-qa-engineer"]},
+      "wired_first_seen": {"skills": {"handoff": "2026-09-01", "tdd": "2026-10-02"},
+                           "agents": {"grid-qa-engineer": "2026-09-01"}},
       "listing": {"2026-10-09": {"skills": 187, "chars": 30002}}
     }
   }
@@ -63,6 +76,12 @@ git never conflicts. Keys are sorted, output is 2-space indented.
   loses data and never double counts when scans overlap.
 - `wired` is replaced only for a list the scan could produce; `updated` changes
   only when something else did.
+- `wired_first_seen` holds the first UTC day each wired name was seen (earliest
+  day wins on every merge). A host file written before the key existed is seeded
+  with its own earliest stored day, not today. The prune report never proposes a
+  skill first seen after its window began.
+- The schema number (`schema: 1`) lives in one place, `scripts/usage/usage_schema.py`,
+  with the migration plan for the day it changes; adding a key does not need a bump.
 
 ## Retention
 
@@ -107,17 +126,57 @@ identical files and prints `unchanged`.
 - launchd runs a missed job when the Mac wakes.
 - The installer exits 2 and writes nothing if the repo path or state dir contains
   a character outside `A-Z a-z 0-9 _ . / @ + -` (the shared renderer cannot escape
-  it). Move the checkout to a plain path.
-- Per-run log: `~/.grid/usage.log` (override: `GRID_STATE_DIR`). Under launchd the
-  scheduler's own stdout and stderr go to `~/.grid/io.the-grid.usage.log`.
+  it). Move the checkout to a plain path. `--uninstall` renders nothing, so it still
+  works from such a path.
+- `--uninstall` removes the plist AND both unit files whatever scheduler the probe
+  picks now (the probe can differ from install time), then prints the deactivation
+  command for each scheduler it touched.
+- Unit files are written through a private temp file and renamed (mode 0600), so a
+  symlink at the unit path is replaced (`replaced symlink` is printed), never
+  followed. If you keep your units as symlinks into a dotfiles repo, expect a plain
+  file after the next install.
+- Per-run log: `~/.grid/usage.log` (override: `GRID_STATE_DIR`, which must be an
+  absolute path; so must `GRID_PRIVATE_DIR`). Under launchd the scheduler's own
+  stdout and stderr go to `~/.grid/io.the-grid.usage.log`; the installer creates the
+  state dir for it. `GRID_STATE_DIR`, `GRID_PRIVATE_DIR` and `GRID_HOST` are NOT
+  carried into the scheduled job (only the log path uses the state dir); the
+  installer prints a note when any is set. `weekly.sh` exits 1 when the state dir
+  is not writable.
 - Test it once by hand before trusting the schedule: `bash scripts/usage/weekly.sh`.
 
 What `weekly.sh` does each run: extract into `<private>/usage/`; if the private
-dir is a git repo, `pull --rebase --autostash`, commit only `usage/<host>.json`
-with the message `usage: <host> <date>`, and push. Pull and push failures are
-logged and never fatal (a failed pull also aborts any half-finished rebase); the
-commit stays local and the next run retries. A private dir that is not a git repo
-just gets the file.
+dir is a git repo, commit only `usage/<host>.json` with the message
+`usage: <host> <date>`, `pull --rebase`, and push. Pull and push failures are
+logged and never fatal; the commit stays local and the next run retries. A private
+dir that is not a git repo just gets the file.
+
+The job never touches your own work in the private repo (shared guard:
+`scripts/lib/private-git-guard.sh`, also used by `instincts.sh sync`):
+
+- **Busy repo:** with a rebase, merge or cherry-pick in progress, a detached HEAD,
+  unmerged entries or no upstream, the whole git phase is skipped (the file is
+  still written) and the reason is logged.
+- **Dirty tree:** if a tracked file outside `usage/` is modified the pull is
+  skipped (`private repo has other changes; pull skipped`); the job still commits
+  its own file. There is no autostash. A pull that conflicts is aborted and the
+  local commit kept.
+- **Push guard:** the push only happens when every unpushed commit touches only
+  `usage/<host>.json`; otherwise it is skipped and the run exits 4.
+- **Remote marker:** the push also needs `<private>/.grid-private-remote`, whose
+  first line is the push URL of the upstream remote. Without it (or on a mismatch)
+  the push is skipped with `push skipped` in `usage.log` and the run still exits 0.
+  Create it once per machine, after confirming the repo is private
+  (`gh repo view <owner>/<private-repo> --json isPrivate`):
+  `git -C "${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}" remote get-url --push origin > "${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}/.grid-private-remote"`.
+  The marker holds the raw push URL: keep it out of any `git add -A` (list it in
+  `.git/info/exclude` of the private repo) and never put credentials in the remote URL.
+  Both jobs push exactly that remote and the upstream branch, whatever `push.default`
+  or `branch.<name>.pushRemote` say. A remote with more than one push URL makes the
+  push skip with `multiple-push-urls` in `usage.log` (the run still exits 0): `git push`
+  would send to every one of them, so keep exactly one, the marker's.
+- **Hangs and overlap:** each git call is killed after `GRID_GIT_TIMEOUT` seconds
+  (default 120) and prompts are disabled; a second run while one is active logs
+  `already running` and exits 0 (`<state>/weekly.lock`, stale after two hours).
 
 ## Reading `usage/<host>.json`
 
@@ -173,9 +232,28 @@ One `<host>.json` per machine under `${GRID_PRIVATE_DIR:-~/.the-grid-private}/us
 
 Counts only: no prompt text, paths, project names, session ids or message ids.
 
-**Names are stored as seen.** A private skill, agent or slash command named after
-a client or a project lands in the usage file, and so in the private repo. Never
-copy a usage file or a report built from one into the public repo.
+**What the extractor skips (and says so on stderr).** Each record's day is its
+timestamp converted to UTC; a timestamp that is malformed or outside
+2024-01-01..tomorrow (UTC) is dropped and counted as `bad_day`. Symlinked project
+directories and transcripts, FIFOs and other non-regular files are not followed
+(`skipped_links`); unreadable directories are counted too (`walk_errors`); an
+unreadable projects root exits 1 and leaves the host file untouched. A transcript
+line over 8 MB or nested too deep to parse is counted as a bad line. Stored names
+must be ASCII and match the name filter, and at most 500 wired names per list are kept.
+The prune report ignores stored days outside that range, never ends its window after
+today, and prints file and skill names escaped. It is for you to read: do not feed it
+to an agent that can apply proposals on its own.
+
+**Which names are stored.** Skill, agent and slash names are checked against what is
+wired on the machine (this scan plus the stored wired lists); anything else is counted
+under `other`. When nothing is wired, names are stored as seen rather than lost. The
+wired names themselves, hook names and model names are stored. Never copy a usage file
+or a report built from one into the public repo.
+
+**Do not run the gate or the prune report on a checkout you have not read.** The
+baseline measurement runs that checkout's own `scripts/wire.sh`, with a scrubbed
+environment (only `PATH`, locale, `TMPDIR` and `GRID_*`), but it is still that
+checkout's code.
 
 **De-duplication** happens in the adapter before anything is stored (resumed
 sessions copy history into new transcript files, so a raw sum double counts):
@@ -189,10 +267,15 @@ sessions copy history into new transcript files, so a raw sum double counts):
 Stored counts only ever go up (max-merge), so a de-duplication bug fixed later
 leaves inflated history until the host file is deleted and re-extracted.
 
+Assumption: de-duplication relies on a re-emitted record keeping its ORIGINAL
+timestamp (resumed transcripts do). A message re-emitted with a later timestamp after
+its original transcript was deleted would be counted again; this has not been observed
+and is accepted. If it ever is, store the de-duplication ids in the host file.
+
 ### The prune report
 
 ```
-bash scripts/prune-report.sh [--window-days 90] [--rare 2] [--min-days 28]
+bash scripts/prune-report.sh [--window-days 90] [--rare 2] [--min-days 14]
                              [--usage-dir DIR] [--out FILE] [--json]
 ```
 
@@ -202,13 +285,17 @@ bash scripts/prune-report.sh [--window-days 90] [--rare 2] [--min-days 28]
 - Candidates are the skills the baseline wires (`scripts/lib/baseline_wired.py`).
   No baseline on the machine (no `baseline-submodules.txt`, or uninitialised
   submodules): it prints `no baseline on this machine` and exits 0.
-- Window: the last `--window-days` days, ending at the latest day stored (not
-  today). Skills use = Skill-tool calls + slash invocations of the same name,
+- Window: the last `--window-days` days, ending at the latest valid day stored but
+  never later than today (UTC); stored days before 2024-01-01 or after tomorrow are
+  ignored and counted in the evidence. Skills use = Skill-tool calls + slash invocations of the same name,
   summed over all hosts. State: `never` (0), `rare` (1..`--rare`), `used`. A
   skill used on one host only is `used`.
-- Fewer than `--min-days` days of coverage (first to last stored day, all hosts):
-  prints `insufficient history: N days of M required`, no proposals, then the
-  evidence section.
+- Fewer than `--min-days` (default 14) ACTIVE days (distinct days holding data, all
+  hosts; a calendar span is not enough): prints `insufficient history: N active days
+  of M required`, no proposals, then the evidence section, which still shows the
+  calendar coverage.
+- A skill first seen wired after the window began is "newly wired": never proposed,
+  and counted as `N newly wired skills not assessed`.
 
 Proposals are numbered, largest saving first, so you can reply "apply 2, skip 3":
 

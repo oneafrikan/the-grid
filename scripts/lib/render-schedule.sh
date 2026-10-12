@@ -33,7 +33,11 @@
 _rs_fail() { echo "render-schedule: $*" >&2; }
 
 # _rs_safe <what> <value> — a path/command word: nothing outside [A-Za-z0-9_./@+-].
+# `local LC_ALL=C` is the first statement in both validators: under an en_GB/en_US
+# UTF-8 locale a bracket range like A-Z is collated, and admits non-ASCII letters.
+# The installers source this file in the caller's locale, so pin it here.
 _rs_safe() {
+  local LC_ALL=C
   case "$2" in
     ""|*[!A-Za-z0-9_./@+-]*)
       _rs_fail "unsafe or empty $1: '$2' (allowed characters: A-Z a-z 0-9 _ . / @ + -)"
@@ -44,6 +48,7 @@ _rs_safe() {
 
 # _rs_desc <value> — a description: the safe set plus spaces.
 _rs_desc() {
+  local LC_ALL=C
   case "$1" in
     ""|*[!A-Za-z0-9_./@+\ -]*)
       _rs_fail "unsafe or empty DESC: '$1' (allowed characters: A-Z a-z 0-9 _ . / @ + - and space)"
@@ -98,7 +103,9 @@ render_unit_slug() {
 
 # render_systemd_service DESC WORKDIR TIMEOUT_SECS CMD [ARG...]
 #   A Type=oneshot user service. TIMEOUT_SECS is an integer; 0 omits TimeoutStartSec.
-#   PATH includes %h/.local/bin (a user service does not inherit a login PATH).
+#   PATH ends with %h/.local/bin (a user service does not inherit a login PATH). It is LAST,
+#   after the system directories, so a binary planted in a user-writable ~/.local/bin cannot
+#   shadow python3/git in an unattended job; `claude` is only found there, so it stays on PATH.
 #   There is deliberately no network-online.target line: a user manager has no such unit.
 render_systemd_service() {
   local desc="${1:-}" workdir="${2:-}" tmo="${3:-}" w
@@ -112,7 +119,7 @@ render_systemd_service() {
   for w in "$@"; do _rs_safe "command word" "$w" || return 2; done
   printf '%s\n' "[Unit]" "Description=$desc" "" "[Service]" "Type=oneshot" \
     "WorkingDirectory=$workdir" \
-    "Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin" \
+    "Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin" \
     "ExecStart=$*"
   if [ "$tmo" -gt 0 ]; then printf '%s\n' "TimeoutStartSec=$tmo"; fi
   return 0
@@ -143,7 +150,8 @@ render_systemd_timer() {
 
 # render_launchd_plist LABEL HOME_DIR WORKDIR LOG_DIR SCHEDULE CMD [ARG...]
 #   A LaunchAgent plist: ProgramArguments = CMD ARG... (no login shell), explicit
-#   HOME and PATH (HOME_DIR/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin),
+#   HOME and PATH (/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:HOME_DIR/.local/bin, the
+#   user-writable directory last, see render_systemd_service),
 #   StartCalendarInterval (Weekday 0=Sun..6=Sat for weekly), stdout+stderr to LOG_DIR/LABEL.log.
 render_launchd_plist() {
   local label="${1:-}" home="${2:-}" workdir="${3:-}" logdir="${4:-}" sched="${5:-}" w wd hh mm
@@ -167,7 +175,7 @@ render_launchd_plist() {
     '    <key>WorkingDirectory</key>' "    <string>$workdir</string>" \
     '    <key>EnvironmentVariables</key>' '    <dict>' \
     '        <key>HOME</key>' "        <string>$home</string>" \
-    '        <key>PATH</key>' "        <string>$home/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>" \
+    '        <key>PATH</key>' "        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$home/.local/bin</string>" \
     '    </dict>' \
     '    <key>StartCalendarInterval</key>' '    <dict>'
   if [ "$_RS_KIND" = weekly ]; then
@@ -208,7 +216,7 @@ render_crontab_line() {
 #   The command a HUMAN runs to activate what was written. PRINTED, never executed.
 #     systemd  NAME = the timer unit        -> systemctl --user daemon-reload && systemctl --user enable --now NAME
 #     launchd  NAME = the plist path        -> launchctl bootstrap gui/$(id -u) NAME
-#     cron     NAME = the crontab LINE      -> (crontab -l 2>/dev/null; echo 'LINE') | crontab -
+#     cron     NAME = the crontab LINE      -> one guarded, idempotent line (see the cron branch)
 render_activation_commands() {
   local scheduler="${1:-}" name="${2:-}"
   if [ $# -ne 2 ]; then _rs_fail "render_activation_commands SCHEDULER NAME"; return 2; fi
@@ -225,8 +233,16 @@ render_activation_commands() {
       case "$name" in
         ""|*"'"*) _rs_fail "crontab line is empty or contains a single quote"; return 2 ;;
       esac
+      # One line, run in a subshell (nothing leaks into the operator's shell; the trap
+      # removes the temp files on every path). Two guards the old
+      # `(crontab -l 2>/dev/null; echo LINE) | crontab -` idiom lacked:
+      #   - a `crontab -l` that fails for any reason other than "no crontab for user"
+      #     aborts and installs nothing, instead of replacing the whole table with LINE;
+      #   - the existing copy of LINE is dropped (exact match, grep -vxF) before it is
+      #     appended, so pasting twice leaves ONE copy. A changed schedule is a different
+      #     line: removing the old one is the operator's `crontab -e` job.
       # shellcheck disable=SC2016
-      printf '%s\n' "(crontab -l 2>/dev/null; echo '$name') | crontab -" ;;
+      printf '%s\n' "( t=\$(mktemp) || exit 1; trap 'rm -f \"\$t\" \"\$t.err\" \"\$t.new\"' EXIT; { crontab -l >\"\$t\" 2>\"\$t.err\" || grep -qi 'no crontab' \"\$t.err\"; } || { cat \"\$t.err\" >&2; exit 1; }; { grep -vxF -- '$name' \"\$t\"; echo '$name'; } >\"\$t.new\"; crontab \"\$t.new\" )" ;;
     *) _rs_fail "unknown SCHEDULER '$scheduler' (want systemd, launchd or cron)"; return 2 ;;
   esac
   return 0

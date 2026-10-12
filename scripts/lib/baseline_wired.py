@@ -66,7 +66,12 @@ def baseline_wired(grid_dir: str):
     # 3. Run the real wire.sh into a throwaway home.
     tmp = tempfile.mkdtemp(prefix="grid-budget-")
     try:
-        wire_env = dict(env)
+        # wire.sh runs the checkout's own code (an untrusted PR checkout included), so it gets
+        # a scrubbed environment: no tokens or credentials from the caller. Only PATH, the
+        # locale, TMPDIR and GRID_* pass; HOME is the throwaway dir, never the real one.
+        wire_env = {k: v for k, v in env.items()
+                    if k in ("PATH", "LANG", "TMPDIR") or k.startswith(("LC_", "GRID_"))}
+        wire_env["HOME"] = tmp
         wire_env.update({
             "GRID_DRY_HOME": tmp,
             "GRID_SKIP_CATALOG": "1",
