@@ -318,3 +318,21 @@ mk_plugin_tree() {
   grep -qx 'hooks/lib/common.sh' "$G/shellcheck.args"
   grep -qx 'hooks/scripts/x.sh' "$G/shellcheck.args"
 }
+
+# --- the quarantined issue-loop is excluded from lint (WP-043) --------------------------------
+# _retired/ holds the abandoned loop, archived byte-for-byte with stale paths. The gate must
+# never hand it to shellcheck (it would be linted at its archived paths and rot the gate), and
+# bats only collects tests/, so the archived tests are never run. The factory PATTERN under
+# automation-factory/patterns/ is a live asset and IS still linted.
+@test "lint check: shellcheck is never handed _retired/, the live pattern is still linted" {
+  mkdir -p "$G/_retired/issue-loop/scripts" "$G/_retired/issue-loop/loop/hooks" "$G/automation-factory/patterns/p"
+  : > "$G/_retired/issue-loop/scripts/x.sh"; : > "$G/_retired/issue-loop/loop/run.sh"
+  : > "$G/_retired/issue-loop/loop/hooks/h.sh"; : > "$G/automation-factory/patterns/p/d.sh"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/shellcheck.args"\nexit 0\n' "$G" > "$G/stubbin/shellcheck"
+  chmod +x "$G/stubbin/shellcheck"
+  run run_gate
+  [ "$status" -eq 0 ]
+  grep -qx 'automation-factory/patterns/p/d.sh' "$G/shellcheck.args"
+  # last, so the negation is the test's final (and deciding) command
+  ! grep -q '_retired' "$G/shellcheck.args"
+}

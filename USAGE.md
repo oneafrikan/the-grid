@@ -118,7 +118,7 @@ target repo instead of running it ad hoc in a session — copy the pattern into 
 tracked `loop/` folder, fill its placeholders, then `bash loop/setup.sh` to wire
 the machine-specific bits (absolute paths, the `.claude/settings.json` hook).
 Full steps: [automation-factory/patterns/issue-loop/README.md](automation-factory/patterns/issue-loop/README.md).
-(`instantiate.sh`, tracked as issue #15, will collapse this to one command.)
+(`instantiate.sh`, which collapsed this to one command, is retired and quarantined under `_retired/issue-loop/`; the cut is manual again. See `_retired/issue-loop/RETIRED.md`.)
 
 ## project-factory — starting a brand-new project
 

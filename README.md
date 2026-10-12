@@ -92,7 +92,7 @@ different asset type:
 | Factory | Produces | Deployed via |
 |---------|----------|---------------|
 | `agent-factory/` | Composed AI agents (`role × stack × skills`) — 4 public projects (`core`, `grid`, `finance-desk`, `learning-desk`; 38 roles, 7 orchestrators + 31 specialists) plus any private desk composed separately | `scripts/wire.sh` (Claude Code target); OpenClaw + Paperclip targets next |
-| `automation-factory/` | Reusable automation patterns (e.g. `issue-loop`) | Cut into a target repo's tracked `loop/` folder |
+| `automation-factory/` | Reusable automation patterns (e.g. `issue-loop`) | Cut into a target repo's tracked `loop/` folder (the-grid's own loop instance is retired: `_retired/issue-loop/RETIRED.md`) |
 | `project-factory/` | Whole new project scaffolds from a template | `scripts/cut-project.sh` (seed or retrofit) |
 
 There is deliberately **no fifth factory for specs** — OpenSpec already fills
@@ -229,7 +229,7 @@ never touches its history.
     sources.sh          ← regenerates docs/SOURCES.md; --check link-checks every URL
     reconcile.sh        ← removes stale skill shadows on a new machine
     check-grid.sh       ← bats suite + broken-symlink scan (CI / pre-push gate)
-    instantiate.sh      ← cuts an automation-factory pattern into a target repo
+    instantiate.sh      ← RETIRED, moved to _retired/issue-loop/scripts/ (cut an automation-factory pattern into a target repo)
     cut-project.sh      ← seeds/retrofits a project-factory template
     gate.sh             ← the commit gate: shellcheck, catalog, role lint, composed output, tests
     run-record.sh       ← appends one line per agent run to a local private log
