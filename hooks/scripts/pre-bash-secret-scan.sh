@@ -285,7 +285,13 @@ handled_commit=0     # a commit-making segment was seen (the command text is sca
 for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
   sub="${GIT_SUB[$i]}"; start="${GIT_START[$i]}"; len="${GIT_LEN[$i]}"
   segment_targets "$i"
-  targets=("${TARGETS[@]}")
+  targets=()
+  for enc in "${TARGETS[@]}"; do
+    if set_target "$enc"; then targets+=("$enc"); fi
+  done
+  # A -C or cd target that does not exist (often a $VAR the hook cannot expand) must not
+  # make the segment invisible: fall back to the payload cwd's own repository.
+  [ "${#targets[@]}" -gt 0 ] || targets=("$cwd$US$US")
   for enc in "${targets[@]}"; do
     set_target "$enc" || continue
     eff="$sub"

@@ -1091,6 +1091,12 @@ big_file() {
   # a relative -C resolves against the payload cwd
   run_hook pre-bash-secret-scan "$(hook_payload "git -C ../repoA commit -m x" "$B")"
   [ "$status" -eq 2 ]
+  # a target the hook cannot resolve ($VAR, or a path that is not there) falls back to the
+  # payload cwd's repository instead of making the commit invisible
+  run_hook pre-bash-secret-scan "$(hook_payload 'git -C $NOPE commit -m x' "$A")"
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
+  run_hook pre-bash-secret-scan "$(hook_payload 'cd $NOPE && git commit -m x' "$A")"
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
 }
 
 @test "secret: commit-creating subcommands, aliases and pathspec files are covered" {
