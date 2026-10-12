@@ -12,13 +12,13 @@
 #   4  same session, no new turns       -> skip   no-new-turns
 #      (GRID_AUTOHANDOFF_FORCE=1 bypasses 2 to 4 only)
 #   5  digest the transcript into a private temp dir; create the fallback dir
-#   6  snapshot .git/config and .git/hooks/, stamp the clock, run `claude -p "/handoff ..."`
-#      in <cwd> (write-only tool set, wall-clock alarm, budget cap)
-#   7  verify what the child wrote: .git untouched, exactly one handoff pair, nothing else new
+#   6  snapshot the watched git state and the scanned dirs, run `claude -p "/handoff ..."`
+#      in <cwd> (write-only tool set, scrubbed env, wall-clock alarm, budget cap)
+#   7  verify what the child wrote: git state untouched, exactly one handoff pair, nothing else changed
 #   8  secret-scan both files (always); a hit quarantines them
 #   9  commit the pair by explicit path, in the repo that holds the files
 #  10  push, but only the private repo and only when that commit is the sole unpushed one
-#  11  write the per-session marker, log, record the run
+#  11  log, record the run (the per-session marker is written just before step 6)
 #
 # The child only WRITES the two files. This script (deterministic shell) checks,
 # scans, commits and pushes, so a model can never be talked into sweeping up the
@@ -26,7 +26,7 @@
 #
 # Log: one line per decision in ${GRID_HOOK_LOG_DIR:-$HOME/.grid/hook-logs}/auto-handoff.log
 #   ts=<UTC> session=<id> action=<skip|spawn|done|error> reason=<token> [turns= commit= push= paths= ...]
-# Env knobs: GRID_AUTOHANDOFF_{MIN_TURNS,MAX_BYTES,TIMEOUT,MAX_USD,FORCE},
+# Env knobs: GRID_AUTOHANDOFF_{MIN_TURNS,MAX_BYTES,TIMEOUT,MAX_USD,FORCE,WAIT,KEEP_ENV},
 #   GRID_HANDOFF_FALLBACK_DIR, GRID_PRIVATE_DIR, GRID_CLAUDE, GRID_HOOK_LOG_DIR,
 #   GRID_HOOK_STATE_DIR, GRID_STATE_DIR (quarantine root).
 #
@@ -44,6 +44,22 @@ GRID_ROOT="$(cd "$HERE/../.." && pwd -P)"
 . "$HERE/common.sh"
 # shellcheck source=secret-patterns.sh
 . "$HERE/secret-patterns.sh"
+# Everything this worker scans is model input or model output: no exemption words (a model
+# can add "example" to any line), plus the extra strict shapes (secret-patterns.sh).
+# shellcheck disable=SC2034  # read by secret-patterns.sh
+SECRET_STRICT=1
+
+# Every git command the worker runs AFTER the child has been near the file system goes
+# through WGIT: no fsmonitor, no hooks and the `ext::` transport off, so a config the
+# child managed to plant cannot execute anything even if the detection in 7a missed it.
+# Consequence: the repo's own hooks do not run for the handoff commit (the worker's strict
+# secret scan stands in). The ssh setup is deliberately NOT touched: blanking
+# core.sshCommand makes every ssh remote fail, and the operator's own GIT_SSH* and config
+# are the operator's (a planted config is unreachable: only pre-run git dirs are used).
+# The usual git environment overrides are dropped.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
+      GIT_COMMON_DIR GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_EXEC_PATH
+WGIT=(git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c protocol.ext.allow=never)
 
 # ---- knobs (a non-numeric value falls back to the default) -----------------------
 num() { if [[ "${1:-}" =~ ^[0-9]+$ ]]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
@@ -61,14 +77,45 @@ PRIVATE="${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}"
 FALLBACK_ROOT="${GRID_HANDOFF_FALLBACK_DIR:-$PRIVATE/handoffs}"
 
 # Temp state, all removed by the EXIT trap (the digest is a copy of the conversation).
-DIGEST_DIR=""; SNAP_DIR=""; STAMP=""
+DIGEST_DIR=""; SNAP_DIR=""
+# Lock directories this process holds (see take_lock); released here on every exit path.
+LOCKS=()
 cleanup() {
+  local l
   [ -n "$DIGEST_DIR" ] && rm -rf "$DIGEST_DIR"
   [ -n "$SNAP_DIR" ] && rm -rf "$SNAP_DIR"
-  [ -n "$STAMP" ] && rm -f "$STAMP"
+  for l in "${LOCKS[@]}"; do rmdir "$l" 2>/dev/null; done
   return 0
 }
 trap cleanup EXIT
+
+# ---- signals and bounded git -------------------------------------------------------
+# The hook's outer alarm sends this process SIGALRM (and a session teardown may send TERM
+# or HUP). The long-running children are started in the background and waited for, so this
+# trap runs at once instead of after them: it stops the child and any git call, unstages
+# the handoff pair if a commit was in flight (git add had already staged it), logs why,
+# and exits through the EXIT trap so temp dirs and locks are released.
+CHILD_PID=""; GIT_PID=""; STAGED=(); STAGED_ROOT=""
+on_signal() {
+  trap '' TERM ALRM HUP
+  [ -n "$CHILD_PID" ] && kill -TERM "$CHILD_PID" 2>/dev/null
+  [ -n "$GIT_PID" ] && kill -TERM "$GIT_PID" 2>/dev/null
+  if [ "${#STAGED[@]}" -gt 0 ]; then
+    "${WGIT[@]}" -C "$STAGED_ROOT" reset -q -- "${STAGED[@]}" >/dev/null 2>&1
+  fi
+  finish_error terminated
+}
+trap on_signal TERM ALRM HUP
+# run_bounded <seconds> <cmd...>: the command with a wall-clock alarm (exit 142 on expiry),
+# in the background so on_signal can stop it; its pid is GIT_PID meanwhile.
+run_bounded() {
+  local rc
+  perl -e 'alarm shift; exec @ARGV or exit 127' "$@" &
+  GIT_PID=$!
+  wait "$GIT_PID"; rc=$?
+  GIT_PID=""
+  return "$rc"
+}
 
 # ---- logging and the run record ---------------------------------------------------
 # log <action> <reason> [extra key=value tokens]
@@ -134,9 +181,34 @@ JQ_DEFS='
 
 # ---- 0/1: payload and transcript --------------------------------------------------
 case "$SID" in ''|*[!A-Za-z0-9_-]*) SID="unknown"; finish_skip bad-payload ;; esac
+# The id is a file name (marker, lock, quarantine dir): cap it well under NAME_MAX.
+[ "${#SID}" -le 64 ] || { SID="unknown"; finish_skip bad-payload; }
 if [ -z "$TRANSCRIPT" ] || [ -z "$CWD" ] || [ ! -d "$CWD" ]; then finish_skip bad-payload; fi
 CWD_REAL="$(rp "$CWD")" || finish_skip bad-payload
+# A session started in HOME (or / or a parent of HOME) would have the whole home tree as
+# its scan root: the worker's own log is "new" there, so such a run could never succeed.
+HOME_REAL="$(rp "$HOME" 2>/dev/null)" || HOME_REAL="$HOME"
+[ "$CWD_REAL" = "/" ] && finish_skip cwd-too-broad
+case "$HOME_REAL/" in "$CWD_REAL"/*) finish_skip cwd-too-broad ;; esac
 if [ ! -f "$TRANSCRIPT" ] || [ ! -r "$TRANSCRIPT" ]; then finish_skip no-transcript; fi
+
+# ---- per-session lock ------------------------------------------------------------------
+# SessionEnd can fire several times for one session (5 simultaneous payloads gave 5 paid
+# model runs, 4 of them commit-failed). mkdir is the atomic test-and-set; a lock older than
+# TIMEOUT + 300 s belongs to a worker that died without its EXIT trap and is taken over.
+# take_lock <dir>: 0 and registered for release in cleanup(), or 1 when someone holds it.
+take_lock() {
+  local d="$1" mins=$(( (TIMEOUT + 300 + 59) / 60 ))
+  if ! mkdir "$d" 2>/dev/null; then
+    [ -n "$(find "$d" -maxdepth 0 -mmin "+$mins" 2>/dev/null)" ] || return 1
+    rmdir "$d" 2>/dev/null
+    mkdir "$d" 2>/dev/null || return 1
+  fi
+  LOCKS+=("$d")
+  return 0
+}
+mkdir -p "$STATE" 2>/dev/null
+take_lock "$STATE/$SID.lock" || finish_skip already-running
 
 # Human-turn count (always computed: the marker stores it, the log shows it).
 TURNS="$(prefilter | jq -n "$JQ_DEFS"'[inputs | select(human)] | length' 2>/dev/null)"
@@ -145,7 +217,9 @@ TURNS="$(prefilter | jq -n "$JQ_DEFS"'[inputs | select(human)] | length' 2>/dev/
 if [ "$FORCE" != 1 ]; then
   # ---- 2: has a handoff already run in this session? -------------------------------
   # Three signals, anywhere in the session:
-  #   a) a user/system line whose TEXT holds <command-name>/handoff</command-name>
+  #   a) a user/system line whose TEXT STARTS with <command-name>/handoff</command-name>
+  #      (after the optional <command-message> line Claude Code emits first; a tag typed
+  #      mid-sentence is not a handoff, D33)
   #      (or /<plugin>:handoff); tool_result blocks never count, because the same tag
   #      appears inside tool output whenever a transcript is cat-ed
   #   b) an assistant Skill tool_use whose input.skill is handoff or <x>:handoff
@@ -153,7 +227,7 @@ if [ "$FORCE" != 1 ]; then
   if prefilter | jq -e -n "$JQ_DEFS"'
       any(inputs;
         ((.type == "user" or .type == "system")
-           and any((.message.content?, .content?) | texts; type == "string" and test("<command-name>/([^<>:/]+:)?handoff</command-name>")))
+           and any((.message.content?, .content?) | texts; type == "string" and test("^\\s*(<command-message>[^<]*</command-message>\\s*)?<command-name>/([^<>:/]+:)?handoff</command-name>")))
         or (.type == "assistant"
            and any(.message.content[]?; type == "object" and .type == "tool_use" and .name == "Skill"
                    and ((.input.skill // "") | test("(^|:)handoff$"))))
@@ -174,15 +248,45 @@ if [ "$FORCE" != 1 ]; then
   fi
 fi
 
+# ---- per-cwd lock ------------------------------------------------------------------
+# Handoff pairs carry no session id in their names, so one session's pair cannot be told
+# apart on disk from another's. Two sessions in the same directory therefore take turns:
+# the second waits up to GRID_AUTOHANDOFF_WAIT seconds (default 120), then skips as
+# cwd-busy WITHOUT a marker (it may be retried later). A build or editor writing into the
+# directory during the run is still reported as unexpected-file.
+WAIT="$(num "${GRID_AUTOHANDOFF_WAIT:-}" 120)"
+# lock_path_wait <path> <kind>: wait for the lock keyed by <path> (cwd-busy if it never frees).
+lock_path_wait() {
+  local key waited=0
+  key="$(printf '%s' "$1" | cksum | cut -d' ' -f1)"
+  until take_lock "$STATE/$2-$key.lock"; do
+    if [ "$waited" -ge "$WAIT" ]; then
+      # a repo that stays locked after the child ran: the pair stays on disk, uncommitted
+      if [ "$2" = repo ]; then finish_error repo-busy; else finish_skip cwd-busy; fi
+    fi
+    sleep 1; waited=$((waited + 1))
+  done
+}
+lock_path_wait "$CWD_REAL" cwd
+
 # ---- 5: digest, fallback dir, target dir -------------------------------------------
 DIGEST_DIR="$(mktemp -d)" || finish_error digest-failed
 SNAP_DIR="$(mktemp -d)" || finish_error digest-failed
 DIGEST="$DIGEST_DIR/session-digest.md"
 bash "$HERE/transcript-digest.sh" "$TRANSCRIPT" "$DIGEST" "$MAX_BYTES" 2>/dev/null || finish_error digest-failed
+# The model reads this digest, so a secret in the transcript must not be in it: otherwise it
+# can copy it into the handoff or repeat it in a tool call. Matching lines are replaced.
+REDACTED="$(secret_redact_file "$DIGEST")"
+[[ "$REDACTED" =~ ^[0-9]+$ ]] || REDACTED=0
+REDACTED_TOKEN=""; [ "$REDACTED" -gt 0 ] && REDACTED_TOKEN=" redacted=$REDACTED"
 
 # The child writes into <fallback>/<basename of cwd>; the worker creates it (the child
 # has no mkdir). A failure to create it is not fatal: the child may still use <target>.
-FALLBACK="$FALLBACK_ROOT/$(basename "$CWD")"
+# The directory name goes into a permission rule, so glob metacharacters and newlines in
+# the cwd's name become `_` here (see add_rule); the prompt names this exact path.
+FALLBACK_NAME="$(basename "$CWD")"; FALLBACK_NAME="${FALLBACK_NAME//$'\n'/_}"
+FALLBACK_NAME="$(printf '%s' "$FALLBACK_NAME" | sed 's/[][*?{}()!]/_/g')"
+FALLBACK="$FALLBACK_ROOT/$FALLBACK_NAME"
 mkdir -p "$FALLBACK" 2>/dev/null
 FALLBACK_REAL="$(rp "$FALLBACK" 2>/dev/null)" || FALLBACK_REAL="$FALLBACK"
 
@@ -194,8 +298,11 @@ FALLBACK_REAL="$(rp "$FALLBACK" 2>/dev/null)" || FALLBACK_REAL="$FALLBACK"
 # Sets TARGET to an absolute, EXISTING directory, or "" (no rule for it is then
 # granted and the child can write only to the fallback dir).
 resolve_target() {
-  TARGET=""
-  local table="$HOME/.the-grid-private/handoff-locations.md" base line c1 c2 loc e matched=0
+  TARGET=""; TARGET_ROW=0; ROW_LOC=""; ROW_ABS=0
+  # The table lives with the private data: GRID_PRIVATE_DIR first, then the default home
+  # location (the skill documents ~/.the-grid-private/ and reads only that one).
+  local table="$PRIVATE/handoff-locations.md" base line c1 c2 loc e matched=0
+  [ -r "$table" ] || table="$HOME/.the-grid-private/handoff-locations.md"
   base="$(basename "$CWD")"
   if [ -r "$table" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
@@ -214,9 +321,12 @@ resolve_target() {
         loc="$c2"
         # a leading ~ is a literal in the table; expand it to $HOME by hand
         case "$loc" in \~|\~/*) loc="$HOME${loc#\~}" ;; esac
-        case "$loc" in /*) ;; *) loc="$CWD/$loc" ;; esac
+        # Was the row absolute AS WRITTEN? (decided before $CWD is prepended: a relative row
+        # must resolve inside the cwd or the private repo, see accept_target.)
+        case "$loc" in /*) ROW_ABS=1 ;; *) loc="$CWD/$loc" ;; esac
         loc="${loc%/}"
-        [ -d "$loc" ] && TARGET="$loc"
+        ROW_LOC="$loc"
+        [ -d "$loc" ] && { TARGET="$loc"; TARGET_ROW=1; }
         return 0
       fi
     done < "$table"
@@ -227,14 +337,91 @@ resolve_target() {
   return 0
 }
 resolve_target
-TARGET_REAL=""
-[ -n "$TARGET" ] && TARGET_REAL="$(rp "$TARGET")"
+
+# accept_target: containment for the directory the child will be granted write access to.
+# `[ -d ]` follows symlinks, so a tracked LOGS -> <any dir> link, or a table row (the agent
+# can edit that file), used to turn into a write grant anywhere (R07.sec.F1, high). The
+# resolved path must now be under the cwd or the private repo. The one designed exception
+# is a table row that was written as an ABSOLUTE path to another repo (tests: "mapped
+# location outside cwd"): no `..` component, inside a git work tree whose root is not HOME,
+# and not HOME, / or a sensitive dir. A row written relative must resolve inside the cwd
+# or the private repo, like the default LOGS: otherwise a tracked symlink at the relative
+# path would turn it into a grant anywhere. The private repo's ROOT is never a target (the
+# child could rewrite handoff-locations.md, which decides future grants). Anything refused:
+# TARGET stays empty, only the fallback dir is granted, and the spawn log line says why
+# (target-refused=<why>).
+PRIVATE_REAL="$(rp "$PRIVATE" 2>/dev/null)" || PRIVATE_REAL="$PRIVATE"
+TARGET_REAL=""; TARGET_WHY=""
+accept_target() {
+  [ -n "$TARGET" ] || return 0
+  local real s top
+  real="$(rp "$TARGET")" || { TARGET=""; return 0; }
+  # Never a target, wherever it came from: the private repo's root, the whole cwd, or
+  # anything that is (or sits inside) a git dir: a grant there lets the child rewrite
+  # config or hooks that the worker's own commit would then trust.
+  if [ "$real" = "$PRIVATE_REAL" ]; then TARGET_WHY="private-root"; TARGET=""; return 0; fi
+  if [ "$real" = "$CWD_REAL" ]; then TARGET_WHY="cwd-root"; TARGET=""; return 0; fi
+  case "$real/" in */.git/*) TARGET_WHY="git-dir"; TARGET=""; return 0 ;; esac
+  if [ "$(git -C "$real" rev-parse --is-inside-git-dir 2>/dev/null)" = true ]; then
+    TARGET_WHY="git-dir"; TARGET=""; return 0
+  fi
+  # A `..` in a table row is refused outright: the lexical and the resolved meaning of
+  # `<link>/../x` differ, and a rule built from either would be the wrong one.
+  if [ "$TARGET_ROW" = 1 ]; then
+    case "$ROW_LOC/" in */../*) TARGET_WHY="dotdot"; TARGET=""; return 0 ;; esac
+  fi
+  case "$real/" in
+    "$CWD_REAL"/*|"$PRIVATE_REAL"/*) TARGET_REAL="$real"; return 0 ;;
+  esac
+  if [ "$TARGET_ROW" != 1 ]; then
+    TARGET_WHY="symlink-outside"
+  elif [ "$ROW_ABS" != 1 ]; then
+    TARGET_WHY="outside-cwd"
+  else
+    # An absolute row that LOOKS inside the cwd or the private repo but resolves outside
+    # (a tracked symlink on the way) is the same redirect as a relative one.
+    case "$ROW_LOC/" in
+      "$CWD"/*|"$CWD_REAL"/*|"$PRIVATE"/*|"$PRIVATE_REAL"/*) TARGET_WHY="symlink-outside" ;;
+    esac
+    if [ -z "$TARGET_WHY" ]; then
+      case "$real" in
+        /|"$HOME"|"$HOME_REAL") TARGET_WHY="home-or-root" ;;
+      esac
+    fi
+    if [ -z "$TARGET_WHY" ]; then
+      for s in .claude .config .gnupg .aws .local/bin .bashrc.d .ssh; do
+        case "$real/" in "$HOME/$s"/*|"$HOME_REAL/$s"/*) TARGET_WHY="sensitive-dir" ;; esac
+      done
+      [ -n "${CLAUDE_CONFIG_DIR:-}" ] && case "$real/" in "$CLAUDE_CONFIG_DIR"/*) TARGET_WHY="sensitive-dir" ;; esac
+    fi
+    if [ -z "$TARGET_WHY" ]; then
+      if [ "$(git -C "$real" rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
+        TARGET_WHY="not-a-git-work-tree"
+      else
+        # HOME itself being a work tree (a dotfiles repo) must not make every path under it
+        # a valid target.
+        top="$(git -C "$real" rev-parse --show-toplevel 2>/dev/null)"; top="$(rp "$top" 2>/dev/null)"
+        case "$top" in "$HOME"|"$HOME_REAL"|/) TARGET_WHY="home-work-tree" ;; esac
+      fi
+    fi
+    [ -z "$TARGET_WHY" ] && { TARGET_REAL="$real"; return 0; }
+  fi
+  TARGET=""
+}
+accept_target
 
 # Path-scoped write rules: Edit(//<abs path>/**) in default permission mode is the form
 # Claude Code enforces (tests/fixtures/hooks/README.md, task 0.6); `//` anchors at the
 # filesystem root, so it is "/" in front of the absolute path. Never a bare Edit/Write.
 RULES=()
 add_rule() {
+  # A path with a glob metacharacter (or a newline) would widen or break the rule, and a
+  # `..` component is not a normalised path: grant nothing for it. The fallback dir (whose
+  # name is sanitised below) then remains the child's place to write.
+  case "$1" in
+    *[\*\?\[\]\{\}\(\)\!]*|*$'\n'*) return 0 ;;
+    */../*|*/..) return 0 ;;
+  esac
   local r="Edit(/${1}/**)" x
   for x in "${RULES[@]}"; do [ "$x" = "$r" ] && return 0; done
   RULES+=("$r")
@@ -242,115 +429,347 @@ add_rule() {
 if [ -n "$TARGET" ]; then add_rule "$TARGET"; add_rule "$TARGET_REAL"; fi
 add_rule "$FALLBACK"; add_rule "$FALLBACK_REAL"
 
+# The directories the child writes into are shared state too: two sessions in different
+# cwds can resolve to the same target (LOGS symlinked into the private repo) or the same
+# fallback dir, and each would see the other's pair as "changed during my run". Take a lock
+# per write directory as well, in sorted order (no two workers can wait on each other).
+while IFS= read -r wd; do
+  [ -n "$wd" ] && lock_path_wait "$wd" dir
+done < <(printf '%s\n' "$FALLBACK_REAL" "$TARGET_REAL" | sort -u)
+
 # ---- 6: snapshot .git, stamp, run the child ----------------------------------------
-# A changed .git/config or .git/hooks means the write-only boundary failed. Copy both
-# now (never into a directory the child can see); compare after.
+# A changed git config, hook, info/ file or HEAD means the write-only boundary failed, and
+# the commit below runs in the TARGET repo, not only the cwd repo: a hook planted there
+# would execute as the operator (R07.sec.F2). So every repo we will read or commit in is
+# watched: the cwd repo, the target repo and the fallback repo. State = path + type +
+# checksum (or link target), written outside any directory the child can see.
 GITDIRS=()
-g="$(git -C "$CWD" rev-parse --absolute-git-dir 2>/dev/null)"
-if [ -n "$g" ]; then
-  GITDIRS+=("$g")
-  # In a linked worktree config and hooks live in the common dir: watch it too.
-  common="$(cd "$CWD" && c="$(git rev-parse --git-common-dir 2>/dev/null)" && cd "$c" 2>/dev/null && pwd -P)"
-  [ -n "$common" ] && [ "$common" != "$g" ] && GITDIRS+=("$common")
-fi
+# add_gitdir <dir>: remember the git dir (and the common dir of a linked worktree, where
+# config and hooks live) of the repo containing <dir>, once.
+add_gitdir() {
+  local g c x
+  [ -d "$1" ] || return 0
+  g="$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null)" || return 0
+  [ -n "$g" ] || return 0
+  c="$(cd "$1" && cc="$(git rev-parse --git-common-dir 2>/dev/null)" && cd "$cc" 2>/dev/null && pwd -P)"
+  for x in "$g" "$c"; do
+    [ -n "$x" ] && { have_gitdir "$x" || GITDIRS+=("$x"); }
+  done
+  return 0
+}
+have_gitdir() { local x; for x in "${GITDIRS[@]}"; do [ "$x" = "$1" ] && return 0; done; return 1; }
+# state_lines: stdin = paths; prints "<path>\t<F|L>\t<cksum|target>" for every file or
+# symlink at or below them (a directory contributes its files). Missing paths print nothing.
+state_lines() {
+  local p f
+  while IFS= read -r p; do
+    { [ -e "$p" ] || [ -L "$p" ]; } || continue
+    find -P "$p" \( -type f -o -type l \) -print 2>/dev/null
+  done | sort -u | while IFS= read -r f; do
+    if [ -L "$f" ]; then printf '%s\tL\t%s\n' "$f" "$(readlink "$f")"
+    elif [ "${1:-}" = lite ]; then printf '%s\tF\t%s\n' "$f" "$(wc -c < "$f" 2>/dev/null | tr -d ' ')"
+    else printf '%s\tF\t%s\n' "$f" "$(cksum < "$f" 2>/dev/null | tr ' ' ':')"; fi
+  done
+}
+# git_watch <gitdir>: the paths whose change means a git hook, alias or ref could now run
+# or point somewhere else: config, HEAD, info/, hooks/, a submodule's config and hooks, a
+# linked worktree's config/hooks/info, and any core.hooksPath directory.
+git_watch() {
+  local d="$1" p hp
+  for p in "$d/config" "$d/HEAD" "$d/info" "$d/hooks" "$d"/modules/*/config "$d"/modules/*/hooks \
+           "$d"/worktrees/*/config.worktree "$d"/worktrees/*/hooks "$d"/worktrees/*/info; do
+    printf '%s\n' "$p"
+  done
+  hp="$(git --git-dir="$d" config --get core.hooksPath 2>/dev/null)"
+  if [ -n "$hp" ]; then
+    case "$hp" in \~|\~/*) hp="$HOME${hp#\~}" ;; esac
+    case "$hp" in /*) ;; *) hp="$(dirname "$d")/$hp" ;; esac
+    printf '%s\n' "$hp"
+  fi
+}
+git_state() { git_watch "$1" | state_lines; }
+
+add_gitdir "$CWD"
+[ -n "$TARGET_REAL" ] && add_gitdir "$TARGET_REAL"
+add_gitdir "$FALLBACK_REAL"
 i=0
 for d in "${GITDIRS[@]}"; do
-  mkdir -p "$SNAP_DIR/git$i/hooks"
-  [ -f "$d/config" ] && cp "$d/config" "$SNAP_DIR/git$i/config"
-  [ -d "$d/hooks" ] && cp -R "$d/hooks/." "$SNAP_DIR/git$i/hooks/" 2>/dev/null
+  git_state "$d" > "$SNAP_DIR/git$i.state"
   i=$((i + 1))
 done
 
-# Stamp file, backdated 2 s: a coarse-granularity filesystem must not make a file
-# written in the same second as the stamp look older than it.
-STAMP="$(mktemp)"
-perl -e 'my $t = time - 2; utime $t, $t, $ARGV[0]' "$STAMP"
+# Files the child must never touch, outside every repo: shell startup files, ssh login
+# config, the global git config, Claude's own settings and the user systemd units (each of
+# these runs code or grants access later). Same state snapshot, same compare.
+home_watch() {
+  local f
+  for f in .bashrc .bash_profile .bash_login .profile .bash_logout .zshrc .zshenv .zprofile \
+           .zlogin .zlogout .gitconfig .xprofile .npmrc .pam_environment .ssh/authorized_keys .ssh/authorized_keys2 \
+           .ssh/config .ssh/rc .ssh/environment .config/git/config .config/git/attributes .config/autostart .bashrc.d; do
+    printf '%s\n' "$HOME/$f"
+  done
+  local c="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  printf '%s\n' "$c"/settings*.json "$c/.credentials.json" "$c/CLAUDE.md" "$c/hooks" "$c/commands" "$HOME/.config/systemd/user"
+  # The table that decides future write grants.
+  printf '%s\n' "$PRIVATE/handoff-locations.md" "$HOME/.the-grid-private/handoff-locations.md"
+}
+# Big directories: names, types, link targets and sizes only (no content hashing, no
+# following links). ~/.local/bin holds the claude launcher link into a ~1 GB versions
+# directory; hashing that would be slow, and a self-update mid-run would be a false alarm
+# on content. A same-size rewrite of a file there is not seen (documented in the README).
+home_watch_lite() { printf '%s\n' "$HOME/.local/bin"; }
+# home_state: the whole home-side state, in one stable order.
+home_state() { { home_watch | state_lines; home_watch_lite | state_lines lite; } | sort -u; }
+home_state > "$SNAP_DIR/home.state"
 
-TARGET_TEXT="${TARGET:-none (use the fallback directory)}"
-PROMPT="/handoff Source conversation is the digest file $DIGEST, not this session. Target directory: $TARGET_TEXT. Fallback directory: $FALLBACK."
-
-log spawn ok "turns=$TURNS${END_REASON:+ end=${END_REASON//[^A-Za-z0-9_-]/}}"
-cd "$CWD" || finish_skip bad-payload
-OUT="$SNAP_DIR/child.out"
-# GRID_AUTOHANDOFF_CHILD=1 is the recursion guard (the child's own SessionEnd hook
-# checks it first). The alarm survives exec, so the child is killed at TIMEOUT and
-# the shell sees 142 (128 + SIGALRM). exec failing (no such binary) is exit 127.
-GRID_AUTOHANDOFF_CHILD=1 perl -e 'alarm shift; exec @ARGV or exit 127' "$TIMEOUT" \
-  "${GRID_CLAUDE:-claude}" -p "$PROMPT" \
-  --model sonnet --max-turns 25 --max-budget-usd "$MAX_USD" \
-  --tools "Read,Write,Bash" \
-  --allowedTools "Read" "${RULES[@]}" "Bash(hostname:*)" "Bash(realpath:*)" "Bash(readlink:*)" "Bash(ls:*)" "Bash(date:*)" \
-  --disallowedTools "Edit" "Bash(git:*)" \
-  --add-dir "$DIGEST_DIR" --add-dir "$FALLBACK" \
-  --append-system-prompt-file "$HERE/auto-handoff-system.md" \
-  < /dev/null > "$OUT" 2>&1
-rc=$?
-
-# Child output into the log, truncated to 4000 bytes and prefixed so it never reads
-# as a decision line.
-if [ -s "$OUT" ]; then
-  { head -c 4000 "$OUT" | sed 's/^/child| /'; echo; } >> "$LOG" 2>/dev/null
-fi
-case "$rc" in
-  0) ;;
-  142) finish_error timeout ;;
-  *) finish_error "claude-exit-$rc" ;;
-esac
-
-# ---- 7: verify what the child wrote -------------------------------------------------
-# 7a. .git first: any difference in config or hooks fails closed. Nothing under .git/
-#     is ever moved or deleted, the operator may be using the repo right now.
-CHANGED=()
-i=0
-for d in "${GITDIRS[@]}"; do
-  s="$SNAP_DIR/git$i"
-  if [ -f "$s/config" ]; then
-    cmp -s "$s/config" "$d/config" 2>/dev/null || CHANGED+=("$d/config")
-  elif [ -e "$d/config" ]; then
-    CHANGED+=("$d/config")
-  fi
-  if [ -d "$d/hooks" ]; then
-    # diff -rq lines: "Only in <dir>: <name>" / "Files <a> and <b> differ"
-    while IFS= read -r l; do
-      case "$l" in
-        "Only in "*) rest="${l#Only in }"; p="${rest%%: *}/${rest#*: }" ;;
-        "Files "*" differ") rest="${l#Files * and }"; p="${rest% differ}" ;;
-        *) p="$l" ;;
-      esac
-      # report snapshot-side paths (a removed file) at their live location
-      CHANGED+=("${p/#$s/$d}")
-    done < <(diff -rq "$s/hooks" "$d/hooks" 2>/dev/null)
-  elif [ -n "$(ls -A "$s/hooks" 2>/dev/null)" ]; then
-    CHANGED+=("$d/hooks")
-  fi
-  i=$((i + 1))
-done
-if [ "${#CHANGED[@]}" -gt 0 ]; then
-  DISP=(); for p in "${CHANGED[@]}"; do DISP+=("$(disp "$p")"); done
-  finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")"
-fi
-
-# 7b. every NEW regular file under cwd, the fallback dir and (when it lies outside cwd)
-#     the target dir. No -maxdepth: a depth cap lets a deep write go unseen. .git/ is
-#     pruned whole; our own temp dirs are pruned in case TMPDIR sits under cwd.
-ROOTS=("$CWD" "$FALLBACK")
+# Roots the verification scans: ONLY the directories the child may write to: the cwd, the
+# fallback dir and the target dir. Not the whole work tree of the repo the commit lands in:
+# the private repo holds the live LOGS/ that other agents write all the time, and another
+# session's pair or note would be blamed on this run (the git STATE of those repos is still
+# watched, in 7a). All real paths: find -P never follows a link out of a root.
+ROOTS=("$CWD_REAL" "$FALLBACK_REAL")
 if [ -n "$TARGET_REAL" ]; then
   case "$TARGET_REAL/" in
     "$CWD_REAL"/*) ;;
     *) ROOTS+=("$TARGET_REAL") ;;
   esac
 fi
+DIGEST_REAL="$(rp "$DIGEST_DIR")"; SNAP_REAL="$(rp "$SNAP_DIR")"   # roots are real paths: prune by real path too
+LOG_DIR="$(dirname "$LOG")"; LOG_DIR_REAL="$(rp "$LOG_DIR" 2>/dev/null)" || LOG_DIR_REAL="$LOG_DIR"
+
+# fs_snapshot: "<path> TAB <F|L> TAB <mtime> TAB <size>" for every regular file and symlink
+# under ROOTS, sorted. This replaces the old clock stamp (`-newer` a time 2 s before the
+# start): a file edited moments before the run, a sibling session's pair or the worker's
+# own log under cwd all looked "new" to the stamp. A before/after diff only reports what
+# changed DURING the child run. Stat is done in perl with sub-second mtimes (no GNU `find
+# -printf`; whole seconds would miss a same-second rewrite). .git is
+# pruned (7a watches the parts that matter); so are our temp dirs, Claude's config dir
+# and the hook log dir, in case a root happens to contain them.
+fs_snapshot() {
+  find -P "${ROOTS[@]}" \( -name .git -o -path "$DIGEST_DIR" -o -path "$SNAP_DIR" -o -path "$DIGEST_REAL" \
+         -o -path "$SNAP_REAL" -o -path "$HOME/.claude" -o -path "$HOME_REAL/.claude" \
+         -o -path "$LOG_DIR" -o -path "$LOG_DIR_REAL" \) -prune \
+       -o \( -type f -o -type l \) -print0 2>/dev/null |
+    perl -MTime::HiRes=lstat -0ne 'chomp; my @s = lstat($_) or next; print join("\t", $_, (-l _ ? "L" : "F"), $s[9], $s[7]), "\n"' |
+    sort -u
+}
+fs_snapshot > "$SNAP_DIR/fs.before"
+
+# git_entries: every `.git` entry (file or directory) under the roots, not descending into
+# it. fs_snapshot prunes .git by name, so a git dir the CHILD creates would not show there;
+# comparing this list before and after does (7a). Known git dirs are in the "before" list
+# already, so only a new one counts.
+git_entries() {
+  find -P "${ROOTS[@]}" -name .git -prune -print 2>/dev/null | sort -u
+}
+git_entries > "$SNAP_DIR/git.entries.before"
+
+# scan_new_and_quarantine: the error paths that end before the normal secret scan (timeout,
+# child failure, unexpected-file) used to leave a handoff pair the child had already
+# written in the working tree, unscanned, for a later `git add -A` to sweep up. This scans
+# every file that is new or changed since the before-snapshot (regular files up to 1 MB,
+# at most 200 of them): a NEW file with a hit moves to the quarantine dir; a pre-existing
+# file the child changed is reported but never moved (it is the operator's). Sets QNOTE to
+# "secret=<file:line:name,...>[ quarantine=<dir>]", or "" when everything is clean.
+QNOTE=""
+scan_new_and_quarantine() {
+  local f ty _mt sz l n=0 moved=0 qdir="$QUARANTINE/$SID" dest hits=() found
+  QNOTE=""
+  fs_snapshot > "$SNAP_DIR/fs.scan"
+  while IFS=$'\t' read -r f ty _mt sz; do
+    [ "$ty" = F ] || continue
+    [[ "$sz" =~ ^[0-9]+$ ]] && [ "$sz" -le 1048576 ] || continue
+    n=$((n + 1)); [ "$n" -le 200 ] || break
+    found=0
+    while IFS= read -r l; do
+      [ -n "$l" ] || continue
+      # "<path>:<line>: <name> (abcd...)" -> "<file>:<line>:<name>"; never the value.
+      l="${l% (*}"; l="${l##*/}"; hits+=("${l// /}"); found=1
+    done < <(secret_scan_file "$f")
+    [ "$found" = 1 ] || continue
+    if ! awk -F'\t' -v p="$f" '$1 == p { hit = 1 } END { exit !hit }' "$SNAP_DIR/fs.before"; then
+      mkdir -p "$qdir" || continue
+      dest="$qdir/$(basename "$f")"; [ -e "$dest" ] && dest="$qdir/$moved-$(basename "$f")"
+      mv -- "$f" "$dest" && moved=$((moved + 1))
+    fi
+  done < <(comm -13 "$SNAP_DIR/fs.before" "$SNAP_DIR/fs.scan")
+  [ "${#hits[@]}" -gt 0 ] || return 0
+  QNOTE="secret=$(join_csv "${hits[@]}")"
+  [ "$moved" -gt 0 ] && QNOTE="$QNOTE quarantine=$qdir"
+  return 0
+}
+
+TARGET_TEXT="${TARGET:-none (use the fallback directory)}"
+PROMPT="/handoff Source conversation is the digest file $DIGEST, not this session. Target directory: $TARGET_TEXT. Fallback directory: $FALLBACK."
+
+# The turn marker is written BEFORE the child runs: whatever the outcome, this session
+# is not paid for again until it gains MIN_TURNS new turns (an error outcome used to leave
+# no marker, so every later SessionEnd of the session ran the model again).
+printf '%s\n' "$TURNS" > "$STATE/$SID" 2>/dev/null
+log spawn ok "turns=$TURNS${END_REASON:+ end=${END_REASON//[^A-Za-z0-9_-]/}}${TARGET_WHY:+ target-refused=$TARGET_WHY}${REDACTED_TOKEN}"
+cd "$CWD" || finish_skip bad-payload
+OUT="$SNAP_DIR/child.out"
+# GRID_AUTOHANDOFF_CHILD=1 is the recursion guard (the child's own SessionEnd hook
+# checks it first). The alarm survives exec, so the child is killed at TIMEOUT and
+# the shell sees 142 (128 + SIGALRM). exec failing (no such binary) is exit 127.
+#
+# Isolation (D-extra-1 B). The rule form Edit(//<abs>/**) is the primary confinement but
+# was never proven live, so nothing below depends on it:
+#   - --permission-mode default and --setting-sources user: the operator's own
+#     permission mode (say acceptEdits) and project settings do not apply to this run
+#   - --strict-mcp-config: no MCP server config is picked up
+#   - extra denies for the places a write would persist code or access (ssh, Claude and
+#     user config, shell startup files, anything under a .git directory)
+#   - env -i: the child sees PATH, HOME, locale, TMPDIR, the Claude config dir and OAuth
+#     token, the recursion guard, and only what GRID_AUTOHANDOFF_KEEP_ENV names (a comma
+#     list of NAMEs or PREFIX*). GH_TOKEN, ANTHROPIC_API_KEY, cloud credentials and
+#     SSH_AUTH_SOCK are NOT passed; if claude authenticates through an API key variable,
+#     name it in GRID_AUTOHANDOFF_KEEP_ENV.
+DENY=("Edit" "Bash(git:*)")
+for h in "$HOME" "$HOME_REAL"; do
+  # (dot-ssh stays last: the audit rule hook-network reads the word followed by a blank as a network call)
+  for s in .claude .config .gnupg .aws .ssh; do
+    case "$h" in *[\*\?\[\]\{\}\(\)\!]*|*$'\n'*) ;; *) DENY+=("Edit(/$h/$s/**)") ;; esac
+  done
+  for s in .bashrc .bash_profile .bash_login .profile .zshrc .zshenv .zprofile .zlogin .gitconfig; do
+    case "$h" in *[\*\?\[\]\{\}\(\)\!]*|*$'\n'*) ;; *) DENY+=("Edit(/$h/$s)") ;; esac
+  done
+  [ "$HOME_REAL" = "$HOME" ] && break
+done
+DENY+=("Edit(**/.git/**)")
+
+CHILD_ENV=()
+# KEEP_ENV: NAME or PREFIX*; entries that are not plain identifiers are ignored (the value
+# is used in an indirect expansion, which must never see anything else).
+IFS=, read -r -a KEEP_PATS <<< "${GRID_AUTOHANDOFF_KEEP_ENV:-}"
+for pat in "${KEEP_PATS[@]}"; do
+  [[ "$pat" =~ ^[A-Za-z_][A-Za-z0-9_]*\*?$ ]] || continue
+  case "$pat" in
+    *'*')
+      pfx="${pat%\*}"
+      while IFS= read -r nm; do
+        [[ "$nm" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        case "$nm" in "$pfx"*) CHILD_ENV+=("$nm=${!nm}") ;; esac
+      done < <(compgen -e) ;;
+    *) [ -n "${!pat+x}" ] && CHILD_ENV+=("$pat=${!pat}") ;;
+  esac
+done
+for nm in LANG LC_ALL TMPDIR CLAUDE_CONFIG_DIR CLAUDE_CODE_OAUTH_TOKEN; do
+  [ -n "${!nm+x}" ] && CHILD_ENV+=("$nm=${!nm}")
+done
+# Last, so nothing above can override them (later assignments win under env).
+CHILD_ENV+=("PATH=$PATH" "HOME=$HOME" "GRID_AUTOHANDOFF_CHILD=1")
+PERL_BIN="$(command -v perl || printf perl)"
+
+# Timeout wrapper (perl, because setsid(1) is not on macOS): the child runs in its own
+# session and process group; on the alarm (or a TERM sent to the wrapper) the whole GROUP
+# gets TERM, then KILL, so grandchildren do not outlive the timeout, and the wrapper exits
+# 142 (the "timeout" outcome). A failed exec is 127. Otherwise it passes the exit status on.
+TIMEOUT_PL='
+use POSIX qw(setsid);
+my $t = shift @ARGV;
+my $pid = fork();
+exit 127 unless defined $pid;
+if (!$pid) { setsid(); exec @ARGV; exit 127; }
+my $reap = sub { kill "TERM", -$pid; select(undef, undef, undef, 1.5); kill "KILL", -$pid; waitpid($pid, 0); };
+$SIG{ALRM} = sub { $reap->(); exit 142; };
+$SIG{TERM} = sub { $reap->(); exit 143; };
+alarm $t;
+waitpid($pid, 0);
+my $st = $?;
+exit($st & 127 ? 128 + ($st & 127) : $st >> 8);
+'
+# The child runs in the BACKGROUND and the worker waits for it: bash defers a trap until a
+# foreground command ends, so a SIGALRM from the hook's outer alarm would otherwise sit
+# unhandled for up to the whole timeout. With `wait`, the trap (on_signal) runs at once.
+CHILD_PID=""
+env -i "${CHILD_ENV[@]}" "$PERL_BIN" -e "$TIMEOUT_PL" "$TIMEOUT" \
+  "${GRID_CLAUDE:-claude}" -p "$PROMPT" \
+  --model sonnet --max-turns 25 --max-budget-usd "$MAX_USD" \
+  --permission-mode default --setting-sources user --strict-mcp-config \
+  --tools "Read,Write,Bash" \
+  --allowedTools "Read" "${RULES[@]}" "Bash(hostname:*)" "Bash(realpath:*)" "Bash(readlink:*)" "Bash(ls:*)" "Bash(date:*)" \
+  --disallowedTools "${DENY[@]}" \
+  --add-dir "$DIGEST_DIR" --add-dir "$FALLBACK" \
+  --append-system-prompt-file "$HERE/auto-handoff-system.md" \
+  < /dev/null > "$OUT" 2>&1 &
+CHILD_PID=$!
+wait "$CHILD_PID"
+rc=$?
+CHILD_PID=""
+
+# Child output into the log, truncated to 4000 bytes and prefixed so it never reads
+# as a decision line. It is model output, so it goes through the secret mask first: a
+# matching line is replaced, never logged. When the cut falls mid-line that last (partial)
+# line is dropped, so half a token cannot slip past the patterns.
+if [ -s "$OUT" ]; then
+  if [ "$(wc -c < "$OUT")" -gt 4000 ]; then
+    { head -c 4000 "$OUT" | sed '$d' | secret_mask_stream | sed 's/^/child| /'; echo; } >> "$LOG" 2>/dev/null
+  else
+    { secret_mask_stream < "$OUT" | sed 's/^/child| /'; echo; } >> "$LOG" 2>/dev/null
+  fi
+fi
+case "$rc" in
+  0) ;;
+  142) scan_new_and_quarantine; finish_error timeout "$QNOTE" ;;
+  *) scan_new_and_quarantine; finish_error "claude-exit-$rc" "$QNOTE" ;;
+esac
+
+# ---- 7: verify what the child wrote -------------------------------------------------
+# 7a. .git first, then the files outside every repo: any difference in the watched state
+#     fails closed. Nothing is ever moved or deleted: the operator may be using the repo
+#     right now. The snapshot is compared by content (checksum / link target), so a file
+#     rewritten with identical bytes is not a change.
+CHANGED=()
+# state_diff <before-file> <after-text-from-stdin>: the paths whose state line differs.
+state_diff() {
+  diff "$1" - 2>/dev/null | awk -F'\t' '/^[<>] /{sub(/^[<>] /, "", $1); print $1}' | sort -u
+}
+i=0
+for d in "${GITDIRS[@]}"; do
+  while IFS= read -r p; do [ -n "$p" ] && CHANGED+=("$p"); done < <(git_state "$d" | state_diff "$SNAP_DIR/git$i.state")
+  i=$((i + 1))
+done
+while IFS= read -r p; do [ -n "$p" ] && CHANGED+=("$p"); done < <(home_state | state_diff "$SNAP_DIR/home.state")
+# A git dir that did not exist before the run (VS1): refuse before any git command runs.
+NEWGIT=()
+while IFS= read -r p; do [ -n "$p" ] && NEWGIT+=("$(disp "$p")"); done \
+  < <(git_entries | comm -13 "$SNAP_DIR/git.entries.before" -)
+if [ "${#NEWGIT[@]}" -gt 0 ]; then
+  scan_new_and_quarantine
+  finish_error unexpected-git-dir "paths=$(join_csv "${NEWGIT[@]}")${QNOTE:+ $QNOTE}"
+fi
+if [ "${#CHANGED[@]}" -gt 0 ]; then
+  DISP=(); for p in "${CHANGED[@]}"; do DISP+=("$(disp "$p")"); done
+  scan_new_and_quarantine
+  finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")${QNOTE:+ $QNOTE}"
+fi
+
+# 7b. what changed under the roots DURING the child run: entries in the after-snapshot that
+#     are not in the before-snapshot (new, or a different mtime or size). Symlinks are
+#     looked at, never followed (find -P), so a link cannot hide or redirect a write; a
+#     symlink named like a handoff file is reported whatever its age, because a
+#     pre-planted one would make the child write through it. No -maxdepth: a depth cap
+#     lets a deep write go unseen.
 NEW=()      # real paths, de-duplicated (the same file can be reached by two roots)
 NEW_DISP=()
-while IFS= read -r f; do
+SYMS=()     # changed or new symlinks, and handoff-named ones of any age
+while IFS=$'\t' read -r f ty _mt _sz; do
   [ -n "$f" ] || continue
-  r="$(rp "$f")" || continue
+  # rp resolves a symlink to a directory; a link is reported as itself (its parent, resolved, plus its name)
+  if [ "$ty" = L ]; then r="$(rp "$(dirname "$f")")/$(basename "$f")" || continue; else r="$(rp "$f")" || continue; fi
   dup=0
-  for x in "${NEW[@]}"; do [ "$x" = "$r" ] && dup=1; done
+  for x in "${NEW[@]}" "${SYMS[@]}"; do [ "$x" = "$r" ] && dup=1; done
   [ "$dup" = 1 ] && continue
-  NEW+=("$r"); NEW_DISP+=("$(disp "$f")")
-done < <(find -L "${ROOTS[@]}" \( -name .git -o -path "$DIGEST_DIR" -o -path "$SNAP_DIR" \) -prune \
-              -o -type f -newer "$STAMP" -print 2>/dev/null)
+  if [ "$ty" = L ]; then SYMS+=("$r")
+  else NEW+=("$r"); NEW_DISP+=("$(disp "$f")"); fi
+done < <({ fs_snapshot > "$SNAP_DIR/fs.after"; comm -13 "$SNAP_DIR/fs.before" "$SNAP_DIR/fs.after"
+           awk -F'\t' '$2 == "L" && ($1 ~ /-handoff\.md$/ || $1 ~ /-context\.md$/)' "$SNAP_DIR/fs.after"; })
+if [ "${#SYMS[@]}" -gt 0 ]; then
+  DISP=(); for p in "${SYMS[@]}"; do DISP+=("$(disp "$p")"); done
+  scan_new_and_quarantine
+  finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")${QNOTE:+ $QNOTE}"
+fi
 
 HANDOFFS=()   # indexes into NEW
 n=0
@@ -358,7 +777,7 @@ for r in "${NEW[@]}"; do
   case "$(basename "$r")" in *-handoff.md) HANDOFFS+=("$n") ;; esac
   n=$((n + 1))
 done
-if [ "${#HANDOFFS[@]}" -eq 0 ]; then finish_error no-handoff-file; fi
+if [ "${#HANDOFFS[@]}" -eq 0 ]; then { scan_new_and_quarantine; finish_error no-handoff-file "$QNOTE"; }; fi
 
 # EXPECTED: one <p>-handoff.md and at most one <p>-context.md with the same <p>, in one
 # directory that is the target dir or the fallback dir. Everything else is UNEXPECTED.
@@ -382,7 +801,8 @@ for r in "${NEW[@]}"; do
 done
 if [ "${#UNEXP[@]}" -gt 0 ]; then
   # Detect only: nothing is moved or deleted, every unexpected path is named.
-  finish_error unexpected-file "paths=$(join_csv "${UNEXP[@]}")"
+  scan_new_and_quarantine
+  finish_error unexpected-file "paths=$(join_csv "${UNEXP[@]}")${QNOTE:+ $QNOTE}"
 fi
 PAIR=("$HF"); [ -n "$CTX" ] && PAIR+=("$CTX")
 
@@ -404,25 +824,42 @@ if [ "${#HITS[@]}" -gt 0 ]; then
 fi
 
 # ---- 9: commit the pair, by explicit path, in the repo that holds the real files ----
+# A git dir the child CREATED (a nested .git in the target or fallback dir) would make the
+# commit below run its config as the operator (core.fsmonitor, hooks, a ssh command). The
+# before/after .git listing in 7a catches a new .git entry; this is the second line: the
+# git dir that governs the commit directory must be one that existed before the run.
 R="$(dirname "$HF")"
-T="$(git -C "$R" rev-parse --show-toplevel 2>/dev/null)"
+RG="$("${WGIT[@]}" -C "$R" rev-parse --absolute-git-dir 2>/dev/null)"
+if [ -n "$RG" ]; then
+  RG="$(rp "$RG" 2>/dev/null)" || RG=""
+  have_gitdir "$RG" || { scan_new_and_quarantine; finish_error unexpected-git-dir "paths=$(disp "$RG")${QNOTE:+ $QNOTE}"; }
+fi
+T="$("${WGIT[@]}" -C "$R" rev-parse --show-toplevel 2>/dev/null)"
 if [ -z "$T" ]; then
   # Not inside any git repo: leave the files on disk (the skill's own rule).
   T=""; COMMIT="none"
 else
   T="$(rp "$T")"
+  # Two workers committing into one repo (the private repo, from different cwds) would race
+  # for its index lock: take turns.
+  lock_path_wait "$T" repo
   RELS=()
   for f in "${PAIR[@]}"; do RELS+=("${f#"$T"/}"); done
   prefix="$(basename "$HF")"; prefix="${prefix%-handoff.md}"
   # add then commit with the same pathspec: only these files, never the operator's
-  # other staged work.
-  if cout="$(git -C "$T" add -- "${RELS[@]}" 2>&1 \
-        && git -C "$T" commit -q -m "docs: auto-handoff $prefix" -- "${RELS[@]}" 2>&1)"; then
-    COMMIT="$(git -C "$T" rev-parse --short HEAD 2>/dev/null)"
+  # other staged work. Each git call is bounded (60 s: a hung hook must not outlive the
+  # hook's outer alarm), and what is staged is remembered so on_signal can unstage it.
+  GOUT="$SNAP_DIR/git.out"
+  STAGED_ROOT="$T"; STAGED=("${RELS[@]}")
+  if run_bounded 60 "${WGIT[@]}" -C "$T" add -- "${RELS[@]}" > "$GOUT" 2>&1 \
+        && run_bounded 60 "${WGIT[@]}" -C "$T" commit -q -m "docs: auto-handoff $prefix" -- "${RELS[@]}" >> "$GOUT" 2>&1; then
+    COMMIT="$("${WGIT[@]}" -C "$T" rev-parse --short HEAD 2>/dev/null)"
+    STAGED=()
   else
     # Leave the files on disk; unstage them so the next commit does not pick them up.
-    git -C "$T" reset -q -- "${RELS[@]}" >/dev/null 2>&1
-    printf 'child| commit failed: %s\n' "$(printf '%s' "$cout" | head -c 400 | tr '\n' ' ')" >> "$LOG" 2>/dev/null
+    "${WGIT[@]}" -C "$T" reset -q -- "${RELS[@]}" >/dev/null 2>&1
+    STAGED=()
+    printf 'child| commit failed: %s\n' "$(head -c 400 "$GOUT" | secret_mask_stream | tr '\n' ' ')" >> "$LOG" 2>/dev/null
     finish_error commit-failed
   fi
 fi
@@ -430,15 +867,14 @@ fi
 # ---- 10: push, only the private repo and only our own commit -----------------------
 PUSH=""
 if [ "$COMMIT" != "none" ]; then
-  PRIVATE_REAL="$(rp "$PRIVATE" 2>/dev/null)" || PRIVATE_REAL="$PRIVATE"
   if [ "$T" != "$PRIVATE_REAL" ]; then
     PUSH="no-not-private"
-  elif ! git -C "$T" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+  elif ! "${WGIT[@]}" -C "$T" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
     PUSH="no-upstream"
-  elif [ "$(git -C "$T" rev-list --count '@{u}..HEAD' 2>/dev/null)" != "1" ]; then
+  elif [ "$("${WGIT[@]}" -C "$T" rev-list --count '@{u}..HEAD' 2>/dev/null)" != "1" ]; then
     # A push sends every unpushed commit; only a handoff-only push is safe unattended.
     PUSH="no-other-commits"
-  elif git -C "$T" push -q >/dev/null 2>&1; then
+  elif run_bounded 60 "${WGIT[@]}" -C "$T" push -q >/dev/null 2>&1; then
     PUSH="yes"
   else
     PUSH="failed"
@@ -446,7 +882,6 @@ if [ "$COMMIT" != "none" ]; then
 fi
 
 # ---- 11: marker, log, record -------------------------------------------------------
-mkdir -p "$STATE" 2>/dev/null && printf '%s\n' "$TURNS" > "$STATE/$SID" 2>/dev/null
 log 'done' ok "turns=$TURNS commit=$COMMIT${PUSH:+ push=$PUSH}"
 record ok "commit=$COMMIT${PUSH:+ push=$PUSH}"
 exit 0

@@ -1046,7 +1046,9 @@ done
 # --- 3c2. Machine-level hooks (auto-handoff) ---
 # Makes ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json hold exactly the generated
 # hook entries the manifest asks for (hook: / -hook:), leaving every hand-written
-# hook and key alone. deploy_hooks.py --user is idempotent (a second run writes
+# hook and key alone (values and key order kept; the first write REFORMATS the whole
+# file to 2-space-indented JSON, see the deploy_hooks.py docstring). deploy_hooks.py
+# --user is idempotent (a second run writes
 # nothing) and stdlib-only, so plain python3 is enough. A failure is a warning, never
 # a failed wire: skills and agents are already linked above.
 # Skipped silently (no manifest row) under GRID_SKIP_CATALOG, i.e. every dry run, so a

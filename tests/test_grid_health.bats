@@ -441,3 +441,28 @@ snapshot() { tree_digest "$GREAL"; echo "--"; tree_digest "$SKILLS_DIR"; echo "-
   [[ "$output" == *"repair"* ]]
   [[ "$output" == *"uninstall"* ]]
 }
+
+# WP-015 (hardening, refs private WP-015): a dotfiles-symlinked settings.json is a deliberate
+# setup. `wire.sh --check` used to exit 1 forever for it, and doctor showed only the first
+# stderr line (often an unrelated warning).
+@test "doctor on a machine with symlinked settings is clean" {
+  installed
+  mkdir -p "$GREAL/agent-factory"
+  cp "$REPO_ROOT/agent-factory/deploy_hooks.py" "$GREAL/agent-factory/deploy_hooks.py"
+  cp -R "$REPO_ROOT/hooks" "$GREAL/hooks"
+  printf '{}\n' > "$T/dotfiles-settings.json"
+  ln -s "$T/dotfiles-settings.json" "$CLAUDE_CONFIG_DIR/settings.json"
+  run grid doctor
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a check failure reports every stderr line" {
+  installed
+  # A wire.sh that fails after two lines of context: both must reach the finding.
+  printf '#!/bin/bash\necho "first-problem-line" >&2\necho "second-problem-line" >&2\nexit 1\n' > "$GREAL/scripts/wire.sh"
+  run grid doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"first-problem-line"* ]]
+  [[ "$output" == *"second-problem-line"* ]]
+}

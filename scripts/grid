@@ -1684,7 +1684,10 @@ def link_findings(grid_dir, skills_dir):
             findings.append(("links", "link", name, "%s -> %s" % (
                 "missing" if line[0] == "<" else "stale", target)))
     if not findings:
-        reason = (proc.stderr.strip().splitlines() or ["exit %d" % proc.returncode])[0]
+        # Every non-blank stderr line, not just the first: the first is often an unrelated
+        # warning and the real cause comes after it.
+        lines = [ln.strip() for ln in proc.stderr.splitlines() if ln.strip()]
+        reason = "; ".join(lines) or "exit %d" % proc.returncode
         findings.append(("links", "wire", "wire.sh", "check failed: %s" % reason))
     return findings
 

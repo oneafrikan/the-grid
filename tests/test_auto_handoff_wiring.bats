@@ -349,3 +349,32 @@ generated_commands() {
   # A dry run also leaves the mock grid's own state alone.
   [ ! -e "$MOCK_GRID/.wired.manifest" ]
 }
+
+# ---------------------------------------------------------------- WP-015 (hardening, refs private WP-015)
+
+@test "GRID_DIR without hooks/run.sh exits non-zero and writes nothing" {
+  rm "$MOCK_GRID/hooks/run.sh"
+  GRID_DIR="$MOCK_GRID" run python3 "$MOCK_GRID/agent-factory/deploy_hooks.py" --user --hooks auto-handoff
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"run.sh not found"* ]]
+  [ ! -e "$SETTINGS" ]
+  # Through wire.sh it is the usual warning and a clean exit, never a dangling entry.
+  wire
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: deploy_hooks.py --user failed"* ]]
+  [ ! -e "$SETTINGS" ]
+}
+
+@test "a symlinked settings file: wire.sh --check exits 0 and says skipped; a real wire still warns and keeps the link" {
+  printf '{}\n' > "$MOCK_HOOK_ROOT/real-settings.json"
+  ln -s "$MOCK_HOOK_ROOT/real-settings.json" "$SETTINGS"
+  wire
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: deploy_hooks.py --user failed"* ]]
+  [ -L "$SETTINGS" ]
+  wire --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipped: symlinked settings"* ]]
+  [ -L "$SETTINGS" ]
+  [ "$(cat "$MOCK_HOOK_ROOT/real-settings.json")" = "{}" ]
+}

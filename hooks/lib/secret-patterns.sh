@@ -9,7 +9,10 @@
 #                                  returns 0; returns 1 for no match or an exempt line
 #   secret_scan_file <path>        prints "<path>:<line>: <name> (<4 chars>...)" per hit
 #                                  (at most 10); returns 1 when anything was printed
+#   secret_redact_file <path>      rewrites matching lines as "[line redacted: <name>]", prints the count
+#   secret_mask_stream             stdin to stdout, a matching line becomes "[masked: <name>]"
 #   secret_sensitive_name <name>   returns 0 for a sensitive file BASENAME
+#   SECRET_STRICT=1                no exemptions, plus the STRICT_* shapes (the auto-handoff worker)
 #
 # Patterns are POSIX extended regular expressions with POSIX classes only (no \s,
 # no PCRE) so they behave the same on GNU and BSD systems. They are matched with
@@ -99,6 +102,24 @@ secret_prefilter_re() {
   printf '%s' "$out"
 }
 
+# Strict mode (SECRET_STRICT=1, set by the auto-handoff worker). A caller whose input is
+# model output must not honour the exemptions above: the model can add the word "example"
+# to any line it wants to get past the scan. Strict mode therefore (a) ignores
+# _SECRET_EXEMPT, including the allow pragma, and (b) also tries the few extra shapes
+# below. They are worker-only on purpose: as a commit guard on human diffs they would be
+# too noisy (any long hash or `password=...` in code). No entropy scoring: fixed patterns,
+# nothing to tune. Known cost: a long base64-looking run (a 64-hex digest, for example) in
+# a handoff is quarantined; the operator reviews the quarantine directory.
+_STRICT_Q="'\""   # a single and a double quote
+STRICT_NAMES=(base64-run bearer-value password-assigned)
+STRICT_RES=(
+  '[A-Za-z0-9+/=]{64,}'
+  '[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}'
+  # case-insensitive; the leading boundary keeps "bypass_cache: enabled" out
+  "(^|[^A-Za-z0-9])(pass|pwd|passw(or)?d)[A-Za-z0-9_]*[[:space:]]*[:=][[:space:]]*[${_STRICT_Q}]?[^${_STRICT_Q}[:space:]]{6,}"
+)
+STRICT_BOUND=(0 0 1)
+
 # Set by _secret_match: the matched pattern name and the matched text without its
 # boundary character (callers show only its first four characters).
 SECRET_MATCH_NAME=""
@@ -137,6 +158,7 @@ _assigned_value() {
 # _secret_exempt <token text>
 #   True when the matched token itself holds a placeholder word (case-insensitive).
 _secret_exempt() {
+  [ "${SECRET_STRICT:-0}" = 1 ] && return 1   # strict mode: never exempt (see SECRET_STRICT)
   local was=0 rc=1
   shopt -q nocasematch && was=1
   shopt -s nocasematch
@@ -159,7 +181,7 @@ _secret_match() {
   local line="$1" i name re hit="" text="" was=0 tail key after tok
   shopt -q nocasematch && was=1
   shopt -u nocasematch
-  if [[ "$line" == *"$_SECRET_PRAGMA"* ]]; then
+  if [ "${SECRET_STRICT:-0}" != 1 ] && [[ "$line" == *"$_SECRET_PRAGMA"* ]]; then
     if [ "$was" = 1 ]; then shopt -s nocasematch; fi
     return 1
   fi
@@ -185,6 +207,18 @@ _secret_match() {
     fi
     [ -z "$hit" ] || break
   done
+  if [ -z "$hit" ] && [ "${SECRET_STRICT:-0}" = 1 ]; then
+    shopt -s nocasematch   # only password-assigned needs it; the others spell their classes out
+    for ((i = 0; i < ${#STRICT_NAMES[@]}; i++)); do
+      re="${STRICT_RES[$i]}"
+      if [[ "$line" =~ $re ]]; then
+        hit="${STRICT_NAMES[$i]}"
+        text="${BASH_REMATCH[0]}"
+        if [ "${STRICT_BOUND[$i]}" = 1 ]; then text="${text#"${BASH_REMATCH[1]}"}"; fi
+        break
+      fi
+    done
+  fi
   if [ "$was" = 1 ]; then shopt -s nocasematch; else shopt -u nocasematch; fi
   [ -n "$hit" ] || return 1
   SECRET_MATCH_NAME="$hit"
@@ -227,13 +261,42 @@ secret_scan_file() {
   local path="$1" line n=0 found=0
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
-    if _secret_match "$line"; then
+    if secret_match_long "$line"; then
       printf '%s:%s: %s (%s...)\n' "$path" "$n" "$SECRET_MATCH_NAME" "${SECRET_MATCH_TEXT:0:4}"
       found=$((found + 1))
       [ "$found" -ge 10 ] && break
     fi
   done < "$path"
   [ "$found" -eq 0 ]
+}
+
+# secret_redact_file <path>
+#   Rewrites <path> in place: every line that matches becomes "[line redacted: <name>]".
+#   Prints the number of lines redacted (0 leaves the file's bytes alone). Used on the
+#   digest the model reads, so a secret in the transcript is never shown to it.
+secret_redact_file() {
+  local path="$1" tmp line n=0
+  tmp="$(mktemp "$path.XXXXXX")" || { echo 0; return 1; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    if secret_match_long "$line"; then
+      printf '[line redacted: %s]\n' "$SECRET_MATCH_NAME"
+      n=$((n + 1))
+    else
+      printf '%s\n' "$line"
+    fi
+  done < "$path" > "$tmp"
+  if [ "$n" -gt 0 ]; then mv -f "$tmp" "$path"; else rm -f "$tmp"; fi
+  printf '%s\n' "$n"
+}
+
+# secret_mask_stream
+#   stdin to stdout, line by line; a matching line becomes "[masked: <name>]". Used on
+#   text that goes into a log (child output, git's error text).
+secret_mask_stream() {
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    if secret_match_long "$line"; then printf '[masked: %s]\n' "$SECRET_MATCH_NAME"; else printf '%s\n' "$line"; fi
+  done
 }
 
 # secret_sensitive_name <basename>

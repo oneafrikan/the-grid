@@ -41,6 +41,13 @@ only.
 The machine-readable version of this table is `catalogue.json` (the only place scope,
 profile and cost are defined). Every entry has a non-empty `cost`.
 
+**What "closed" covers.** A `closed` guard blocks when it runs: a missing `jq` makes it
+exit 2 with an install hint, which Claude Code treats as a block. It does not cover a
+missing launcher. If `hooks/run.sh` is gone (a moved or deleted checkout, a wrong
+`GRID_DIR`) the emitted command exits 127, which Claude Code does not treat as
+blocking, so the guard is off until the path is fixed (the failure shows as a hook
+error in the session). A launcher that blocks on its own absence is deferred.
+
 **Opt-in hooks (`instincts-*`).** These four are in no profile. A project turns them on
 with a top-level `learning: on` in its `.grid/project.yaml` (the YAML `true` works too),
 and `deploy_hooks.py` then emits them under every profile, including `off`. Setting the
@@ -75,8 +82,11 @@ settings.json  ->  bash ".../hooks/run.sh" <id>   ->   hooks/scripts/<id>.sh
 
 ## Environment variables
 
-Both are read by `run.sh` from the environment of the shell that launched `claude`;
-no re-emit is needed.
+Both are read by `run.sh` from the environment of the shell that launched `claude`
+(the environment the hook runs in), not from any file; no re-emit is needed. Anything
+that can set those variables for the hook process can switch a guard off, which is
+what a kill switch is; whether a project's own `.claude/settings.json` `env` block
+reaches hook subprocesses has not been verified.
 
 | Variable | Effect |
 |---|---|
@@ -127,9 +137,17 @@ profiles. The hook returns in well under a second; the worker runs in its own se
 
 **Wiring.** `scripts/wire.sh` adds one generated SessionEnd entry to
 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json` (`deploy_hooks.py --user`; absolute
-path to this checkout's `hooks/run.sh`), leaving every hand-written hook and key alone.
+path to this checkout's `hooks/run.sh`), leaving every hand-written hook and key alone
+(values and key order are kept, but the first write reformats the whole file as
+2-space-indented JSON: tabs, `\uXXXX` escapes and spellings like `1e5` are normalised).
+A settings file it cannot rewrite faithfully (duplicate keys, `NaN`/`Infinity`, empty,
+read-only, not a regular file) is refused with a warning and left untouched; delete an
+empty file or write `{}` to it.
 Running `wire.sh` again changes nothing; `wire.sh --check` reports a missing entry and
-exits 1. A symlinked settings file or config dir is refused (a warning from `wire.sh`).
+exits 1. A symlinked settings file or config dir is refused (a warning from `wire.sh`),
+and `wire.sh --check` skips it with a notice instead of reporting drift forever.
+Numbers with more than 17 significant digits lose precision in the reformat (they pass
+through a float).
 
 **Opting out.** Per machine: put `-hook:auto-handoff` in the machine's manifest overlay
 (re-enable with `hook:auto-handoff`). Per session: start `claude` with
@@ -145,7 +163,26 @@ exits 1. A symlinked settings file or config dir is refused (a warning from `wir
   (`no-new-turns`).
 
 Only real human turns count: tool results, meta lines, attachments and subagent
-(sidechain) lines do not.
+(sidechain) lines do not. Only a message that STARTS with the `/handoff` command tag
+counts as having run it; the tag quoted mid-sentence does not.
+
+**One run at a time.** A worker takes a per-session lock (`<state dir>/handoff/<id>.lock`,
+taken over when older than the timeout plus 5 minutes, released on every exit) and a
+per-directory lock, so repeated SessionEnd payloads for one session spawn one model run
+and two sessions in one directory take turns. The turn marker is written before the
+child runs, so a failed run is not repeated until the session gains `MIN_TURNS` more
+turns. What the child changed is judged by a before/after snapshot of the scanned
+directories, so a file you edited just before the session ended is not blamed on it; a
+build or editor writing into the directory *during* the run still is (`unexpected-file`).
+The child runs in its own process group and the whole group is killed at the timeout.
+
+Known limit: the locks serialise sessions that share a directory or a repo, and a waiter
+gives up after `GRID_AUTOHANDOFF_WAIT` seconds (`cwd-busy`, or `repo-busy` once its child
+has run, leaving the pair on disk uncommitted) with no retry. Three or more sessions that
+end together on one shared target can therefore lose a handoff; the hook's outer alarm
+allows for four such waits. `~/.local/bin` is watched by names, types, link targets and
+sizes only (a same-size rewrite there is not seen, and a self-update of the claude link
+during a run is reported as `unexpected-file`).
 
 **Cost.** One Sonnet run per qualifying session. Bounds: `--max-budget-usd`
 (`GRID_AUTOHANDOFF_MAX_USD`, default 1.00; it may not bind on a subscription plan),
@@ -154,28 +191,84 @@ Every run is in the log and in the run record (`scripts/run-record.sh`, role
 `auto-handoff`).
 
 **The child can only write.** It runs in the session's directory with
-`--tools Read,Write,Bash`, in default permission mode (no `--permission-mode` flag).
-Write access is path-scoped allow rules, `Edit(//<abs dir>/**)`, for the handoff target
-directory and the fallback directory only; `Edit` itself and `Bash(git:*)` are denied,
-and Bash is limited to `hostname`, `realpath`, `readlink`, `ls` and `date`. A system
-prompt (`lib/auto-handoff-system.md`) tells it to write only the two files and run no
-git. The target directory is resolved the way the handoff skill resolves it: the first
-matching row of `~/.the-grid-private/handoff-locations.md`, else an existing `logs`
-directory of the session's directory in any casing. If it does not exist the child
-writes to the fallback directory instead.
+`--tools Read,Write,Bash`. Write access is path-scoped allow rules,
+`Edit(//<abs dir>/**)`, for the handoff target directory and the fallback directory
+only; `Edit` itself and `Bash(git:*)` are denied, and Bash is limited to `hostname`,
+`realpath`, `readlink`, `ls` and `date`. A system prompt (`lib/auto-handoff-system.md`)
+tells it to write only the two files and run no git. The target directory is resolved
+the way the handoff skill resolves it: the first matching row of `handoff-locations.md`
+in the private dir (`$GRID_PRIVATE_DIR`, else `~/.the-grid-private/`), else an existing
+`logs` directory of the session's directory in any casing. If it does not exist the
+child writes to the fallback directory instead.
+
+**Confinement.** Whether Claude Code honours the `Edit(//<abs>/**)` rule form was not
+proven live (operator check B1), so the rules are not the only barrier:
+
+- The resolved target must lie under the session's directory or the private repo. A
+  `LOGS` symlink that points elsewhere is refused (only the fallback directory is
+  granted; the spawn log line says `target-refused=<why>`). A table row written as a
+  RELATIVE path must resolve inside the session's directory or the private repo too
+  (`outside-cwd` otherwise: a tracked symlink at that path cannot redirect the grant).
+  Only a row written as an ABSOLUTE path may name another repo, and then only if it has
+  no `..`, is inside a git work tree whose root is not `$HOME`, and is not `$HOME`, `/`
+  or under `~/.ssh`, `.claude`, `.config`, `.gnupg`, `.aws`, `.local/bin` or `.bashrc.d`.
+  The private repo's own root is never a target (`private-root`): the child could
+  rewrite `handoff-locations.md`, which decides future grants.
+- A path with a glob metacharacter (`* ? [ ] { } ( ) !`) or a newline, or with a `..`
+  component, gets no rule; the fallback directory name is sanitised the same way.
+- The child runs with `--permission-mode default`, `--setting-sources user` and
+  `--strict-mcp-config`, with extra denies for `~/.ssh`, `~/.claude`, `~/.config`,
+  `~/.gnupg`, `~/.aws`, shell startup files, `~/.gitconfig` and anything under a `.git`
+  directory.
+- It starts under `env -i`: it gets `PATH`, `HOME`, locale, `TMPDIR`,
+  `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN`, the recursion guard, and only the
+  variables named in `GRID_AUTOHANDOFF_KEEP_ENV` (comma list of names or `PREFIX*`).
+  `GH_TOKEN`, `ANTHROPIC_API_KEY`, cloud credentials and `SSH_AUTH_SOCK` are not passed;
+  if `claude` authenticates through an API key variable, list it there.
+- The worker's own git calls after the child run with `core.fsmonitor=false`,
+  `core.hooksPath=/dev/null` and the `ext::` transport off (your own configuration for
+  remote access is left alone, so a push to a `git@host:` remote works), and only in a git dir that existed
+  before the run, so a configuration
+  the child managed to plant cannot execute anything. The repository's own hooks
+  therefore do not run for the handoff commit (the worker's strict secret scan runs
+  first); a git dir the child creates is `unexpected-git-dir`.
+- Afterwards the worker detects (it never reverts) changes it could not stop; see the
+  next list. It cannot see a write to an arbitrary path outside the directories and
+  files listed there.
 
 **What the worker does after the child.** It never trusts the model's side effects:
 
-1. A changed `.git/config` or `.git/hooks/` (snapshotted before, compared after) is
-   `unexpected-file`: no commit, changed paths logged, nothing moved.
-2. Every new file under the session's directory (any depth, `.git/` excluded), the
-   fallback directory and the target directory is collected. Exactly one
+1. A change (content compared, before and after) to git `config`, `HEAD`, `info/`,
+   `hooks/`, a submodule's config and hooks, a linked worktree's config, hooks and
+   info, or a `core.hooksPath` directory, in the session's repo, the target repo or the
+   fallback repo; or to shell startup files, `~/.ssh/{authorized_keys,config,rc}`,
+   `~/{.gitconfig,.npmrc,.xprofile,.pam_environment,.local/bin,.bashrc.d}`,
+   `~/.config/{autostart,systemd/user,git/attributes}`, Claude's
+   `settings*.json`, `.credentials.json`, `CLAUDE.md`, `hooks/` and `commands/`, is
+   `unexpected-file`: no commit, changed paths logged, nothing moved. (Not watched:
+   a repo's `refs`, `packed-refs` and `index`, which change legitimately while you
+   work.) A `.git` entry that did not exist before the run, anywhere under the scanned
+   directories, is `unexpected-git-dir`.
+2. Every file or symlink (symlinks are not followed) that is new or changed during the run,
+   under the session's directory (any depth, `.git/` excluded), the fallback directory
+   and the target directory is collected (NOT the rest of the repo the commit lands in:
+   other agents write there while the run is going, and a sibling session's files must
+   not fail this one; two workers that share a write directory or a repo take turns), and a symlink named
+   `*-handoff.md` or `*-context.md` is reported whatever its age. Exactly one
    `<p>-handoff.md` and at most one `<p>-context.md` with the same prefix, in the target
    or fallback directory, are expected. Anything else is `unexpected-file` (no commit,
    every path logged, nothing moved or deleted); no handoff file at all is
    `no-handoff-file`.
 3. Both files are scanned with the secret table (`lib/secret-patterns.sh`), whatever the
-   project profile says. A hit is `secret`: both files move to
+   project profile says, in strict mode: the "example"/placeholder exemptions do not
+   apply (a model can add the word to any line), and four extra shapes count: a run of
+   64 or more base64 characters, `Bearer <20+ chars>`, a URL password
+   (`scheme://user:secret@host`) and `pass`/`pwd`/`password` assigned a value of 6 or
+   more characters. A long hex digest in a handoff is therefore quarantined too. The same
+   scan runs first on the timeout, child-failure and `unexpected-file` paths: a NEW file
+   with a hit moves to the quarantine directory (the reason stays `timeout` and so on,
+   with `secret=` and `quarantine=` added); a pre-existing file the child changed is only
+   reported. A hit is `secret`: both files move to
    `${GRID_STATE_DIR:-$HOME/.grid}/handoff-quarantine/<session>/` (outside every repo),
    nothing is committed, and only names and line numbers are logged. Review and delete
    them.
@@ -185,6 +278,14 @@ writes to the fallback directory instead.
 5. It pushes only when that repository is the private repo
    (`${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}`), its branch has an upstream, and the
    handoff commit is the only unpushed one. A plain `git push`, nothing else.
+
+**What the model sees and what the log keeps.** The digest the child reads is scanned
+with the same strict table before the child starts: a matching line becomes
+`[line redacted: <pattern>]` (the spawn log line says `redacted=<n>`), so a secret in the
+transcript is never in front of the model. Child output and git's error text are masked
+the same way before they are written to the log (`child| [masked: <pattern>]`). Each
+message in the digest is cut to the size cap before it is measured, so one huge message
+cannot exhaust memory.
 
 **Fallback directory.**
 `${GRID_HANDOFF_FALLBACK_DIR:-${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}/handoffs}/<basename of the session directory>/`.
@@ -198,9 +299,11 @@ The worker creates it first.
 | `GRID_AUTOHANDOFF_MAX_BYTES` | 300000 | digest size cap (the middle is elided past it) |
 | `GRID_AUTOHANDOFF_TIMEOUT` | 900 | seconds before the child is killed (`reason=timeout`) |
 | `GRID_AUTOHANDOFF_MAX_USD` | 1.00 | `--max-budget-usd` for the child |
+| `GRID_AUTOHANDOFF_WAIT` | 120 | seconds a second session in the same directory waits for the first before skipping as `cwd-busy` |
 | `GRID_AUTOHANDOFF_FORCE` | unset | `1` skips the already-ran, short-session and marker checks (parity runs, tests) |
 | `GRID_HANDOFF_FALLBACK_DIR` | see above | where a handoff lands when the target directory is missing or denied |
 | `GRID_PRIVATE_DIR` | `~/.the-grid-private` | the one repo the worker may push |
+| `GRID_AUTOHANDOFF_KEEP_ENV` | unset | extra variables the child keeps under `env -i`: names or `PREFIX*`, comma separated (the stub in tests needs `STUB_*,GRID_*`) |
 | `GRID_CLAUDE` | `claude` | the binary the worker runs (tests point it at a stub) |
 | `GRID_HOOK_LOG_DIR` | `~/.grid/hook-logs` | log directory (mode 0700) |
 | `GRID_HOOK_STATE_DIR` | `~/.grid/hook-state` | per-session marker directory |
@@ -216,13 +319,18 @@ line per decision:
 ts=<UTC time> session=<id> action=<skip|spawn|done|error> reason=<token> [turns=N] [commit=<none|sha>] [push=<token>] [paths=...]
 ```
 
-- `action=skip`: `bad-payload`, `no-transcript`, `already-ran`, `short-session`,
-  `no-new-turns`.
+- `action=skip`: `bad-payload` (including a session id over 64 characters),
+  `no-transcript`, `already-ran`, `short-session`, `no-new-turns`, `already-running`
+  (another worker holds this session's lock), `cwd-busy` (another session held the
+  directory's lock for `GRID_AUTOHANDOFF_WAIT` seconds; no marker is written, so a later
+  end may retry), `cwd-too-broad` (the session directory is `/`, `$HOME` or a parent of
+  it) and `no-perl` (written by the hook: without perl it cannot detach or time out).
 - `action=spawn reason=ok`: the child started (`end=` is the SessionEnd reason).
 - `action=done reason=ok`: the files were written and checked; `commit=` is `none` or the
   short sha.
-- `action=error`: `timeout`, `claude-exit-<n>` (127 means the binary could not be run),
-  `no-handoff-file`, `unexpected-file` (see `paths=`), `secret`, `commit-failed`,
+- `action=error`: `terminated` (the worker got TERM, HUP or the hook's outer alarm; a
+  half-made commit was unstaged), `timeout`, `claude-exit-<n>` (127 means the binary could not be run),
+  `no-handoff-file`, `unexpected-file` and `unexpected-git-dir` (see `paths=`), `repo-busy`, `secret`, `commit-failed`,
   `digest-failed`.
 - `push=`: `yes`; `no-not-private` (not the private repo); `no-upstream`;
   `no-other-commits` (an earlier unpushed commit exists, so nothing was sent); `failed`

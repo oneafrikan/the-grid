@@ -44,7 +44,12 @@
 #     STUB_STDIN_DUMP          path: the last `-p` call's stdin is copied there
 #     STUB_CLAUDE_STDIN        path: every `-p` call's drained stdin is copied there (same as STUB_STDIN_DUMP)
 #     Every call also records, in $STUB_DIR: claude.cwd, claude.child-env (GRID_AUTOHANDOFF_CHILD),
-#     claude.pgid, claude.pid, claude.umask (auto-handoff tests).
+#     claude.pgid, claude.pid, claude.umask, claude.env (the full environment it received)
+#     (auto-handoff tests). WP-016 modes: handoff-outside ($STUB_OUTSIDE_FILE), handoff-home-dotfile
+#     ($HOME/.bashrc), handoff-symlink, handoff-githook-other (git internals of $STUB_HANDOFF_DIR's repo).
+#     WP-017/018 knobs for handoff-* modes: STUB_HANDOFF_PREFIX (distinct pair names), STUB_CLAUDE_GRANDCHILD=1
+#     (a lingering grandchild, pid in grandchild.pid), STUB_CLAUDE_SLEEP_AFTER (linger after writing),
+#     STUB_CLAUDE_PRINT (text printed on stdout); modes handoff-modify (edits base.txt), handoff-secret-third.
 #     STUB_CLAUDE_MODE         unset = the behaviour above. handoff-logs | handoff-fallback | handoff-target |
 #                              handoff-extra | handoff-stray act like the auto-handoff child: write
 #                              2026-01-01-testhost-stub-{handoff,context}.md (body ${STUB_HANDOFF_BODY:-stub}) into
@@ -170,6 +175,7 @@ if [ -n "${STUB_DIR:-}" ]; then
   ps -o pgid= -p $$ | tr -d ' ' > "$STUB_DIR/claude.pgid"
   echo $$ > "$STUB_DIR/claude.pid"
   umask > "$STUB_DIR/claude.umask"
+  env > "$STUB_DIR/claude.env"   # the environment the worker handed the child (WP-016)
 fi
 # STUB_CLAUDE_MODE=handoff-* acts like the real child of hooks/lib/auto-handoff-worker.sh:
 # it writes the two handoff files and leaves. Unset (the default) = the old behaviour below.
@@ -178,9 +184,18 @@ case "${STUB_CLAUDE_MODE:-}" in
     # Keep a copy of the digest the prompt names, so a test can read what the child saw.
     digest="$(printf '%s' "$*" | sed -n 's/.*digest file \([^ ]*\), not this session.*/\1/p')"
     if [ -n "$digest" ] && [ -f "$digest" ] && [ -n "${STUB_DIR:-}" ]; then cp "$digest" "$STUB_DIR/claude.digest"; fi
+    # STUB_CLAUDE_GRANDCHILD=1: leave a long-lived grandchild behind (its pid in grandchild.pid), as a
+    # real child's tool process would; the worker's timeout must kill it too (WP-017).
+    if [ "${STUB_CLAUDE_GRANDCHILD:-0}" = 1 ]; then sleep 300 > /dev/null 2>&1 3>&- & echo $! > "$STUB_DIR/grandchild.pid"; fi
+    # STUB_CLAUDE_IGNORE_TERM=1: ignore TERM and never exit on its own (only KILL ends it): pins the
+    # worker's TERM-then-KILL of the child's process group.
+    if [ "${STUB_CLAUDE_IGNORE_TERM:-0}" = 1 ]; then trap '' TERM; while :; do sleep 1; done; fi
+    # STUB_SIDE_FILE: another process writes this file while the child runs (simulates a sibling session).
+    if [ -n "${STUB_SIDE_FILE:-}" ]; then mkdir -p "$(dirname "$STUB_SIDE_FILE")"; echo "from another agent" > "$STUB_SIDE_FILE"; fi
     if [ -n "${STUB_CLAUDE_SLEEP:-}" ]; then sleep "$STUB_CLAUDE_SLEEP"; fi
-    hf=2026-01-01-testhost-stub-handoff.md
-    cf=2026-01-01-testhost-stub-context.md
+    # STUB_HANDOFF_PREFIX makes the pair's names distinct, so two sessions in one cwd (WP-017) can be told apart.
+    hf="${STUB_HANDOFF_PREFIX:-}2026-01-01-testhost-stub-handoff.md"
+    cf="${STUB_HANDOFF_PREFIX:-}2026-01-01-testhost-stub-context.md"
     body="${STUB_HANDOFF_BODY:-stub}"
     # write_pair <dir>: both handoff files into <dir>
     write_pair() { mkdir -p "$1"; printf '%s\n' "$body" > "$1/$hf"; printf '%s\n' "$body" > "$1/$cf"; }
@@ -197,7 +212,45 @@ case "${STUB_CLAUDE_MODE:-}" in
         write_pair "$PWD/LOGS"
         mkdir -p "$PWD/a/b/c/d/e"
         echo stray > "$PWD/a/b/c/d/e/stray.md" ;;
+      # WP-016: the write-only boundary failing in ways the original scan could not see.
+      handoff-outside)  # the pair, plus a file at $STUB_OUTSIDE_FILE (outside the target dir)
+        write_pair "$PWD/LOGS"
+        printf 'x\n' > "$STUB_OUTSIDE_FILE" ;;
+      handoff-home-dotfile)  # the pair, plus a line appended to the shell rc file
+        write_pair "$PWD/LOGS"
+        echo 'echo planted' >> "$HOME/.bashrc" ;;
+      handoff-modify)  # the pair, plus an edit to a tracked file
+        write_pair "$PWD/LOGS"
+        echo more >> "$PWD/base.txt" ;;
+      handoff-symlink)  # the pair, plus a new symlink beside it
+        write_pair "$PWD/LOGS"
+        ln -s /etc/hostname "$PWD/LOGS/evil-link" ;;
+      handoff-githook-other)  # the pair into $STUB_HANDOFF_DIR (a repo), plus git internals of THAT repo
+        write_pair "$STUB_HANDOFF_DIR"
+        g="$(git -C "$STUB_HANDOFF_DIR" rev-parse --absolute-git-dir)"
+        mkdir -p "$g/hooks" "$g/info"
+        printf '#!/bin/sh\n' > "$g/hooks/post-commit"
+        echo '# planted' >> "$g/info/exclude"
+        : > "$g/HEAD.evil" ;;
+      # WP-016/018 review follow-ups
+      handoff-nested-git)  # the pair into $STUB_HANDOFF_DIR plus a NEW .git there whose config would run $STUB_CANARY_CMD
+        write_pair "$STUB_HANDOFF_DIR"
+        mkdir -p "$STUB_HANDOFF_DIR/.git/objects" "$STUB_HANDOFF_DIR/.git/refs"
+        printf 'ref: refs/heads/main\n' > "$STUB_HANDOFF_DIR/.git/HEAD"
+        printf '[core]\n\trepositoryformatversion = 0\n\tfsmonitor = %s\n' "$STUB_CANARY_CMD" > "$STUB_HANDOFF_DIR/.git/config" ;;
+      handoff-leak)  # NO pair; a secret-bearing stray file instead
+        mkdir -p "$PWD/LOGS"; printf '%s\n' "$body" > "$PWD/leak.txt" ;;
+      handoff-symlink-dir)  # the pair, plus a new symlink to a DIRECTORY
+        write_pair "$PWD/LOGS"
+        ln -s /etc "$PWD/LOGS/etc-link" ;;
+      handoff-secret-third)  # the pair (give it a secret body), plus an innocent third file (WP-018)
+        write_pair "$PWD/LOGS"
+        echo plain > "$PWD/LOGS/third.md" ;;
     esac
+    # STUB_CLAUDE_PRINT: text the child prints on stdout (the worker logs it, masked).
+    # STUB_CLAUDE_SLEEP_AFTER: seconds to linger AFTER writing (a timeout with files on disk).
+    if [ -n "${STUB_CLAUDE_PRINT:-}" ]; then printf '%s\n' "$STUB_CLAUDE_PRINT"; fi
+    if [ -n "${STUB_CLAUDE_SLEEP_AFTER:-}" ]; then sleep "$STUB_CLAUDE_SLEEP_AFTER"; fi
     exit "${STUB_CLAUDE_EXIT:-0}" ;;
 esac
 # issue number from the worktree name (issue-N), if any

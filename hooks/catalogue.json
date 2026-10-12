@@ -12,7 +12,7 @@
       "on_failure": "block",
       "model_cost": false,
       "cost": "0 tokens; about 50 ms per Bash call (measured on one Linux box); prints ~60 tokens only when it blocks.",
-      "description": "Blocks git --no-verify (and commit -n), hook-disabling config, and force-push."
+      "description": "Blocks git --no-verify (and commit -n), hook-disabling config, and force-push. Blocks while it runs; if the launcher file is missing the command exits 127, which Claude Code does not treat as blocking."
     },
     {
       "id": "pre-bash-secret-scan",
@@ -25,7 +25,7 @@
       "on_failure": "block",
       "model_cost": false,
       "cost": "0 tokens; about 60 ms per Bash call (measured on one Linux box), more only for a git commit or git add that scans a diff; prints a short file:line list only when it blocks.",
-      "description": "Blocks git commit when an added line looks like a secret, and git add of key and .env files."
+      "description": "Blocks git commit when an added line looks like a secret, and git add of key and .env files. Blocks while it runs; if the launcher file is missing the command exits 127, which Claude Code does not treat as blocking."
     },
     {
       "id": "auto-handoff",

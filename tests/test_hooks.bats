@@ -1722,3 +1722,17 @@ tok_pgp()       { printf '%s' "-----BEGIN PGP PRIV""ATE KEY BLOCK-----"; }
     ! secret_sensitive_name "$n" || { echo "should not be sensitive: $n" >&2; false; }
   done
 }
+
+# WP-015 (hardening, refs private WP-015): "fail: closed" only covers a missing jq. A missing
+# launcher is bash exit 127, which Claude Code does not treat as blocking, so the guard is off.
+# The catalogue (what `grid hooks` shows) and the README must say so rather than imply more.
+@test "closed guards' catalogue description mentions the missing-launcher case" {
+  run jq -e 'all(.hooks[] | select(.fail == "closed"); (.description | test("launcher")) and (.description | test("127")))' \
+    "$REPO_ROOT/hooks/catalogue.json"
+  [ "$status" -eq 0 ]
+  grep -q "exits 127" "$REPO_ROOT/hooks/README.md"
+}
+
+@test "README says the kill switches are read from the environment the hook runs in" {
+  grep -q "environment the hook runs in" "$REPO_ROOT/hooks/README.md"
+}

@@ -38,8 +38,8 @@ Also write a context file using today's actual date.
 
 Default: save to `LOGS/` — ask before creating it if it doesn't exist.
 
-Optional per-project overrides: if `~/.the-grid-private/handoff-locations.md`
-exists, read its table first (rows: `| directory-name-or-glob | location |`);
+Optional per-project overrides: if `handoff-locations.md` exists in the private dir
+(`$GRID_PRIVATE_DIR`, default `~/.the-grid-private/`), read its table first (rows: `| directory-name-or-glob | location |`);
 the first row matching the current working directory wins. If the file is
 absent or no row matches, use the default above.
 
