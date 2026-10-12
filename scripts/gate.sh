@@ -174,6 +174,16 @@ run_bats() {
   if [ "${#leftovers[@]}" -gt 0 ]; then
     echo "    tests leaked temp files into their TMPDIR:" >&2
     printf '      %s\n' "${leftovers[@]:0:20}" >&2
+    # Say what each entry is and who might still be running, so a leak seen only on a CI
+    # runner can be traced to its test without reproducing it. Best effort: a minimal PATH
+    # (the gate's own tests) simply prints less.
+    local e
+    for e in "${leftovers[@]:0:20}"; do
+      { ls -ldA -- "$e"
+        if [ -d "$e" ]; then find "$e" -maxdepth 2 | head -n 20; else head -c 300 -- "$e"; echo; fi
+      } 2>/dev/null | sed 's/^/        /' >&2 || true
+    done
+    { echo "      processes still running:"; ps -eo pid,etime,args --sort=etimes 2>/dev/null | grep -v -e ' ps -eo' -e grep -e ' \[' | head -n 25 | cut -c1-200 | sed 's/^/        /'; } >&2 || true
     rc=1
   fi
   rm -rf "$tmp"
