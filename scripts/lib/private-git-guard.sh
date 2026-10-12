@@ -39,7 +39,9 @@
 #   git -C <dir> remote get-url --push origin > <dir>/.grid-private-remote
 # The operator creates it once per machine after checking the repo is private. The
 # helper cannot know that itself; the marker pins "the remote I confirmed" so a
-# changed or mis-set remote can never receive the job's commits.
+# changed or mis-set remote can never receive the job's commits. A remote with more than
+# one push URL is refused too (`multiple-push-urls`, exit 3, the job still exits 0): a push
+# goes to every one of them, and only the first would be compared with the marker.
 #
 # <pathspec> is relative to the repo root; a commit is "own" when every path it
 # touches equals <pathspec> or sits under <pathspec>/.
@@ -103,10 +105,17 @@ cmd_push_args() {
 }
 
 cmd_push_ok() {
-  local dir="$1" spec="$2" branch remote url marker want path
+  local dir="$1" spec="$2" branch remote url urls marker want path
   branch="$(git -C "$dir" symbolic-ref -q --short HEAD)" || { echo "detached-head"; return 3; }
   remote="$(git -C "$dir" config "branch.$branch.remote")" || { echo "no-upstream-remote"; return 3; }
-  url="$(git -C "$dir" remote get-url --push "$remote" 2>/dev/null)" || { echo "no-push-url"; return 3; }
+  # ALL push URLs: `git push <remote>` pushes to every one of them, while a plain
+  # `get-url --push` shows only the first. Exactly one is allowed, and it must be the marker's.
+  urls="$(git -C "$dir" remote get-url --push --all "$remote" 2>/dev/null)" || { echo "no-push-url"; return 3; }
+  if [ "$(printf '%s\n' "$urls" | grep -c .)" -ne 1 ]; then
+    echo "multiple-push-urls: remote $remote has more than one push URL; refusing to push"
+    return 3
+  fi
+  url="$urls"
 
   # Remote check first: nothing below matters if the destination is not the confirmed one.
   marker="$dir/$MARKER_NAME"

@@ -171,7 +171,9 @@ The job never touches your own work in the private repo (shared guard:
   The marker holds the raw push URL: keep it out of any `git add -A` (list it in
   `.git/info/exclude` of the private repo) and never put credentials in the remote URL.
   Both jobs push exactly that remote and the upstream branch, whatever `push.default`
-  or `branch.<name>.pushRemote` say.
+  or `branch.<name>.pushRemote` say. A remote with more than one push URL makes the
+  push skip with `multiple-push-urls` in `usage.log` (the run still exits 0): `git push`
+  would send to every one of them, so keep exactly one, the marker's.
 - **Hangs and overlap:** each git call is killed after `GRID_GIT_TIMEOUT` seconds
   (default 120) and prompts are disabled; a second run while one is active logs
   `already running` and exits 0 (`<state>/weekly.lock`, stale after two hours).
