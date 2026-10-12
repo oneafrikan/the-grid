@@ -7,8 +7,10 @@ Each subcommand checks files against ONE harness's documented format, so a vendo
 change means editing the one checker here (the vendor facts are in docs/harnesses.md).
 Stdlib only: the bats tests run it with the system python3, not the agent-factory venv.
 
-Exit codes: 0 every file passed (or the check was skipped, see `requires`),
-            1 at least one file failed, 2 bad usage.
+Exit codes: 0 every file passed,
+            1 at least one file failed, 2 bad usage,
+            3 the check could not run (a `requires` reason, e.g. no tomllib): not a pass, so
+              a caller must skip on its own first, as the .bats files do (R16.qa.F13).
 
 Extending: later harness groups add their checker by writing a function that takes a
 Path and returns a list of problem strings (empty = valid), and decorating it with
@@ -22,13 +24,13 @@ from pathlib import Path
 from typing import Callable
 
 # subcommand name -> (checker, requires). `requires()` returns None when the check can run,
-# or a one-line reason when it must be skipped.
+# or a one-line reason when it cannot run.
 COMMANDS: dict[str, tuple[Callable[[Path], list[str]], Callable[[], str | None]]] = {}
 
 
 def command(name: str, requires: Callable[[], str | None] = lambda: None):
     """Register a checker under `name`. When `requires()` returns a reason, the run prints
-    a skip notice and exits 0 instead of failing (e.g. an interpreter too old for a module)."""
+    a notice and exits 3, distinct from a pass (e.g. an interpreter too old for a module)."""
     def register(fn: Callable[[Path], list[str]]):
         COMMANDS[name] = (fn, requires)
         return fn
@@ -37,7 +39,7 @@ def command(name: str, requires: Callable[[], str | None] = lambda: None):
 
 # ── codex-agent ──────────────────────────────────────────────────────────────
 def _needs_tomllib() -> str | None:
-    """tomllib is stdlib from Python 3.11; older interpreters skip rather than fail."""
+    """tomllib is stdlib from Python 3.11; older interpreters report "cannot run" (exit 3)."""
     try:
         import tomllib  # noqa: F401
     except ImportError:
@@ -222,8 +224,8 @@ def main(argv: list[str]) -> int:
     checker, requires = COMMANDS[argv[1]]
     skip = requires()
     if skip:
-        print(f"{argv[1]}: skipped, {skip}")
-        return 0
+        print(f"{argv[1]}: cannot run, {skip}")
+        return 3
     failed = False
     for name in argv[2:]:
         path = Path(name)
