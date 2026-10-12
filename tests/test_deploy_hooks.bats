@@ -844,3 +844,63 @@ seed_user_file() {
   [[ "$output" == *"read-only"* ]] || false
   cmp "$L" "$MOCK_HOOK_ROOT/before"
 }
+
+# ---- write semantics: umask for new files, no clobbering of a concurrent edit ----
+
+@test "a new settings file honours umask 077 (mode 600)" {
+  run bash -c 'umask 077; exec "$0" "$1" --user --hooks user-job' "$PY" "$EMIT"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$(user_file)")" = "600" ]
+}
+
+@test "a new settings file under umask 022 is mode 644" {
+  run bash -c 'umask 022; exec "$0" "$1" --user --hooks user-job' "$PY" "$EMIT"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$(user_file)")" = "644" ]
+}
+
+# _before_replace is the test seam between "read the file" and "rename over it": a change
+# injected there must abort the run instead of being overwritten (lost update).
+@test "a change injected through _before_replace aborts without clobbering it" {
+  export PYTHONDONTWRITEBYTECODE=1
+  seed_user_file '{"theme": "dark"}'
+  run "$PY" - "$REPO_ROOT/agent-factory" "$(user_file)" <<'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import deploy_hooks as d
+
+target = sys.argv[2]
+def inject():
+    with open(target, "w") as fh:
+        fh.write('{"theme": "light", "added_by": "someone else"}\n')
+d._before_replace = inject
+sys.argv = ["deploy_hooks.py", "--user", "--hooks", "user-job"]
+d.main()
+PYEOF
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"changed while"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+  # The concurrent writer's content is intact and no temp file is left behind.
+  [ "$(jq -r .added_by "$(user_file)")" = "someone else" ]
+  [ -z "$(ls -A "$CLAUDE_CONFIG_DIR" | grep -v '^settings.json$' || true)" ]
+}
+
+@test "a file created by someone else between the read and the rename is not replaced" {
+  export PYTHONDONTWRITEBYTECODE=1
+  run "$PY" - "$REPO_ROOT/agent-factory" "$(user_file)" <<'PYEOF'
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import deploy_hooks as d
+
+target = sys.argv[2]
+def inject():
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "w") as fh:
+        fh.write('{"theirs": true}\n')
+d._before_replace = inject
+sys.argv = ["deploy_hooks.py", "--user", "--hooks", "user-job"]
+d.main()
+PYEOF
+  [ "$status" -ne 0 ]
+  [ "$(jq -r .theirs "$(user_file)")" = "true" ]
+}

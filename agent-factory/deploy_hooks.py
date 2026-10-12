@@ -538,15 +538,49 @@ def render(settings: dict) -> str:
     return json.dumps(settings, indent=2, ensure_ascii=False) + "\n"
 
 
-def atomic_write(path: Path, text: str) -> None:
-    """Temp file in the same directory, then rename; keeps an existing file's mode."""
+def file_sig(path: Path):
+    """(inode, mtime_ns, size) of a file, None when it is absent. Taken BEFORE the file is
+    read, so a write that lands between the read and the stat shows up as a difference
+    when atomic_write compares it again just before the rename."""
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return None
+    return (st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+def _before_replace() -> None:
+    """Test seam: called after the temp file is written, immediately before the re-check
+    and the rename. A test replaces it to simulate another writer in that window."""
+
+
+def current_umask() -> int:
+    """The process umask (os.umask can only be read by setting it)."""
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
+
+
+def atomic_write(path: Path, text: str, expected_sig=None) -> None:
+    """Temp file in the same directory, then rename; keeps an existing file's mode.
+
+    A NEW file gets 0666 & ~umask (what any other tool would create), not a fixed 0644.
+    `expected_sig` is the file_sig() taken before the settings were read; if the file's
+    sig differs just before the rename (someone wrote or created it meanwhile) the write
+    is abandoned rather than clobbering that change. This narrows the lost-update window
+    from the whole run to the few microseconds between the re-check and os.replace; there
+    is no lock, so it cannot close it. Owner and ACLs of an existing file are not copied
+    (only the mode is)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    mode = (path.stat().st_mode & 0o777) if path.exists() else 0o644
+    mode = (path.stat().st_mode & 0o777) if path.exists() else (0o666 & ~current_umask())
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".grid-deploy-hooks-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
         os.chmod(tmp, mode)  # mkstemp creates 0600
+        _before_replace()
+        if file_sig(path) != expected_sig:
+            raise OSError(f"{path} changed while the emitter was running; re-run to merge on top of it")
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
@@ -554,8 +588,8 @@ def atomic_write(path: Path, text: str) -> None:
         raise
 
 
-def write_files(items: list[tuple[Path, str]]) -> None:
-    """Write every (path, text) atomically, after checking ALL of them up front.
+def write_files(items: list[tuple[Path, str, object]]) -> None:
+    """Write every (path, text, sig) atomically, after checking ALL of them up front.
 
     The checks that can be done without writing happen first, so an input that cannot be
     written aborts the run before the first file changes: the text must encode as UTF-8
@@ -563,7 +597,7 @@ def write_files(items: list[tuple[Path, str]]) -> None:
     (st_mode, not os.access: root passes os.access on a 0444 file; a read-only file is a
     deliberate choice the emitter must not replace). I/O failures during the writes are
     one-line errors that say which files, if any, were already written."""
-    for path, text in items:
+    for path, text, _sig in items:
         try:
             text.encode("utf-8")
         except UnicodeError as exc:
@@ -571,9 +605,9 @@ def write_files(items: list[tuple[Path, str]]) -> None:
         if path.exists() and not path.stat().st_mode & 0o200:
             die(f"{path}: is read-only (no owner write bit); make it writable or remove it; nothing was written")
     done: list[Path] = []
-    for path, text in items:
+    for path, text, sig in items:
         try:
-            atomic_write(path, text)
+            atomic_write(path, text, sig)
         except (OSError, UnicodeError) as exc:
             where = f"already written: {', '.join(map(str, done))}" if done else "nothing was written"
             die(f"{path}: cannot write ({exc}); {where}")
@@ -616,8 +650,9 @@ def run_user(args, catalogue: list[dict]) -> None:
 
     settings = user_settings_path()
     check_user_no_symlinks(settings)
+    sig = file_sig(settings)   # before the read: see atomic_write
     original, text = read_settings(settings)
-    sweeps = sweep_scope(catalogue, "user")   # never sweep the project-scope guards
+    sweeps = sweep_scope(catalogue, "user")  # never sweep the project-scope guards
     try:
         merged = merge_owned(original, desired, sweeps)
     except SettingsError as exc:
@@ -647,7 +682,7 @@ def run_user(args, catalogue: list[dict]) -> None:
     if merged != original:
         new_text = render(merged)
         if new_text != text:  # same bytes: leave the file (and its mtime) alone
-            write_files([(settings, new_text)])
+            write_files([(settings, new_text, sig)])
             written = 1
     print(f"deploy_hooks: {settings}  user hooks: {names}  {written} written.")
 
@@ -697,20 +732,21 @@ def main() -> None:
 
     # --- plan every file before touching any: both settings files are swept; only the
     # target gets additions, so a target change moves entries instead of duplicating them.
-    plan = []  # (rel path, original dict, original text, merged dict, desired for this file)
+    plan = []  # (rel path, original dict, original text, merged dict, desired for this file, sig)
     sweeps = sweep_scope(catalogue, "project")  # never sweep a user-scope handler sharing the file
     for name, rel in SETTINGS_REL.items():
         want = desired if name == target else []
+        sig = file_sig(project / rel)   # before the read: see atomic_write
         original, text = read_settings(project / rel)
         try:
             merged = merge_owned(original, want, sweeps)
         except SettingsError as exc:
             die(f"{project / rel}: {exc}; nothing was written")
-        plan.append((rel, original, text, merged, want))
+        plan.append((rel, original, text, merged, want, sig))
 
     # --- drift lines (used by --check and --dry-run) ---------------------------------
     problems = []
-    for rel, original, _text, merged, want in plan:
+    for rel, original, _text, merged, want, _sig in plan:
         lines = describe(original, want, rel, sweeps)
         if merged != original and not lines:
             lines = [f"differs    {rel}  (duplicate generated entries)"]
@@ -734,13 +770,13 @@ def main() -> None:
 
     # --- apply -------------------------------------------------------------------
     todo = []
-    for rel, original, text, merged, _want in plan:
+    for rel, original, text, merged, _want, sig in plan:
         if merged == original:
             continue  # nothing to do; also covers "do not create a file just to leave it empty"
         new_text = render(merged)
         if new_text == text:
             continue  # same bytes: leave the file (and its mtime) alone
-        todo.append((project / rel, new_text))
+        todo.append((project / rel, new_text, sig))
     write_files(todo)  # checks every file before the first write
     changed = len(todo)
     print(f"deploy_hooks: {project}  profile={profile}  target={target}  {len(desired)} hook(s), {changed} written.")
