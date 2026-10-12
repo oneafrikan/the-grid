@@ -419,3 +419,19 @@ make_fake_real_home() {
   [ "$status" -eq 0 ]
   [ -L "$MOCK_SKILLS/dotdot" ]
 }
+
+@test "a newline-named foreign symlink does not abort wire and links are fully rebuilt" {
+  # The name is split by a line-based read: readlink of the first half failed under set -e
+  # and silently aborted teardown on every run.
+  local nl=$'\n'
+  ln -s "$OTHER_DIR/x" "$MOCK_SKILLS/bad${nl}name"
+  ln -s "$MOCK_GRID/repos/gone" "$MOCK_SKILLS/stale${nl}grid"   # an owned one, same oddity
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/bad${nl}name" ]          # foreign: untouched
+  [ ! -L "$MOCK_SKILLS/stale${nl}grid" ]      # ours: torn down
+  [ -L "$MOCK_SKILLS/skill-alpha" ]
+  [ -L "$MOCK_SKILLS/skill-beta" ]
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 0 ]
+}
