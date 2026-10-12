@@ -339,6 +339,7 @@ tok() { printf '%s_%s' "$1" "$(head -c "${2:-36}" /dev/zero | tr '\0' a)"; }
 }
 
 @test "(p) genuine placeholders still pass, also several on one line" {
+  put r.md "CI paths /Users/runner/work and /home/runner/work are the generic hosted-runner user"
   put a.md "mail you@example.com or git@github.com:o/r.git, see /home/bob/x and /Users/<name>/y"
   put b.md "AKIAIOSFODNN7EXAMPLE and /home/you/x"
   put c.md "/home/user/x /home/name/x /Users/username/x"
