@@ -513,6 +513,16 @@ STUB
   expect_pass $'git status \\\n  --short'
 }
 
+@test "no-bypass: a backtick command substitution is read like a subshell" {
+  rows=(
+    '`git commit --no-verify -m x`'
+    'echo `git commit -n`'
+    'x=`git push --force`'
+  )
+  for row in "${rows[@]}"; do expect_block "$row"; done
+  expect_pass 'echo `git status`'
+}
+
 @test "no-bypass: --config-env with core.hooksPath is a hook-disabling override" {
   expect_block 'git --config-env=core.hooksPath=VAR commit -m x'
   expect_block 'git --config-env core.hooksPath=VAR commit -m x'

@@ -120,7 +120,7 @@ _grid_tokenize() {
   #      instead of one loop iteration each.
   # Ordinary = not a quote, backslash, blank, newline or one of ; & | ( ) (the characters the
   # per-character cases below handle). In a bracket expression a backslash is literal.
-  local _TK_ORD=$'^([^\'"\\ \t\n;&|()]+)([ \t]?)' _TK_Q1=$'^[^\']+' _TK_Q2=$'^[^"\\]+' _TK_CM=$'^[^\n]+'
+  local _TK_ORD=$'^([^\'"\\ \t\n;&|()`]+)([ \t]?)' _TK_Q1=$'^[^\']+' _TK_Q2=$'^[^"\\]+' _TK_CM=$'^[^\n]+'
   T_RAW=(); T_MASK=(); T_FLAG=(); T_SEP=()
   _TK_RAW=""; _TK_MASK=""; _TK_FLAG=""; _TK_IN=0; _TK_DLR=0
   n=${#s}
@@ -203,6 +203,8 @@ _grid_tokenize() {
             [ "$nx" = '|' ] && i=$((i + 1)) ;;
           # Subshells, command substitution and function bodies: ( and ) end a segment.
           '('|')') _grid_tk_word; _grid_tk_sep ;;
+          # An unquoted backtick opens or closes a command substitution: like ( and ).
+          '`') _grid_tk_word; _grid_tk_sep ;;
           *) _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_FLAG+="$c"; _TK_IN=1 ;;
         esac ;;
     esac
