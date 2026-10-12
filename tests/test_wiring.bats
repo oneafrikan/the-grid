@@ -10,6 +10,8 @@ setup() {
 }
 
 teardown() {
+  # A test may leave a dir read-only; rm -rf in common_teardown needs it writable again.
+  chmod -R u+w "$MOCK_AGENTS" "$MOCK_SKILLS" 2>/dev/null || true
   common_teardown
 }
 
@@ -434,4 +436,39 @@ make_fake_real_home() {
   [ -L "$MOCK_SKILLS/skill-beta" ]
   GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh" --check
   [ "$status" -eq 0 ]
+}
+
+# links_of DIR: "name -> target" for every symlink in DIR, C-sorted (NUL-safe enough for tests).
+links_of() {
+  find "$1" -maxdepth 1 -type l | LC_ALL=C sort | while IFS= read -r l; do
+    printf '%s -> %s\n' "$l" "$(readlink "$l")"
+  done
+}
+
+@test "read-only agents dir: wire exits 2 and the skill links are unchanged" {
+  [ "$(id -u)" -ne 0 ] || skip "root ignores directory permissions"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scripts/wire.sh"
+  local before; before="$(links_of "$MOCK_SKILLS")"
+  [ -n "$before" ]
+  chmod a-w "$MOCK_AGENTS"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"nothing was changed"* ]]
+  [ "$(links_of "$MOCK_SKILLS")" = "$before" ]
+}
+
+@test "an ln shim that fails on its 3rd call leaves the previous links restored and exits non-zero" {
+  make_skill "$MOCK_GRID/skills/skill-gamma" "skill-gamma"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scripts/wire.sh"
+  local before; before="$(links_of "$MOCK_SKILLS")"
+  [ "$(printf '%s\n' "$before" | wc -l | tr -d ' ')" -eq 3 ]
+  # The shim fails exactly once (3rd call), so the restore step's own ln works.
+  local real_ln; real_ln="$(command -v ln)"
+  mkdir -p "$BATS_TEST_TMPDIR/shim"
+  printf '#!/usr/bin/env bash\nc=$(cat "%s/count" 2>/dev/null || echo 0); c=$((c+1)); echo $c > "%s/count"\n[ "$c" -ne 3 ] || exit 1\nexec "%s" "$@"\n' \
+    "$BATS_TEST_TMPDIR/shim" "$BATS_TEST_TMPDIR/shim" "$real_ln" > "$BATS_TEST_TMPDIR/shim/ln"
+  chmod +x "$BATS_TEST_TMPDIR/shim/ln"
+  PATH="$BATS_TEST_TMPDIR/shim:$PATH" GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -ne 0 ]
+  [ "$(links_of "$MOCK_SKILLS")" = "$before" ]     # all three back, none lost
 }
