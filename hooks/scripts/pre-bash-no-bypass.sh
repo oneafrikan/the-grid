@@ -57,6 +57,7 @@ fi
 grid_check_cmd_cap pre-bash-no-bypass "$command"
 
 grid_git_segments "$command"
+grid_check_balanced pre-bash-no-bypass
 
 reasons=()
 for v in "${GIT_VIOLATIONS[@]}"; do reasons+=("$v"); done

@@ -73,6 +73,7 @@ grid_check_cmd_cap pre-bash-secret-scan "$command"
 [ -n "$cwd" ] && [ -d "$cwd" ] || exit 0
 
 grid_git_segments "$command"
+grid_check_balanced pre-bash-secret-scan
 
 US=$'\037'
 RS=$'\036'

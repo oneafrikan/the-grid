@@ -436,10 +436,10 @@ STUB
   [ "$status" -eq 0 ] || { echo "status $status (142 = killed by the 5 s alarm)" >&2; false; }
 }
 
-@test "no-bypass: tokenizer is correct across its 2048-byte window boundary" {
+@test "no-bypass: tokenizer is correct across its window refill boundary" {
   # The tokenizer reads through a sliding window; a quote, an escape or && landing on
-  # the refill point must not change the result.
-  for len in 2036 2040 2043 2044 2045 2046 2047 2048 2049 2052; do
+  # the window refill boundary must not change the result.
+  for len in 440 445 447 448 449 450 451 453 2047 2048 2049; do
     pad="$(rep a "$len")"
     expect_block "git commit -m x$pad --no-verify" || { echo "len $len: bare flag after padding" >&2; false; }
     expect_pass "git commit -m \"$pad --no-verify\"" || { echo "len $len: quoted mention" >&2; false; }
@@ -511,6 +511,66 @@ STUB
   # as a separator between words it still just continues the line
   expect_pass $'git commit \\\n-m x'
   expect_pass $'git status \\\n  --short'
+}
+
+# --- quote state must not drift: an apostrophe in a heredoc body, a $'..' string or a
+# quote inside $(..) must not hide the git call that comes after it.
+
+@test "no-bypass: a later git call is still seen after a heredoc body, a \$'..' string or a \$(..) with quotes" {
+  rows=(
+    $'cat <<EOF\nit\'s a note\nEOF\ngit commit -n -m x'
+    $'cat <<\'EOF\' > f\ndon\'t\nEOF\ngit push --force'
+    $'cat <<-EOF\n\tit\'s\n\tEOF\ngit commit --no-verify'
+    $'cat <<A <<B\nit\'s\nA\nit\'s too\nB\ngit commit -n'
+    $'echo $\'\\\'\' ; git commit --no-verify -m x'
+    $'echo "$(echo \'"\')"; git commit -n'
+    $'x="$(git commit -n -m y)"'
+    $'echo "$(git push --force)"'
+    $'echo "a `git commit -n` b"'
+    $'bash <<EOF\ngit commit -n\nEOF'
+    $'cat <<EOF\nnote $(git commit -n)\nEOF'
+    $'cat <<EOF\nnote `git push -f`\nEOF'
+  )
+  for row in "${rows[@]}"; do
+    expect_block "$row"
+    # a block for the right reason: not the fail-closed "quote not closed" backstop
+    [[ "$output" != *"not closed"* ]] || { echo "wrong reason for: $row" >&2; false; }
+  done
+}
+
+@test "no-bypass: heredoc bodies and quoted substitutions that are balanced still pass" {
+  rows=(
+    $'cat <<EOF\nit\'s fine\nEOF\ngit status'
+    $'git commit -m "$(cat <<\'EOF\'\nthe message\'s body\nEOF\n)"'
+    'echo "a $(date) b"; git status'
+    $'echo $\'it\\\'s\'; git status'
+    $'cat <<\'EOF\'\ngit push --force and --no-verify\nEOF'
+    $'cat <<EOF\nnever use git push --force\nEOF'
+    $'git commit -F - <<EOF\nfix: stop using git commit -n\nEOF'
+    'git commit -m "$(echo a "b c")"'
+  )
+  for row in "${rows[@]}"; do expect_pass "$row"; done
+}
+
+@test "no-bypass: an unterminated quote fails closed with a message to simplify the command" {
+  expect_block 'git commit -m "oops'
+  [[ "$output" == *"not closed"* ]] || { echo "$output" >&2; false; }
+  expect_block "git status; echo 'x"
+  expect_block 'git status; echo "$(echo a'
+  # an unterminated quote in a command that does not mention git is not our business
+  expect_pass "echo 'x"
+}
+
+@test "secret: a later commit is still scanned after a heredoc body or a quote trick" {
+  mkrepo
+  stage_line "key = \"$(tok_ghp)\""
+  for row in $'cat <<EOF\nit\'s a note\nEOF\ngit commit -m x' $'echo $\'\\\'\' ; git commit -m x' \
+             $'echo "$(echo \'"\')"; git commit -m x' 'echo "$(git commit -m x)"' 'echo `git commit -m x`'; do
+    scan "$row"
+    [ "$status" -eq 2 ] || { echo "expected BLOCK for: $row: $output" >&2; false; }
+    [[ "$output" != *"not closed"* ]] || { echo "wrong reason for: $row" >&2; false; }
+    [[ "$output" == *"f.txt:1: github-token"* ]] || { echo "no finding for: $row: $output" >&2; false; }
+  done
 }
 
 @test "no-bypass: a backtick command substitution is read like a subshell" {
