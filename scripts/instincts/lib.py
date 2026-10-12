@@ -760,7 +760,7 @@ def validate_instinct(obj) -> dict | None:
             out[key] = n
     for key in ("first_seen", "last_seen", "last_decay_week", "last_contradict_week"):
         if key in obj:
-            if not (isinstance(obj[key], str) and WEEK_RE.match(obj[key])):
+            if not (isinstance(obj[key], str) and WEEK_RE.fullmatch(obj[key])):
                 return None
             out[key] = obj[key]
     if "project" in obj:

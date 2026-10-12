@@ -445,6 +445,17 @@ validate() {
   done
 }
 
+@test "validate_instinct: a week string with a trailing newline is rejected (no \$-anchor slack)" {
+  base='"id":"some-habit","trigger":"when x","action":"do y","scope":"project","project":"3f9a1c0b7d2e","confidence":0.6,"status":"active","host":"host-a","domain":"git"'
+  run validate "{$base,\"last_seen\":\"2026-W41\\n\"}"
+  [ "$output" = "None" ]
+  run validate "{$base,\"first_seen\":\"2026-W41\\n\"}"
+  [ "$output" = "None" ]
+  # the clean value still validates
+  run validate "{$base,\"last_seen\":\"2026-W41\"}"
+  [[ "$output" == *'"last_seen": "2026-W41"'* ]]
+}
+
 @test "validate_instinct: accepts a model output item (kind + evidence)" {
   run validate '{"kind":"new","id":"some-habit","trigger":"when x","action":"do y","domain":"git","evidence":["P1","F2"]}'
   [[ "$output" == *'"kind": "new"'* ]]
