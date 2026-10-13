@@ -142,6 +142,24 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
   [[ "$flat" == *"indexed across $nlib dedicated library submodules"* ]]
 }
 
+@test "F11: index.html library and reference summary and table equal SKILLS.md" {
+  flat="$(tr '\n' ' ' < index.html | tr -s ' ')"
+  nlib="$(awk '/^## Library submodules/{f=1;next} /^## /{f=0} f && /^- \*\*repos\//{n++} END{print n+0}' SKILLS.md)"
+  nref="$(awk '/^## Reference submodules/{f=1;next} /^## /{f=0} f && /^- \*\*repos\//{n++} END{print n+0}' SKILLS.md)"
+  sum="$(awk '/^## Library submodules/{f=1;next} /^## /{f=0} f && /^- \*\*repos\//{s+=$(NF-1)} END{print s+0}' SKILLS.md)"
+  # the "over 1,000" wording is only true while the sum stays above it
+  [ "$sum" -gt 1000 ]
+  [[ "$flat" == *"over 1,000 more skills across $nlib library submodules"* ]]
+  case "$nref" in 7) w=Seven ;; 8) w=Eight ;; 9) w=Nine ;; 10) w=Ten ;; *) w="?$nref" ;; esac
+  [[ "$flat" == *"$w more repos are reference-only"* ]]
+  # the per-repo table: one row per SKILLS.md entry, same counts and tier
+  [ "$(grep -c '<td>Library</td>' index.html)" -eq "$nlib" ]
+  [ "$(grep -c '<td>Reference (index)</td>' index.html)" -eq "$nref" ]
+  while read -r repo n; do
+    grep -q "<tr><td><code>repos/$repo</code></td><td>$n</td><td>Library</td></tr>" index.html || { echo "index.html row wrong for $repo ($n)"; false; }
+  done < <(sed -n -E '/^## Library submodules/,/^## Reference/ s/^- \*\*repos\/([^*]+)\*\* — ([0-9]+) skills.*/\1 \2/p' SKILLS.md)
+}
+
 @test "F11: BOOTSTRAP gives no hard-coded test or skill totals that drift" {
   ! grep -n -E 'All [0-9]+ tests|the other ~?[0-9]+ skills' BOOTSTRAP.md || false
 }
