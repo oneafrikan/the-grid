@@ -6,11 +6,11 @@ How to run the-grid's unattended issue loop on your own Linux box, and the human
 
 For the generic, repo-agnostic version of the isolation and GitHub App setup (and the team/organisation case), see the [secure agent loop playbook](../automation-factory/docs/secure-agent-loop.md).
 
-This runbook describes the uplift changes in `openspec/changes/*/` (13 changes). Commands marked "needs loops Phase A" only exist once the `loops` change is merged to your working branch. Commands in Section 4 are copied from each change's `tasks.md`; if a `tasks.md` changes later, the `tasks.md` wins.
+This runbook describes the uplift changes in `openspec/changes/*/` (13 changes). Commands marked "needs loops Phase A" use the runner, the App token minter and `instantiate.sh --profile linux`: the runner pattern is in `automation-factory/patterns/issue-loop/` and `scripts/lib/render-schedule.sh` is live, while the minter and `instantiate.sh` are quarantined under `_retired/issue-loop/` (see the banner above). Commands in Section 4 are copied from each change's `tasks.md`; if a `tasks.md` changes later, the `tasks.md` wins.
 
 ## Prerequisites
 
-- `loops` Phase A (the runner `run-issues.sh`, `instantiate.sh --profile linux`, `scripts/lib/render-schedule.sh`) merged to your working branch. Section 1 Part 1 needs no new code; Part 2 and Sections 2 and 3 need Phase A.
+- `loops` Phase A is built: the runner `run-issues.sh` (in `automation-factory/patterns/issue-loop/`), `scripts/lib/render-schedule.sh`, and `instantiate.sh --profile linux` plus the token minter (both under `_retired/issue-loop/scripts/`: move them back before use, see RETIRED.md). Section 1 Part 1 needs no new code; Part 2 and Sections 2 and 3 need Phase A.
 - The loop builds only the groups that are not marked HUMAN. Every HUMAN group is yours (Section 4).
 
 ## Names used below
@@ -66,6 +66,7 @@ Why so much isolation (loops design, Q1 and Q13 revised): the worker runs with `
 4. `[sudo]` Install Claude Code as the loop user and log in once. The install one-liner is from Anthropic's install docs, not from the specs: check the current command first.
    ```bash
    sudo -iu <loop-user>
+   # check Anthropic's current install command first; at the time of writing:
    curl -fsSL https://claude.ai/install.sh | bash
    ~/.local/bin/claude          # first run: prints a login URL; open it in a browser, paste the code back, then /exit
    ~/.local/bin/claude auth status --text
@@ -109,11 +110,12 @@ Why so much isolation (loops design, Q1 and Q13 revised): the worker runs with `
 
 10. `[sudo]` Put the key and the ids on the box. The runner PARSES the env file (never sources it) and reads only `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `GH_APP_KEY_FILE` (optional, defaults to the path below), `LOOP_TRUSTED_ACTORS` and `LOOP_OPERATOR_HOME`. The env file and the key file must both be mode 600 or the runner refuses to start, and a `GH_TOKEN=` line in the env file is refused.
     ```bash
-    # on your own machine
-    scp ~/Downloads/<app-slug>.<date>.private-key.pem <box>:~/app.pem && ssh <box> 'chmod 600 ~/app.pem'   # never /tmp: world-readable dir
-    # on the box
+    # on your own machine: into a mode-700 directory, never a default-mode file in your home and never /tmp (world-readable)
+    ssh <box> 'install -d -m 700 ~/keys'
+    scp ~/Downloads/<app-slug>.<date>.private-key.pem <box>:~/keys/app.pem && ssh <box> 'chmod 600 ~/keys/app.pem'
+    # on the box (no key-placement script is shipped: this one command installs the key mode 600 for the loop user and removes your copy)
     sudo -u <loop-user> install -d -m 700 ~<loop-user>/.config/the-grid
-    sudo bash <setup-script> --key ~/app.pem --app-id <id> --installation-id <id>   # installs mode 600, verifies, shreds your copy
+    sudo install -o <loop-user> -g <loop-user> -m 600 ~/keys/app.pem ~<loop-user>/.config/the-grid/app.pem && shred -u ~/keys/app.pem
     sudo -iu <loop-user>
     umask 077
     mkdir -p ~/.config/the-grid
@@ -121,11 +123,11 @@ Why so much isolation (loops design, Q1 and Q13 revised): the worker runs with `
     printf 'GH_APP_ID=%s\nGH_APP_INSTALLATION_ID=%s\nLOOP_TRUSTED_ACTORS=%s\nLOOP_OPERATOR_HOME=%s\n' "$APP_ID" "$INST_ID" '<operator-login>' '<the $HOME value noted in step 3>' > ~/.config/the-grid/issue-loop.env
     git config --global user.name  "<app-name>[bot]"
     git config --global user.email "${APP_ID}+<app-name>[bot]@users.noreply.github.com"
-    find ~/.config/the-grid/issue-loop.env ~/.config/the-grid/app.pem -perm -077     # must print nothing
+    find ~/.config/the-grid/issue-loop.env ~/.config/the-grid/app.pem -perm /077     # must print nothing (/077 matches any group or other bit; -077 would only match all of them)
     cat ~/.config/the-grid/issue-loop.env                                             # holds ids and logins, no secret
     exit
     ```
-    Success: `find` prints nothing; the env file shows the App ID, the installation id, a non-empty `LOOP_OPERATOR_HOME` and no `GH_TOKEN` line. `LOOP_TRUSTED_ACTORS` is comma-separated; only <operator-login> is listed (the App can never be one: it is a bot). One env file serves one repo at a time: the installation decides which repo the token can reach (see the callout after step 14). The token check itself needs the mint script, `scripts/lib/gh-app-token.sh`, which ships with loops group 2: it runs at the start of step 13, not before.
+    Success: `find` prints nothing; the env file shows the App ID, the installation id, a non-empty `LOOP_OPERATOR_HOME` and no `GH_TOKEN` line. `LOOP_TRUSTED_ACTORS` is comma-separated; only <operator-login> is listed (the App can never be one: it is a bot). One env file serves one repo at a time: the installation decides which repo the token can reach (see the callout after step 14). The token check itself needs the mint script (`scripts/lib/gh-app-token.sh` before the quarantine, now `_retired/issue-loop/scripts/lib/gh-app-token.sh`): it runs at the start of step 13, not before.
 
 11. `[browser]` Add the ruleset on `next` (repo owner's account). Settings > Rules > Rulesets > New ruleset > New branch ruleset.
     - Name `next-needs-pr`; Enforcement status: Active.
@@ -166,13 +168,15 @@ Gate: loops groups 1 to 4 are merged to `next`. Check from a clone: `git log --o
 
     First get the repo onto the box and run the step 7 to 11 checks, as the loop user. The mint script lives in the repo, and the repo may be private, so bootstrap with a copy of that one script (it needs nothing around it):
     ```bash
-    # on your own machine
-    scp <your the-grid checkout>/scripts/lib/gh-app-token.sh <box>:/tmp/gh-app-token.sh
-    # on the box
+    # on your own machine: into the mode-700 staging directory from step 10, not /tmp
+    scp <your the-grid checkout>/_retired/issue-loop/scripts/lib/gh-app-token.sh <box>:~/keys/gh-app-token.sh
+    # on the box: install it where the loop user can read it (it cannot read your home)
+    sudo -u <loop-user> install -d -m 755 ~<loop-user>/bin
+    sudo install -m 755 -o <loop-user> -g <loop-user> ~/keys/gh-app-token.sh ~<loop-user>/bin/gh-app-token.sh && shred -u ~/keys/gh-app-token.sh
     sudo -iu <loop-user>
     ids() { sed -n "s/^$1=//p" ~/.config/the-grid/issue-loop.env; }
     export GH_APP_ID="$(ids GH_APP_ID)" GH_APP_INSTALLATION_ID="$(ids GH_APP_INSTALLATION_ID)"
-    tok="$(bash /tmp/gh-app-token.sh)"                     # prints a ghs_ token on success; one stderr line naming the cause otherwise
+    tok="$(bash ~/bin/gh-app-token.sh)"                     # prints a ghs_ token on success; one stderr line naming the cause otherwise
     GH_TOKEN="$tok" gh auth setup-git
     GH_TOKEN="$tok" git clone https://github.com/<owner>/the-grid.git ~/the-grid     # https, not ssh: the runner refuses an ssh origin
     unset tok
@@ -342,10 +346,11 @@ cd agent-factory
 .venv/bin/python compose.py examples/core.yaml --target claude-code
 .venv/bin/python compose.py examples/grid.yaml --target claude-code
 .venv/bin/python compose.py examples/finance-desk.yaml --target claude-code
+.venv/bin/python compose.py examples/learning-desk.yaml --target claude-code
 cd .. && bash scripts/wire.sh                           # always last
 ```
 
-- Recompose every private project in the same pass. `compose.py` overwrites `projects/<name>/` wholesale; recomposing only the public three while a private project's roles are unreachable destroys that project's output.
+- Recompose every private project in the same pass. `compose.py` overwrites `projects/<name>/` wholesale; recomposing only the public four while a private project's roles are unreachable destroys that project's output.
 - After the `vetting` changes land, `wire.sh` runs an audit first and exits 3 on a high finding without changing anything. Fix it, add a reasoned `audit-allow` entry in `CURATION.md`, or run `GRID_AUDIT=warn bash scripts/wire.sh` once.
 - After `foundations` group 5, `wire.sh` prints `runtime MISSING` until foundations HUMAN group 6 has run on that machine.
 - The loop box's clone (`~/the-grid`) runs the loop from its own checkout. Pull it only when `loop/` or its hooks changed, and only while no run is in progress: `sudo -iu <loop-user> git -C ~/the-grid pull --ff-only`. The runner refuses to start on a dirty tree.

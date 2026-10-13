@@ -236,20 +236,22 @@ Success: the install page lists exactly one repository.
 App settings > Private keys > Generate. A `.pem` downloads.
 
 - Never put it in `/tmp`, `/var/tmp` or `/dev/shm`, a repo, chat, or a shell-history line.
-- Keep one copy in your own home on the box, mode 600; install it for the loop user in step 5; delete the source afterwards (`shred -u`, else `rm`).
+- Keep one copy in a mode-700 directory in your own home on the box (`~/keys`), file mode 600; install it for the loop user in step 5; delete the source afterwards (`shred -u`, else `rm`).
 
 ```bash
-# from your workstation: straight into your home on the box, not /tmp
-scp ~/Downloads/<app-slug>.*.private-key.pem <box>:~/app.pem
-ssh <box> 'chmod 600 ~/app.pem'
+# from your workstation: into a mode-700 directory on the box, not a default-mode file and not /tmp
+ssh <box> 'install -d -m 700 ~/keys'
+scp ~/Downloads/<app-slug>.*.private-key.pem <box>:~/keys/app.pem
+ssh <box> 'chmod 600 ~/keys/app.pem'
 ```
 
-Success: `head -1 ~/app.pem` on the box prints a `-----BEGIN ... PRIVATE KEY-----` line (or `PRIVATE KEY`).
+Success: `head -1 ~/keys/app.pem` on the box prints a `-----BEGIN ... PRIVATE KEY-----` line (or `PRIVATE KEY`).
 
 ### Step 4 `[sudo]` Create the OS user and prove isolation
 
-The setup script (private today, see #164) does these as idempotent phases, each
-reporting `[ ok ]`, `[ fix ]` or `[FAIL]`. Manual equivalents:
+A one-shot setup script does these as idempotent phases, each reporting `[ ok ]`,
+`[ fix ]` or `[FAIL]`. It is private and not shipped (a portable version is tracked in
+the-grid issue #164), so follow the manual equivalents, which need nothing else:
 
 | Phase | What it does | Manual equivalent |
 |---|---|---|
@@ -261,12 +263,12 @@ reporting `[ ok ]`, `[ fix ]` or `[FAIL]`. Manual equivalents:
 | tools | `git gh jq curl openssl` present (optional apt install) | `command -v git gh jq curl openssl` as the loop user |
 | config | `~/.config/the-grid` mode 700, env-file template mode 600, never overwrites an existing env file | step 6 |
 | app ids | set `GH_APP_ID`, `GH_APP_INSTALLATION_ID` in place, never add `GH_TOKEN` | step 6 |
-| app key | install key mode 600 owned by the loop user, verify with `cmp`, delete the source; refuses sources under `/tmp` etc. or readable by group/other | `sudo install -o <loop-user> -g <loop-user> -m 600 ~/app.pem ~<loop-user>/.config/the-grid/app.pem && shred -u ~/app.pem` |
+| app key | install key mode 600 owned by the loop user, verify with `cmp`, delete the source; refuses sources under `/tmp` etc. or readable by group/other | `sudo -u <loop-user> install -d -m 700 ~<loop-user>/.config/the-grid` then `sudo install -o <loop-user> -g <loop-user> -m 600 ~/keys/app.pem ~<loop-user>/.config/the-grid/app.pem && shred -u ~/keys/app.pem` |
 | claude | install `claude` as the loop user (the installer refuses root) | step 5 |
 | identity | `git config --global user.name "<app-slug>[bot]"`, `user.email "<app-id>+<app-slug>[bot]@users.noreply.github.com"` | step 6 |
 | manual report | lists what is left: Claude login, clone, token check | steps 5 and 8 |
 
-Script modes:
+Modes of the private script:
 
 | Mode | Effect |
 |---|---|
@@ -296,9 +298,13 @@ now if the script did not (`sudo install ...` from the table in step 4).
 
 ### Step 6 Env file and git identity
 
-As the loop user, `umask 077`. The runner reads only these keys:
+As the loop user. The block starts with `umask 077` and a mode-700 config dir, so no
+file is ever created readable by others. The runner reads only these keys:
 
 ```bash
+sudo -iu <loop-user>
+umask 077
+install -d -m 700 ~/.config/the-grid
 cat > ~/.config/the-grid/issue-loop.env <<'EOF'
 GH_APP_ID=<app-id>
 GH_APP_INSTALLATION_ID=<installation-id>
@@ -307,7 +313,8 @@ LOOP_OPERATOR_HOME=<your home path on the box>
 EOF
 git config --global user.name  "<app-slug>[bot]"
 git config --global user.email "<app-id>+<app-slug>[bot]@users.noreply.github.com"
-find ~/.config/the-grid/issue-loop.env ~/.config/the-grid/app.pem -perm -077   # must print nothing
+find ~/.config/the-grid/issue-loop.env ~/.config/the-grid/app.pem -perm /077   # must print nothing (/077 = any group or other bit; -077 only matches files with all of them)
+exit
 ```
 
 | Key | Required | Meaning |
@@ -332,16 +339,20 @@ it off overnight.
 
 ### Step 8 Clone and verify token and rules
 
-Needs `gh-app-token.sh` (runner change). The minter is the-grid's
-`scripts/lib/gh-app-token.sh` and depends on nothing else, so for a repo that is not
-the-grid, copy that one file to the box first (`scp` it to your home, then
-`MINT=<path>`); `instantiate.sh` later places a copy at `loop/gh-app-token.sh`.
+Needs `gh-app-token.sh` (runner change). The minter (in the-grid at
+`_retired/issue-loop/scripts/lib/gh-app-token.sh`, formerly `scripts/lib/gh-app-token.sh`)
+depends on nothing else, so for a repo that is not the-grid, copy that one file to the
+box first: `scp` it into your `~/keys` directory, then install it where the loop user can
+read it (the loop user cannot read your home after step 4):
+`sudo -u <loop-user> install -d -m 755 ~<loop-user>/bin` and
+`sudo install -m 755 -o <loop-user> -g <loop-user> ~/keys/gh-app-token.sh ~<loop-user>/bin/gh-app-token.sh`.
+`instantiate.sh` later places a copy at `loop/gh-app-token.sh`.
 Clone over https, because the runner refuses an SSH `origin` (an SSH key in the
 loop user's home would give the worker push access).
 
 ```bash
 sudo -iu <loop-user>
-MINT=<path to gh-app-token.sh, readable by the loop user>
+MINT=~/bin/gh-app-token.sh
 ids() { sed -n "s/^$1=//p" ~/.config/the-grid/issue-loop.env; }
 export GH_APP_ID="$(ids GH_APP_ID)" GH_APP_INSTALLATION_ID="$(ids GH_APP_INSTALLATION_ID)"
 tok="$(bash "$MINT")"                                # one stderr line naming the cause on failure
@@ -531,7 +542,7 @@ Success: `list-timers` no longer shows the timer; running the minter
 Uninstall fully: kill switch, then delete the ruleset only if nothing else needs it,
 remove the App (App settings > Advanced > Delete), `sudo userdel -r <loop-user>`
 (this deletes its clone, env file, key copy and Claude login), delete your own
-`~/app.pem` source if any remains, and remove the opt-in labels if unused.
+`~/keys/` staging directory if any remains, and remove the opt-in labels if unused.
 
 Common preflight failures (exit 2) and fixes:
 
