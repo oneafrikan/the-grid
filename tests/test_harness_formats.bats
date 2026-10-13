@@ -915,3 +915,188 @@ runpy.run_path(sys.argv[0], run_name="__main__")
   echo "$output"
   [ "$status" -eq 3 ]
 }
+
+# ============================================== NF-044 (VS7): delete scope of the swap dirs ====
+# The writers used to delete any <target>.tmp / <target>.old (and <project>.tmp / .old) next to
+# the output, which could be a user's own dir. Now only debris compose.py itself marked is
+# cleared; anything else is refused untouched. Author's own checks, not independent verification.
+
+# A user dir (no compose.py marker) at each swap name: canary inside, deep sandbox so a wrong
+# delete can only reach this test's own tree.
+@test "NF-044: a user dir at a swap name is refused and never deleted (install_tree and install_project)" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out" t d
+  mkdir -p "$out/fx"
+  # Targets that use install_tree: <out>/fx/_<target>.tmp|.old. Default target: <out>/fx.tmp|.old.
+  for d in "$out/fx/_claude-code.tmp" "$out/fx/_claude-code.old" "$out/fx.tmp" "$out/fx.old"; do
+    mkdir -p "$d"
+    printf 'mine\n' > "$d/canary.txt"
+  done
+  for t in claude-code default; do
+    if [ "$t" = default ]; then
+      run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+    else
+      run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$out"
+    fi
+    echo "$t: $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"refusing to delete"* ]]
+    [[ "$output" != *"Traceback"* ]]
+  done
+  for d in "$out/fx/_claude-code.tmp" "$out/fx/_claude-code.old" "$out/fx.tmp" "$out/fx.old"; do
+    [ "$(cat "$d/canary.txt")" = mine ]
+  done
+  # nothing was composed over the refusal
+  [ ! -e "$out/fx/_claude-code" ]
+  [ ! -e "$out/fx/agents.yaml" ]
+}
+
+@test "NF-044: a symlink at a swap name is refused, never followed" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out"
+  mkdir -p "$out/fx" "$TMP/sb/deep/victim"
+  printf 'mine\n' > "$TMP/sb/deep/victim/canary.txt"
+  ln -s "$TMP/sb/deep/victim" "$out/fx/_claude-code.old"
+  ln -s "$TMP/sb/deep/victim" "$out/fx.tmp"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$out"
+  [ "$status" -ne 0 ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+  [ "$status" -ne 0 ]
+  [ "$(cat "$TMP/sb/deep/victim/canary.txt")" = mine ]
+  [ -L "$out/fx/_claude-code.old" ]
+  [ -L "$out/fx.tmp" ]
+}
+
+@test "NF-044: debris compose.py itself left (dir plus its marker) is still cleared, and a run leaves no marker" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out"
+  mkdir -p "$out/fx/_claude-code.tmp" "$out/fx.old"
+  printf 'x\n' > "$out/fx/_claude-code.tmp/half.txt"
+  printf 'x\n' > "$out/fx.old/half.txt"
+  : > "$out/fx/_claude-code.tmp.compose-owned"
+  : > "$out/fx.old.compose-owned"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -z "$(find "$out" -name '*.tmp' -o -name '*.old' -o -name '*compose-owned*')" ]
+  [ -d "$out/fx/_claude-code" ]
+}
+
+# VS1 (cheap part): the writers re-check for a symlink right before the first rename, so a link
+# swapped in after vet_target() is refused. Called directly because the swap cannot be raced
+# reliably from a test; the in-function re-check is what is under test.
+@test "NF-044: install_tree and install_project refuse a project dir that is a symlink at swap time" {
+  local sb="$TMP/sb/deep"
+  mkdir -p "$sb/victim/_claude-code" "$sb/out"
+  printf 'keep\n' > "$sb/victim/_claude-code/canary.txt"
+  printf 'keep\n' > "$sb/victim/canary-top.txt"
+  ln -s "$sb/victim" "$sb/out/fx"
+  run env REPO_ROOT="$REPO_ROOT" OUT="$sb/out" "$PY" -c '
+import os, sys
+from pathlib import Path
+sys.path.insert(0, os.environ["REPO_ROOT"] + "/agent-factory")
+import compose
+out = Path(os.environ["OUT"])
+for fn, args in ((compose.install_tree, (out / "fx" / "_claude-code", {"a.txt": "x"})),
+                 (compose.install_project, (out / "fx", {"a.txt": "x"}))):
+    try:
+        fn(*args)
+    except SystemExit as e:
+        assert "symlink" in str(e.code), e.code
+    else:
+        raise SystemExit("accepted a symlinked project dir: " + fn.__name__)
+print("refused both")'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$sb/victim/_claude-code/canary.txt")" = keep ]
+  [ "$(cat "$sb/victim/canary-top.txt")" = keep ]
+  [ ! -e "$sb/victim/a.txt" ]
+}
+
+# A marker-shaped thing that is not a plain file (dir, FIFO) is not compose.py's marker. The run
+# is refused, and the failure cleanup must not treat it as proof that the user's dir at the swap
+# name is ours (it used to, and deleted it).
+@test "NF-044: a dir or FIFO at a marker path never gets the user's swap-name dir deleted (both writers)" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out" kind t d m
+  for kind in dir fifo; do
+    rm -rf "$out"; mkdir -p "$out/fx"
+    for d in "$out/fx/_claude-code.tmp" "$out/fx.tmp"; do
+      mkdir -p "$d"; printf 'mine\n' > "$d/canary.txt"
+      if [ "$kind" = dir ]; then mkdir "$d.compose-owned"; else mkfifo "$d.compose-owned"; fi
+    done
+    for t in claude-code default; do
+      if [ "$t" = default ]; then
+        run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+      else
+        run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$out"
+      fi
+      echo "$kind $t: $output"
+      [ "$status" -ne 0 ]
+      [[ "$output" != *"Traceback"* ]]
+    done
+    for d in "$out/fx/_claude-code.tmp" "$out/fx.tmp"; do
+      [ "$(cat "$d/canary.txt")" = mine ]
+    done
+  done
+}
+
+# A failed swap whose rollback also fails leaves the previous output in <name>.old. It must be
+# kept (and named in the error), not deleted by the failure cleanup. os.rename is made to fail
+# only for the moves that put new content in place and for one rollback move.
+@test "NF-044: a failed swap with a failed rollback keeps the previous output and says where" {
+  run env REPO_ROOT="$REPO_ROOT" TMP="$TMP" "$PY" -c '
+import os, sys
+from pathlib import Path
+sys.path.insert(0, os.environ["REPO_ROOT"] + "/agent-factory")
+import compose
+
+real_rename = os.rename
+def run_case(label, setup, fn, fail_src, keep_rel):
+    base = Path(os.environ["TMP"]) / label
+    out = base / "out"
+    target, files = setup(out)
+    def rename(src, dst, *a, **k):
+        if fail_src(Path(src), Path(dst)):
+            raise OSError(5, "injected")
+        return real_rename(src, dst, *a, **k)
+    os.rename = rename
+    try:
+        fn(target, files)
+    except SystemExit as e:
+        msg = str(e.code)
+    else:
+        raise SystemExit(label + ": no failure")
+    finally:
+        os.rename = real_rename
+    old = Path(str(target) + ".old")
+    assert "kept at" in msg and str(old) in msg, (label, msg)
+    for rel in keep_rel:
+        assert (old / rel).is_file(), (label, rel, os.listdir(old) if old.is_dir() else "no old dir")
+    # not deleted next run by mistake: its marker is gone, so the next claim refuses it
+    assert not Path(str(old) + ".compose-owned").exists(), label
+
+def setup_project(out):
+    p = out / "fx"; p.mkdir(parents=True)
+    (p / "a.txt").write_text("A"); (p / "b.txt").write_text("B")
+    return p, {"new.txt": "n"}
+# project: moving anything out of old/b.txt back, and new content in, fail
+run_case("proj", setup_project, compose.install_project,
+         lambda s, d: s.parent.name == "fx.tmp" or (s.parent.name == "fx.old" and s.name == "b.txt"),
+         ["b.txt"])
+
+def setup_tree(out):
+    t = out / "fx" / "_claude-code"; t.mkdir(parents=True)
+    (t / "prev.txt").write_text("P")
+    return t, {"new.txt": "n"}
+# tree: tmp -> target fails, and so does old -> target (the restore)
+run_case("tree", setup_tree, compose.install_tree,
+         lambda s, d: s.name in ("_claude-code.tmp", "_claude-code.old"), ["prev.txt"])
+print("kept")'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"kept"* ]]
+}

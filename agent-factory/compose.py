@@ -366,13 +366,19 @@ def load_config(path: Path) -> dict:
         if not isinstance(agent.get("bare", False), bool):
             errors.append(f"{where}: bare must be true/false")
 
-        for stack in agent.get("stacks", []) or []:
-            if not (STACKS_DIR / stack).is_dir():
-                errors.append(f"{where}: stack '{stack}' has no dir at {STACKS_DIR / stack}")
-
-        for skill in agent.get("skills", []) or []:
-            if not (SKILLS_DIR / skill).is_dir():
-                errors.append(f"{where}: skill '{skill}' has no dir at {SKILLS_DIR / skill}")
+        # stacks:/skills: names become read paths (STACKS_DIR / name), so each must be a plain
+        # kebab-case name (same rule as `project`) BEFORE any path is built from it.
+        for key, base, code in (("stacks", STACKS_DIR, "E_STACK_NAME"), ("skills", SKILLS_DIR, "E_SKILL_NAME")):
+            names = agent.get(key, []) or []
+            if not isinstance(names, list):
+                errors.append(f"{where}: {code}: `{key}` must be a list of names")
+                continue
+            for name in names:
+                if not (isinstance(name, str) and PROJECT_RE.fullmatch(name)):
+                    errors.append(f"{where}: {code}: {key} entry {name!r} must be lowercase "
+                                  f"kebab-case, at most 64 chars (no paths, '..' or control characters)")
+                elif not (base / name).is_dir():
+                    errors.append(f"{where}: {key[:-1]} '{name}' has no dir at {base / name}")
 
     # Roster validation: an orchestrator's roster is generated from delegates_to
     # and injected at the {{ROSTER_TABLE}} token in its AGENTS.md. Enforce that
@@ -436,6 +442,12 @@ def render_stack_overlay(stacks: list[str]) -> str:
         if summary:
             sections.extend(["", summary])
         for fragment in meta.get("fragments", []) or []:
+            # A fragment is read into the generated agent file: it must stay inside its own
+            # stack dir (no '..', absolute path or symlink out), else refuse rather than read.
+            if not isinstance(fragment, str) or "\0" in fragment or not (
+                    STACKS_DIR / stack / fragment).resolve().is_relative_to((STACKS_DIR / stack).resolve()):
+                sys.exit(f"E_STACK_FRAGMENT: stack {stack!r}: fragment {str(fragment)!r} "
+                         f"is outside the stack dir")
             frag_path = STACKS_DIR / stack / fragment
             if frag_path.is_file():
                 sections.extend(["", _read(frag_path).rstrip()])
@@ -880,6 +892,62 @@ def _remove(path: Path, strict: bool = True) -> None:
             raise
 
 
+# The swap dirs (<target>.tmp / <target>.old, <project>.tmp / .old) sit next to user content, so
+# a crashed run's debris may only be deleted when compose.py itself made it. Ownership is a
+# sibling marker FILE (<dir>.compose-owned), written before the dir exists: the dir's own
+# contents (a previous generated tree) cannot carry one. Anything unmarked is a user's, refused.
+OWNED_SUFFIX = ".compose-owned"
+
+
+def _marker(p: Path) -> Path:
+    return p.with_name(p.name + OWNED_SUFFIX)
+
+
+def _unmark(p: Path) -> None:
+    """Remove p's marker if it is a file or link (a link is unlinked, never followed); never a dir."""
+    m = _marker(p)
+    if m.is_symlink() or m.is_file():
+        m.unlink()
+
+
+def _recheck_not_link(*paths: Path) -> None:
+    """Re-verify, immediately before the first rename, what vet_target() checked at the start:
+    the project dir and the target are still not symlinks. Narrows (does not close) the window in
+    which a same-user process could swap a link in after vetting; an fd-based swap would close it."""
+    for p in paths:
+        if p.is_symlink():
+            sys.exit(f"error: refusing to write: {p} became a symlink after it was vetted")
+
+
+def _claim(p: Path, claimed: list) -> None:
+    """About to create `p`: clear compose.py's own debris there, refuse anything else, then mark it
+    ours and record it in `claimed`. Failure cleanup releases ONLY what is in `claimed`, never a
+    path it merely finds a marker-shaped thing beside (a dir or FIFO there is not our marker)."""
+    m = _marker(p)
+    marked = m.is_symlink() or m.is_file()    # a marker that is a dir/FIFO is nobody's: refused below
+    if os.path.lexists(m) and not (m.is_symlink() or m.is_file()):
+        sys.exit(f"error: refusing to touch {m}: not a plain file")
+    if os.path.lexists(p) and not marked:
+        sys.exit(f"error: refusing to delete {p}: it was not created by compose.py "
+                 f"(no {m.name} beside it); move or remove it and re-run")
+    _remove(p)
+    _unmark(p)                                # stale marker: a link is unlinked, never followed
+    p.parent.mkdir(parents=True, exist_ok=True)   # the marker is a sibling; its dir may not exist yet
+    fd = os.open(_marker(p), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    os.close(fd)
+    claimed.append(p)
+
+
+def _release(p: Path, strict: bool = True) -> None:
+    """Delete a dir we claimed, and its marker. Only ever called on a path _claim()ed first."""
+    _remove(p, strict)
+    try:
+        _unmark(p)
+    except OSError:
+        if strict:
+            raise
+
+
 def vet_target(out_dir: Path, name, sub: str | None = None) -> Path:
     """The dir a writer will replace: <out_dir>/<name>[/<sub>]. Exits (no traceback) unless the
     name is a plain project name, neither the project dir nor the target is a symlink or a
@@ -922,11 +990,13 @@ def install_tree(target: Path, files: dict[str, str], dirs=()) -> None:
     dir, hence the two renames. Any failure restores the old tree and exits with an error."""
     tmp = target.with_name(target.name + ".tmp")
     old = target.with_name(target.name + ".old")
+    claimed: list[Path] = []
     try:
-        for leftover in (tmp, old):          # a crashed earlier run's debris is ours to clear
-            _remove(leftover)
+        for leftover in (tmp, old):          # a crashed earlier run's own debris is ours to clear
+            _claim(leftover, claimed)        # (anything unmarked is a user's: refused, untouched)
         tmp.mkdir(parents=True)
         _materialise(tmp, files, dirs)
+        _recheck_not_link(target.parent, target)
         if os.path.lexists(target):
             os.rename(target, old)
         try:
@@ -935,13 +1005,35 @@ def install_tree(target: Path, files: dict[str, str], dirs=()) -> None:
             if os.path.lexists(old):
                 os.rename(old, target)
             raise
-        _remove(old, strict=False)
+        _release(tmp, strict=False)          # tmp was renamed into place; this drops its marker
+        _release(old, strict=False)
     except OSError as exc:
-        _remove(tmp, strict=False)
-        sys.exit(f"error: could not write {target}: {exc}")
+        kept = _abort_swap(tmp, old, claimed)
+        sys.exit(f"error: could not write {target}: {exc}"
+                 + (f" (the previous tree is kept at {kept})" if kept else ""))
     except BaseException:
-        _remove(tmp, strict=False)
+        _abort_swap(tmp, old, claimed)
         raise
+
+
+def _abort_swap(tmp: Path, old: Path, claimed: list) -> Path | None:
+    """Failure cleanup. Releases only paths in `claimed` (so a refused _claim() of a user's dir
+    deletes nothing). `tmp` is ours and is dropped. `old` is dropped only if it is gone or an
+    empty dir; if it still holds anything it may be the only copy of the previous output, so it
+    is kept, its marker removed (the next run then refuses it instead of clearing it), and its
+    path returned for the error message."""
+    if tmp in claimed:
+        _release(tmp, strict=False)
+    if old not in claimed:
+        return None
+    if os.path.lexists(old) and not (old.is_dir() and not old.is_symlink() and not os.listdir(old)):
+        try:
+            _unmark(old)
+        except OSError:
+            pass
+        return old
+    _release(old, strict=False)
+    return None
 
 
 def install_project(project_dir: Path, files: dict[str, str]) -> None:
@@ -953,12 +1045,14 @@ def install_project(project_dir: Path, files: dict[str, str]) -> None:
     old = project_dir.with_name(project_dir.name + ".old")
     moved_old: list[str] = []
     moved_new: list[str] = []
+    claimed: list[Path] = []
     try:
-        for leftover in (tmp, old):
-            _remove(leftover)
+        for leftover in (tmp, old):          # only compose.py's own marked debris is cleared
+            _claim(leftover, claimed)
         tmp.mkdir(parents=True)
         _materialise(tmp, files)
         old.mkdir()
+        _recheck_not_link(project_dir)
         project_dir.mkdir(parents=True, exist_ok=True)
         try:
             for entry in sorted(os.listdir(project_dir)):
@@ -974,14 +1068,16 @@ def install_project(project_dir: Path, files: dict[str, str]) -> None:
             for entry in moved_old:
                 os.rename(old / entry, project_dir / entry)
             raise
-        _remove(tmp, strict=False)
-        _remove(old, strict=False)
+        _release(tmp, strict=False)
+        _release(old, strict=False)
     except OSError as exc:
-        _remove(tmp, strict=False)
-        _remove(old, strict=False)
-        sys.exit(f"error: could not write {project_dir}: {exc}")
+        # old is emptied by a clean rollback; if the rollback itself failed it still holds the
+        # previous own-output, which _abort_swap keeps (and names here) instead of deleting.
+        kept = _abort_swap(tmp, old, claimed)
+        sys.exit(f"error: could not write {project_dir}: {exc}"
+                 + (f" (the previous output is kept at {kept})" if kept else ""))
     except BaseException:
-        _remove(tmp, strict=False)
+        _abort_swap(tmp, old, claimed)
         raise
 
 
