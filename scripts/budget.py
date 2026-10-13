@@ -35,7 +35,7 @@ Environment: GRID_DIR (repo root; default: parent of scripts/), GRID_BASELINE
 
 Fail closed: a SKILL.md or role.yaml this reader cannot measure faithfully (UTF-8 BOM,
 invalid UTF-8, quoted top-level key, indented `---` in the frontmatter, duplicate key, no
-description) fails --check by path and reason instead of counting 0 characters. For
+description, a line-break character other than \\n such as U+2028) fails --check by path and reason instead of counting 0 characters. For
 baseline (upstream) skills the same problems are only warned on stderr.
 
 Stdlib only. --check also enforces the sections/ integrity rule for split
@@ -101,6 +101,13 @@ KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):(?:[ \t]+(.*))?$")
 QUOTED_KEY_RE = re.compile(r"""^["'][A-Za-z_][\w-]*["']\s*:""")
 BOM = "\ufeff"
 NO_FRONTMATTER = "no `---` frontmatter block at the top of the file"
+# str.splitlines() also breaks on these; YAML 1.2 readers keep U+0085/U+2028/U+2029 inside the
+# line and none of the others is a YAML break at all (a bare CR is, to some readers). A reader
+# that breaks where another does not sees a different key set, so `description: short<sep>...`
+# was under-counted (NF-055 VF2). Lines are cut on \n only (CRLF tolerated) and any of these
+# in the text that is read is a named problem, the stance scripts/lib/fmshape.py takes
+# (its _BAD_CHAR class carries the same characters; tabs stay legal here as indentation).
+LINE_BREAK_RE = re.compile("[\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
 
 
 def _collapse(text: str) -> str:
@@ -139,6 +146,22 @@ def _scalar(rest: str, cont: list):
     # Plain scalar: " #..." starts a comment; continuation lines fold to one line.
     parts = [re.sub(r"\s+#.*$", "", p) for p in [rest] + [ln.strip() for ln in body]]
     return _collapse(" ".join(parts)), True
+
+
+def split_lines(text: str) -> list:
+    """Lines of `text` cut on \\n alone; one trailing \\r per line (CRLF) is dropped."""
+    return [ln[:-1] if ln.endswith("\r") else ln for ln in text.split("\n")]
+
+
+def line_break_problems(lines: list) -> list:
+    """A named problem when `lines` hold a character that some reader treats as a line break
+    and this one does not (see LINE_BREAK_RE); empty when they are clean."""
+    found = sorted({m.group() for ln in lines for m in LINE_BREAK_RE.finditer(ln)})
+    if not found:
+        return []
+    names = ", ".join(f"U+{ord(c):04X}" for c in found)
+    return [f"a line-break character other than \\n ({names}) in the text that is read: readers "
+            "disagree on where the line ends, so the description may be under-counted; remove it"]
 
 
 def parse_top_level(lines: list):
@@ -193,10 +216,12 @@ def read_frontmatter(path: str):
     text, problems = read_text(path)
     if text is None:
         return {}, problems
-    lines = text.splitlines()
-    if not lines or lines[0].rstrip() != "---":
+    lines = split_lines(text)
+    if lines[0].rstrip(" \t") != "---":
         return {}, problems + [NO_FRONTMATTER]
-    end = next((i for i in range(1, len(lines)) if lines[i].rstrip() == "---"), len(lines))
+    end = next((i for i in range(1, len(lines)) if lines[i].rstrip(" \t") == "---"), len(lines))
+    # The fences included: a separator that hides or fakes a fence moves the region itself.
+    problems += line_break_problems(lines[:end + 1])
     if any(ln.strip() == "---" for ln in lines[1:end]):
         problems.append("an indented `---` inside the frontmatter: some readers end the "
                         "block there; rewrite the text so no line is only `---`")
@@ -209,8 +234,9 @@ def read_yaml(path: str):
     text, problems = read_text(path)
     if text is None:
         return {}, problems
-    meta, more = parse_top_level(text.splitlines())
-    return meta, problems + more
+    lines = split_lines(text)
+    meta, more = parse_top_level(lines)
+    return meta, problems + line_break_problems(lines) + more
 
 
 # --------------------------------------------------------------------------

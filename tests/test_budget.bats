@@ -601,6 +601,74 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
   [[ "$output" != *"FAIL"* ]] || false
 }
 
+# --- line breaks YAML does not share with str.splitlines() (NF-055 VF2) ----------------------
+# splitlines() also breaks on U+0085, U+2028, U+2029, \x0b, \x0c, \x1c-\x1e, which YAML 1.2
+# readers keep inside the line, so `description: short<sep><300 chars>` was measured as "short"
+# and --check printed OK. The reader now splits on \n (CRLF tolerated) only and FAILS CLOSED on
+# any of these characters in the frontmatter, the same stance as scripts/lib/fmshape.py.
+
+# linebreak_cases — "label<TAB>printf escape" for every separator under test.
+linebreak_cases() {
+  printf '%s\t%s\n' NEL '\xc2\x85' LS '\xe2\x80\xa8' PS '\xe2\x80\xa9' VT '\x0b' FF '\x0c' \
+    FS '\x1c' GS '\x1d' RS '\x1e' CR '\r'
+}
+
+@test "a line-separator character inside a SKILL.md description fails --check by name (no under-count)" {
+  local label esc long
+  long="$(head -c 300 /dev/zero | tr '\0' x)"
+  write_target 1000 0 0 0 250 100000
+  while IFS=$'\t' read -r label esc; do
+    rm -rf "$MOCK_GRID/skills"; mkdir -p "$MOCK_GRID/skills/sep"
+    # shellcheck disable=SC2059   # the escape is the point
+    printf -- "---\nname: sep\ndescription: short${esc}${long}\n---\nbody\n" > "$MOCK_GRID/skills/sep/SKILL.md"
+    budget --check
+    echo "$label -> $status $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"budget: FAIL skills/sep/SKILL.md: "*"line"* ]] || false
+    [[ "$output" != *"Traceback"* ]] || false
+  done < <(linebreak_cases)
+}
+
+@test "a line-separator character in a role.yaml fails --check by name" {
+  local label esc
+  write_target 1000 1000 1000 0 250 100000
+  while IFS=$'\t' read -r label esc; do
+    rm -rf "$MOCK_GRID/agent-factory"; mkdir -p "$MOCK_GRID/agent-factory/roles/sep"
+    # shellcheck disable=SC2059
+    printf -- "name: sep\ndescription: short${esc}name: other\n" > "$MOCK_GRID/agent-factory/roles/sep/role.yaml"
+    budget --check
+    echo "$label -> $status $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"budget: FAIL agent-factory/roles/sep/role.yaml: "*"line"* ]] || false
+  done < <(linebreak_cases)
+}
+
+@test "a separator that only hides the closing fence is still reported (the region is cut on \\n alone)" {
+  # `---` after U+2028 is column 0 to a YAML 1.1 reader, mid-line to a \n-only one: the two
+  # disagree about where the frontmatter ends, so the gate must not pick one silently.
+  mkdir -p "$MOCK_GRID/skills/fence"
+  printf -- '---\nname: fence\ndescription: short\xe2\x80\xa8---\nbody\n' > "$MOCK_GRID/skills/fence/SKILL.md"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/fence/SKILL.md: "* ]] || false
+}
+
+@test "separators in the BODY (after the closing fence) do not matter; CRLF line endings still measure" {
+  mkdir -p "$MOCK_GRID/skills/body" "$MOCK_GRID/skills/crlf"
+  printf -- '---\nname: body\ndescription: Does a thing\n---\nbody\xe2\x80\xa8more\x0cstill\n' > "$MOCK_GRID/skills/body/SKILL.md"
+  printf -- '---\r\nname: crlf\r\ndescription: Does a thing\r\n---\r\nbody\r\n' > "$MOCK_GRID/skills/crlf/SKILL.md"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 3 ] || [ "$status" -eq 0 ]
+  [[ "$output" != *"FAIL"* ]] || false
+  budget --json
+  [ "$(jget "$output" entries.skills.0.listing_chars)" = "12" ]     # body
+  [ "$(jget "$output" entries.skills.1.listing_chars)" = "12" ]     # crlf: no stray \r counted
+}
+
 # --- the real repo --------------------------------------------------------------
 
 @test "the real repo passes its own committed target on the example baseline (exit 0, or 3 when submodules are uninitialised)" {
