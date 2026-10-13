@@ -1,10 +1,13 @@
 # hooks/
 
-Claude Code hooks that ship with the-grid. Shell scripts, zero model calls, one
-launcher, one catalogue.
+Claude Code hooks that ship with the-grid. Shell scripts, one launcher, one
+catalogue. The guard and instincts hooks make no model calls; auto-handoff starts one
+headless run per qualifying session (below).
 
-> **Status.** Built so far: the launcher, the catalogue, the two guard hooks, the
-> auto-handoff hook with its worker (below), and the project emitter. To opt a project
+> **Status.** Built: the launcher, the catalogue, the two guard hooks, the
+> auto-handoff hook with its worker (below), the four instincts hooks (capture and
+> inject; opt-in per project with `learning: on`, see [docs/instincts.md](../docs/instincts.md)),
+> and the project emitter. To opt a project
 > in, set `hooks: {profile: standard}` in its `.grid/project.yaml` and run
 > `agent-factory/.venv/bin/python agent-factory/deploy_hooks.py <project>`
 > (`--list` shows every hook's cost; `--check` reports drift). `scripts/wire.sh` wires

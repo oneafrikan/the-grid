@@ -13,7 +13,9 @@ claude plugin install grid-agents@the-grid
 ```
 
 Install either or both. Installs follow the default branch; no release tags exist yet,
-so there is no pin.
+so there is no pin. The bundles are built on `next` and reach the default branch (`main`)
+only when `next` is promoted to `main`, so until then this install has nothing to fetch
+from `main`.
 
 ## What is in each bundle
 

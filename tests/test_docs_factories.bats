@@ -115,3 +115,30 @@ GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
   [ "$status" -eq 1 ]
   grep -qF 'openspec@1.12.0' skills/grid-help/sections/orientation.md
 }
+
+# --- WP-071 (R25.qa.F12): count words equal what the tree has -----------------------------------
+
+# word_to_num: one..eight as a number (the docs spell small counts out)
+word_to_num() {
+  case "$1" in
+    one) echo 1 ;; two) echo 2 ;; three) echo 3 ;; four) echo 4 ;; five) echo 5 ;;
+    six) echo 6 ;; seven) echo 7 ;; eight) echo 8 ;; *) echo "unknown count word: $1" >&2; echo -1 ;;
+  esac
+}
+
+@test "README: the factory count word equals the rows of its factories table" {
+  cd "$GRID_ROOT"
+  rows="$(awk '/^\| Factory /{f=1; next} f && /^\|[-| ]+\|$/{next} f && /^\|/{n++; next} f{f=0} END{print n+0}' README.md)"
+  word="$(grep -o -E 'one of [a-z]+ sibling factories' README.md | sed -E 's/one of ([a-z]+) .*/\1/')"
+  [ -n "$word" ]
+  [ "$rows" -ge 1 ]
+  [ "$(word_to_num "$word")" -eq "$rows" ]
+}
+
+@test "README and CLAUDE: the public project count equals agent-factory/examples/*.yaml" {
+  cd "$GRID_ROOT"
+  n="$(ls agent-factory/examples/*.yaml | wc -l | tr -d ' ')"
+  grep -q "$n public projects" README.md
+  case "$n" in 3) w=three ;; 4) w=four ;; 5) w=five ;; *) w=unknown ;; esac
+  grep -q -i "$w public projects" CLAUDE.md
+}
