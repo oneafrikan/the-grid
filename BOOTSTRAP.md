@@ -79,6 +79,10 @@ Notes:
   cannot redirect what it fetches). Behind a corporate proxy or credential
   helper set `GRID_GIT_FORWARD_CONFIG=1` to forward your git environment.
   `GRID_AUDIT_TIMEOUT=<seconds>` (default 300) bounds each `audit.py` run.
+- `grid lock --check` fails (exit 2) on a shallow submodule checkout that cannot prove
+  a locked commit is on its declared ref. A CI job that clones submodules at depth 1
+  sets `GRID_LOCK_ALLOW_SHALLOW=1` (exactly `1`) to skip that one proof with a notice;
+  `grid lock` itself never skips it. Run `grid lock --check` on a full clone to get the proof.
 - A damaged ledger is reported by `grid doctor` with its path. Restore a backup,
   or delete the file and re-run `grid install`, which adopts directories that
   still match `grid.lock`.

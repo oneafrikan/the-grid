@@ -501,7 +501,9 @@ orphan_commit() {
   [[ "$output" == *"fetch origin"* ]]
 }
 
-@test "a shallow checkout that cannot prove reachability: lock exits 2 mentioning shallow, lock --check skips with a notice" {
+# shallow_tip_checkout: make repos/up a depth-1 clone whose recorded sha is a commit it cannot
+# prove is on the ref (the tip moved on after the clone), and record that sha in the index.
+shallow_tip_checkout() {
   run lock
   [ "$status" -eq 0 ]
   rm -rf "$G/repos/up"
@@ -512,12 +514,40 @@ orphan_commit() {
   git -C "$G/repos/up" fetch -q --depth 1 origin "$tip"
   git -C "$G/repos/up" checkout -q "$tip"
   git -C "$G" update-index --add --cacheinfo "160000,$tip,repos/up"
+}
+
+# Deliberately changed (hardening, refs private NF-066 J1): the old test asserted that
+# `lock --check` SKIPS the reachability proof on a shallow checkout and exits non-2, which
+# let a sha that is on no upstream ref pass. The skip is now opt-in (GRID_LOCK_ALLOW_SHALLOW=1).
+@test "a shallow checkout that cannot prove reachability: lock and lock --check both exit 2 mentioning shallow" {
+  shallow_tip_checkout
   run lock
   [ "$status" -eq 2 ]
   [[ "$output" == *"shallow"* ]]
   run lock --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"shallow"* ]]
+  [[ "$output" == *"GRID_LOCK_ALLOW_SHALLOW=1"* ]]
+}
+
+@test "GRID_LOCK_ALLOW_SHALLOW=1 lets lock --check skip the shallow reachability proof with a notice, but never lock" {
+  shallow_tip_checkout
+  GRID_LOCK_ALLOW_SHALLOW=1 run lock --check
   [ "$status" -ne 2 ]
   [[ "$output" == *"shallow"* ]]
+  [[ "$output" == *"reachability not checked"* ]]
+  # lock writes the file, so the opt-in never applies to it.
+  GRID_LOCK_ALLOW_SHALLOW=1 run lock
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"shallow"* ]]
+}
+
+@test "only the exact value 1 opts in to the shallow skip" {
+  shallow_tip_checkout
+  for v in 0 true yes "" " 1" 11; do
+    GRID_LOCK_ALLOW_SHALLOW="$v" run lock --check
+    if [ "$status" -ne 2 ]; then echo "value '$v': status $status" >&2; false; fi
+  done
 }
 
 @test "a duplicate (name, source) entry in grid.lock is rejected by lock --check, exit 2 naming both entries" {
