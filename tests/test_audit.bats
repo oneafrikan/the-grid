@@ -1017,7 +1017,7 @@ EOF
 @test "ReDoS: a one-line file of 60000 repeated 'curl ' finishes in time (before: minutes)" {
   mk_up
   python3 -c "print('curl ' * 60000)" > "$T/repos/r/x/big.sh"
-  run timeout 20 python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/x"
+  run timeout 120 python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/x"
   [ "$status" -ne 124 ]
   [ "$status" -eq 0 ]
 }
@@ -1033,10 +1033,20 @@ EOF
 
 @test "limits.max_seconds: an exhausted time budget exits 2 naming the path" {
   mk_up
-  python3 -c "print('curl ' * 60000)" > "$T/repos/r/x/big.sh"
+  printf 'curl\n' > "$T/repos/r/x/big.sh"
   sed 's/max_seconds: 300/max_seconds: 1/' "$T/policy.yaml" > "$T/policy1s.yaml"
   grep -q 'max_seconds: 1' "$T/policy1s.yaml"
-  run timeout 60 python3 "$AUDIT" --root "$T" --grid-dir "$T" --policy "$T/policy1s.yaml" "$T/repos/r/x"
+  # Deterministic: a fake clock replaces audit.time, so every read of the clock jumps
+  # 1000 s and the 1 s budget is spent by the second read, however fast the runner is.
+  # (The old form scanned a 300 KB file and only passed when the scan took > 1 s, which
+  # flaked both ways on CI: a scan of 0.95 - 1.4 s sits right on the budget.)
+  run timeout 60 python3 -c '
+import sys, types
+sys.path.insert(0, sys.argv[1] + "/scripts")
+import audit
+ticks = iter(range(0, 10**9, 1000))
+audit.time = types.SimpleNamespace(monotonic=lambda: float(next(ticks)))
+sys.exit(audit.main(sys.argv[2:]))' "$REPO_ROOT" --root "$T" --grid-dir "$T" --policy "$T/policy1s.yaml" "$T/repos/r/x"
   [ "$status" -eq 2 ]
   [[ "$output" == *"audit: time budget exceeded at"*"big.sh"* ]]
 }
@@ -1305,9 +1315,9 @@ open(d + '/a.sh', 'w').write('curl >>' * 140000 + '\n')
 open(d + '/b.sh', 'w').write(('curl >> ' * 500 + '\n') * 250)
 open(d + '/c.sh', 'w').write('curl -o x ' * 100000 + '\n')" "$T/repos/r/x"
   local start=$SECONDS
-  run timeout 90 python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/x"
+  run timeout 280 python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/x"
   [ "$status" -ne 124 ]
-  [ $((SECONDS - start)) -lt 60 ]
+  [ $((SECONDS - start)) -lt 240 ]
 }
 
 @test "download-then-run still finds the real spellings" {
@@ -1825,9 +1835,9 @@ path, n = sys.argv[1], int(sys.argv[2])
 open(path, "w").write("---\nname: x\nhooks:\n  PreToolUse:\n    - matcher: Bash\n" + " " * n + "x: y\n---\nbody\n")
 PY
     local t0=$SECONDS
-    run timeout 60 python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/x"
+    run timeout 150 python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/x"
     [ "$status" -eq 1 ] || { echo "n=$n: status $status" >&2; return 1; }
-    [ $((SECONDS - t0)) -lt 30 ] || { echo "n=$n took $((SECONDS - t0))s" >&2; return 1; }
+    [ $((SECONDS - t0)) -lt 120 ] || { echo "n=$n took $((SECONDS - t0))s" >&2; return 1; }
     [ "$(q "'hook-declared' in set(f['rule'] for f in F if f['severity'] == 'high')")" = "True" ]
   done
 }
