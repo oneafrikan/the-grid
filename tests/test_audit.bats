@@ -1014,10 +1014,15 @@ EOF
   [ "$(q 'F')" = "[]" ]
 }
 
-@test "ReDoS: a one-line file of 60000 repeated 'curl ' finishes in time (before: minutes)" {
+# Bounds in the ReDoS tests sit BETWEEN the current scanner and the pre-fix one (measured with
+# the pre-fix scripts/ overlaid; see the PR body): a bound that a loaded CI runner can exceed
+# flakes, a bound above the pre-fix time proves nothing. The input is sized so the pre-fix
+# (quadratic) scan stays over the bound even on a runner twice as fast as the measuring
+# machine, while the current scan stays 6x or more under it with every core busy.
+@test "ReDoS: a one-line file of 120000 repeated 'curl ' finishes in time (pre-fix: about 170 s, quadratic)" {
   mk_up
-  python3 -c "print('curl ' * 60000)" > "$T/repos/r/x/big.sh"
-  run timeout 120 python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/x"
+  python3 -c "print('curl ' * 120000)" > "$T/repos/r/x/big.sh"
+  run timeout 55 python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/x"
   [ "$status" -ne 124 ]
   [ "$status" -eq 0 ]
 }
@@ -1834,10 +1839,13 @@ import sys
 path, n = sys.argv[1], int(sys.argv[2])
 open(path, "w").write("---\nname: x\nhooks:\n  PreToolUse:\n    - matcher: Bash\n" + " " * n + "x: y\n---\nbody\n")
 PY
-    local t0=$SECONDS
-    run timeout 150 python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/x"
+    # Per-size bound between the current scanner (0.4 s / 3 s) and the pre-fix one (73 s for
+    # 100 KB, hours for 1 MB): a bound above 73 s would let the 100 KB case pass on the old code.
+    local t0=$SECONDS limit=15
+    [ "$n" -gt 100000 ] && limit=40
+    run timeout "$limit" python3 "$AUDIT" --root "$T" --grid-dir "$T" --format json "$T/repos/r/x"
     [ "$status" -eq 1 ] || { echo "n=$n: status $status" >&2; return 1; }
-    [ $((SECONDS - t0)) -lt 120 ] || { echo "n=$n took $((SECONDS - t0))s" >&2; return 1; }
+    [ $((SECONDS - t0)) -lt "$limit" ] || { echo "n=$n took $((SECONDS - t0))s" >&2; return 1; }
     [ "$(q "'hook-declared' in set(f['rule'] for f in F if f['severity'] == 'high')")" = "True" ]
   done
 }
