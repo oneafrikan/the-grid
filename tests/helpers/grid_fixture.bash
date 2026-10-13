@@ -56,6 +56,29 @@ print("\n".join(sorted(rows)))
 ' "$1"
 }
 
+# tree_digest_changed <before> <after>: given two tree_digest outputs, prints one line per
+# path that was added, removed or changed ("<kind> <path>"; content hashes and file content
+# are never printed). For failure diagnostics next to a `[ "$after" = "$before" ]` assert.
+tree_digest_changed() {
+  python3 -B -c '
+import sys
+def rows(text):
+    out = {}
+    for line in text.splitlines():
+        kind, _, rest = line.partition(" ")
+        if kind == "f":                           # "f <path> <sha256>": the hash is the value
+            name, _, digest = rest.rpartition(" ")
+        else:                                     # "l <path> <target>" / "d <path>": whole row
+            name, digest = rest, ""
+        out[(kind, name)] = digest
+    return out
+a, b = rows(sys.argv[1]), rows(sys.argv[2])
+for key in sorted(set(a) | set(b)):
+    if a.get(key) != b.get(key):
+        print("%s %s" % key)
+' "$1" "$2"
+}
+
 # file_id <path>: prints st_ino:st_mtime_ns. A rewrite through os.replace always
 # changes the inode, so equality proves "not rewritten" even on a coarse-timestamp
 # filesystem.
