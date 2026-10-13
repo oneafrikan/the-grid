@@ -141,6 +141,29 @@ teardown() {
   [ ! -e "$MOCK_SKILLS/skill-extra" ] # other host's overlay → not applied here
 }
 
+@test "a path-like GRID_HOST is rejected: exit 2, and no file outside machines/ is read as an overlay" {
+  make_skill "$MOCK_GRID/repos/baserepo/skill-base" "skill-base"
+  make_skill "$MOCK_GRID/repos/extrarepo/skill-extra" "skill-extra"
+  printf 'baserepo\n' > "$MOCK_GRID/baseline-submodules.txt"
+  mkdir -p "$MOCK_GRID/machines"
+  printf 'extrarepo\n' > "$MOCK_GRID/outsidehost.txt"          # what machines/../outsidehost.txt names
+  for bad in '../outsidehost' 'a/b' '-rf' '.hidden' 'has space'; do
+    GRID_HOST="$bad" GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"GRID_HOST"* ]]
+    [ ! -e "$MOCK_SKILLS/skill-extra" ]
+  done
+}
+
+@test "the grid-lock sentinel host and ordinary hostnames are accepted" {
+  make_skill "$MOCK_GRID/repos/baserepo/skill-base" "skill-base"
+  printf 'baserepo\n' > "$MOCK_GRID/baseline-submodules.txt"
+  for ok in '__baseline__' 'my_box' 'host-1.local'; do
+    GRID_HOST="$ok" GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+    [ "$status" -eq 0 ]
+  done
+}
+
 @test "overlay subtraction (-repo) removes a baseline whole-repo entry" {
   make_skill "$MOCK_GRID/repos/keeprepo/skill-keep" "skill-keep"
   make_skill "$MOCK_GRID/repos/droprepo/skill-drop" "skill-drop"

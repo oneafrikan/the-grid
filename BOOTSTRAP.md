@@ -68,6 +68,16 @@ Notes:
 - `git submodule update --init` refuses a `repos/<source>` that `grid` populated.
   To switch to the maintainer path, run
   `python3 ~/.the-grid/scripts/grid uninstall --yes` first.
+- `grid uninstall --yes` and `grid repair` also run `wire.sh` (with
+  `GRID_NO_CATALOG=1`) to refresh the links and `.wired.manifest`.
+- Use `grid` as a single writer: it takes no lock, so do not run two `grid`
+  commands that write at the same time (a scheduled `grid drift` only reads).
+- The ledger is trusted same-user state, not an authenticated record:
+  `grid uninstall --force` removes any directory under `repos/<source>/` that a
+  ledger row names. Keep `~/.grid` writable only by you.
+- A damaged ledger is reported by `grid doctor` with its path. Restore a backup,
+  or delete the file and re-run `grid install`, which adopts directories that
+  still match `grid.lock`.
 - `grid schedule` needs a clone path (and `HOME`, and the state dir) made only of
   `A-Z a-z 0-9 _ . / @ + -`. A path with a space is refused and nothing is written.
 

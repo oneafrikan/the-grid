@@ -93,13 +93,26 @@ def state_dir():
     return os.path.join(os.environ.get("HOME") or os.path.expanduser("~"), ".grid")
 
 
+HOST_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
+
+
 def host_key():
     """Machine key for overlay files: GRID_HOST, else the short hostname.
 
     socket.gethostname().split('.')[0] equals `hostname -s` but needs no external
     `hostname` binary (a minimal Arch or container install may lack it).
+
+    The value becomes a file name (machines/<host>.txt), so it must be one safe path
+    component: letters, digits, `_`, `.`, `-`, not starting with `.` or `-`. A value
+    like `../../x` would otherwise read or seed a file outside machines/. A leading
+    `_` is allowed on purpose: `grid lock` passes the sentinel `__baseline__` to
+    wire.sh. Same rule as scripts/wire.sh.
     """
-    return os.environ.get("GRID_HOST") or socket.gethostname().split(".")[0]
+    host = os.environ.get("GRID_HOST") or socket.gethostname().split(".")[0]
+    if not HOST_RE.fullmatch(host):
+        raise GridError("grid: GRID_HOST %s is not a valid machine key (letters, digits, `_`, `.`, "
+                        "`-`; not starting with `.` or `-`)" % _printable(host))
+    return host
 
 
 def atomic_write(path, content):
@@ -367,10 +380,20 @@ def validate_ref(ref):
         raise ValueError("ref %r is not a valid ref" % (ref,))
 
 
+# C0 (incl. ESC, BEL, tab, newline), DEL and C1 controls: a name is a display label that
+# is printed to the terminal, and tab/newline are also the ledger's column/row separators.
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
 def validate_label(value, field):
-    """`kind` / `name`: non-empty, no tab or newline (they are TSV columns in the ledger)."""
-    if not isinstance(value, str) or not value or "\t" in value or "\n" in value:
-        raise ValueError("%s must be a non-empty string without tab or newline" % field)
+    """`kind` / `name`: non-empty, no control characters (spaces are allowed: existing locks use them)."""
+    if not isinstance(value, str) or not value or _CONTROL_RE.search(value):
+        raise ValueError("%s must be a non-empty string without control characters" % field)
+
+
+def _printable(value):
+    """`value` as text that is safe to print: non-printable characters shown as escapes."""
+    return ascii(str(value))[1:-1]
 
 
 def dest_for(source, path):
@@ -439,8 +462,10 @@ LOCK_FIELDS = ("hash", "kind", "name", "path", "sha", "source", "tree")
 def _entry_label(index, entry):
     """Name an entry in an error: its kind/name/source when readable, else its index."""
     if isinstance(entry, dict):
+        # The values are untrusted file content that reaches the terminal: escape them.
         return "entry %d (%s %s from %s)" % (
-            index, entry.get("kind"), entry.get("name"), entry.get("source"))
+            index, _printable(entry.get("kind")), _printable(entry.get("name")),
+            _printable(entry.get("source")))
     return "entry %d" % index
 
 
@@ -968,8 +993,12 @@ def ledger_path():
     return os.path.join(state_dir(), LEDGER_NAME)
 
 
-def _ledger_error(lineno, msg):
-    return GridError("grid: %s line %d: %s" % (LEDGER_NAME, lineno, msg))
+def _ledger_error(path, lineno, msg):
+    # Name the file and the way out: the ledger is machine-local state, so deleting it is
+    # safe (install re-adopts dirs that still match the lock) and restoring a copy is too.
+    return GridError("grid: %s line %d: %s; restore the file from a backup, or delete it and "
+                     "re-run `grid install` (which adopts directories that match grid.lock)"
+                     % (path, lineno, msg))
 
 
 def read_ledger(path=None):
@@ -980,6 +1009,13 @@ def read_ledger(path=None):
     any other kind: skipped with one notice per kind, never an error, and handed
     back so write_ledger can copy them through (a newer grid's rows must survive
     an older grid's rewrite). A missing file is ([], []).
+
+    Trust model: the ledger is machine-local, same-user state and is NOT authenticated.
+    Every row is validated (patterns, dest == repos/<source>/<path>, no duplicates), but
+    a row that names a real directory under repos/<source>/ makes `uninstall --force`
+    and `repair --prune --force` willing to delete it. Protecting the file is the
+    user's job (it lives under the state dir, default ~/.grid). Nothing here serialises
+    two grid processes either: use grid as a single writer.
     """
     path = path or ledger_path()
     try:
@@ -988,13 +1024,14 @@ def read_ledger(path=None):
     except FileNotFoundError:
         return [], []
     rows, foreign, seen = [], [], set()
+    first_line = {}                                 # dest -> line of its first row
     for lineno, line in enumerate(text.split("\n"), 1):
         if not line:
             continue
         cols = line.split("\t")
         kind = cols[0]
         if not kind:
-            raise _ledger_error(lineno, "empty kind")
+            raise _ledger_error(path, lineno, "empty kind")
         if kind != "skill":
             if kind not in seen:
                 seen.add(kind)
@@ -1003,7 +1040,7 @@ def read_ledger(path=None):
             foreign.append(line)
             continue
         if len(cols) != len(LEDGER_COLS):
-            raise _ledger_error(lineno, "expected %d tab-separated columns, found %d"
+            raise _ledger_error(path, lineno, "expected %d tab-separated columns, found %d"
                                 % (len(LEDGER_COLS), len(cols)))
         row = dict(zip(LEDGER_COLS, cols))
         try:
@@ -1016,9 +1053,38 @@ def read_ledger(path=None):
             if row["dest"] != dest_for(row["source"], row["path"]):
                 raise ValueError("dest %r is not repos/<source>/<path>" % row["dest"])
         except ValueError as exc:
-            raise _ledger_error(lineno, str(exc))
+            raise _ledger_error(path, lineno, str(exc))
+        # A doubled dest would plan the same directory twice; it also means the file was
+        # damaged or hand-edited, so refuse rather than guess which row is right.
+        if row["dest"] in first_line:
+            raise _ledger_error(path, lineno, "duplicate row for %s (first on line %d)"
+                                % (row["dest"], first_line[row["dest"]]))
+        first_line[row["dest"]] = lineno
         rows.append(row)
     return rows, foreign
+
+
+def preflight_state():
+    """GridError unless the ledger can be written: found BEFORE anything is fetched or placed.
+
+    Without this an unwritable state dir was only found by write_ledger at the end,
+    after skills were already placed. The state dir (or, when it does not exist yet,
+    its nearest existing ancestor, which is where it would be created) must be a
+    writable directory, and the ledger path must not be a directory.
+    """
+    sdir = os.path.abspath(state_dir())
+    probe = sdir
+    while not os.path.lexists(probe):
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            break
+        probe = parent
+    if not os.path.isdir(probe) or not os.access(probe, os.W_OK | os.X_OK):
+        raise GridError("grid: state dir %s is not writable (checked %s); set GRID_STATE_DIR to a "
+                        "writable directory" % (sdir, probe))
+    if os.path.isdir(ledger_path()):
+        raise GridError("grid: %s is a directory, not the ledger file; remove it or set "
+                        "GRID_STATE_DIR elsewhere" % ledger_path())
 
 
 def write_ledger(rows, foreign=(), path=None):
@@ -1252,7 +1318,7 @@ def check_source_policy(grid_dir, cfg, sources, vetted, announce_file=True):
         if not vetted:
             continue
         proc = subprocess.run(
-            [sys.executable, os.path.join(grid_dir, "scripts", "audit.py"),
+            [sys.executable, "-B", os.path.join(grid_dir, "scripts", "audit.py"),
              "--grid-dir", grid_dir, "--check-url", url],
             env=dict(os.environ, LC_ALL="C"), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             encoding="utf-8", errors="replace")
@@ -1477,7 +1543,8 @@ def audit_staged(grid_dir, run, source, entries):
     is not allowed and lives under that entry's directory; the source's other
     entries pass. Exit 2 or unparseable output: every entry of the source fails.
     """
-    cmd = [sys.executable, os.path.join(grid_dir, "scripts", "audit.py"), "--format", "json",
+    # -B: the scanner must not leave a scripts/lib/__pycache__ in the repo (also under --dry-run).
+    cmd = [sys.executable, "-B", os.path.join(grid_dir, "scripts", "audit.py"), "--format", "json",
            "--root", run, "--grid-dir", grid_dir]
     cmd += [os.path.join(run, "repos", source, *e["path"].split("/")) for e in entries]
     proc = subprocess.run(cmd, env=dict(os.environ, LC_ALL="C"), stdout=subprocess.PIPE,
@@ -1697,7 +1764,10 @@ def apply_plan(grid_dir, cfg, skills_dir, vetted, plan, failed, remove_rows, kee
             new_rows.append(dict((c, entry[c]) for c in LEDGER_COLS if c in entry))
         elif old is not None and os.path.lexists(os.path.join(grid_dir, entry["dest"])):
             new_rows.append(old)                               # the older dir is still there
-    write_ledger(new_rows, foreign)
+    # Nothing to record and no ledger yet (a maintainer checkout installs nothing): do not
+    # create an empty file, which doctor/repair would read as "this is an install machine".
+    if new_rows or foreign or os.path.exists(ledger_path()):
+        write_ledger(new_rows, foreign)
 
     # Step 10: wire (links and .wired.manifest; never SKILLS.md).
     return failed, run_wire(grid_dir, skills_dir)
@@ -1743,6 +1813,7 @@ def cmd_install(args):
     check_source_policy(grid_dir, cfg, set(e["source"] for e in selected), vetted)
 
     if not dry:
+        preflight_state()                                      # before any write or network access
         sweep_stale_staging(grid_dir)
         seed_wired_files(grid_dir, host)                       # step 2
 
@@ -1871,7 +1942,14 @@ def doctor_findings(grid_dir, skills_dir, host):
         return findings + link_findings(grid_dir, skills_dir), True
     lock = read_grid_lock(grid_dir, cfg["sources"])
     selected, _notices = select_lock_entries(grid_dir, lock, host)
-    rows, _foreign = read_ledger()
+    try:
+        rows, _foreign = read_ledger()
+    except (GridError, OSError) as exc:
+        # A damaged ledger is a finding (valid --json too), not a reason to print nothing:
+        # doctor is the command an operator runs to find out what is wrong. Without rows
+        # the ledger and disk checks cannot run; the link check still can.
+        detail = " ".join(str(exc).split())
+        return findings + [("ledger", "file", LEDGER_NAME, detail)] + link_findings(grid_dir, skills_dir), False
     findings += ledger_findings(grid_dir, selected, rows)
     findings += disk_findings(grid_dir, rows)
     findings += link_findings(grid_dir, skills_dir)
@@ -1933,6 +2011,7 @@ def cmd_repair(args):
         print_dry_run(plan, remove_rows)
         return EXIT_OK
 
+    preflight_state()
     sweep_stale_staging(grid_dir)
     failed, wired_ok = apply_plan(grid_dir, cfg, args.skills_dir, vetted, plan, failed,
                                   remove_rows, keep_rows, foreign)
@@ -2396,6 +2475,17 @@ def cmd_schedule(args):
     grid_dir = resolve_grid_dir(args.grid_dir)
     scheduler = schedule_scheduler()
     if args.action == "install":
+        env_state = os.environ.get("GRID_STATE_DIR")
+        if env_state:
+            # The job runs in the scheduler's environment, not this shell's: only the log dir
+            # (baked into the rendered files) follows GRID_STATE_DIR. A relative value would
+            # be baked in against whatever directory install ran from, so refuse it.
+            if not os.path.isabs(env_state):
+                raise GridError("grid: GRID_STATE_DIR must be an absolute path for `schedule install` "
+                                "(got %s)" % _printable(env_state))
+            notice("grid: note: GRID_STATE_DIR is not carried into the scheduled job; the job uses its "
+                   "own environment (default $HOME/.grid) for the ledger and reports; only the log "
+                   "directory is placed under it")
         files, printed = schedule_plan(grid_dir, scheduler)     # renders everything first
         if scheduler == "launchd":
             # launchd does not create the log dir the plist points at.
@@ -2425,6 +2515,22 @@ def cmd_schedule(args):
     removed_for = {}
     for sched in ("launchd", "systemd"):
         for path in schedule_paths(sched):
+            # Delete by fixed name only when the file is one grid wrote: a same-named file
+            # of someone else's (not naming scripts/grid and drift) is left alone.
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except FileNotFoundError:
+                print("grid: not present %s" % path)
+                continue
+            except OSError:
+                text = ""
+            # Service and plist name scripts/grid + drift; the timer only names its service unit.
+            ours = (("scripts/grid" in text and "drift" in text)
+                    or (path.endswith(".timer") and SYSTEMD_UNIT + ".service" in text))
+            if not ours:
+                print("grid: not removed %s: not written by grid" % path)
+                continue
             try:
                 os.unlink(path)
                 print("grid: removed %s" % path)
@@ -2442,6 +2548,16 @@ def cmd_schedule(args):
         if sched == scheduler or removed_for.get(sched):
             print(advice[sched])
     return EXIT_OK
+
+
+# Shown by `grid uninstall --help` and `grid repair --help` (private WP-032: documented, not changed).
+SIDE_EFFECT_NOTE = (
+    "`grid {cmd}` also runs scripts/wire.sh, to refresh the links and "
+    ".wired.manifest (never SKILLS.md). "
+    "grid is single-writer: it takes no lock, so do not run two grid commands that write at the "
+    "same time. "
+    "The ledger (installed.manifest) is trusted same-user state: `--force` removes any directory "
+    "under repos/<source>/ that a ledger row names, so keep the file writable only by you.")
 
 
 def build_parser():
@@ -2487,7 +2603,8 @@ def build_parser():
     p_doctor.add_argument("--json", action="store_true", help="print findings as a JSON array")
     p_doctor.set_defaults(func=cmd_doctor)
     p_repair = sub.add_parser("repair", parents=[shared],
-                              help="re-fetch what doctor reports missing, stale or absent, then re-wire")
+                              help="re-fetch what doctor reports missing, stale or absent, then re-wire",
+                              description=SIDE_EFFECT_NOTE.replace("{cmd}", "repair"))
     p_repair.add_argument("--prune", action="store_true",
                           help="also remove ledger directories that grid.lock no longer selects")
     p_repair.add_argument("--force", action="store_true",
@@ -2496,7 +2613,8 @@ def build_parser():
                           help="print the plan; no network access and no writes")
     p_repair.set_defaults(func=cmd_repair)
     p_uninstall = sub.add_parser("uninstall", parents=[shared],
-                                 help="remove what grid placed (dry run unless --yes)")
+                                 help="remove what grid placed (dry run unless --yes)",
+                                 description=SIDE_EFFECT_NOTE.replace("{cmd}", "uninstall"))
     p_uninstall.add_argument("--yes", action="store_true", help="actually delete (default: print the plan only)")
     p_uninstall.add_argument("--force", action="store_true",
                              help="also remove a directory that was edited since grid placed it")
@@ -2541,6 +2659,11 @@ def main(argv=None):
     except GridError as exc:
         sys.stderr.write(str(exc) + "\n")
         return exc.code
+    except OSError as exc:
+        # A filesystem failure nobody handled locally: one line and exit 2, never a
+        # traceback (which would also exit 1, the code that means "findings").
+        sys.stderr.write("grid: %s\n" % exc)
+        return EXIT_ERROR
 
 
 if __name__ == "__main__":
