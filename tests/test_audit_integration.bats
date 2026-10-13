@@ -88,6 +88,21 @@ mk_skill() {
   [ "$status" -eq 0 ]
 }
 
+@test "--gate --quiet still shows a file the scanner did not read (oversize prose: LOW, oversize script: HIGH)" {
+  # shrink the size cap in the mock grid's own policy copy so small fixtures are oversize
+  sed -i.bak 's/max_file_bytes: 1048576/max_file_bytes: 100/' "$T/policy.yaml"
+  mk_skill "$T/skills" x
+  { printf 'prose\n'; head -c 200 /dev/zero | tr '\0' ' '; } > "$T/skills/x/notes.md"
+  printf 'baseline-none\n' > "$T/baseline-submodules.example.txt"
+  run bash "$AUDIT" --gate --quiet
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"LOW"*"oversize-file"*"skills/x/notes.md"* ]]
+  { printf '#!/bin/sh\n'; head -c 200 /dev/zero | tr '\0' ' '; } > "$T/skills/x/run.sh"
+  run bash "$AUDIT" --gate --quiet
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"HIGH"*"oversize-file"*"skills/x/run.sh"* ]]
+}
+
 @test "--owned with nothing to scan is a usage error, not a pass" {
   run bash "$AUDIT" --owned
   [ "$status" -eq 2 ]
@@ -187,25 +202,85 @@ wire_repo() { # $1 = repo name, $2 = skill body
   [ "$status" -eq 1 ]
 }
 
-@test "--gate with an uninitialised submodule prints the notice and scans owned only" {
-  mk_skill "$T/repos/ex" s "$BAD"            # would fail if the wired part ran
-  printf 'ex\n' > "$T/baseline-submodules.example.txt"
-  mk_skill "$T/skills" x
-  # git stub: report an uninitialised submodule, otherwise defer to the real git.
+# submodule_stub UNINIT... -> a `git` on PATH whose `submodule status -- repos/<n>` reports
+# <n> uninitialised ("-" prefix) when <n> is one of the arguments, initialised otherwise;
+# everything else goes to the real git.
+submodule_stub() {
+  local real_git names="$*"
   real_git="$(command -v git)"
   mkdir -p "$BATS_TEST_TMPDIR/stub"
   cat > "$BATS_TEST_TMPDIR/stub/git" <<STUB
 #!/usr/bin/env bash
 if [ "\${1:-}" = submodule ] && [ "\${2:-}" = status ]; then
-  echo "-0000000000000000000000000000000000000000 repos/x"; exit 0
+  for a in "\$@"; do
+    case "\$a" in
+      repos/*)
+        n="\${a#repos/}"
+        case " $names " in
+          *" \$n "*) echo "-0000000000000000000000000000000000000000 \$a" ;;
+          *)         echo " 0000000000000000000000000000000000000000 \$a (heads/main)" ;;
+        esac ;;
+    esac
+  done
+  exit 0
 fi
 exec "$real_git" "\$@"
 STUB
   chmod +x "$BATS_TEST_TMPDIR/stub/git"
+}
+
+@test "--gate: an uninitialised BASELINE submodule exits 2 and says the wired set was NOT scanned" {
+  mk_skill "$T/repos/ex" s "$BAD"            # would fail if the wired part ran
+  printf 'ex\n' > "$T/baseline-submodules.example.txt"
+  mk_skill "$T/skills" x
+  submodule_stub ex
+  PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$AUDIT" --gate
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"audit: wired set NOT scanned (uninitialised baseline submodules: ex)"* ]]
+  [[ "$output" != *"repos/ex"*"curl-pipe-shell"* ]]
+}
+
+@test "--gate --allow-partial: scans owned only, exits 0, and the LAST line still says NOT scanned" {
+  mk_skill "$T/repos/ex" s "$BAD"
+  printf 'ex\n' > "$T/baseline-submodules.example.txt"
+  mk_skill "$T/skills" x
+  submodule_stub ex
+  PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$AUDIT" --gate --allow-partial
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"repos/ex/s"* ]]
+  [[ "$output" == *"-> ok"* ]]
+  [ "${lines[-1]}" = "audit: wired set NOT scanned" ]
+}
+
+@test "--gate: an uninitialised LIBRARY-only submodule does not matter" {
+  mk_skill "$T/repos/ex" s "Plain prose."
+  printf 'ex\n' > "$T/baseline-submodules.example.txt"
+  mk_skill "$T/skills" x
+  submodule_stub lib                          # lib is not in the baseline
   PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$AUDIT" --gate
   [ "$status" -eq 0 ]
-  [[ "$output" == *"audit: wired set not scanned (uninitialised submodules)"* ]]
-  [[ "$output" != *"repos/ex"* ]]
+  [[ "$output" != *"NOT scanned"* ]]
+  [[ "$output" == *"-> ok"* ]]
+}
+
+@test "--gate: the baseline check reads repo names like wire.sh (comments, subtractions and typed entries skipped)" {
+  mk_skill "$T/repos/ex" s "Plain prose."
+  printf '# a comment\nproject:grid\n-gone/skill\nex/s  # trailing\n' > "$T/baseline-submodules.example.txt"
+  mk_skill "$T/skills" x
+  submodule_stub project gone                 # neither is a baseline REPO
+  PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$AUDIT" --gate
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"NOT scanned"* ]]
+}
+
+@test "--gate scans dist/: a probe in dist/personas is picked up" {
+  mk_skill "$T/skills" x
+  printf 'ex\n' > "$T/baseline-submodules.example.txt"
+  mkdir -p "$T/repos/ex" "$T/dist/personas"
+  printf '%s\n' "$BAD" > "$T/dist/personas/zz-probe.md"
+  run bash "$AUDIT" --gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"dist/personas/zz-probe.md"* ]]
 }
 
 # ---------------------------------------------------------------- targets
@@ -253,6 +328,12 @@ run_wire() { run bash "$REPO_ROOT/scripts/wire.sh" "$@"; }
 add_wired() {
   mk_skill "$T/repos/$1" s "${2:-Plain prose.}"
   printf '%s\n' "$1" >> "$T/baseline-submodules.txt"
+}
+
+# lock_vouches REPO -> grid.lock names REPO as an install source, so the "repo with no
+# submodule entry" source check (once any entry exists) does not fire for it.
+lock_vouches() {
+  printf '{"entries": [{"source": "%s"}]}\n' "$1" > "$T/grid.lock"
 }
 
 # gitmodules_entry REPO URL -> a submodule entry so the source checks apply to repos/REPO.
@@ -379,6 +460,7 @@ gitmodules_entry() {
 
 @test "wire (h): an overlay-only repo with no CURATION heading warns; the same repo in the baseline blocks" {
   add_wired base
+  lock_vouches base
   mk_skill "$T/repos/ovl" o
   gitmodules_entry ovl https://github.com/obra/superpowers   # an allowed source
   mkdir -p "$T/machines"; printf 'ovl\n' > "$T/machines/$GRID_HOST.txt"
@@ -396,6 +478,7 @@ gitmodules_entry() {
 
 @test "wire (i): an overlay-only repo whose URL is not allowed warns and still wires" {
   add_wired base
+  lock_vouches base
   mk_skill "$T/repos/ovl" o
   gitmodules_entry ovl https://example.net/someone/else
   # Curated (heading present) so only the source check is in play.
@@ -406,4 +489,14 @@ gitmodules_entry() {
   [[ "$output" == *"source-not-allowed"* ]]
   [[ "$output" != *"source-uncurated"* ]]
   [ -L "$MOCK_SKILLS/o" ]
+}
+
+@test "--gate: an uninitialised baseline repo is named once even when several of its skills are listed" {
+  mk_skill "$T/repos/ex" s "Plain prose."
+  printf 'ex/s\nex/t\nex\n' > "$T/baseline-submodules.example.txt"
+  mk_skill "$T/skills" x
+  submodule_stub ex
+  PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$AUDIT" --gate
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"(uninitialised baseline submodules: ex)"* ]]
 }

@@ -313,3 +313,131 @@ scan() { track; run bash "$SCRIPT" "$@"; }
   scan
   [ "$output" = "$first" ]
 }
+
+# --- WP-040: bypasses of the scan ------------------------------------------------------------
+# Tokens are assembled at run time so no secret-shaped string sits in the repo.
+tok() { printf '%s_%s' "$1" "$(head -c "${2:-36}" /dev/zero | tr '\0' a)"; }
+
+@test "(p) an allowed word does not mask a real hit on the same line" {
+  put a.md "jane.doe@corp-mail.org git@github.com:o/r.git"
+  put b.md "jane.doe@corp-mail.org noreply"
+  put c.md "x@example.com jane.doe@corp-mail.org"
+  put d.md "/home/user1/x"
+  put e.md "/home/alice2/x"
+  put f.md "/home/bobsmith/x"
+  put g.md "/Users/namesmith/x"
+  put h.md "$(tok ghp) EXAMPLE"
+  scan
+  [ "$status" -eq 1 ]
+  local f
+  for f in a b c; do [[ "$output" == *"$f.md:1: [email]"* ]] || { echo "missed $f"; false; }; done
+  [[ "$output" == *"d.md:1: [home-linux]"* ]]
+  [[ "$output" == *"e.md:1: [home-linux]"* ]]
+  [[ "$output" == *"f.md:1: [home-linux]"* ]]
+  [[ "$output" == *"g.md:1: [home-mac]"* ]]
+  [[ "$output" == *"h.md:1: [token]"* ]]
+}
+
+@test "(p) genuine placeholders still pass, also several on one line" {
+  put r.md "CI paths /Users/runner/work and /home/runner/work are the generic hosted-runner user"
+  put a.md "mail you@example.com or git@github.com:o/r.git, see /home/bob/x and /Users/<name>/y"
+  put b.md "AKIAIOSFODNN7EXAMPLE and /home/you/x"
+  put c.md "/home/user/x /home/name/x /Users/username/x"
+  scan
+  [ "$status" -eq 0 ]
+}
+
+@test "(q) a file with a NUL byte or UTF-16 text is reported unscannable until path-allowed" {
+  printf 'a\0b contact jane.doe@corp-mail.org\n' > "$REPO/blob.dat"
+  python3 -c "
+import sys
+open(sys.argv[1], 'wb').write('contact jane.doe@corp-mail.org\n'.encode('utf-16'))" "$REPO/wide.txt"
+  scan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"blob.dat: [unscannable-binary]"* ]]
+  [[ "$output" == *"wide.txt: [unscannable-binary]"* ]]
+  [[ "$output" == *"personal-allow-paths.txt"* ]]
+  printf 'blob.dat\t# fixture binary, reviewed\nwide.txt\t# fixture utf-16 text, reviewed\n' >> "$REPO/scripts/personal-allow-paths.txt"
+  scan
+  [ "$status" -eq 0 ]
+}
+
+@test "(q) an empty file and a plain text file are not unscannable" {
+  : > "$REPO/empty.txt"
+  put plain.md "just text"
+  scan
+  [ "$status" -eq 0 ]
+}
+
+@test "(r) key, credential and archive file names and extensions are blocked" {
+  local n
+  for n in id_rsa id_rsa.pub id_ed25519 id_ecdsa_work .env.local .env.production .netrc .npmrc \
+           credentials.json credentials-prod.json known_hosts \
+           x.p12 x.pfx x.jks x.kdbx x.sqlite3 x.7z x.rar x.docx x.xlsx; do
+    rm -rf "$REPO/sub"; mkdir -p "$REPO/sub"
+    git -C "$REPO" rm -rq --cached sub 2>/dev/null || true
+    printf 'x\n' > "$REPO/sub/$n"
+    scan
+    [ "$status" -eq 1 ] || { echo "not blocked: $n"; false; }
+    [[ "$output" == *"sub/$n: [blocked-type:"* ]] || { echo "no label for $n: $output"; false; }
+  done
+}
+
+@test "(r) .env.example and an ordinary credentials-free json are not blocked" {
+  put .env.example "KEY=value"
+  put config.json '{"a": 1}'
+  scan
+  [ "$status" -eq 0 ]
+}
+
+@test "(s) more token families are flagged without printing the token" {
+  local t
+  for t in "$(tok gho)" "$(tok ghu)" "$(tok ghs)" "$(tok ghr)" "glpat-$(head -c 24 /dev/zero | tr '\0' a)" \
+           "AIza$(head -c 35 /dev/zero | tr '\0' a)" "npm_$(head -c 36 /dev/zero | tr '\0' a)" \
+           "$(printf 'sk_%s' live)_$(head -c 24 /dev/zero | tr '\0' a)"; do
+    put notes.md "key $t"
+    scan
+    [ "$status" -eq 1 ] || { echo "missed ${t:0:6}"; false; }
+    [[ "$output" == *"notes.md:1: [token]"* ]]
+    [[ "$output" != *"$t"* ]]
+  done
+}
+
+@test "(s) a Windows home path is flagged; placeholders are not" {
+  put a.md 'see C:\Users\jsmith\proj'
+  scan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"a.md:1: [home-win]"* ]]
+  put a.md 'see C:\Users\you\proj and C:\Users\<name>\x'
+  scan
+  [ "$status" -eq 0 ]
+}
+
+@test "(s) a tracked file NAMED after an address or a home path is flagged" {
+  printf 'x\n' > "$REPO/jane.doe@corp-mail.org.txt"
+  scan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"[path-name:email]"* ]]
+}
+
+@test "(t) the author name is matched case-insensitively and also in dist/personas and evals" {
+  put skills/x/SKILL.md "ask gareth first"
+  put dist/personas/x.md "GARETH decides"
+  put evals/case/c.md "Gareth wants this"
+  put README.md "gareth built this"
+  scan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/x/SKILL.md:1: [author-name-in-rendered-text]"* ]]
+  [[ "$output" == *"dist/personas/x.md:1: [author-name-in-rendered-text]"* ]]
+  [[ "$output" == *"evals/case/c.md:1: [author-name-in-rendered-text]"* ]]
+  [[ "$output" != *"README.md"* ]]
+}
+
+@test "(q) a NUL byte far into a file (after 400 KB) still makes it unscannable" {
+  python3 -c "
+import sys
+open(sys.argv[1], 'wb').write(b'a\n' * 200000 + b'\0' + b'contact jane.doe@corp-mail.org\n')" "$REPO/late.dat"
+  scan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"late.dat: [unscannable-binary]"* ]]
+}

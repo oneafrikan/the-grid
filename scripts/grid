@@ -42,6 +42,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import urllib.parse
 
 # miniyaml lives next to us in scripts/lib, the same way audit.py finds it.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "lib"))
@@ -132,10 +133,15 @@ def git_env():
     private URL fails instead of waiting on a prompt an unattended job can never
     answer. The GIT_DIR family is removed so a call made from inside a git hook
     still addresses the repo named by `-C`.
+
+    GIT_ALLOW_PROTOCOL: a child may speak https only (plus file when the test-only
+    GRID_ALLOW_FILE=1 is set), so a source URL that slipped past the string checks
+    still cannot make git use ssh, git:// or an ext:: helper.
     """
     env = dict(os.environ)
     env["LC_ALL"] = "C"
     env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_ALLOW_PROTOCOL"] = "https:file" if os.environ.get("GRID_ALLOW_FILE") == "1" else "https"
     for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"):
         env.pop(var, None)
     return env
@@ -1098,14 +1104,32 @@ def overlay_notices(grid_dir, lock, host):
     return out
 
 
+def plain_https_url(url):
+    """True for an https URL whose authority is unambiguous: a hostname, no userinfo,
+    and none of the characters (`#`, `?`, backslash, whitespace, control) that make
+    git/curl contact a different host than a loose reader of the string would.
+
+    Kept here, not only in audit.py's allowlist, so install and drift do not depend
+    on the scanner being present (GRID_AUDIT=warn)."""
+    if not url.startswith("https://") or re.search(r"[#?\\\s\x00-\x1f\x7f]", url):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(url)
+        return bool(parts.hostname) and parts.username is None and parts.password is None
+    except ValueError:
+        return False
+
+
 def check_source_urls(cfg):
-    """Install step 1: every source URL is https:// (file:// only behind GRID_ALLOW_FILE=1, for tests)."""
+    """Install/drift step 1: every source URL is a plain https:// URL (file:// only behind
+    GRID_ALLOW_FILE=1, for tests)."""
     allow_file = os.environ.get("GRID_ALLOW_FILE") == "1"
     for source in sorted(cfg["sources"]):
         url = cfg["sources"][source]["url"]
-        if url.startswith("https://") or (allow_file and url.startswith("file://")):
+        if plain_https_url(url) or (allow_file and url.startswith("file://")):
             continue
-        raise GridError("grid: source '%s' has a URL that is not https: %s" % (source, url))
+        # ascii(): a URL carrying control characters must not reach the terminal raw.
+        raise GridError("grid: source '%s' has a URL that is not https: %s" % (source, ascii(url)[1:-1]))
 
 
 def audit_available(grid_dir):
@@ -1127,19 +1151,21 @@ def audit_available(grid_dir):
                     "set GRID_AUDIT=warn to override")
 
 
-def check_source_policy(grid_dir, cfg, sources, vetted):
-    """Install step 1: `audit.py --check-url` for each source that has a selected entry.
+def check_source_policy(grid_dir, cfg, sources, vetted, announce_file=True):
+    """Install/drift step 1: `audit.py --check-url` for each source that has a selected entry.
 
     Runs before any network access. A disallowed source is exit 2 naming it (a
     stderr warning under GRID_AUDIT=warn). A file:// source (tests only) skips
-    the check with a notice; with no scanner (GRID_AUDIT=warn) it is skipped
-    silently, the SKIPPED notice already said so.
+    the check with a notice (`announce_file=False`: drift's quiet unattended run
+    prints none); with no scanner (GRID_AUDIT=warn) it is skipped silently, the
+    SKIPPED notice already said so.
     """
     warn = os.environ.get("GRID_AUDIT") == "warn"
     for source in sorted(sources):
         url = cfg["sources"][source]["url"]
         if url.startswith("file://"):
-            notice("grid: %s: file:// source, --check-url skipped" % source)
+            if announce_file:
+                notice("grid: %s: file:// source, --check-url skipped" % source)
             continue
         if not vetted:
             continue
@@ -2081,6 +2107,13 @@ def cmd_drift(args):
     grid_dir = resolve_grid_dir(args.grid_dir)
     cfg = load_grid_yaml(grid_dir)
     entries = read_grid_lock(grid_dir, cfg["sources"])
+    # Same refusals as install, BEFORE any network access: the unattended weekly
+    # job must not run ls-remote/fetch against a URL install would have refused.
+    # A violation is exit 2 and no report is written.
+    check_source_urls(cfg)
+    vetted = audit_available(grid_dir)
+    check_source_policy(grid_dir, cfg, set(e["source"] for e in entries), vetted,
+                        announce_file=False)
     results, unreachable = compute_drift(grid_dir, cfg, entries)
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
     body = render_drift_report(date, results, unreachable)

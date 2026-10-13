@@ -9,11 +9,13 @@
 #
 #   kind   deny    case-sensitive extended regex; a match on a line is a finding.
 #          deny-i  the same, case-insensitive.
-#          allow   extended regex; a deny hit on a line is SUPPRESSED when that
-#                  same line matches any allow rule whose scope covers the path.
-#                  Allow is line-level, not match-level: a real address that
-#                  shares a line with an allowed one is NOT caught here (that is
-#                  the private denylist's job).
+#          allow   extended regex; a deny hit is SUPPRESSED only when EVERY
+#                  whitespace-delimited word that contains a match of that deny
+#                  rule also matches an allow rule whose scope covers the path.
+#                  Allow is match-level: a real address or token next to an
+#                  allowed word (git@host, EXAMPLE, a placeholder path) on the
+#                  same line is still reported. Anchor an allow regex to the
+#                  placeholder itself (trailing slash, <...> pair), not to a prefix.
 #   scope  `*` for every file, or a path glob matched against the repo-relative
 #          path with bash `case` (so `skills/*` also covers nested dirs).
 #   label  short name printed in findings as [label]. The `token` label is
@@ -24,19 +26,22 @@
 
 # --- email addresses (placeholders, git remotes, URL userinfo and noreply are fine)
 deny	*	email	[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}
-allow	*	email-ok	(git@|@example\.(com|org|net)|noreply|https?://[^[:space:]]*@)
+allow	*	email-ok	(^|[^A-Za-z0-9._%+-])git@|@example\.(com|org|net)($|[^A-Za-z0-9.-])|noreply|https?://[^[:space:]]*@
 
 # --- home directories (a real user name in a path; obvious placeholders are fine).
 # The name must start with a letter, digit or _ so a dot-dir such as /home/.claude/
 # (a path under a fake HOME) is not mistaken for a user name.
 deny	*	home-mac	/Users/[A-Za-z0-9_][A-Za-z0-9._-]*/
-allow	*	home-placeholder	/Users/(you|name|username|alice|bob|<)
+allow	*	home-placeholder	/Users/((you|user|name|username|alice|bob|runner)|<[^>]+>)/
 deny	*	home-linux	/home/[A-Za-z0-9_][A-Za-z0-9._-]*/
-allow	*	home-placeholder-lx	/home/(you|user|name|username|alice|bob|<)
+allow	*	home-placeholder-lx	/home/((you|user|name|username|alice|bob|runner)|<[^>]+>)/
+# Windows home directories (C:\Users\<name>\); the same placeholders are fine.
+deny	*	home-win	[A-Za-z]:\\Users\\[A-Za-z0-9_][A-Za-z0-9._-]*\\
+allow	*	home-placeholder-win	[A-Za-z]:\\Users\\((you|user|name|username|alice|bob|Public|Default)|<[^>]+>)\\
 
 # --- secrets: token-shaped strings. Findings print only `path:line: [token]`.
 # `\bsk-` needs the word boundary or "desk-finance-risk-officer" false-positives.
-deny	*	token	(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|\bsk-[A-Za-z0-9_-]{20,}|xox[abp]-[0-9A-Za-z-]{10,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY)
+deny	*	token	(gh[pousr]_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}|npm_[A-Za-z0-9]{36}|sk_live_[0-9A-Za-z]{20,}|github_pat_[A-Za-z0-9_]{20,}|\bsk-[A-Za-z0-9_-]{20,}|xox[abp]-[0-9A-Za-z-]{10,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY)
 allow	*	token-example	EXAMPLE
 
 # --- network addresses: RFC1918 private ranges, CGNAT 100.64.0.0/10, tailnet hosts
@@ -46,17 +51,17 @@ deny	*	tailnet	[A-Za-z0-9-]+\.ts\.net\b
 
 # --- author voice: prose docs may say the author's name; text that is rendered
 # into other people's agents, skills, hooks or rules must say "the operator".
+# Case-insensitive, and the generated personas and the eval cases are rendered text too.
 # A scope that matches no files is a no-op, so paths later changes add are listed now.
-deny	agent-factory/openclaw/templates/*	author-name-in-rendered-text	Gareth
-deny	agent-factory/_core/*	author-name-in-rendered-text	Gareth
-deny	agent-factory/roles/*	author-name-in-rendered-text	Gareth
-deny	project-factory/templates/*	author-name-in-rendered-text	Gareth
-deny	skills/*	author-name-in-rendered-text	Gareth
-deny	agents/*	author-name-in-rendered-text	Gareth
-deny	hooks/*	author-name-in-rendered-text	Gareth
-deny	rules/*	author-name-in-rendered-text	Gareth
-deny	automation-factory/patterns/*	author-name-in-rendered-text	Gareth
-deny	plugins/*	author-name-in-rendered-text	Gareth
-# The licence text each plugin bundle ships is a byte copy of the repo-root LICENSE; its
-# copyright line names the rights holder, which the licence requires.
-allow	plugins/*/LICENSE	licence-copyright-line	^Copyright \(c\) [0-9]{4}
+deny-i	agent-factory/openclaw/templates/*	author-name-in-rendered-text	Gareth
+deny-i	agent-factory/_core/*	author-name-in-rendered-text	Gareth
+deny-i	agent-factory/roles/*	author-name-in-rendered-text	Gareth
+deny-i	project-factory/templates/*	author-name-in-rendered-text	Gareth
+deny-i	skills/*	author-name-in-rendered-text	Gareth
+deny-i	agents/*	author-name-in-rendered-text	Gareth
+deny-i	hooks/*	author-name-in-rendered-text	Gareth
+deny-i	rules/*	author-name-in-rendered-text	Gareth
+deny-i	automation-factory/patterns/*	author-name-in-rendered-text	Gareth
+deny-i	plugins/*	author-name-in-rendered-text	Gareth
+deny-i	dist/personas/*	author-name-in-rendered-text	Gareth
+deny-i	evals/*	author-name-in-rendered-text	Gareth
