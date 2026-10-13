@@ -10,8 +10,12 @@
 # Usage:
 #   bash scripts/catalog.sh               # write SKILLS.md in the repo root
 #   bash scripts/catalog.sh /tmp/x.md     # write somewhere else (used by tests)
-#   bash scripts/catalog.sh --check       # write nothing; exit 1 if SKILLS.md is stale
+#   bash scripts/catalog.sh --check       # write nothing; exit 0 current, 1 stale, 2 the check itself failed
+#   bash scripts/catalog.sh -h | --help   # this usage; writes nothing
 #   GRID_BASELINE=<file> bash scripts/catalog.sh   # render from that baseline (gate.sh and wire.sh pin the tracked example)
+#
+# A leading dash is always an option: an unknown one is a usage error (exit 2) before any file
+# is touched. A non-dash argument is the output path.
 #
 # Re-run after adding, editing, or updating skills — same idea as wire.sh.
 
@@ -22,15 +26,45 @@ GRID_DIR="${GRID_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # find_skill_mds: tracked-only SKILL.md discovery, shared with wire.sh.
 # shellcheck source=lib/find-skill-mds.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/find-skill-mds.sh"
+
+# usage: print the Usage block of this file's header (the single source of the text).
+usage() { sed -n '/^# Usage:/,/^#$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+# A leading dash is always an option, never an output path: `--chek` or `--help` must not
+# create a file of that name. A non-dash argument is the output path (wire.sh passes one).
+CHECK=0
+OUT=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --check)   CHECK=1 ;;
+    -h|--help) usage; exit 0 ;;
+    -*)        echo "catalog.sh: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *)         [ -z "$OUT" ] || { echo "catalog.sh: more than one output path" >&2; usage >&2; exit 2; }
+               OUT="$1" ;;
+  esac
+  shift
+done
+
 # --check: render to a temp file and diff against the committed SKILLS.md
 # instead of overwriting it. Read-only drift detector for hooks / CI.
-CHECK=0
-if [ "${1:-}" = "--check" ]; then
-  CHECK=1
-  OUT="$(mktemp)"
-  trap 'rm -f "$OUT"' EXIT
+# Exit status: 0 current, 1 STALE (the diff says so), 2 anything else (no temp file, a render
+# or compare failure), so a caller can tell "regenerate it" from "the check itself broke".
+CHECK_DONE=0
+if [ "$CHECK" = 1 ]; then
+  [ -z "$OUT" ] || { echo "catalog.sh: --check writes nothing and takes no output path" >&2; usage >&2; exit 2; }
+  OUT="$(mktemp)" || { echo "catalog.sh: --check cannot create a temp file (is TMPDIR usable?)" >&2; exit 2; }
+  # A non-zero exit before the comparison finished is an error (2), whatever set -e saw.
+  check_exit() {
+    local rc=$?
+    rm -f "$OUT"
+    if [ "$CHECK_DONE" = 0 ] && [ "$rc" -ne 0 ]; then
+      echo "catalog.sh: --check failed before it could compare (exit $rc)" >&2
+      exit 2
+    fi
+  }
+  trap check_exit EXIT
 else
-  OUT="${1:-$GRID_DIR/SKILLS.md}"
+  OUT="${OUT:-$GRID_DIR/SKILLS.md}"
 fi
 
 # --- Parse one SKILL.md → prints "name<TAB>summary" ------------------------
@@ -334,12 +368,15 @@ total=$((wired_live + library_skill_count))
 } > "$OUT"
 
 if [ "$CHECK" = 1 ]; then
-  if diff -u "$GRID_DIR/SKILLS.md" "$OUT" >&2; then
-    echo "SKILLS.md is up to date ($total skills)."
-    exit 0
-  fi
-  echo "SKILLS.md is stale — run: bash scripts/catalog.sh" >&2
-  exit 1
+  # diff exits 0 identical, 1 different, 2 trouble (for example no SKILLS.md to compare to).
+  diff_rc=0
+  diff -u "$GRID_DIR/SKILLS.md" "$OUT" >&2 || diff_rc=$?
+  CHECK_DONE=1
+  case "$diff_rc" in
+    0) echo "SKILLS.md is up to date ($total skills)."; exit 0 ;;
+    1) echo "SKILLS.md is stale — run: bash scripts/catalog.sh" >&2; exit 1 ;;
+    *) echo "catalog.sh: --check could not compare against $GRID_DIR/SKILLS.md" >&2; exit 2 ;;
+  esac
 fi
 
 echo "Wrote $OUT ($total skills)."

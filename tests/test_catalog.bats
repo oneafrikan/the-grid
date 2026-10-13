@@ -300,3 +300,75 @@ assert body.endswith("…") and set(body[:-1]) == {"—"} and 60 < len(body) < 7
   lacks 'drop-me' "$OUT"
   grep -q '^## repos/subr (wired) — 1$' "$OUT"
 }
+
+# --- WP-048: option handling ---------------------------------------------------------------
+# Any first argument used to be the output path, so `--chek`, `-h` or `--help` wrote a file of
+# that name. A leading dash is now an option (`--check`, `-h`/`--help`); an unknown one is usage
+# (exit 2) before any file is touched. A non-dash argument is still the output path (wire.sh).
+# $OTHER_DIR is an empty scratch dir the script is run from, so a stray file shows up in it.
+
+in_other_dir() { # ARGS... -> runs catalog.sh from $OTHER_DIR against the mock grid
+  run bash -c 'cd "$1" && shift && GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh" "$@"' _ "$OTHER_DIR" "$@"
+}
+
+@test "catalog.sh --chek exits 2 with a usage line and creates no file" {
+  export MOCK_GRID REPO_ROOT
+  in_other_dir --chek
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--chek"* ]]
+  [ -z "$(ls -A "$OTHER_DIR")" ]
+  [ ! -e "$MOCK_GRID/SKILLS.md" ]
+}
+
+@test "catalog.sh -h and --help print the usage, exit 0 and create no file" {
+  export MOCK_GRID REPO_ROOT
+  local flag
+  for flag in -h --help; do
+    in_other_dir "$flag"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Usage"* ]]
+    [ -z "$(ls -A "$OTHER_DIR")" ]
+    [ ! -e "$MOCK_GRID/SKILLS.md" ]
+  done
+}
+
+@test "catalog.sh --check with an output path is a usage error (it writes nothing)" {
+  export MOCK_GRID REPO_ROOT
+  # A current SKILLS.md, so that ignoring the path would give a clean exit 0, not an error.
+  GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh"
+  in_other_dir --check "$OTHER_DIR/x.md"
+  [ "$status" -eq 2 ]
+  [ -z "$(ls -A "$OTHER_DIR")" ]
+}
+
+@test "catalog.sh --check exits 2, not the 'stale' 1, when it cannot make its temp file" {
+  GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh"        # a current SKILLS.md
+  TMPDIR="$MOCK_GRID/no-such-tmpdir" GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/catalog.sh" --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"temp"* ]]
+}
+
+@test "catalog.sh --check exits 2, not the 'stale' 1, when the render itself fails" {
+  [ "$(id -u)" -ne 0 ] || skip "root reads an unreadable file"
+  GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh"          # a current SKILLS.md
+  printf 'skill-alpha\n' > "$MOCK_GRID/baseline-submodules.txt"
+  chmod 000 "$MOCK_GRID/baseline-submodules.txt"                       # the render cannot read it
+  GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/catalog.sh" --check
+  chmod 600 "$MOCK_GRID/baseline-submodules.txt"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"failed before it could compare"* ]]
+}
+
+@test "catalog.sh --check exits 2 when there is no SKILLS.md to compare against" {
+  GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/catalog.sh" --check
+  [ "$status" -eq 2 ]
+}
+
+@test "catalog.sh --check: current is 0, stale is 1" {
+  GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh"
+  GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/catalog.sh" --check
+  [ "$status" -eq 0 ]
+  make_skill "$MOCK_GRID/skills/skill-new" "skill-new"
+  GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/catalog.sh" --check
+  [ "$status" -eq 1 ]
+}

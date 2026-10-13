@@ -168,3 +168,103 @@ sources_fixture() {
   [ "$status" -eq 2 ]
   [ ! -e "$FX/out2.md" ]
 }
+
+# --- WP-048: sources.sh option handling and edge behaviour ---------------------------------
+# Any first argument used to be an output path, so `--help` or `--chek` wrote a file of that
+# name. A leading dash is now an option: known ones act, unknown ones are usage (exit 2)
+# before any file is touched. A non-dash argument is still the output path (tests, wire.sh).
+
+# gitmodules_fixture URL... — a GRID_DIR whose .gitmodules has one submodule per URL
+gitmodules_fixture() {
+  FX="$BATS_TEST_TMPDIR/fx"
+  mkdir -p "$FX/docs" "$BATS_TEST_TMPDIR/cwd"
+  : > "$FX/.gitmodules"
+  local n=0 u
+  for u in "$@"; do
+    n=$((n + 1))
+    printf '[submodule "m%s"]\n\tpath = repos/m%s\n\turl = %s\n' "$n" "$n" "$u" >> "$FX/.gitmodules"
+  done
+}
+
+# curl_stub — a curl on PATH that logs its argv and answers 200 with the last argument as the
+# effective URL, so a --check run needs no network and shows exactly what curl was handed
+curl_stub() {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$STUB_CURL_LOG"\nfor last; do :; done\nprintf "200 %%s\\n" "$last"\n' \
+    > "$BATS_TEST_TMPDIR/bin/curl"
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+  export STUB_CURL_LOG="$BATS_TEST_TMPDIR/curl.log"
+}
+
+@test "sources.sh --help prints the usage, exits 0 and creates no file" {
+  gitmodules_fixture https://example.com/a.git
+  cd "$BATS_TEST_TMPDIR/cwd"
+  GRID_DIR="$FX" run bash "$REPO_ROOT/scripts/sources.sh" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage"* ]]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/cwd")" ]
+  [ ! -e "$FX/docs/SOURCES.md" ]
+}
+
+@test "sources.sh -h is --help" {
+  gitmodules_fixture https://example.com/a.git
+  cd "$BATS_TEST_TMPDIR/cwd"
+  GRID_DIR="$FX" run bash "$REPO_ROOT/scripts/sources.sh" -h
+  [ "$status" -eq 0 ]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/cwd")" ]
+}
+
+@test "sources.sh --bogus exits 2 with a usage line and creates no file" {
+  gitmodules_fixture https://example.com/a.git
+  cd "$BATS_TEST_TMPDIR/cwd"
+  GRID_DIR="$FX" run bash "$REPO_ROOT/scripts/sources.sh" --bogus
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--bogus"* ]]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/cwd")" ]
+  [ ! -e "$FX/docs/SOURCES.md" ]
+}
+
+@test "sources.sh with a path argument still writes there" {
+  gitmodules_fixture https://example.com/a.git
+  GRID_DIR="$FX" run bash "$REPO_ROOT/scripts/sources.sh" "$BATS_TEST_TMPDIR/out.md"
+  [ "$status" -eq 0 ]
+  grep -q 'repos/m1' "$BATS_TEST_TMPDIR/out.md"
+}
+
+@test "sources.sh with no submodules exits 1 naming the cause, and writes nothing" {
+  gitmodules_fixture
+  GRID_DIR="$FX" run bash "$REPO_ROOT/scripts/sources.sh" "$BATS_TEST_TMPDIR/out.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sources.sh: no submodules in .gitmodules"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/out.md" ]
+}
+
+@test "sources.sh --check with no submodules exits 1 naming the cause (no vacuous pass)" {
+  gitmodules_fixture
+  curl_stub
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" GRID_DIR="$FX" run bash "$REPO_ROOT/scripts/sources.sh" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sources.sh: no submodules in .gitmodules"* ]]
+}
+
+@test "sources.sh --check hands curl each URL after --, and a leading-dash URL is a FAIL without curl" {
+  gitmodules_fixture https://example.com/ok.git --version
+  curl_stub
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" GRID_DIR="$FX" run bash "$REPO_ROOT/scripts/sources.sh" --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL"*"repos/m2"* ]]
+  [[ "$output" == *"2 checked, 1 failed."* ]]
+  # curl ran for the good URL only, with the URL after `--`
+  [ "$(wc -l < "$STUB_CURL_LOG" | tr -d ' ')" -eq 1 ]
+  grep -q -- ' -- https://example.com/ok$' "$STUB_CURL_LOG"
+  # curl was never handed the dash-leading value
+  [ "$(grep -c -- '--version' "$STUB_CURL_LOG" || true)" -eq 0 ]
+}
+
+@test "no .gitmodules URL is the old NotFair.git form (moved upstream: notfair-plugin)" {
+  # The old URL still resolves through a redirect, but it is what --check reports as MOVED.
+  run grep -F 'nowork-studio/NotFair.git' "$REPO_ROOT/.gitmodules"
+  [ "$status" -ne 0 ]
+  grep -q 'url = https://github.com/nowork-studio/notfair-plugin.git' "$REPO_ROOT/.gitmodules"
+}
