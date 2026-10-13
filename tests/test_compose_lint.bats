@@ -491,3 +491,77 @@ cfg_with_project() {
   [[ "$output" == *"W_DESCRIPTION_LONG: zz-long/role.yaml"* ]]
   [[ "$output" != *"W_DESCRIPTION_LONG: zz-edge"* ]]
 }
+
+# ---- NF-042: `stacks:` / `skills:` names are validated before they become read paths ------
+
+# cfg_with_list <key> <yaml flow-list text> — a one-agent config with stacks:/skills: set
+cfg_with_list() {
+  CFG=$(mktemp -d)/c.yaml
+  printf 'project: zz\nslug: zz\nagents:\n  - role: morpheus\n    %s: %s\n' "$1" "$2" > "$CFG"
+}
+
+@test "NF-042: unsafe stacks:/skills: names are refused in every mode, with a stable code" {
+  local sb out bad key t; sb=$(mktemp -d)
+  out="$sb/out"; mkdir -p "$out"
+  # parent dir, current dir, absolute, separators, backslash, empty, NUL, newline/control,
+  # upper case, a non-string, a nested list, over-long.
+  for key in stacks skills; do
+    for bad in '".."' '"."' '"/etc"' '"a/b"' '"../victim"' '"a\\b"' '""' '"a\0b"' '"x\n"' '"a\tb"' '"a\u001bb"' '"Up"' '123' '[a]' "\"$(printf 'a%.0s' $(seq 1 70))\""; do
+      cfg_with_list "$key" "[$bad]"
+      for t in --check --dry-run; do
+        run "$PY" "$COMPOSE" "$CFG" $t --out "$out"
+        echo "$key=$bad $t: $output"
+        [ "$status" -ne 0 ]
+        [[ "$output" != *"Traceback"* ]]
+      done
+      run "$PY" "$COMPOSE" "$CFG" --target claude-code --out "$out"
+      [ "$status" -ne 0 ]
+      [[ "$output" != *"Traceback"* ]]
+      if [ "$key" = stacks ]; then [[ "$output" == *"E_STACK_NAME"* ]]; else [[ "$output" == *"E_SKILL_NAME"* ]]; fi
+      rm -rf "$(dirname "$CFG")"
+    done
+  done
+  # a bare scalar (not a list) is refused too, and nothing was written
+  cfg_with_list stacks '"../x"'
+  run "$PY" "$COMPOSE" "$CFG" --check --out "$out"
+  [ "$status" -ne 0 ]
+  [ -z "$(ls -A "$out")" ]
+  rm -rf "$sb" "$(dirname "$CFG")"
+}
+
+@test "NF-042: a well-formed stack name that does not exist is still the old not-found error" {
+  cfg_with_list stacks '[no-such-stack]'
+  run "$PY" "$COMPOSE" "$CFG" --check --out "$(dirname "$CFG")/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no-such-stack"* ]]
+  [[ "$output" != *"E_STACK_NAME"* ]]
+  rm -rf "$(dirname "$CFG")"
+}
+
+@test "NF-042: a shipped stack name still composes" {
+  local out; out=$(mktemp -d)
+  cfg_with_list stacks '[lamp]'
+  run "$PY" "$COMPOSE" "$CFG" --target claude-code --out "$out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  rm -rf "$out" "$(dirname "$CFG")"
+}
+
+@test "NF-042: a stack fragment outside its stack dir is refused, not read" {
+  local sb; sb=$(mktemp -d)
+  mkdir -p "$sb/stacks/evil"
+  printf 'secret-canary\n' > "$sb/outside.md"
+  printf 'name: evil\nfragments: [../../outside.md]\n' > "$sb/stacks/evil/stack.yaml"
+  run env SB="$sb" REPO_ROOT="$REPO_ROOT" "$PY" -c '
+import os, sys
+sys.path.insert(0, os.environ["REPO_ROOT"] + "/agent-factory")
+from pathlib import Path
+import compose
+compose.STACKS_DIR = Path(os.environ["SB"]) / "stacks"
+print(compose.render_stack_overlay(["evil"]))'
+  echo "$output"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"E_STACK_FRAGMENT"* ]]
+  [[ "$output" != *"secret-canary"* ]]
+  rm -rf "$sb"
+}
