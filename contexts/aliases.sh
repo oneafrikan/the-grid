@@ -17,15 +17,19 @@
 # the former adds the mode text on top of it.
 
 # --- Resolve the contexts directory (first match wins) -----------------------
-# 1. $GRID_DIR/contexts when GRID_DIR is set (same override the-grid scripts use).
-# 2. The directory of this file: bash BASH_SOURCE, or zsh's %x prompt escape.
+# 1. $GRID_DIR/contexts when GRID_DIR is set and that directory exists (same override
+#    the-grid scripts use). Made absolute with cd + pwd, so a relative GRID_DIR (e.g. `.`)
+#    still works after the shell changes directory.
+# 2. The directory of this file: bash BASH_SOURCE, or zsh's %x prompt escape. Also the
+#    fallback when GRID_DIR has no contexts/ (it used to define no alias, silently).
 # 3. $HOME/.the-grid/contexts.
 # Variables are prefixed _grid_ctx_ and unset at the end so sourcing leaves
 # nothing behind in the user's shell.
 _grid_ctx_dir=""
-if [ -n "${GRID_DIR:-}" ]; then
-  _grid_ctx_dir="$GRID_DIR/contexts"
-else
+if [ -n "${GRID_DIR:-}" ] && [ -d "$GRID_DIR/contexts" ]; then
+  _grid_ctx_dir="$(cd "$GRID_DIR/contexts" 2>/dev/null && pwd)"
+fi
+if [ -z "$_grid_ctx_dir" ]; then
   _grid_ctx_src=""
   if [ -n "${BASH_VERSION:-}" ]; then
     _grid_ctx_src="${BASH_SOURCE[0]:-}"
@@ -41,11 +45,12 @@ else
 fi
 
 # --- Define one alias per context file that exists ---------------------------
-# shellcheck disable=SC2139  # the directory is expanded at definition time on purpose (aliases must not depend on cwd or on _grid_ctx_dir surviving)
-[ -f "$_grid_ctx_dir/dev.md" ] && alias claude-dev="claude --append-system-prompt-file \"$_grid_ctx_dir/dev.md\""
-# shellcheck disable=SC2139  # see above
-[ -f "$_grid_ctx_dir/research.md" ] && alias claude-research="claude --append-system-prompt-file \"$_grid_ctx_dir/research.md\""
-# shellcheck disable=SC2139  # see above
-[ -f "$_grid_ctx_dir/review.md" ] && alias claude-review="claude --append-system-prompt-file \"$_grid_ctx_dir/review.md\""
+# The path goes through printf %q: it is spliced into the alias body, which the shell parses
+# again on every use, so a `$`, backtick or `"` in the install path must be escaped
+# (spaces were already safe inside the old double quotes).
+for _grid_ctx_mode in dev research review; do
+  # shellcheck disable=SC2139  # the directory is expanded at definition time on purpose (aliases must not depend on cwd or on _grid_ctx_dir surviving)
+  [ -f "$_grid_ctx_dir/$_grid_ctx_mode.md" ] && alias "claude-$_grid_ctx_mode=claude --append-system-prompt-file $(printf '%q' "$_grid_ctx_dir/$_grid_ctx_mode.md")"
+done
 
-unset _grid_ctx_dir _grid_ctx_src
+unset _grid_ctx_dir _grid_ctx_src _grid_ctx_mode

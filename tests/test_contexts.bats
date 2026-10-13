@@ -97,6 +97,49 @@ assert_argv() {
   assert_argv "$MOCK_GRID/contexts/dev.md"
 }
 
+# run_cd SHELL GRID_DIR TARGET_CWD: source aliases.sh from OTHER_DIR with GRID_DIR as given,
+# then cd to TARGET_CWD before invoking claude-dev. An alias built from a relative path only
+# works from the cwd it was sourced in, so the cd is what exposes it (R24.qa.F10).
+run_cd() {
+  local sh="$1" grid="$2" there="$3"
+  cd "$OTHER_DIR"
+  run env GRID_DIR="$grid" PATH="$STUB_DIR:$PATH" \
+    "$sh" -c 'shopt -s expand_aliases 2>/dev/null; source "$1"; cd "$2" && eval "claude-dev foo"' _ "$ALIASES" "$there"
+}
+
+@test "a relative GRID_DIR is absolutised: the alias still works after a cd (bash)" {
+  mkdir -p "$OTHER_DIR/rel/contexts" "$OTHER_DIR/elsewhere"
+  echo "# dev" > "$OTHER_DIR/rel/contexts/dev.md"
+  run_cd bash rel "$OTHER_DIR/elsewhere"
+  [ "$status" -eq 0 ]
+  assert_argv "$(cd "$OTHER_DIR/rel/contexts" && pwd)/dev.md"
+}
+
+@test "a relative GRID_DIR is absolutised under zsh too" {
+  command -v zsh >/dev/null || skip "zsh not installed"
+  mkdir -p "$OTHER_DIR/rel/contexts" "$OTHER_DIR/elsewhere"
+  echo "# dev" > "$OTHER_DIR/rel/contexts/dev.md"
+  run_cd zsh rel "$OTHER_DIR/elsewhere"
+  [ "$status" -eq 0 ]
+  assert_argv "$(cd "$OTHER_DIR/rel/contexts" && pwd)/dev.md"
+}
+
+@test "a GRID_DIR containing \$, a backtick and a double quote survives eval as one literal path" {
+  local odd="$OTHER_DIR"'/a$HOME`x"y'
+  mkdir -p "$odd/contexts"
+  echo "# dev" > "$odd/contexts/dev.md"
+  run_cd bash "$odd" "$OTHER_DIR"
+  [ "$status" -eq 0 ]
+  assert_argv "$odd/contexts/dev.md"
+}
+
+@test "a GRID_DIR without contexts/ falls back to the directory of aliases.sh" {
+  mkdir -p "$OTHER_DIR/empty"
+  run_cd bash "$OTHER_DIR/empty" "$OTHER_DIR"
+  [ "$status" -eq 0 ]
+  assert_argv "$REPO_ROOT/contexts/dev.md"
+}
+
 @test "alias definition uses --append-system-prompt-file, never --system-prompt-file" {
   cd "$OTHER_DIR"
   run env -u GRID_DIR bash -c 'shopt -s expand_aliases; source "$1"; alias claude-dev' _ "$ALIASES"
