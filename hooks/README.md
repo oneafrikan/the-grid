@@ -119,7 +119,12 @@ absent guard. Both guards therefore bound their work with caps rather than rely 
 tokenizer being fast on every input: a command over the byte or token cap, or with
 substitutions nested deeper than 16, is refused instead of tokenized (the cost at the caps is about 1 to 2 s of CPU on a busy machine, not zero);
 the secret scan stops at its line cap, its 1 MB matcher-input cap or a 3 s time budget
-(`oversize-scan`), and a candidate line over 256 KB blocks as `oversize-line`. These
+(`oversize-scan`), and a candidate line over 262144 characters (bytes in the C locale)
+blocks as `oversize-line`. A line over 6,000 characters is matched in overlapping pieces; a
+run of letters, digits and `_` that holds a key word (`secret`, `token`, ...) and is too
+long to keep whole in a piece (over 4096 characters past a cut) is also `oversize-line`, and a line with more than 200
+`key =` candidates (`secret`, `token`, `password`, ...) is `key-dense-line`, because a scan
+that cannot finish must block, not pass. These
 are bounds, not a proof: an unusual input can still cost more than measured. Both catalogue entries carry
 `"on_failure": "block"`, which `deploy_hooks.py` emits as `"onFailure": "block"` in the
 generated handler so Claude Code itself blocks when the guard fails or times out.
@@ -264,12 +269,15 @@ proven live (operator check B1), so the rules are not the only barrier:
    `no-handoff-file`.
 3. Both files are scanned with the secret table (`lib/secret-patterns.sh`), whatever the
    project profile says, in strict mode: the "example"/placeholder exemptions do not
-   apply (a model can add the word to any line, and the allow pragma is ignored too), and
+   apply (a model can add the word to any line), and
    four extra shapes count: a run of 64 or more base64 characters, `Bearer <20+ chars>`,
-   a URL password of any characters (`scheme://user:secret@host`, including a password
-   that starts with `$`, `<` or `{` or holds a colon) and `pass`/`pwd`/`password`
+   a URL password of 6 or more characters (`scheme://user:secret@host`, including a
+   password that starts with `$`, `<` or `{` or holds a colon, and an empty user name,
+   `scheme://:secret@host`) and `pass`/`pwd`/`password`
    assigned a value of 6 or more characters. An unquoted assigned value (`api_key =
-   abc...`) counts at 16+ characters even when it is all letters or holds parentheses.
+   abc...`) counts at 16+ characters even when it is all letters or holds parentheses;
+   as in the commit guard, a value whose first character is `$`, `<` or `{` is a
+   template and is skipped, quoted or not.
    A long hex digest in a handoff is therefore quarantined too. The same
    scan runs first on the timeout, child-failure and `unexpected-file` paths: a NEW file
    with a hit moves to the quarantine directory (the reason stays `timeout` and so on,
