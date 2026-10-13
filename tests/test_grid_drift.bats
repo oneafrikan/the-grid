@@ -411,6 +411,54 @@ assert d["ProgramArguments"][-2:] == ["drift", "--quiet"], d["ProgramArguments"]
   empty_dir "$LAUNCH_AGENTS_DIR"
 }
 
+@test "schedule install with GRID_STATE_DIR set prints one note that it is not carried into the job" {
+  # grid_env_isolate exports GRID_STATE_DIR for every test, so it is set here.
+  GRID_OS=Linux run schedule install
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c 'GRID_STATE_DIR is not carried')" = 1 ]
+  # With it unset there is nothing to say.
+  unset GRID_STATE_DIR
+  GRID_OS=Linux run schedule install
+  [ "$status" -eq 0 ]
+  lacks "$output" "GRID_STATE_DIR is not carried"
+}
+
+@test "schedule install with a relative GRID_STATE_DIR exits 2 and writes nothing" {
+  for os in Darwin Linux Other; do
+    GRID_STATE_DIR="rel/state" GRID_OS=$os run schedule install
+    [ "$status" -eq 2 ]
+    contains "$output" "GRID_STATE_DIR"
+    contains "$output" "absolute"
+  done
+  empty_dir "$LAUNCH_AGENTS_DIR"
+  empty_dir "$SYSTEMD_USER_DIR"
+}
+
+@test "schedule remove leaves a foreign same-named unit in place and says so" {
+  mkdir -p "$SYSTEMD_USER_DIR" "$LAUNCH_AGENTS_DIR"
+  printf '[Service]\nExecStart=/bin/true\n' > "$SYSTEMD_USER_DIR/grid-drift.service"
+  printf '[Timer]\nOnCalendar=daily\n' > "$SYSTEMD_USER_DIR/grid-drift.timer"
+  printf '<plist>someone else</plist>\n' > "$LAUNCH_AGENTS_DIR/io.the-grid.drift.plist"
+  before=$(tree_digest "$SYSTEMD_USER_DIR"; tree_digest "$LAUNCH_AGENTS_DIR")
+  GRID_OS=Linux run schedule remove
+  [ "$status" -eq 0 ]
+  contains "$output" "not removed"
+  contains "$output" "not written by grid"
+  [ "$before" = "$(tree_digest "$SYSTEMD_USER_DIR"; tree_digest "$LAUNCH_AGENTS_DIR")" ]
+}
+
+@test "schedule remove still deletes a file grid wrote next to a foreign one" {
+  GRID_OS=Linux run schedule install
+  [ "$status" -eq 0 ]
+  # Replace only the timer with a foreign file; the service stays grid's.
+  printf '[Timer]\nOnCalendar=daily\n' > "$SYSTEMD_USER_DIR/grid-drift.timer"
+  GRID_OS=Linux run schedule remove
+  [ "$status" -eq 0 ]
+  [ ! -e "$SYSTEMD_USER_DIR/grid-drift.service" ]
+  [ -e "$SYSTEMD_USER_DIR/grid-drift.timer" ]
+  contains "$output" "not written by grid"
+}
+
 @test "schedule remove with nothing installed exits 0" {
   GRID_OS=Linux run schedule remove
   [ "$status" -eq 0 ]

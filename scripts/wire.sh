@@ -107,6 +107,13 @@ SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
 AGENTS_DIR="${AGENTS_DIR:-$HOME/.claude/agents}"
 RULES_DIR="${RULES_DIR:-$HOME/.claude/rules}"
 GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || uname -n 2>/dev/null | cut -d. -f1 || echo unknown)}"
+# GRID_HOST names a file (machines/<host>.txt): one safe path component, or `../x` would
+# read an overlay from outside machines/. A leading `_` stays legal (the `__baseline__`
+# sentinel). Same rule as host_key() in scripts/grid.
+if ! [[ "$GRID_HOST" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*$ ]]; then
+  echo "wire: GRID_HOST is not a valid machine key (letters, digits, _ . -; not starting with . or -)" >&2
+  exit 2
+fi
 
 # --- harness registry: the distinct dirs of every NON-claude harness ----------------
 # Raw registry values (the "~/..." form, which is also what the manifest rows show).
