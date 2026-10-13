@@ -46,6 +46,9 @@ SECRET_NAMES=(
   huggingface-token digitalocean-token shopify-token stripe-test stripe-webhook
   slack-webhook google-oauth assigned-secret
 )
+# The key words of the assigned-secret row (the last SECRET_RES entry). Also read by
+# secret_match_long, which needs the TAIL of each (see _KEYWORD_TAIL_RE).
+_SECRET_KEYWORDS='secret|token|passw(or)?d|api[_-]?key|access[_-]?key|private[_-]?key'
 SECRET_RES=(
   '(^|[^A-Za-z0-9])(AKIA|ASIA)[0-9A-Z]{16}([^A-Za-z0-9]|$)'
   '-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----'
@@ -62,7 +65,8 @@ SECRET_RES=(
   # providers (WP-023, D38)
   'AccountKey=[A-Za-z0-9+/]{86}'
   '[Aa]uthorization:[[:space:]]*[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}'
-  '://[^/:@[:space:]]+:[^/:@[:space:]$<{][^/:@[:space:]]{2,}@'
+  # the user name may be empty (redis://:password@host), hence * and not +
+  '://[^/:@[:space:]]*:[^/:@[:space:]$<{][^/:@[:space:]]{2,}@'
   '(^|[^A-Za-z0-9])SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}'
   '(^|[^A-Za-z0-9])SK[0-9a-fA-F]{32}([^A-Za-z0-9]|$)'
   '(^|[^A-Za-z0-9])key-[0-9A-Za-z]{32}([^A-Za-z0-9]|$)'
@@ -75,10 +79,11 @@ SECRET_RES=(
   '(^|[^A-Za-z0-9])ya29\.[0-9A-Za-z_-]{20,}'
   # assigned-secret: the KEY side only. The key word may sit inside an identifier
   # (AWS_SECRET_ACCESS_KEY, JWT_SECRET_KEY) and may be followed by a closing quote
-  # (a JSON key, "password": ...). Case-insensitive (set by _secret_match). The VALUE
-  # side is judged in bash by _assigned_value, because "16+ characters with a digit and
-  # no parentheses" cannot be said in one ERE.
-  '(secret|token|passw(or)?d|api[_-]?key|access[_-]?key|private[_-]?key)[A-Za-z0-9_]*["'"'"']?[[:space:]]*[:=]'
+  # (a JSON key, "password": ...), which JSON inside a string literal escapes with one or
+  # more backslashes ({\"password\":\"v\"}). Case-insensitive (set by _secret_match). The
+  # VALUE side is judged in bash by _assigned_value, because "16+ characters with a digit
+  # and no parentheses" cannot be said in one ERE.
+  '('"$_SECRET_KEYWORDS"')[A-Za-z0-9_]*\\*["'"'"']?[[:space:]]*[:=]'
 )
 SECRET_BOUND=(1 0 1 1 1 1 1 0 1 0 1 1  0 0 0 1 1 1 1 1 1 1 1 0 1  0)
 
@@ -116,14 +121,28 @@ STRICT_NAMES=(base64-run bearer-value url-password password-assigned)
 STRICT_RES=(
   '[A-Za-z0-9+/=]{64,}'
   '[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}'
-  # Any user:password@ in a URL. Wider than the table's db-url-password on purpose: the
-  # password may start with $ < { (a model can pick any first character) and may hold a
-  # colon (legal in RFC 3986). The cost is a quarantined handoff on a templated URL.
-  '://[^/@:[:space:]]+:[^/@[:space:]]{6,}@'
+  # Any user:password@ in a URL (the user name may be empty). Wider than the table's
+  # db-url-password on purpose: the password may start with $ < { (a model can pick any
+  # first character) and may hold a colon (legal in RFC 3986). The cost is a quarantined
+  # handoff on a templated URL.
+  '://[^/@:[:space:]]*:[^/@[:space:]]{6,}@'
   # case-insensitive; the leading boundary keeps "bypass_cache: enabled" out
   "(^|[^A-Za-z0-9])(pass|pwd|passw(or)?d)[A-Za-z0-9_]*[[:space:]]*[:=][[:space:]]*[${_STRICT_Q}]?[^${_STRICT_Q}[:space:]]{6,}"
 )
 STRICT_BOUND=(0 0 0 1)
+
+# Most `key =` candidates tried on one scanned line (see _secret_match). A real line has a
+# handful; a line over this is a data blob or an attack on the matcher's running time.
+SECRET_MAX_KEYS=200
+_SM_KEYS_LEFT=""
+# A cut inside this is a cut inside a long identifier run (see secret_match_long): 200
+# identifier characters, then at most 16 characters that are not.
+_IDRUN_RE='[[:alnum:]_]{200}[^[:alnum:]_]{0,16}$'
+# The identifier run at the end of a piece (group 1), and the tail of every key word that
+# can sit inside one: `api-key` has a `-`, so only its `key` is part of the run. A superset
+# on purpose (any run holding "key" counts); case-insensitive, see _has_keyword_tail.
+_IDTAIL_RE='([[:alnum:]_]+)[^[:alnum:]_]{0,16}$'
+_KEYWORD_TAIL_RE='secret|token|passw|key'
 
 # Set by _secret_match: the matched pattern name and the matched text without its
 # boundary character (callers show only its first four characters).
@@ -149,8 +168,14 @@ _AV_RE_Q="^[\"']([^\"'[:space:]\$<{][^\"'[:space:]]{15,})"
 _AV_RE_U="^([^\"'[:space:]\$<{][^\"'[:space:]]{15,})"
 _AV_TOKEN=""
 _assigned_value() {
-  local rest="$1" v
+  local rest="$1" v lead
   rest="${rest#"${rest%%[![:space:]]*}"}"          # drop leading blanks
+  # JSON inside a string literal escapes its quotes ({\"k\":\"v\"}): drop the backslashes
+  # in front of an opening quote so the quoted-value rule below sees the quote
+  lead="${rest%%[!\\]*}"
+  if [ -n "$lead" ]; then
+    case "${rest#"$lead"}" in \"*|\'*) rest="${rest#"$lead"}" ;; esac
+  fi
   case "$rest" in
     \"*|\'*)
       if [[ "$rest" =~ $_AV_RE_Q ]]; then _AV_TOKEN="${BASH_REMATCH[1]}"; return 0; fi ;;
@@ -186,9 +211,14 @@ _secret_exempt() {
 #       is passed over and later rows are still tried, so an example key next to a real
 #       one does not hide the real one;
 #     - assigned-secret matches the key side by regex, then judges the value in bash
-#       (_assigned_value); every `key =` on the line is tried in turn.
+#       (_assigned_value); every `key =` on the line is tried in turn, but at most
+#       SECRET_MAX_KEYS of them per scanned line (_SM_KEYS_LEFT, reset by the public entry
+#       points). Each try re-reads the rest of the line, so an unbounded loop is quadratic
+#       (about 20 s on a 240 KB line of keys). A line with more keys than the bound is
+#       reported as key-dense-line: a scan that cannot finish must block, not pass.
 _secret_match() {
   local line="$1" i name re hit="" text="" was=0 tail key after tok
+  : "${_SM_KEYS_LEFT:=$SECRET_MAX_KEYS}"
   shopt -q nocasematch && was=1
   shopt -u nocasematch
   if [ "${SECRET_STRICT:-0}" != 1 ] && [[ "$line" == *"$_SECRET_PRAGMA"* ]]; then
@@ -201,6 +231,8 @@ _secret_match() {
       shopt -s nocasematch
       tail="$line"
       while [[ "$tail" =~ $re ]]; do
+        if [ "$_SM_KEYS_LEFT" -le 0 ]; then hit="key-dense-line"; text=""; break; fi
+        _SM_KEYS_LEFT=$((_SM_KEYS_LEFT - 1))
         key="${BASH_REMATCH[0]}"
         after="${tail#*"$key"}"
         if _assigned_value "$after"; then
@@ -235,12 +267,31 @@ _secret_match() {
   SECRET_MATCH_TEXT="$text"
 }
 
+# _has_keyword_tail <text>
+#   True when the text holds the tail of a key word (case-insensitive).
+_has_keyword_tail() {
+  local was=0 rc=1
+  shopt -q nocasematch && was=1
+  shopt -s nocasematch
+  [[ "$1" =~ $_KEYWORD_TAIL_RE ]] && rc=0
+  if [ "$was" = 1 ]; then shopt -s nocasematch; else shopt -u nocasematch; fi
+  return "$rc"
+}
+
 # secret_match_long <text>
 #   _secret_match for text of any length. The bash matcher is superlinear on long input,
-#   so text over 6,000 bytes is matched in 4,352-byte pieces that overlap by 256 bytes
-#   (a token is far shorter than the overlap), at most 64 pieces (256 KB). Longer text is
-#   reported as a finding named oversize-line: a scan that cannot finish must block, not
-#   pass. Sets the same globals as _secret_match.
+#   so text over 6,000 characters is matched in 4,352-character pieces that overlap by 256
+#   (a token is far shorter than the overlap), at most 64 pieces (262144 characters). Longer
+#   text is reported as a finding named oversize-line: a scan that cannot finish must
+#   block, not pass. Sets the same globals as _secret_match. Lengths are characters in a
+#   UTF-8 locale and bytes in the C locale (bash's ${#x} and ${x:o:n} follow the locale).
+#   The other unbounded part of a match is the run of identifier characters between a key
+#   word and its `=` (`secret<300 letters>=value`): a cut inside such a run (200+ characters
+#   of it before the cut) would leave the word in one piece and the `=` in the next, so the
+#   piece is extended to the end of the run plus the usual 256 characters. A run that needs
+#   more than 4096 extra characters is reported as oversize-line, like any scan that cannot
+#   be shown to be complete. Only a run that holds a key word is treated so: a long hex or
+#   base64 word with none cannot hide a key and is cut as before.
 #   Blanks are the one unbounded part of a match (`key =<any number of blanks>value`), so
 #   a long line first has every run of whitespace squeezed to one space: a pad of any
 #   width can then no longer straddle a piece boundary. No row needs more than one blank
@@ -249,7 +300,8 @@ _secret_match() {
 #   on the ORIGINAL length: squeezing must not turn a line the scan could not have
 #   finished into a clean one.
 secret_match_long() {
-  local t="$1" len=${#1} off=0 pieces=0 tlen sq
+  local t="$1" len=${#1} off=0 pieces=0 tlen sq end w rest run
+  _SM_KEYS_LEFT=$SECRET_MAX_KEYS   # the key bound is per line, not per piece
   if [ "$len" -le 6000 ]; then _secret_match "$t"; return; fi
   # if sed fails the unsqueezed text is scanned (fail closed on size, never on emptiness)
   if sq="$(printf '%s' "$t" | sed 's/[[:space:]][[:space:]]*/ /g')"; then t="$sq"; fi
@@ -259,7 +311,25 @@ secret_match_long() {
     if [ "$pieces" -gt 64 ]; then
       SECRET_MATCH_NAME="oversize-line"; SECRET_MATCH_TEXT=""; return 0
     fi
-    _secret_match "${t:$off:4352}" && return 0
+    end=$((off + 4352))
+    if [ "$end" -lt "$tlen" ]; then
+      # does the cut fall in, or within 16 characters after, a 200+ character identifier run?
+      w="${t:$((end - 216)):216}"
+      if [[ "$w" =~ $_IDRUN_RE ]]; then
+        run=0; rest=""
+        if [[ "$w" == *[[:alnum:]_] ]]; then   # the run goes on past the cut: measure the rest
+          rest="${t:$end:4200}"; rest="${rest%%[![:alnum:]_]*}"; run=${#rest}
+        fi
+        # only a run that holds a key word can hide a key (a long hex or base64 word with
+        # none cannot), so only then pay for the extension, or refuse a run too long to keep
+        [[ "${t:$off:$((end - off))}" =~ $_IDTAIL_RE ]]
+        if _has_keyword_tail "${BASH_REMATCH[1]}$rest"; then
+          if [ "$run" -gt 4096 ]; then SECRET_MATCH_NAME="oversize-line"; SECRET_MATCH_TEXT=""; return 0; fi
+          end=$((end + run + 256))
+        fi
+      fi
+    fi
+    _secret_match "${t:$off:$((end - off))}" && return 0
     off=$((off + 4096))
   done
   if [ "$len" -gt 262144 ]; then SECRET_MATCH_NAME="oversize-line"; SECRET_MATCH_TEXT=""; return 0; fi
@@ -270,6 +340,7 @@ secret_match_long() {
 #   Prints the name of the first matching pattern and returns 0; returns 1 for no
 #   match or an exempt line. (Use _secret_match directly to also get the text.)
 secret_match_line() {
+  _SM_KEYS_LEFT=$SECRET_MAX_KEYS
   _secret_match "$1" || return 1
   printf '%s\n' "$SECRET_MATCH_NAME"
 }
