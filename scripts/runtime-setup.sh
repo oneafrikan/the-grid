@@ -8,8 +8,9 @@
 # This is a HUMAN-RUN script: the setup command can download a browser, and
 # upstream setup scripts may touch global state, so wire.sh never runs it. What
 # this wrapper adds around the upstream command:
-#   1. refuses to start when a prerequisite is missing or the runtime-root link
-#      path is occupied by something that is not ours (it never deletes that);
+#   1. refuses to start when a prerequisite is missing (a --dry-run only notes it
+#      and still prints the plan) or the runtime-root link path is occupied by
+#      something that is not ours (it never deletes that);
 #   2. snapshots the Claude settings file and the real dirs in the skills dir;
 #   3. runs the setup command inside repos/<repo>;
 #   4. compares the settings file afterwards and exits 3 if it changed (it
@@ -77,7 +78,13 @@ fi
 if [ -n "$needs" ] && ! command -v "$needs" >/dev/null 2>&1; then
   echo "runtime-setup: '$needs' is required but not on PATH." >&2
   echo "  the-grid never installs it; the upstream setup prints checksum-verified install instructions." >&2
-  exit 2
+  # A dry run only prints the plan and runs nothing, so a machine without the binary can still
+  # see it; the real run keeps refusing.
+  if [ "$dry" = 1 ]; then
+    echo "  (dry run: continuing; a real run would stop here with exit 2)" >&2
+  else
+    exit 2
+  fi
 fi
 # The runtime-root link path must be absent or already ours. If it is a real
 # dir or points elsewhere, upstream setup would leave it alone and skip

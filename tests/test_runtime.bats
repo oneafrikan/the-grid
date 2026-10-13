@@ -222,3 +222,27 @@ rsetup() { GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scri
   done
   [ "$failed" -eq 0 ]
 }
+
+# --- WP-048: --dry-run needs no setup binary -------------------------------------------------
+# A dry run only prints the plan, so a machine without the `needs` binary (for example bun) can
+# still see it; a real run still refuses with exit 2.
+
+@test "runtime-setup --dry-run with the needs binary absent exits 0, noting it and printing the plan" {
+  printf '%s\n' '# repo | link | marker | needs | setup' \
+    'gstack | gstack | bin/marker | no-such-binary-for-the-test | ./setup --host claude -q' \
+    > "$MOCK_GRID/scripts/lib/runtimes.txt"
+  run rsetup gstack --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no-such-binary-for-the-test"*"not on PATH"* ]]
+  [[ "$output" == *"./setup --host claude -q"* ]]
+  [ ! -e "$STUB_LOG" ]
+}
+
+@test "runtime-setup (a real run) with the needs binary absent still exits 2 and runs nothing" {
+  printf '%s\n' '# repo | link | marker | needs | setup' \
+    'gstack | gstack | bin/marker | no-such-binary-for-the-test | ./setup --host claude -q' \
+    > "$MOCK_GRID/scripts/lib/runtimes.txt"
+  run rsetup gstack
+  [ "$status" -eq 2 ]
+  [ ! -e "$STUB_LOG" ]
+}

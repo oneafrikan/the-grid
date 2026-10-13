@@ -16,6 +16,12 @@
 #   bash scripts/sources.sh --check-drift  # is docs/SOURCES.md current? offline, read-only;
 #                                        # exit 0 current, 1 stale, 2 error. Defaults to the
 #                                        # tracked example baseline; GRID_BASELINE pins another.
+#   bash scripts/sources.sh -h | --help  # this usage; writes nothing
+#
+# A leading dash is always an option: an unknown one is a usage error (exit 2) before any file
+# is touched, so a mistyped flag never becomes the name of an output file.
+# With no submodules in .gitmodules every mode exits 1 ("no submodules"): this repo always
+# tracks some, so an empty list means a broken checkout, never a vacuous pass.
 #
 # --check is the rot detector. Upstream repos get renamed, deleted, or made
 # private, and a submodule URL keeps pointing at nothing without any local
@@ -30,15 +36,30 @@ set -euo pipefail
 
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
+# usage: print the Usage block of this file's header (the single source of the text).
+usage() { sed -n '/^# Usage:/,/^#$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
 CHECK_MODE=0
 DRIFT_MODE=0
 COMMITTED="$GRID_DIR/docs/SOURCES.md"
 OUT="$COMMITTED"
-case "${1:-}" in
-  --check)       CHECK_MODE=1 ;;
-  --check-drift) DRIFT_MODE=1 ;;
-  *)             OUT="${1:-$OUT}" ;;
-esac
+OUT_GIVEN=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --check)       CHECK_MODE=1 ;;
+    --check-drift) DRIFT_MODE=1 ;;
+    -h|--help)     usage; exit 0 ;;
+    -*)            echo "sources.sh: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *)             [ "$OUT_GIVEN" -eq 0 ] || { echo "sources.sh: more than one output path" >&2; usage >&2; exit 2; }
+                   OUT="$1"; OUT_GIVEN=1 ;;
+  esac
+  shift
+done
+# The two checks write nothing and exclude each other, so a path or a second mode is a mistake.
+if [ $((CHECK_MODE + DRIFT_MODE)) -gt 1 ] || { [ $((CHECK_MODE + DRIFT_MODE)) -eq 1 ] && [ "$OUT_GIVEN" -eq 1 ]; }; then
+  echo "sources.sh: --check and --check-drift take no output path and exclude each other" >&2
+  usage >&2; exit 2
+fi
 
 # Baseline: GRID_BASELINE pins it (same override wire.sh, catalog.sh and budget.py take). The
 # committed SOURCES.md is rendered from the TRACKED example baseline, so --check-drift defaults
@@ -141,6 +162,14 @@ read_submodules() {
     done
 }
 
+# No submodule entries: `read_submodules` fails under pipefail when git finds none, so check up
+# front and say so, in every mode (an empty list would otherwise write a table-less file with a
+# silent exit 1, or make --check pass with "0 checked").
+if [ -z "$(read_submodules || true)" ]; then
+  echo "sources.sh: no submodules in .gitmodules" >&2
+  exit "$((1 + DRIFT_MODE))"
+fi
+
 # --- --check: HEAD every URL -------------------------------------------------
 if [ "$CHECK_MODE" -eq 1 ]; then
   echo "Link-checking every submodule URL in .gitmodules …"
@@ -150,6 +179,11 @@ if [ "$CHECK_MODE" -eq 1 ]; then
   while IFS=$'\t' read -r path clone_url url; do
     [ -n "$path" ] || continue
     total=$((total + 1))
+    # A URL that starts with "-" would be read by curl as an option. .gitmodules is trusted,
+    # but a bad value must be a FAIL line, not an argument: curl is never called with it.
+    case "$url" in
+      -*) printf '  FAIL %s %-40s %s\n' "000" "$path" "$url"; failures=$((failures + 1)); continue ;;
+    esac
     # -L follow redirects (repos get renamed and 301 — that's a pass, but we
     #    report the final URL so .gitmodules can be updated).
     # -I HEAD only; --max-time so one dead host can't hang the whole run.
@@ -158,7 +192,7 @@ if [ "$CHECK_MODE" -eq 1 ]; then
     # The trailing \n in -w is required: without it `read` hits EOF, returns
     # non-zero, and `set -e` kills the whole run on the first URL.
     read -r code final < <(curl -sS -I -L --max-time 20 -o /dev/null \
-      -w '%{http_code} %{url_effective}\n' "$url" 2>/dev/null || echo "000 $url")
+      -w '%{http_code} %{url_effective}\n' -- "$url" 2>/dev/null || echo "000 $url")
     if [ "$code" = "200" ]; then
       if [ "${final%/}" != "${url%/}" ]; then
         printf '  MOVED   %-40s %s\n' "$path" "$url"
