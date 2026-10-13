@@ -453,18 +453,31 @@ def dest_for(source, path):
     return "repos/%s/%s" % (source, path)
 
 
+def source_root(grid_dir, source):
+    """<realpath(<grid>/repos)>/<source>: the containment root of one source.
+
+    realpath is applied to repos/ ONLY, never to the source dir. A symlinked repos/
+    (the whole directory, e.g. kept on another disk) is a deliberate layout and is
+    followed; a symlinked repos/<source> must stay refused, and resolving it here
+    would make it contain its own target (see is_contained).
+    """
+    return os.path.join(os.path.realpath(os.path.join(grid_dir, "repos")), source)
+
+
 def is_contained(grid_dir, source, dest):
-    """True when realpath(<grid>/<dest>) lies under <realpath(grid)>/repos/<source>.
+    """True when realpath(<grid>/<dest>) lies under realpath(<grid>/repos)/<source>.
 
     The one containment test, applied before every write or delete (install and
     uninstall reuse it). realpath resolves symlinks, so a symlinked parent that
     points elsewhere is caught as well as a `..` component.
 
-    The root is built from the realpath of the GRID dir, NOT from the realpath of
+    The root is built from the realpath of repos/, NOT from the realpath of
     repos/<source>: resolving the source dir itself would make a symlinked
     repos/<source> contain its own target, so everything under it would pass.
+    A symlinked repos/ moves the root with it, so nothing can land outside the
+    real repos tree whatever repos/ points at.
     """
-    root = os.path.join(os.path.realpath(grid_dir), "repos", source)
+    root = source_root(grid_dir, source)
     target = os.path.realpath(os.path.join(grid_dir, dest))
     try:
         return os.path.commonpath([root, target]) == root
@@ -486,7 +499,9 @@ def dest_chain_link(grid_dir, dest, include_leaf):
     """
     parts = dest.split("/")
     upto = len(parts) if include_leaf else len(parts) - 1
-    for i in range(1, upto + 1):
+    # Start below repos/ (i = 2 is repos/<source>): a symlinked repos/ is a supported
+    # layout and the containment root already follows it, so it is not a "swap".
+    for i in range(2, upto + 1):
         prefix = "/".join(parts[:i])
         try:
             st = os.lstat(os.path.join(grid_dir, prefix))
@@ -495,6 +510,19 @@ def dest_chain_link(grid_dir, dest, include_leaf):
         if stat.S_ISLNK(st.st_mode):
             return prefix
     return None
+
+
+def escape_hint(grid_dir, dest):
+    """The text " (<path> is a symlink)" for the first symlink on <dest>, else "".
+
+    Appended to an "escapes repos/<source>" error: the only way a validated path can
+    leave its root is through a link, and saying which one is the useful part.
+    repos/ itself is named only when no deeper link explains the escape.
+    """
+    link = dest_chain_link(grid_dir, dest, include_leaf=True)
+    if link is None and os.path.islink(os.path.join(grid_dir, "repos")):
+        link = "repos"
+    return " (%s is a symlink)" % link if link else ""
 
 
 def source_dir_is_link(grid_dir, source):
@@ -576,7 +604,8 @@ def read_grid_lock(grid_dir, sources):
         if source_dir_is_link(grid_dir, entry["source"]):
             raise GridError("grid: grid.lock %s: repos/%s is a symlink" % (label, entry["source"]))
         if not is_contained(grid_dir, entry["source"], dest):
-            raise GridError("grid: grid.lock %s: %s escapes repos/%s" % (label, dest, entry["source"]))
+            raise GridError("grid: grid.lock %s: %s escapes repos/%s%s"
+                            % (label, dest, entry["source"], escape_hint(grid_dir, dest)))
         for what, key in (("destination", ("dest", dest)),
                           ("name and source", ("name", entry["name"], entry["source"]))):
             if key in seen_by:
@@ -1302,7 +1331,7 @@ def placed_dir_status(grid_dir, row, force=False):
     if os.path.islink(os.path.join(grid_dir, "repos", source)):
         return "refused", "repos/%s is a symlink" % source
     if not is_contained(grid_dir, source, dest):
-        return "refused", "%s resolves outside repos/%s" % (dest, source)
+        return "refused", "%s resolves outside repos/%s%s" % (dest, source, escape_hint(grid_dir, dest))
     if os.path.islink(target):
         return "refused", "%s is a symlink" % dest
     if not os.path.lexists(target):
@@ -1336,7 +1365,7 @@ def remove_placed_dir(grid_dir, row, force=False):
     except OSError as exc:
         # No traceback and no silent success: the caller keeps the ledger row.
         return "failed", "%s: %s" % (row["dest"], exc.strerror or exc)
-    root = os.path.join(grid_dir, "repos", row["source"])
+    root = source_root(grid_dir, row["source"])          # target is a realpath, so is the root
     parent = os.path.dirname(target)
     while parent != root and parent.startswith(root + os.sep):
         try:
@@ -1852,7 +1881,8 @@ def place_staged(grid_dir, run, repo, entry, counter):
     if source_dir_is_link(grid_dir, entry["source"]):
         raise _entry_error(entry, "repos/%s is a symlink" % entry["source"])
     if not is_contained(grid_dir, entry["source"], entry["dest"]):
-        raise _entry_error(entry, "%s escapes repos/%s" % (entry["dest"], entry["source"]))
+        raise _entry_error(entry, "%s escapes repos/%s%s"
+                           % (entry["dest"], entry["source"], escape_hint(grid_dir, entry["dest"])))
     final = os.path.join(grid_dir, entry["dest"])
     link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
     if link:                                    # before makedirs, which would follow it
