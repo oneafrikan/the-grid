@@ -919,8 +919,10 @@ def _recheck_not_link(*paths: Path) -> None:
             sys.exit(f"error: refusing to write: {p} became a symlink after it was vetted")
 
 
-def _claim(p: Path) -> None:
-    """About to create `p`: clear compose.py's own debris there, refuse anything else, then mark it ours."""
+def _claim(p: Path, claimed: list) -> None:
+    """About to create `p`: clear compose.py's own debris there, refuse anything else, then mark it
+    ours and record it in `claimed`. Failure cleanup releases ONLY what is in `claimed`, never a
+    path it merely finds a marker-shaped thing beside (a dir or FIFO there is not our marker)."""
     m = _marker(p)
     marked = m.is_symlink() or m.is_file()    # a marker that is a dir/FIFO is nobody's: refused below
     if os.path.lexists(m) and not (m.is_symlink() or m.is_file()):
@@ -933,6 +935,7 @@ def _claim(p: Path) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)   # the marker is a sibling; its dir may not exist yet
     fd = os.open(_marker(p), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
     os.close(fd)
+    claimed.append(p)
 
 
 def _release(p: Path, strict: bool = True) -> None:
@@ -987,9 +990,10 @@ def install_tree(target: Path, files: dict[str, str], dirs=()) -> None:
     dir, hence the two renames. Any failure restores the old tree and exits with an error."""
     tmp = target.with_name(target.name + ".tmp")
     old = target.with_name(target.name + ".old")
+    claimed: list[Path] = []
     try:
         for leftover in (tmp, old):          # a crashed earlier run's own debris is ours to clear
-            _claim(leftover)                 # (anything unmarked is a user's: refused, untouched)
+            _claim(leftover, claimed)        # (anything unmarked is a user's: refused, untouched)
         tmp.mkdir(parents=True)
         _materialise(tmp, files, dirs)
         _recheck_not_link(target.parent, target)
@@ -1004,24 +1008,32 @@ def install_tree(target: Path, files: dict[str, str], dirs=()) -> None:
         _release(tmp, strict=False)          # tmp was renamed into place; this drops its marker
         _release(old, strict=False)
     except OSError as exc:
-        _abort_swap(tmp, old)
-        sys.exit(f"error: could not write {target}: {exc}")
+        kept = _abort_swap(tmp, old, claimed)
+        sys.exit(f"error: could not write {target}: {exc}"
+                 + (f" (the previous tree is kept at {kept})" if kept else ""))
     except BaseException:
-        _abort_swap(tmp, old)
+        _abort_swap(tmp, old, claimed)
         raise
 
 
-def _abort_swap(tmp: Path, old: Path) -> None:
-    """Failure cleanup after _claim() succeeded for both: drop our tmp dir, and `old`'s marker
-    if `old` is gone. A refused _claim() (a user's dir) never reaches here with that dir claimed:
-    its marker is absent, so nothing of the user's is deleted. `old` itself is never deleted here:
-    it may be the only copy of the previous tree."""
-    _release_if_ours(tmp)
-    if not os.path.lexists(old):
+def _abort_swap(tmp: Path, old: Path, claimed: list) -> Path | None:
+    """Failure cleanup. Releases only paths in `claimed` (so a refused _claim() of a user's dir
+    deletes nothing). `tmp` is ours and is dropped. `old` is dropped only if it is gone or an
+    empty dir; if it still holds anything it may be the only copy of the previous output, so it
+    is kept, its marker removed (the next run then refuses it instead of clearing it), and its
+    path returned for the error message."""
+    if tmp in claimed:
+        _release(tmp, strict=False)
+    if old not in claimed:
+        return None
+    if os.path.lexists(old) and not (old.is_dir() and not old.is_symlink() and not os.listdir(old)):
         try:
             _unmark(old)
         except OSError:
             pass
+        return old
+    _release(old, strict=False)
+    return None
 
 
 def install_project(project_dir: Path, files: dict[str, str]) -> None:
@@ -1033,9 +1045,10 @@ def install_project(project_dir: Path, files: dict[str, str]) -> None:
     old = project_dir.with_name(project_dir.name + ".old")
     moved_old: list[str] = []
     moved_new: list[str] = []
+    claimed: list[Path] = []
     try:
         for leftover in (tmp, old):          # only compose.py's own marked debris is cleared
-            _claim(leftover)
+            _claim(leftover, claimed)
         tmp.mkdir(parents=True)
         _materialise(tmp, files)
         old.mkdir()
@@ -1058,19 +1071,14 @@ def install_project(project_dir: Path, files: dict[str, str]) -> None:
         _release(tmp, strict=False)
         _release(old, strict=False)
     except OSError as exc:
-        _release_if_ours(tmp)
-        _release_if_ours(old)
-        sys.exit(f"error: could not write {project_dir}: {exc}")
+        # old is emptied by a clean rollback; if the rollback itself failed it still holds the
+        # previous own-output, which _abort_swap keeps (and names here) instead of deleting.
+        kept = _abort_swap(tmp, old, claimed)
+        sys.exit(f"error: could not write {project_dir}: {exc}"
+                 + (f" (the previous output is kept at {kept})" if kept else ""))
     except BaseException:
-        _release_if_ours(tmp)
+        _abort_swap(tmp, old, claimed)
         raise
-
-
-def _release_if_ours(p: Path) -> None:
-    """Failure cleanup: delete `p` only when its marker shows compose.py made it. A refused
-    _claim() (a user's dir at that name) has no marker, so it is never deleted here."""
-    if os.path.lexists(_marker(p)):
-        _release(p, strict=False)
 
 
 def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
