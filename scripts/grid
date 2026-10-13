@@ -1524,15 +1524,69 @@ def check_source_policy(grid_dir, cfg, sources, vetted, announce_file=True):
             raise GridError(msg)
 
 
+def _seed_copy(grid_dir, src, rel):
+    """Copy `src` to <grid>/<rel> without ever writing outside the grid.
+
+    The copy is a NO-FOLLOW, EXCLUSIVE create walked down from an fd on the grid dir:
+    each parent directory is opened with O_NOFOLLOW (a symlinked `machines/`, even a
+    dangling one, is refused rather than followed out of the grid), and the file is
+    created with O_CREAT|O_EXCL|O_NOFOLLOW (a dangling symlink at the leaf makes the
+    create fail instead of materialising its target). A plain exists/copyfile pair
+    followed such a link: os.path.exists is False for a dangling link and
+    shutil.copyfile writes through it.
+    """
+    parts = rel.split("/")
+    # The example is read with O_NOFOLLOW too, so a symlinked example cannot pull an
+    # outside file's content into a seeded file; anything that is not a regular file is
+    # treated as a missing example.
+    try:
+        sfd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return
+    dirfd = None
+    try:
+        if not stat.S_ISREG(os.fstat(sfd).st_mode):
+            return
+        dirfd = os.open(grid_dir, os.O_RDONLY | os.O_DIRECTORY)
+        for part in parts[:-1]:
+            try:
+                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+            except FileNotFoundError:
+                os.mkdir(part, 0o777, dir_fd=dirfd)
+                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+            except OSError:
+                raise GridError("grid: refusing to seed %s: %s is a symlink or not a directory "
+                                "(grid never writes through a symlink)" % (rel, part))
+            os.close(dirfd)
+            dirfd = nfd
+        try:
+            dfd = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                          0o666, dir_fd=dirfd)
+        except FileExistsError:
+            return                        # already there (or a link there): never overwritten
+        try:
+            with os.fdopen(dfd, "wb") as out, os.fdopen(sfd, "rb", closefd=False) as inp:
+                shutil.copyfileobj(inp, out)
+        except BaseException:
+            os.unlink(parts[-1], dir_fd=dirfd)    # no half-written seed file left behind
+            raise
+    finally:
+        os.close(sfd)
+        if dirfd is not None:
+            os.close(dirfd)
+
+
 def seed_wired_files(grid_dir, host):
     """Install step 2: create baseline-submodules.txt and machines/<host>.txt from their
-    tracked examples when absent. Never overwrites; a missing example is skipped."""
+    tracked examples when absent. Never overwrites; a missing example is skipped.
+
+    "Absent" means lexists: a dangling symlink at the destination counts as present
+    (and is left alone). The write itself is _seed_copy's no-follow create."""
     for src, dst in (("baseline-submodules.example.txt", "baseline-submodules.txt"),
-                     (os.path.join("machines", "example.txt"), os.path.join("machines", host + ".txt"))):
-        src, dst = os.path.join(grid_dir, src), os.path.join(grid_dir, dst)
-        if os.path.exists(src) and not os.path.exists(dst):
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copyfile(src, dst)
+                     ("machines/example.txt", "machines/" + host + ".txt")):
+        if os.path.lexists(os.path.join(grid_dir, dst)):
+            continue
+        _seed_copy(grid_dir, os.path.join(grid_dir, src), dst)
 
 
 # --- install: classification (step 6) ----------------------------------------------------

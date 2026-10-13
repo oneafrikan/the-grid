@@ -1167,6 +1167,72 @@ open(p, "w").write("\n".join(rows))
   [ -z "$(find "$T/real" -maxdepth 1 -name '*.txt')" ]
 }
 
+# --- seeding never writes outside the grid (hardening, refs private NF-066 E2) ---------------
+# seed_wired_files copies the tracked examples to baseline-submodules.txt and
+# machines/<host>.txt. A committed symlink at either path (or at machines/) must not
+# turn that copy into a write outside the grid. Fixtures only: every "outside" path is
+# under $T/outside and the canary files are checked afterwards.
+
+@test "seeding: a dangling baseline-submodules.txt symlink does not create its target outside the grid" {
+  build_grids
+  mkdir -p "$T/outside"
+  ln -s "$T/outside/NEWFILE" "$GREAL/baseline-submodules.txt"
+  run install
+  [ ! -e "$T/outside/NEWFILE" ]
+  [ -L "$GREAL/baseline-submodules.txt" ]
+}
+
+@test "seeding: baseline-submodules.txt symlinked to an existing outside file or dir leaves it untouched" {
+  build_grids
+  mkdir -p "$T/outside/dir"
+  printf 'canary\n' > "$T/outside/file"
+  ln -s "$T/outside/file" "$GREAL/baseline-submodules.txt"
+  run install
+  [ "$(cat "$T/outside/file")" = "canary" ]
+  rm "$GREAL/baseline-submodules.txt"
+  ln -s "$T/outside/dir" "$GREAL/baseline-submodules.txt"
+  run install
+  [ -z "$(ls -A "$T/outside/dir")" ]
+}
+
+@test "seeding: a dangling machines/<host>.txt symlink does not create its target outside the grid" {
+  build_grids
+  mkdir -p "$GREAL/machines" "$T/outside"
+  : > "$GREAL/machines/example.txt"
+  ln -s "$T/outside/NEWHOST" "$GREAL/machines/testhost.txt"
+  run install
+  [ ! -e "$T/outside/NEWHOST" ]
+}
+
+@test "seeding: machines/ symlinked outside the grid is refused, nothing is written through it" {
+  build_grids
+  mkdir -p "$T/outside/mdir"
+  : > "$T/outside/mdir/example.txt"
+  ln -s "$T/outside/mdir" "$GREAL/machines"
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"symlink"* ]]
+  [ ! -e "$T/outside/mdir/testhost.txt" ]
+  # A dangling machines/ link has no example behind it, so there is nothing to seed:
+  # no traceback and nothing created at its target.
+  rm "$GREAL/machines"
+  ln -s "$T/outside/nodir" "$GREAL/machines"
+  run install
+  [[ "$output" != *"Traceback"* ]]
+  [ ! -e "$T/outside/nodir" ]
+}
+
+@test "seeding: a normal install still seeds both files from the examples" {
+  build_grids
+  mkdir -p "$GREAL/machines"
+  printf 'up\n' > "$GREAL/machines/example.txt"
+  run install
+  [ "$status" -eq 0 ]
+  [ -f "$GREAL/baseline-submodules.txt" ] && [ ! -L "$GREAL/baseline-submodules.txt" ]
+  [ "$(cat "$GREAL/baseline-submodules.txt")" = "up" ]
+  [ "$(cat "$GREAL/machines/testhost.txt")" = "up" ]
+}
+
 @test "every audit.py subprocess runs python with -B" {
   build_grids
   run python3 -B -c '
