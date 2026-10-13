@@ -823,6 +823,233 @@ print(g.is_contained(sys.argv[1], "up", "repos/up/skills/alpha"))
   [ "$output" = "False" ]
 }
 
+# --- (m) robustness (private WP-032) ---------------------------------------------------------------------------------------
+# A state dir or ledger problem is a clean exit 2 found BEFORE anything is fetched or placed.
+
+@test "uninstall --help and repair --help say they also run wire.sh, that grid takes no lock, and that the ledger is trusted" {
+  build_grids
+  for cmd in uninstall repair; do
+    run python3 -B "$G/scripts/grid" --grid-dir "$G" "$cmd" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"wire.sh"* ]]
+    [[ "$output" == *"no lock"* ]]
+    [[ "$output" == *"ledger"* ]]
+  done
+}
+
+@test "BOOTSTRAP.md documents the wire.sh side effect, single-writer use and the trusted ledger" {
+  grep -q "single writer" "$REPO_ROOT/BOOTSTRAP.md"
+  grep -q "also run \`wire.sh\`" "$REPO_ROOT/BOOTSTRAP.md"
+  grep -q "trusted" "$REPO_ROOT/BOOTSTRAP.md"
+}
+
+@test "an unwritable GRID_STATE_DIR exits 2 with no traceback and nothing placed" {
+  # Root ignores file modes, which would make this test pass vacuously: fail loudly instead.
+  [ "$(id -u)" -ne 0 ]
+  build_grids
+  chmod 555 "$GRID_STATE_DIR"
+  run install
+  chmod 755 "$GRID_STATE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" == *"$GRID_STATE_DIR"* ]]
+  [ ! -e "$G/repos/up/skills" ]
+  [ ! -e "$GRID_TRACE_FETCH" ]
+}
+
+@test "repair with an unwritable GRID_STATE_DIR exits 2 and places nothing" {
+  [ "$(id -u)" -ne 0 ]
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  rm -rf "$G/repos/up/skills"
+  rm -f "$GRID_TRACE_FETCH"
+  chmod 555 "$GRID_STATE_DIR"
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" repair
+  chmod 755 "$GRID_STATE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  [ ! -e "$G/repos/up/skills" ]
+  [ ! -e "$GRID_TRACE_FETCH" ]
+}
+
+@test "a GRID_STATE_DIR whose nearest existing ancestor is a file exits 2" {
+  build_grids
+  printf 'x\n' > "$T/afile"
+  GRID_STATE_DIR="$T/afile/state" run install
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  [ ! -e "$G/repos/up/skills" ]
+}
+
+@test "GRID_STATE_DIR=/proc/nope exits 2 with no traceback" {
+  [ "$(id -u)" -ne 0 ]
+  build_grids
+  GRID_STATE_DIR=/proc/nope run install
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  [ ! -e "$G/repos/up/skills" ]
+}
+
+@test "a ledger path that is a directory exits 2 naming it, before anything is placed" {
+  build_grids
+  mkdir "$(LEDGER)"
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" == *"installed.manifest"* ]]
+  [ ! -e "$G/repos/up/skills" ]
+}
+
+@test "a duplicate ledger row is rejected: exit 2 naming the file, the line and the remedy" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  head -n 1 "$(LEDGER)" >> "$(LEDGER)"
+  before=$(cat "$(LEDGER)")
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"duplicate"* ]]
+  [[ "$output" == *"installed.manifest line 3"* ]]
+  [[ "$output" == *"re-run"* ]]
+  [ "$(cat "$(LEDGER)")" = "$before" ]
+}
+
+@test "a malformed ledger row names the ledger path and the remedy" {
+  build_grids
+  printf 'skill\tshort\n' > "$(LEDGER)"
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$(LEDGER)"* ]]
+  [[ "$output" == *"grid install"* ]]
+}
+
+@test "a control character in a lock name is rejected: ESC, BEL, DEL and a C1 character" {
+  build_grids
+  for esc in '\u001b[31m' '\u0007' '\u007f' '\u0085' '\u009b'; do
+    python3 -B -c '
+import json, sys
+path = sys.argv[1]
+esc = json.loads("\"%s\"" % sys.argv[2])
+doc = json.load(open(path))
+doc["entries"][0]["name"] = "x" + esc + "y"
+json.dump(doc, open(path, "w"))
+' "$GREAL/grid.lock" "$esc"
+    run install
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"control"* ]]
+    # The raw control byte must not reach the terminal through the error text.
+    [[ "$output" != *$'\033'* ]]
+    [ ! -e "$G/repos/up/skills" ]
+  done
+}
+
+@test "a control character in a ledger name is rejected" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  python3 -B -c '
+import sys
+p = sys.argv[1]
+rows = open(p).read().split("\n")
+cols = rows[0].split("\t"); cols[1] = "al\x1b[2Jpha"; rows[0] = "\t".join(cols)
+open(p, "w").write("\n".join(rows))
+' "$(LEDGER)"
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"control"* ]]
+  [[ "$output" != *$'\033'* ]]
+}
+
+@test "GRID_HOST=../../x exits 2 and creates nothing outside the grid" {
+  build_grids
+  # An example overlay so the seeding step would copy it to machines/<host>.txt.
+  mkdir -p "$GREAL/machines"
+  : > "$GREAL/machines/example.txt"
+  for bad in '../../x' '../x' 'a/b' '/abs' '..' 'has space'; do
+    GRID_HOST="$bad" run install
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"GRID_HOST"* ]]
+    GRID_HOST="$bad" run install --dry-run
+    [ "$status" -eq 2 ]
+  done
+  [ ! -e "$T/real/x.txt" ]
+  [ ! -e "$T/x.txt" ]
+  [ ! -e "$G/repos/up/skills" ]
+  [ -z "$(find "$T/real" -maxdepth 1 -name '*.txt')" ]
+}
+
+@test "every audit.py subprocess runs python with -B" {
+  build_grids
+  run python3 -B -c '
+import importlib.util, subprocess, sys
+from importlib.machinery import SourceFileLoader
+grid = sys.argv[1]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+seen = []
+class Done(object):
+    returncode, stdout, stderr = 0, "", ""
+def fake_run(cmd, *a, **k):
+    seen.append(list(cmd))
+    return Done()
+g.subprocess.run = fake_run
+cfg = {"sources": {"up": {"url": "https://example.com/up.git", "ref": "HEAD"}}}
+g.check_source_policy(grid, cfg, {"up"}, True)
+g.audit_staged(grid, grid + "/run", "up", [{"dest": "repos/up/skills/alpha", "path": "skills/alpha"}])
+for cmd in seen:
+    print("%s %s" % (cmd[1], cmd[2].rsplit("/", 1)[-1]))
+' "$GREAL"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^-B audit.py$')" -eq 2 ]
+}
+
+@test "a real install leaves no __pycache__ under scripts/" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  [ -z "$(find "$GREAL/scripts" -name __pycache__)" ]
+}
+
+@test "install on a maintainer checkout (repos/up/.git) leaves no ledger file, so doctor stays in maintainer mode" {
+  build_grids
+  mkdir -p "$G/repos/up/.git"
+  run install
+  [ "$status" -eq 0 ]
+  [ ! -e "$(LEDGER)" ]
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" doctor
+  [[ "$output" == *"maintainer mode"* ]]
+}
+
+@test "install --dry-run does not need a writable state dir" {
+  [ "$(id -u)" -ne 0 ]
+  build_grids
+  chmod 555 "$GRID_STATE_DIR"
+  run install --dry-run
+  chmod 755 "$GRID_STATE_DIR"
+  [ "$status" -eq 0 ]
+}
+
+@test "main turns an OSError from anywhere into one line and exit 2, not a traceback" {
+  build_grids
+  run python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+grid = sys.argv[1]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+def boom(*a, **k):
+    raise PermissionError(13, "Permission denied", "/some/where")
+g.write_ledger = boom
+sys.exit(g.main(["--grid-dir", grid, "install"]))
+' "$G"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Permission denied"* ]]
+  [[ "$output" != *"Traceback"* ]]
+}
+
 @test "classify_entries refuses a symlinked repos/<source> even when the lock reader is bypassed" {
   build_grids
   outside_canary

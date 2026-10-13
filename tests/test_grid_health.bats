@@ -403,6 +403,25 @@ snapshot() { tree_digest "$GREAL"; echo "--"; tree_digest "$SKILLS_DIR"; echo "-
   [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
 }
 
+@test "corrupt ledger: doctor --json is valid JSON with a ledger finding naming the file" {
+  installed
+  printf 'skill\tshort\n' > "$(LEDGER)"
+  run grid doctor --json
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | python3 -m json.tool >/dev/null
+  [[ "$output" == *'"check": "ledger"'* ]]
+  [[ "$output" == *"installed.manifest"* ]]
+}
+
+@test "corrupt ledger: doctor without --json prints the finding and exits 1" {
+  installed
+  printf 'skill\tshort\n' > "$(LEDGER)"
+  run grid doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ledger "* ]]
+  [[ "$output" == *"installed.manifest"* ]]
+}
+
 @test "uninstall --yes with a read-only dir: no traceback, that row is kept, the other row is processed, exit 2" {
   # Root ignores file modes, which would make this test pass vacuously: fail loudly instead.
   [ "$(id -u)" -ne 0 ]
