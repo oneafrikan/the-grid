@@ -92,6 +92,16 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GA
   [[ "$output" == *"gate: FAIL — bats"* ]] || false
 }
 
+@test "a bats that prints the bare version without the 'Bats ' prefix fails the gate (NF-055 VF4)" {
+  # `${v#Bats }` is a no-op on a bare number, so a bare "1.13.0" used to pass the pin.
+  printf '#!/usr/bin/env bash\n[ "${1:-}" = "--version" ] && { echo "%s"; exit 0; }\necho "1..0"\nexit 0\n' \
+    "$(pinned_bats_version)" > "$G/tests/lib/bats-core/bin/bats"
+  run run_gate
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — bats"* ]] || false
+}
+
 @test "the pinned bats version is the one the real submodule carries" {
   [ -f "$REPO_ROOT/tests/lib/bats-core/package.json" ] || skip "bats-core submodule not initialised"
   [ -n "$(pinned_bats_version)" ]
