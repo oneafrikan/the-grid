@@ -360,6 +360,8 @@ def load_target(grid):
         return None
     except ValueError as exc:       # bad JSON and invalid UTF-8 (UnicodeDecodeError) alike
         sys.exit(f"budget: {TARGET_REL} is not valid JSON: {exc}")
+    except RecursionError:          # nesting thousands deep: json raises this, not ValueError
+        sys.exit(f"budget: {TARGET_REL} is nested too deeply to read")
     # Every later step does target.get(...), so a list, string or number would end in a
     # traceback; a mistyped limit would crash a comparison. Say which, once, here.
     if not isinstance(data, dict):
