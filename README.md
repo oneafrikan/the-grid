@@ -8,13 +8,13 @@
 >
 > **What it does:** clone once, run one command, and you get:
 >
-> 1. **~137 curated skills as slash commands** (`/standup`, `/review`, `/ship`, `/skill-scout`…). Another ~100 are searchable but kept switched off.
+> 1. **~130 curated skills as slash commands** (`/standup`, `/review`, `/ship`, `/skill-scout`…). Another ~100 are searchable but kept switched off.
 > 2. **38 ready-made AI roles you can call on:** a dev team (tech lead, backend, QA, security…), a finance desk, a Socratic tutor (`/morpheus`), and a front door (`/tron`) that tells you which one to use.
 > 3. **Templates** to start new projects with specs and agents already wired in.
 >
-> **How:** one script symlinks everything into `~/.claude/`. No installs, no config, and the same setup follows you across laptops and servers.
+> **How:** one script symlinks everything into `~/.claude/` and keeps one opt-out session-end hook in `~/.claude/settings.json` (see [How wire.sh works](#how-wiresh-works)). No installs, and the same setup follows you across laptops and servers.
 >
-> **Today vs next:** works today with **Claude Code**. Other agent tools (opencode, Codex CLI, Gemini CLI, Cursor) are scoped but not built yet.
+> **Today vs next:** **Claude Code** is the default and the tested target. Codex CLI, OpenCode and Gemini CLI also get skills, subagents and rule packs through opt-in `harness:<name>` entries ([docs/harnesses.md](docs/harnesses.md)); Cursor gets rule packs only. None of those four has been smoke-tested on a real install yet.
 >
 > **Think of it as:** dotfiles for your AI assistant. **Start here:** after install, run `/tron`.
 
@@ -49,8 +49,8 @@ the-grid is a personal wiring hub for an AI-agent ecosystem — Claude, OpenClaw
 
 ## What you get
 
-**239 skills indexed, 137 wired live** (14 built by Gareth, 123 from curated
-upstream repos) **+ 102 more in a searchable library** — plus 38 composed AI
+**232 skills indexed, 132 wired live** (14 built by Gareth, 118 from curated
+upstream repos) **+ 100 more in a searchable library** — plus 38 composed AI
 agents across 4 ready-to-run teams (7 orchestrators, 31 specialists). Every agent
 role follows a written contract (checked by `compose.py --lint-roles`) and can be
 given a tool allowlist in its `role.yaml`.
@@ -84,16 +84,20 @@ This is a sample, not the full list — browse everything in
 
 One script, `scripts/wire.sh`, symlinks skills — and agents composed by
 `agent-factory/` — into `~/.claude/skills/` and `~/.claude/agents/` so Claude
-picks them up automatically. No installs, no config files.
+picks them up automatically. No installs, no config files to write by hand. It
+also adds one generated SessionEnd hook (auto-handoff) to
+`~/.claude/settings.json`, on by default; the off switch is in
+[How wire.sh works](#how-wiresh-works).
 
 Everything above is produced by one of four sibling factories, each owning a
 different asset type:
 
 | Factory | Produces | Deployed via |
 |---------|----------|---------------|
-| `agent-factory/` | Composed AI agents (`role × stack × skills`) — 4 public projects (`core`, `grid`, `finance-desk`, `learning-desk`; 38 roles, 7 orchestrators + 31 specialists) plus any private desk composed separately | `scripts/wire.sh` (Claude Code target); OpenClaw + Paperclip targets next |
+| `agent-factory/` | Composed AI agents (`role × stack × skills`) — 4 public projects (`core`, `grid`, `finance-desk`, `learning-desk`; 38 roles, 7 orchestrators + 31 specialists) plus any private desk composed separately | `scripts/wire.sh` (Claude Code target; opt-in `harness:<name>` entries add Codex, OpenCode, Gemini CLI and others) |
 | `automation-factory/` | Reusable automation patterns (e.g. `issue-loop`) | Cut into a target repo's tracked `loop/` folder (the-grid's own loop instance is retired: `_retired/issue-loop/RETIRED.md`) |
-| `project-factory/` | Whole new project scaffolds from a template | `scripts/cut-project.sh` (seed or retrofit) |
+| `project-factory/` | Whole new project scaffolds from a template | `project-factory/scripts/cut-project.sh` (seed or retrofit) |
+| Skill wiring | the curated skill set (`skills/` plus the `repos/` submodules) | `scripts/wire.sh`, steered by `baseline-submodules.txt` and `machines/<host>.txt` |
 
 There is deliberately **no fifth factory for specs** — OpenSpec already fills
 that role; see "Spec-driven development" below.
@@ -103,9 +107,13 @@ that role; see "Spec-driven development" below.
 One command — clone, then run `bootstrap.sh` (syncs submodules → wires skills):
 
 ```bash
-git clone https://github.com/<your-username>/the-grid.git ~/.the-grid \
+git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid \
   && bash ~/.the-grid/scripts/bootstrap.sh
 ```
+
+Using your own fork? Put its URL in place of `oneafrikan/the-grid`. `scripts/grid`, the
+plugin bundles and `hooks/` exist on the `next` branch only until `next` is promoted to
+`main`, so add `--branch next` to the clone to get them.
 
 Add `--with-agents` to also compose **and** wire the agent team in the same run:
 
@@ -204,7 +212,8 @@ never touches its history.
     ...
   agents/               ← hand-authored root-owned agents (personas/behavior-modifiers)
   machines/             ← per-machine skill/project overlays
-    <host>.txt          ← committed overlay (adds/subtracts on the baseline)
+    example.txt         ← tracked starting point for an overlay
+    <host>.txt          ← GITIGNORED overlay (adds/subtracts on the baseline)
     <host>.local.txt    ← GITIGNORED overlay — private project gates
   docs/                 ← reference docs and resources
     SOURCES.md          ← generated: upstream URL per submodule (never edit)
@@ -214,23 +223,34 @@ never touches its history.
   agent-factory/        ← composes AI dev-team agents (role × stack × skills); live
     models.yaml         ← the one tier-to-model map for generated agents
     run_evals.py        ← runs the golden cases in evals/ (opt-in, spend-capped)
+    deploy_hooks.py     ← writes guard/auto-handoff hooks into settings files
   evals/                ← golden cases that check how agent roles behave
   automation-factory/   ← reusable automation patterns (e.g. issue-loop), cut into target repos
   project-factory/      ← scaffolds brand-new projects from a template
+                        ← seed or retrofit with project-factory/scripts/cut-project.sh <template> <dir>
+  hooks/                ← Claude Code guard hooks + the auto-handoff hook (see hooks/README.md)
+  rules/                ← path-scoped coding-convention rule packs, opt-in (docs/rules.md)
+  plugins/              ← GENERATED Claude Code plugin bundles (scripts/build-plugins.py; never hand-edit)
+  contexts/             ← opt-in working-mode prompts (claude-dev / claude-research / claude-review)
+  dist/                 ← GENERATED portable single-file personas (scripts/build-personas.sh)
+  openspec/             ← OpenSpec changes (proposals, design, tasks) for the-grid itself
+  _retired/             ← quarantined code, not gated or deployed (issue-loop; see its RETIRED.md)
   repos/                ← sibling repos as git submodules
     gstack/             (each may contain many skill dirs)
     openclaw/
     paperclip/
     ...
   scripts/
+    grid                ← submodule-free install CLI (install, lock, doctor, repair, ...; BOOTSTRAP.md)
     bootstrap.sh        ← one-shot setup: submodules → wire (--with-agents: compose too)
     wire.sh             ← creates ~/.claude/skills/ + ~/.claude/agents/ symlinks (idempotent)
     catalog.sh          ← regenerates SKILLS.md
     sources.sh          ← regenerates docs/SOURCES.md; --check link-checks every URL
     reconcile.sh        ← removes stale skill shadows on a new machine
-    check-grid.sh       ← bats suite + broken-symlink scan (CI / pre-push gate)
+    check-grid.sh       ← full bats suite + broken-symlink scan (CI / pre-push gate)
     instantiate.sh      ← RETIRED, moved to _retired/issue-loop/scripts/ (cut an automation-factory pattern into a target repo)
-    cut-project.sh      ← seeds/retrofits a project-factory template
+    rules.py            ← lints, lists and emits the rule packs (rules/)
+    audit.sh, audit.py  ← the vetting scan that wire.sh runs before touching any link
     gate.sh             ← the commit gate: shellcheck, catalog, role lint, composed output, tests
     run-record.sh       ← appends one line per agent run to a local private log
   tests/
@@ -242,6 +262,8 @@ never touches its history.
   CLAUDE.md               ← full project context for Claude sessions
   SKILLS.md               ← generated skill index (never edit by hand)
   LEARNINGS.md            ← durable lessons mined from project history
+  policy.yaml             ← vetting policy read by scripts/audit.py
+  grid.yaml, grid.lock    ← where wired skills come from, and the pinned commits (scripts/grid)
   baseline-submodules.example.txt ← tracked starting point; copy to the line below
   baseline-submodules.txt ← GITIGNORED, personal — your own baseline allowlist
   machines/example.txt    ← tracked starting point; copy to machines/<host>.txt
@@ -258,10 +280,11 @@ nothing in the-grid requires it, and it isn't part of the layout above.
 bash scripts/check-grid.sh
 ```
 
-Runs the bats suite (one-line PASS/FAIL — full output only on failure) and scans
-for broken grid-owned symlinks. Exits non-zero if anything's wrong, so it works
-as a CI / pre-push gate. A `pre-commit` hook (in `.githooks/`, activated by
-`bootstrap.sh`) runs the same tests before every commit; bypass with
+Runs the full bats suite (one-line PASS/FAIL — full output only on failure; it takes
+many minutes, roughly 15 on CI) and scans for broken grid-owned symlinks. Exits
+non-zero if anything's wrong, so it works as a CI / pre-push gate. A `pre-commit`
+hook (in `.githooks/`, activated by `bootstrap.sh`) runs `scripts/gate.sh` before
+every commit; bypass with
 `git commit --no-verify` or `GRID_SKIP_HOOK=1`.
 
 Link rot is checked separately — upstream repos get renamed, deleted, or made
@@ -331,6 +354,16 @@ On each run, `scripts/wire.sh`:
 5. Leaves symlinks pointing elsewhere untouched.
 6. Regenerates `SKILLS.md` via `catalog.sh`.
 
+Before step 1 it runs the vetting audit and refuses to change anything if a wired
+skill fails it. Besides symlinks, `wire.sh` also writes `.wired.manifest` in this
+repo and keeps one generated **auto-handoff** SessionEnd hook entry in
+`~/.claude/settings.json` (`agent-factory/deploy_hooks.py --user`; your own hooks and
+keys are left alone, but the first write reformats the file as 2-space-indented JSON).
+The hook is **on by default**: when a session ends it may run one headless Claude call
+to write a handoff note. To switch it off, add `-hook:auto-handoff` to the baseline or
+your machine overlay (`machines/<host>.txt`) and re-run `wire.sh`, which removes the
+entry; details in [hooks/README.md](hooks/README.md).
+
 Opt-in coding-convention rule packs (`rules:<pack>` manifest entries) are documented in [docs/rules.md](docs/rules.md).
 
 Step 4 wires whatever `compose.py` last produced. Because that output is
@@ -357,19 +390,19 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 ## Roadmap
 
 Shipped today: the **Claude Code** target is built and wired live.
-`compose.py --target` also accepts `openclaw`, `openclaw-native`, and
-`paperclip`.
+`compose.py --target` also accepts `openclaw`, `openclaw-native`, `paperclip`,
+`codex`, `gemini-cli`, `opencode` and `portable` (single-file personas, committed
+under `dist/personas/`). Skills, subagents and rule packs reach Codex CLI, OpenCode
+and Gemini CLI through opt-in `harness:<name>` manifest entries
+([docs/harnesses.md](docs/harnesses.md)); Cursor gets rule packs only
+(`scripts/rules.py emit --harness cursor`), not an agent target.
 
-Planned, not built — tracked in [Issues](../../issues):
+Not built, or not yet verified — tracked in [Issues](../../issues):
 
 | Direction | Status |
 |---|---|
-| `opencode` compose target | Researched, scoped, not implemented |
-| OpenAI Codex CLI target | Scoped |
-| Gemini CLI target | Scoped |
-| Cursor | Validating whether the claude-code output is reusable as-is |
+| Real-install smoke tests of the Codex, OpenCode and Gemini CLI targets | Not done; the vendor docs were read, not exercised ([docs/harnesses.md](docs/harnesses.md)) |
 | Amp | Blocked — custom-agent mechanism needs verifying first |
-| Portable single-file personas for chat-UI Projects | Scoped |
 | OpenSpec **stores** (cross-repo planning) | Open decision, deliberately not adopted |
 
 The compose model is a multi-target compiler: one source (the OpenClaw 5-file
@@ -397,9 +430,11 @@ not a supported product. Concretely:
 - **Fork rather than depend.** The wiring model — manifest, symlinks,
   compose-then-wire — is the transferable part. Copy it and point it at your own
   skills.
-- **`wire.sh` only ever touches symlinks that point into this repo.** It won't
-  clobber a real directory or a foreign symlink in `~/.claude/skills/`. Read it
-  before running it anyway; it writes to your home directory.
+- **`wire.sh` only ever replaces symlinks that point into this repo.** It won't
+  clobber a real directory or a foreign symlink in `~/.claude/skills/`. It also
+  edits `~/.claude/settings.json` (the auto-handoff hook, on by default; see
+  "How wire.sh works"). Read it before running it anyway; it writes to your home
+  directory.
 
 ## License
 
