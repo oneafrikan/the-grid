@@ -426,6 +426,19 @@ mk_plugin_tree() {
   ! grep -q '_retired' "$G/shellcheck.args"
 }
 
+# NF-027: a glob group with no match (a stub grid, a fork that dropped a dir) must add nothing.
+# Without nullglob the literal pattern reaches shellcheck, which reports it as a missing file.
+@test "lint check: a glob group with no matching file is not handed to shellcheck as a literal pattern" {
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/shellcheck.args"\nexit 0\n' "$G" > "$G/stubbin/shellcheck"
+  chmod +x "$G/stubbin/shellcheck"
+  run run_gate
+  [ "$status" -eq 0 ]
+  # the real file is still linted, so the list is not simply empty
+  grep -qx 'scripts/gate.sh' "$G/shellcheck.args"
+  # last, so the negation is the test's final (and deciding) command
+  ! grep -q '[*?[]' "$G/shellcheck.args"
+}
+
 # --- strict mode (WP-045, D65) ---------------------------------------------------------------
 # A skip that is not on the allowlist must fail CI. The gate runs under env -i, so a test hands
 # the allowlist in through GATE_ENV.
@@ -457,6 +470,25 @@ skipped_list() {
   run run_gate --strict
   [ "$status" -eq 1 ]
   [[ "$output" == *"unexpected skip: shellcheck"* ]] || false
+}
+
+# NF-027: the allowlist is matched as WHOLE names. A substring match would let an allowed
+# `plugins-validate` hide an unexpected `plugins` skip (and `compose-core` hide `compose`).
+@test "strict: the allowlist matches whole names (an allowed plugins-validate does not cover plugins)" {
+  run run_gate
+  [ "$status" -eq 0 ]
+  local all; all="$(skipped_list)"
+  # precondition: both names are skipped here, and one is a prefix of the other
+  [[ " $all " == *" plugins "* ]] || false
+  [[ " $all " == *" plugins-validate "* ]] || false
+  local allow=" $all "
+  allow="${allow/ plugins / }"
+  GATE_ENV=(GRID_GATE_EXPECT_SKIPPED="$allow")
+  run run_gate --strict
+  echo "$output"
+  [ "$status" -eq 1 ]
+  # exactly `plugins` is unexpected; plugins-validate stays covered by its own entry
+  [[ "$output" == *"gate: FAIL (unexpected skip: plugins)"* ]] || false
 }
 
 @test "strict: --strict and --pre-commit combine in either order" {
@@ -724,6 +756,22 @@ run_hook() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GA
   run run_gate
   [ "$status" -eq 1 ]
   [[ "$output" == *"scripts/grid"* ]] || false
+}
+
+# NF-027: scripts/grid has no .py extension, so only the pysyntax stage's own special case
+# covers it. The lock stage also runs it (and would fail on a syntax error too), so the
+# assertion is on the pysyntax stage's own output, not just the gate's overall failure.
+# The broken file is a fixture copy under $G; the real scripts/grid is never touched.
+@test "pysyntax: a syntax error in scripts/grid alone fails the pysyntax stage itself" {
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+  printf 'def (:\n' > "$G/scripts/grid"
+  run run_gate
+  echo "$output"
+  [ "$status" -eq 1 ]
+  local stage
+  stage="$(printf '%s\n' "$output" | sed -n '/^==> pysyntax/,/^==> catalog/p')"
+  [[ "$stage" == *"scripts/grid"* ]] || false
+  [[ "$stage" == *"FAIL"* ]] || false
 }
 
 # --- fresh worktree: initialise the bats submodule once (WP-045) -------------------------------------
