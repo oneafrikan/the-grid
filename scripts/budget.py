@@ -133,6 +133,22 @@ def _quoted(text: str, quote: str) -> str:
     return "".join(out)
 
 
+def _strip_comment(part: str) -> str:
+    """`part` without a trailing ` #...` comment; same result as re.sub(r"\\s+#.*$", "", part).
+
+    The regex was quadratic on a long whitespace run (a 1 MB run took over 100 s: every
+    start inside the run re-scans it looking for a `#`). A `#` starts a comment only when
+    whitespace precedes it, so find the first such `#` with str.find (linear) and drop the
+    whitespace in front of it. A `#` at index 0, or glued to a word (`a#b`), is not one.
+    """
+    i = part.find("#")
+    while i != -1:
+        if i > 0 and part[i - 1].isspace():           # str.isspace == the regex's \s
+            return part[:i].rstrip()
+        i = part.find("#", i + 1)
+    return part
+
+
 def _scalar(rest: str, cont: list):
     """(value, single_line) for one key's inline text plus its continuation lines."""
     rest = rest.strip()
@@ -145,7 +161,7 @@ def _scalar(rest: str, cont: list):
     if rest[:1] in ("'", '"'):
         return _collapse(_quoted(full, rest[0])), True
     # Plain scalar: " #..." starts a comment; continuation lines fold to one line.
-    parts = [re.sub(r"\s+#.*$", "", p) for p in [rest] + [ln.strip() for ln in body]]
+    parts = [_strip_comment(p) for p in [rest] + [ln.strip() for ln in body]]
     return _collapse(" ".join(parts)), True
 
 
@@ -221,7 +237,11 @@ def read_frontmatter(path: str):
     if lines[0].rstrip(" \t") != "---":
         return {}, problems + [NO_FRONTMATTER]
     end = next((i for i in range(1, len(lines)) if lines[i].rstrip(" \t") == "---"), len(lines))
-    # The fences included: a separator that hides or fakes a fence moves the region itself.
+    # The closing fence line is included in the scan. A separator glued to a fence is not a
+    # fence here (the fence test strips only spaces and tabs): after the OPENING `---` the
+    # file already failed above as having no frontmatter; after the CLOSING one `end` runs to
+    # the last line, so the region holds the separator and is named below (alongside the
+    # missing-fence problem). Both are tested (tests/test_budget.bats, NF-060 VG2).
     problems += line_break_problems(lines[:end + 1])
     if end == len(lines):
         # skill_frontmatter.py and catalog.sh read an unclosed fence as NO frontmatter; the rest

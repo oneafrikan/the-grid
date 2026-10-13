@@ -205,6 +205,33 @@ print("ok")
   [ ! -e "$G/grid.lock" ]
 }
 
+# VG4 (hardening, refs private NF-066): lock used only the lexical symlink test, so a chain of
+# links that each look inside the skill dir but leave it once resolved was locked and then
+# refused by install. Lock now also runs install's realpath containment test.
+@test "a chain symlink that escapes only through an intermediate link is refused at lock time" {
+  mkdir -p "$U/skills/alpha/sub" "$U/skills/alpha/sub2"
+  ln -s .. "$U/skills/alpha/sub/up"
+  ln -s ../sub/up/.. "$U/skills/alpha/sub2/x"
+  upstream_commit "chain link"
+  fixture_advance "$G" "$U"
+  run lock
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"points outside"* ]]
+  [[ "$output" == *"sub2/x"* ]]
+  [ ! -e "$G/grid.lock" ]
+}
+
+@test "a link that stays inside the skill dir is still locked (lock-time realpath check has no false positive)" {
+  mkdir -p "$U/skills/alpha/sub"
+  ln -s ../run.sh "$U/skills/alpha/sub/runner"
+  ln -s sub "$U/skills/alpha/subdir"
+  upstream_commit "inside links"
+  fixture_advance "$G" "$U"
+  run lock
+  [ "$status" -eq 0 ]
+  [ -f "$G/grid.lock" ]
+}
+
 @test "an absolute symlink target also counts as escaping" {
   ln -s /etc/hosts "$U/skills/alpha/abs"
   upstream_commit "absolute link"
@@ -501,7 +528,9 @@ orphan_commit() {
   [[ "$output" == *"fetch origin"* ]]
 }
 
-@test "a shallow checkout that cannot prove reachability: lock exits 2 mentioning shallow, lock --check skips with a notice" {
+# shallow_tip_checkout: make repos/up a depth-1 clone whose recorded sha is a commit it cannot
+# prove is on the ref (the tip moved on after the clone), and record that sha in the index.
+shallow_tip_checkout() {
   run lock
   [ "$status" -eq 0 ]
   rm -rf "$G/repos/up"
@@ -512,12 +541,40 @@ orphan_commit() {
   git -C "$G/repos/up" fetch -q --depth 1 origin "$tip"
   git -C "$G/repos/up" checkout -q "$tip"
   git -C "$G" update-index --add --cacheinfo "160000,$tip,repos/up"
+}
+
+# Deliberately changed (hardening, refs private NF-066 J1): the old test asserted that
+# `lock --check` SKIPS the reachability proof on a shallow checkout and exits non-2, which
+# let a sha that is on no upstream ref pass. The skip is now opt-in (GRID_LOCK_ALLOW_SHALLOW=1).
+@test "a shallow checkout that cannot prove reachability: lock and lock --check both exit 2 mentioning shallow" {
+  shallow_tip_checkout
   run lock
   [ "$status" -eq 2 ]
   [[ "$output" == *"shallow"* ]]
   run lock --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"shallow"* ]]
+  [[ "$output" == *"GRID_LOCK_ALLOW_SHALLOW=1"* ]]
+}
+
+@test "GRID_LOCK_ALLOW_SHALLOW=1 lets lock --check skip the shallow reachability proof with a notice, but never lock" {
+  shallow_tip_checkout
+  GRID_LOCK_ALLOW_SHALLOW=1 run lock --check
   [ "$status" -ne 2 ]
   [[ "$output" == *"shallow"* ]]
+  [[ "$output" == *"reachability not checked"* ]]
+  # lock writes the file, so the opt-in never applies to it.
+  GRID_LOCK_ALLOW_SHALLOW=1 run lock
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"shallow"* ]]
+}
+
+@test "only the exact value 1 opts in to the shallow skip" {
+  shallow_tip_checkout
+  for v in 0 true yes "" " 1" 11; do
+    GRID_LOCK_ALLOW_SHALLOW="$v" run lock --check
+    if [ "$status" -ne 2 ]; then echo "value '$v': status $status" >&2; false; fi
+  done
 }
 
 @test "a duplicate (name, source) entry in grid.lock is rejected by lock --check, exit 2 naming both entries" {
@@ -529,6 +586,26 @@ orphan_commit() {
   [[ "$output" == *"duplicate"* ]]
   [[ "$output" == *"entry 0"* ]]
   [[ "$output" == *"entry 2"* ]]
+}
+
+# J3 (hardening, refs private NF-066): names and destinations are compared case-folded, so
+# two entries that differ only in case (one directory on a case-insensitive filesystem) clash.
+@test "grid.lock entries whose names differ only in case are duplicates, exit 2" {
+  run lock
+  [ "$status" -eq 0 ]
+  edit_lock 'e = dict(doc["entries"][0]); e["name"] = e["name"].upper(); e["path"] = "skills/other"; doc["entries"].append(e)'
+  run lock --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"duplicate"* ]]
+}
+
+@test "grid.lock entries whose destinations differ only in case are duplicates, exit 2" {
+  run lock
+  [ "$status" -eq 0 ]
+  edit_lock 'e = dict(doc["entries"][0]); e["name"] = "alpha-copy"; e["path"] = e["path"].upper(); doc["entries"].append(e)'
+  run lock --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"duplicate"* ]]
 }
 
 @test "a duplicate dest in grid.lock (same source and path under another name) is rejected, exit 2" {
@@ -605,7 +682,10 @@ open(p, "w").write(s)
 
 @test "the committed grid.lock matches the real checkouts (or is not checkable here)" {
   # 0 where every source is checked out, 3 on a checkout without the submodules.
-  run python3 -B "$REPO_ROOT/scripts/grid" --grid-dir "$REPO_ROOT" lock --check
+  # Opt in to skipping the reachability proof: CI clones submodules at depth 1, and this test is
+  # about the committed lock matching the checkouts, not about history. (grid_env_isolate unsets
+  # the variable, so it is set here explicitly.)
+  GRID_LOCK_ALLOW_SHALLOW=1 run python3 -B "$REPO_ROOT/scripts/grid" --grid-dir "$REPO_ROOT" lock --check
   if [ "$status" -ne 0 ] && [ "$status" -ne 3 ]; then
     echo "status $status: $output" >&2
     false

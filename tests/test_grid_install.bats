@@ -974,6 +974,68 @@ sys.exit(g.main(["--grid-dir", grid, "install"]))
   [ -z "$(ls -A "$T/outside")" ]
 }
 
+# VH1: the E1 change stopped checking `repos` itself for a swap between check and act. A
+# same-user process swapping repos/ for a symlink in that window must not redirect the delete
+# or the placement outside the realpath(repos)/<source> that was checked.
+@test "remove_placed_dir: repos/ swapped for a symlink after the check does not delete elsewhere" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  mkdir -p "$T/elsewhere"
+  cp -R "$GREAL/repos/up" "$T/elsewhere/up"
+  run python3 -B -c '
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+grid, elsewhere = sys.argv[1], sys.argv[2]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+rows, _foreign = g.read_ledger()
+row = [r for r in rows if r["name"] == "alpha"][0]
+real = g.placed_dir_status
+def swapping(grid_dir, r, force=False):
+    res = real(grid_dir, r, force)
+    # The window: after the check said ok, before the delete.
+    os.rename(grid + "/repos", grid + "/repos.moved")
+    os.symlink(elsewhere, grid + "/repos")
+    return res
+g.placed_dir_status = swapping
+status, detail = g.remove_placed_dir(grid, row, True)
+print("status=%s %s" % (status, detail))
+' "$GREAL" "$T/elsewhere"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"status=removed"* ]]
+  [ -f "$T/elsewhere/up/skills/alpha/SKILL.md" ]
+}
+
+@test "place_staged: repos/ swapped for a symlink after the containment check places nothing elsewhere" {
+  build_grids
+  mkdir -p "$T/elsewhere/up"
+  run python3 -B -c '
+import os, importlib.util, sys
+from importlib.machinery import SourceFileLoader
+grid, elsewhere = sys.argv[1], sys.argv[2]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+real = g.is_contained
+def swapping(grid_dir, source, dest):
+    res = real(grid_dir, source, dest)
+    # Only the call made by place_staged, and only once: swap repos/ for a link.
+    if sys._getframe(1).f_code.co_name == "place_staged" and not os.path.islink(grid + "/repos"):
+        os.rename(grid + "/repos", grid + "/repos.moved")
+        os.symlink(elsewhere, grid + "/repos")
+    return res
+g.is_contained = swapping
+sys.exit(g.main(["--grid-dir", grid, "install"]))
+' "$GREAL" "$T/elsewhere"
+  [ "$status" -ne 0 ]
+  # Only the entry whose check was swapped is refused; a later entry sees a stable (supported)
+  # symlinked repos/ and is placed normally.
+  [[ "$output" == *"repos changed while placing"* ]]
+  [ ! -e "$T/elsewhere/up/skills" ]
+}
+
 @test "is_contained is False for a path under a symlinked repos/<source> (root is not the resolved source dir)" {
   build_grids
   outside_canary
@@ -989,6 +1051,198 @@ print(g.is_contained(sys.argv[1], "up", "repos/up/skills/alpha"))
 ' "$GREAL"
   [ "$status" -eq 0 ]
   [ "$output" = "False" ]
+}
+
+# --- symlinked repos/ directory (hardening, refs private NF-066 E1) ---------------------------
+# Some machines keep repos/ elsewhere (same filesystem) behind a symlink. That whole-directory link
+# is legitimate; what must stay refused is a link at repos/<source> or below it. The
+# containment root is realpath(<grid>/repos)/<source>, so nothing can land outside the
+# real repos/ tree. Every command that reads the lock (install, doctor, drift, repair,
+# uninstall) goes through the same check.
+
+# link_repos_dir: move the grid's repos/ to $T/elsewhere and leave a symlink in its place.
+link_repos_dir() {
+  mv "$GREAL/repos" "$T/elsewhere"
+  ln -s "$T/elsewhere" "$GREAL/repos"
+}
+
+@test "a symlinked repos/ directory: install, doctor, drift, repair and uninstall all work" {
+  build_grids
+  link_repos_dir
+  run install
+  [ "$status" -eq 0 ]
+  [ -f "$T/elsewhere/up/skills/alpha/SKILL.md" ]
+  [ -f "$T/elsewhere/up/nested/cat/beta/SKILL.md" ]
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" doctor
+  [ "$status" -eq 0 ]
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" drift --quiet
+  [ "$status" -eq 0 ]
+  # repair re-places a deleted skill through the link.
+  rm -rf "$T/elsewhere/up/skills/alpha"
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" repair
+  [ "$status" -eq 0 ]
+  [ -f "$T/elsewhere/up/skills/alpha/SKILL.md" ]
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" uninstall --yes
+  [ "$status" -eq 0 ]
+  [ ! -e "$T/elsewhere/up/skills/alpha" ]
+  [ ! -e "$T/elsewhere/up/nested/cat/beta" ]
+  # Emptied parents are pruned up to (not including) <repos>/up.
+  [ ! -e "$T/elsewhere/up/nested" ]
+  [ -d "$T/elsewhere/up" ]
+}
+
+@test "a symlinked repos/ directory does not make repos/<source> symlinks acceptable" {
+  build_grids
+  link_repos_dir
+  outside_canary
+  rm -rf "$T/elsewhere/up"
+  ln -s "$T/outside" "$T/elsewhere/up"
+  run install
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repos/up is a symlink"* ]]
+  only_canary
+  run install --force
+  [ "$status" -ne 0 ]
+  only_canary
+}
+
+@test "a symlinked repos/ directory: a link below repos/<source> pointing outside is refused and the error names a symlink" {
+  build_grids
+  link_repos_dir
+  outside_canary
+  ln -s "$T/outside" "$T/elsewhere/up/skills"
+  run install
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"symlink"* ]]
+  only_canary
+}
+
+@test "uninstall through a symlinked repos/ never deletes outside the real repos tree" {
+  build_grids
+  link_repos_dir
+  run install
+  [ "$status" -eq 0 ]
+  outside_canary
+  # Swap a placed skill's parent for a link out of the tree; the row must be kept, not followed.
+  mv "$T/elsewhere/up/skills" "$T/outside/skills"
+  ln -s "$T/outside/skills" "$T/elsewhere/up/skills"
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" uninstall --yes --force
+  [ -f "$T/outside/skills/alpha/SKILL.md" ]
+}
+
+@test "is_contained under a symlinked repos/: True for a normal path, False for a link out of the source" {
+  build_grids
+  link_repos_dir
+  outside_canary
+  run python3 -B -c '
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+grid, outside = sys.argv[1], sys.argv[2]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+print(g.is_contained(grid, "up", "repos/up/skills/alpha"))
+os.symlink(outside, grid + "/repos/up/skills")
+print(g.is_contained(grid, "up", "repos/up/skills/alpha"))
+' "$GREAL" "$T/outside"
+  [ "$status" -eq 0 ]
+  [ "$output" = "True
+False" ]
+}
+
+@test "the escape error names the symlink when one is on the path" {
+  build_grids
+  outside_canary
+  ln -s "$T/outside" "$GREAL/repos/up/skills"
+  run install
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repos/up/skills is a symlink"* ]]
+}
+
+# --- git failure hints, uninstall preflight, host key (hardening, refs private NF-066 J2/VG5/VG7) ---
+
+# run_git_stub STDERR [ENV=VAL]: call run_git with subprocess.run stubbed to fail with STDERR;
+# prints the GridError text.
+run_git_stub() {
+  python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader("gridmod", sys.argv[1] + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+class Done(object):
+    returncode, stdout = 128, ""
+    stderr = sys.argv[2]
+g.subprocess.run = lambda *a, **k: Done()
+try:
+    g.run_git(["status"])
+except g.GridError as exc:
+    print(exc)
+' "$GREAL" "$1"
+}
+
+@test "J2: a git failure from dubious ownership or auth points at GRID_GIT_FORWARD_CONFIG=1" {
+  build_grids
+  for msg in "fatal: detected dubious ownership in repository at '/x'" \
+             "fatal: could not read Username for 'https://example.com': terminal prompts disabled" \
+             "fatal: Authentication failed for 'https://example.com/r.git/'"; do
+    run run_git_stub "$msg"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"GRID_GIT_FORWARD_CONFIG=1"* ]]
+  done
+}
+
+@test "J2: no hint for an unrelated git failure, nor when the config is already forwarded" {
+  build_grids
+  run run_git_stub "fatal: not a git repository"
+  [[ "$output" != *"GRID_GIT_FORWARD_CONFIG"* ]]
+  GRID_GIT_FORWARD_CONFIG=1 run run_git_stub "fatal: detected dubious ownership in repository at '/x'"
+  [[ "$output" != *"set GRID_GIT_FORWARD_CONFIG"* ]]
+}
+
+@test "VG5: uninstall --yes with an unwritable state dir exits 2 before deleting anything" {
+  [ "$(id -u)" -ne 0 ]
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  chmod 555 "$GRID_STATE_DIR"
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" uninstall --yes
+  chmod 755 "$GRID_STATE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+  [ -L "$SKILLS_DIR/alpha" ]
+  [ -f "$(LEDGER)" ]
+}
+
+@test "VG7: a hostname that is not a valid machine key says to set GRID_HOST" {
+  build_grids
+  run python3 -B -c '
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader("gridmod", sys.argv[1] + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+os.environ.pop("GRID_HOST", None)
+g.socket.gethostname = lambda: "h\u00f6st.local"
+try:
+    g.host_key()
+except g.GridError as exc:
+    print(exc)
+os.environ["GRID_HOST"] = "../x"
+try:
+    g.host_key()
+except g.GridError as exc:
+    print(exc)
+' "$GREAL"
+  [ "$status" -eq 0 ]
+  first=$(printf '%s\n' "$output" | sed -n 1p)
+  second=$(printf '%s\n' "$output" | sed -n 2p)
+  [[ "$first" == *"hostname"* ]]
+  [[ "$first" == *"set GRID_HOST"* ]]
+  [[ "$first" != *"GRID_HOST is not"* ]]
+  # A value the user DID set keeps the old wording.
+  [[ "$second" == *"GRID_HOST"*"is not a valid machine key"* ]]
 }
 
 # --- (m) robustness (private WP-032) ---------------------------------------------------------------------------------------
@@ -1083,6 +1337,26 @@ print(g.is_contained(sys.argv[1], "up", "repos/up/skills/alpha"))
   [ "$(cat "$(LEDGER)")" = "$before" ]
 }
 
+@test "ledger rows whose dest differs only in case are duplicates, exit 2" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  python3 -B -c '
+import sys
+p = sys.argv[1]
+rows = open(p).read().split("\n")
+cols = rows[0].split("\t")
+# Same row with the path (and so dest) upper-cased and a different name: only the case differs.
+cols[1] = cols[1] + "-copy"
+cols[4] = cols[4].upper()
+cols[5] = "repos/" + cols[2] + "/" + cols[4]
+open(p, "a").write("\t".join(cols) + "\n")
+' "$(LEDGER)"
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"duplicate"* ]]
+}
+
 @test "a malformed ledger row names the ledger path and the remedy" {
   build_grids
   printf 'skill\tshort\n' > "$(LEDGER)"
@@ -1165,6 +1439,123 @@ open(p, "w").write("\n".join(rows))
   [ ! -e "$T/x.txt" ]
   [ ! -e "$G/repos/up/skills" ]
   [ -z "$(find "$T/real" -maxdepth 1 -name '*.txt')" ]
+}
+
+# --- seeding never writes outside the grid (hardening, refs private NF-066 E2) ---------------
+# seed_wired_files copies the tracked examples to baseline-submodules.txt and
+# machines/<host>.txt. A committed symlink at either path (or at machines/) must not
+# turn that copy into a write outside the grid. Fixtures only: every "outside" path is
+# under $T/outside and the canary files are checked afterwards.
+
+@test "seeding: a dangling baseline-submodules.txt symlink does not create its target outside the grid" {
+  build_grids
+  mkdir -p "$T/outside"
+  ln -s "$T/outside/NEWFILE" "$GREAL/baseline-submodules.txt"
+  run install
+  [ ! -e "$T/outside/NEWFILE" ]
+  [ -L "$GREAL/baseline-submodules.txt" ]
+}
+
+@test "seeding: baseline-submodules.txt symlinked to an existing outside file or dir leaves it untouched" {
+  build_grids
+  mkdir -p "$T/outside/dir"
+  printf 'canary\n' > "$T/outside/file"
+  ln -s "$T/outside/file" "$GREAL/baseline-submodules.txt"
+  run install
+  [ "$(cat "$T/outside/file")" = "canary" ]
+  rm "$GREAL/baseline-submodules.txt"
+  ln -s "$T/outside/dir" "$GREAL/baseline-submodules.txt"
+  run install
+  [ -z "$(ls -A "$T/outside/dir")" ]
+}
+
+@test "seeding: a dangling machines/<host>.txt symlink does not create its target outside the grid" {
+  build_grids
+  mkdir -p "$GREAL/machines" "$T/outside"
+  : > "$GREAL/machines/example.txt"
+  ln -s "$T/outside/NEWHOST" "$GREAL/machines/testhost.txt"
+  run install
+  [ ! -e "$T/outside/NEWHOST" ]
+}
+
+# Changed in the review round (VH5): a symlinked machines/ used to abort the whole install
+# with exit 2. A user may keep machines/ symlinked into a private repo, and base installed fine
+# on a new host, so grid still refuses to WRITE through the link but skips the host overlay
+# with a notice and carries on. Only a machines/ that is not a directory at all stays exit 2.
+@test "seeding: machines/ symlinked outside the grid: nothing is written through it, a notice, install continues" {
+  build_grids
+  mkdir -p "$T/outside/mdir"
+  : > "$T/outside/mdir/example.txt"
+  ln -s "$T/outside/mdir" "$GREAL/machines"
+  run install
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"symlink"* ]]
+  [ ! -e "$T/outside/mdir/testhost.txt" ]
+  [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+  # A dangling machines/ link has no example behind it, so there is nothing to seed:
+  # no traceback and nothing created at its target.
+  rm "$GREAL/machines"
+  ln -s "$T/outside/nodir" "$GREAL/machines"
+  run install
+  [[ "$output" != *"Traceback"* ]]
+  [ ! -e "$T/outside/nodir" ]
+}
+
+@test "seeding: machines that is a regular file gives no traceback and is left alone" {
+  build_grids
+  printf 'x\n' > "$GREAL/machines"
+  run install
+  [[ "$output" != *"Traceback"* ]]
+  [ "$(cat "$GREAL/machines")" = "x" ]
+}
+
+# --- review round: FIFO examples must not hang, and non-regular examples are skipped ---------
+
+@test "seeding: a FIFO as machines/example.txt never hangs and writes nothing" {
+  build_grids
+  mkdir -p "$GREAL/machines"
+  mkfifo "$GREAL/machines/example.txt"
+  run timeout 20 python3 -B "$G/scripts/grid" --grid-dir "$G" install
+  [ "$status" -ne 124 ]
+  [[ "$output" != *"Traceback"* ]]
+  [ ! -e "$GREAL/machines/testhost.txt" ]
+}
+
+@test "seeding: a symlinked or directory example file is skipped and nothing is written" {
+  build_grids
+  mkdir -p "$GREAL/machines" "$T/outside"
+  printf 'SECRET\n' > "$T/outside/secret"
+  # machines/example.txt as a link to an outside file: no host overlay is seeded from it.
+  ln -s "$T/outside/secret" "$GREAL/machines/example.txt"
+  run install
+  [ "$status" -eq 0 ]
+  [ ! -e "$GREAL/machines/testhost.txt" ]
+  [ -f "$GREAL/baseline-submodules.txt" ]
+  # ... or as a directory.
+  rm "$GREAL/machines/example.txt"
+  mkdir "$GREAL/machines/example.txt"
+  run install
+  [ ! -e "$GREAL/machines/testhost.txt" ]
+  # The baseline example as a link: it is still READ for the wired set, but never copied.
+  rm -r "$GREAL/machines/example.txt" "$GREAL/baseline-submodules.txt"
+  rm "$GREAL/baseline-submodules.example.txt"
+  printf 'up\n' > "$T/outside/secret"
+  ln -s "$T/outside/secret" "$GREAL/baseline-submodules.example.txt"
+  run install
+  [ ! -e "$GREAL/baseline-submodules.txt" ]
+  [ "$(cat "$T/outside/secret")" = "up" ]
+}
+
+@test "seeding: a normal install still seeds both files from the examples" {
+  build_grids
+  mkdir -p "$GREAL/machines"
+  printf 'up\n' > "$GREAL/machines/example.txt"
+  run install
+  [ "$status" -eq 0 ]
+  [ -f "$GREAL/baseline-submodules.txt" ]
+  [ ! -L "$GREAL/baseline-submodules.txt" ]
+  [ "$(cat "$GREAL/baseline-submodules.txt")" = "up" ]
+  [ "$(cat "$GREAL/machines/testhost.txt")" = "up" ]
 }
 
 @test "every audit.py subprocess runs python with -B" {

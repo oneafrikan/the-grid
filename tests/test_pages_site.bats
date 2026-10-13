@@ -289,9 +289,9 @@ nested_fixture() {
   [ "$(grep -h 'persist-credentials: false' "$REPO_ROOT"/.github/workflows/*.yml | wc -l)" -ge 2 ]
 }
 
-@test "tests.yml: only pull_request runs are cancelled, and the job has 25 minutes" {
+@test "tests.yml: only pull_request runs are cancelled, and the job has 45 minutes" {
   grep -qE '^[[:space:]]*cancel-in-progress:.*pull_request' "$REPO_ROOT/.github/workflows/tests.yml"
-  grep -qE '^[[:space:]]*timeout-minutes:[[:space:]]*25[[:space:]]*$' "$REPO_ROOT/.github/workflows/tests.yml"
+  grep -qE '^[[:space:]]*timeout-minutes:[[:space:]]*45[[:space:]]*$' "$REPO_ROOT/.github/workflows/tests.yml"
 }
 
 @test "dependabot keeps the github-actions pins current" {
