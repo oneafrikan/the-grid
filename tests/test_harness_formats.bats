@@ -1015,3 +1015,88 @@ print("refused both")'
   [ "$(cat "$sb/victim/canary-top.txt")" = keep ]
   [ ! -e "$sb/victim/a.txt" ]
 }
+
+# A marker-shaped thing that is not a plain file (dir, FIFO) is not compose.py's marker. The run
+# is refused, and the failure cleanup must not treat it as proof that the user's dir at the swap
+# name is ours (it used to, and deleted it).
+@test "NF-044: a dir or FIFO at a marker path never gets the user's swap-name dir deleted (both writers)" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out" kind t d m
+  for kind in dir fifo; do
+    rm -rf "$out"; mkdir -p "$out/fx"
+    for d in "$out/fx/_claude-code.tmp" "$out/fx.tmp"; do
+      mkdir -p "$d"; printf 'mine\n' > "$d/canary.txt"
+      if [ "$kind" = dir ]; then mkdir "$d.compose-owned"; else mkfifo "$d.compose-owned"; fi
+    done
+    for t in claude-code default; do
+      if [ "$t" = default ]; then
+        run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+      else
+        run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$out"
+      fi
+      echo "$kind $t: $output"
+      [ "$status" -ne 0 ]
+      [[ "$output" != *"Traceback"* ]]
+    done
+    for d in "$out/fx/_claude-code.tmp" "$out/fx.tmp"; do
+      [ "$(cat "$d/canary.txt")" = mine ]
+    done
+  done
+}
+
+# A failed swap whose rollback also fails leaves the previous output in <name>.old. It must be
+# kept (and named in the error), not deleted by the failure cleanup. os.rename is made to fail
+# only for the moves that put new content in place and for one rollback move.
+@test "NF-044: a failed swap with a failed rollback keeps the previous output and says where" {
+  run env REPO_ROOT="$REPO_ROOT" TMP="$TMP" "$PY" -c '
+import os, sys
+from pathlib import Path
+sys.path.insert(0, os.environ["REPO_ROOT"] + "/agent-factory")
+import compose
+
+real_rename = os.rename
+def run_case(label, setup, fn, fail_src, keep_rel):
+    base = Path(os.environ["TMP"]) / label
+    out = base / "out"
+    target, files = setup(out)
+    def rename(src, dst, *a, **k):
+        if fail_src(Path(src), Path(dst)):
+            raise OSError(5, "injected")
+        return real_rename(src, dst, *a, **k)
+    os.rename = rename
+    try:
+        fn(target, files)
+    except SystemExit as e:
+        msg = str(e.code)
+    else:
+        raise SystemExit(label + ": no failure")
+    finally:
+        os.rename = real_rename
+    old = Path(str(target) + ".old")
+    assert "kept at" in msg and str(old) in msg, (label, msg)
+    for rel in keep_rel:
+        assert (old / rel).is_file(), (label, rel, os.listdir(old) if old.is_dir() else "no old dir")
+    # not deleted next run by mistake: its marker is gone, so the next claim refuses it
+    assert not Path(str(old) + ".compose-owned").exists(), label
+
+def setup_project(out):
+    p = out / "fx"; p.mkdir(parents=True)
+    (p / "a.txt").write_text("A"); (p / "b.txt").write_text("B")
+    return p, {"new.txt": "n"}
+# project: moving anything out of old/b.txt back, and new content in, fail
+run_case("proj", setup_project, compose.install_project,
+         lambda s, d: s.parent.name == "fx.tmp" or (s.parent.name == "fx.old" and s.name == "b.txt"),
+         ["b.txt"])
+
+def setup_tree(out):
+    t = out / "fx" / "_claude-code"; t.mkdir(parents=True)
+    (t / "prev.txt").write_text("P")
+    return t, {"new.txt": "n"}
+# tree: tmp -> target fails, and so does old -> target (the restore)
+run_case("tree", setup_tree, compose.install_tree,
+         lambda s, d: s.name in ("_claude-code.tmp", "_claude-code.old"), ["prev.txt"])
+print("kept")'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"kept"* ]]
+}

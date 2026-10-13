@@ -92,7 +92,9 @@ one 5-file source, a different artifact shape per `--target`:
 
 Output is regenerable and idempotent: re-running with an unchanged config
 produces byte-identical files (each target's output dir is rebuilt in a `.tmp` dir and swapped
-into place, so a failed run leaves the previous output intact).
+into place, so a failed run leaves the previous output intact). Each `.tmp`/`.old` dir is paired
+with a `<name>.compose-owned` marker file; compose.py only clears leftovers it marked, and refuses
+(never deletes) a `.tmp`/`.old` dir without one.
 `projects/` output is gitignored — the compose config is the tracked artefact.
 
 > **On a machine that just pulled new source, recompose before wiring.** A `git
