@@ -490,6 +490,10 @@ def read_grid_lock(grid_dir, sources):
         raise GridError("grid: grid.lock must be an object with lockVersion 1 and an entries list")
 
     entries, skipped_kinds = [], set()
+    # First entry seen for each identity. install places EVERY entry, while the lock check
+    # compares by (name, source): a hand-added twin would be placed yet invisible to the gate,
+    # so any of the three identities appearing twice is refused here, for every command.
+    seen_by = {}
     for index, entry in enumerate(doc["entries"]):
         label = _entry_label(index, entry)
         if not isinstance(entry, dict):
@@ -521,6 +525,12 @@ def read_grid_lock(grid_dir, sources):
             raise GridError("grid: grid.lock %s: repos/%s is a symlink" % (label, entry["source"]))
         if not is_contained(grid_dir, entry["source"], dest):
             raise GridError("grid: grid.lock %s: %s escapes repos/%s" % (label, dest, entry["source"]))
+        for what, key in (("destination", ("dest", dest)),
+                          ("name and source", ("name", entry["name"], entry["source"]))):
+            if key in seen_by:
+                raise GridError("grid: grid.lock %s duplicates %s (same %s)"
+                                % (label, seen_by[key], what))
+            seen_by[key] = label
         item = dict(entry)
         item["dest"] = dest
         entries.append(item)
@@ -827,12 +837,75 @@ def dirty_paths(repo_dir, path):
     return dirty
 
 
-def generate_lock(grid_dir, cfg, warn=True):
+def git_status(args, timeout=GIT_TIMEOUT):
+    """Run `git <args>` WITHOUT raising on a non-zero exit; return (returncode, stdout).
+
+    For questions whose answer is the exit code (`merge-base --is-ancestor`, `rev-parse
+    --verify -q`). A missing git or a timeout is still a GridError.
+    """
+    try:
+        proc = subprocess.run(["git"] + list(args), env=git_env(), stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, timeout=timeout, encoding="utf-8",
+                              errors="surrogateescape")
+    except subprocess.TimeoutExpired:
+        raise GridError("grid: git timed out after %ds: git %s" % (timeout, " ".join(args)))
+    except FileNotFoundError:
+        raise GridError("grid: git is required but not on PATH")
+    return proc.returncode, proc.stdout
+
+
+def check_sha_on_ref(repo, source, sha, ref, shallow_ok=False):
+    """GridError unless commit `sha` is on source's declared `ref` (or a tag points at it).
+
+    install fetches the pinned sha directly and never looks at the ref, so without this a
+    commit that is on no branch of the upstream (or only on a fork sharing its object
+    store) could be locked. Accepted: an ancestor of the remote-tracking ref (origin/HEAD
+    for ref HEAD, else origin/<ref>, or the tag <ref>), or any commit a tag points at
+    (D53 default: tags allowed). The proof needs history: a shallow checkout that cannot
+    show the ancestry is a failure, or with `shallow_ok` a notice and no check.
+    The sha is only as trustworthy as the review of the lock change itself.
+    """
+    if run_git(["-C", repo, "tag", "--points-at", sha]).strip():
+        return
+    names = (["refs/remotes/origin/HEAD"] if ref == "HEAD"
+             else ["refs/remotes/origin/" + ref, "refs/tags/" + ref])
+    present = [n for n in names
+               if git_status(["-C", repo, "rev-parse", "--verify", "-q", n + "^{commit}"])[0] == 0]
+    shown = "repos/%s" % source
+    fetch_arg = "" if ref == "HEAD" else " " + ref
+    if not present:
+        raise GridError("grid: %s: cannot check that %s is on ref %s: the remote-tracking ref is "
+                        "missing in the checkout; run: git -C %s fetch origin%s"
+                        % (shown, sha[:12], ref, shown, fetch_arg))
+    for name in present:
+        rc, _out = git_status(["-C", repo, "merge-base", "--is-ancestor", sha, name])
+        if rc == 0:
+            return
+        if rc != 1:
+            raise GridError("grid: %s: cannot check ancestry of %s against %s (git exit %d)"
+                            % (shown, sha[:12], name, rc))
+    if git_status(["-C", repo, "rev-parse", "--is-shallow-repository"])[1].strip() == "true":
+        if shallow_ok:
+            notice("grid: %s: shallow checkout, cannot prove %s is on ref %s; reachability not checked"
+                   % (shown, sha[:12], ref))
+            return
+        raise GridError("grid: %s: shallow checkout, cannot prove %s is on ref %s; run: "
+                        "git -C %s fetch --unshallow origin" % (shown, sha[:12], ref, shown))
+    raise GridError("grid: %s: commit %s is not on the declared ref %s (nor tagged); lock a commit "
+                    "that is on it, or fetch it: git -C %s fetch origin%s"
+                    % (shown, sha[:12], ref, shown, fetch_arg))
+
+
+def generate_lock(grid_dir, cfg, warn=True, strict=True):
     """Build the grid.lock entries (sorted list of dicts) from the real submodule checkouts.
 
     Exit 2 (GridError) when a skill path is unsafe, a checkout is missing, not at
-    the commit the parent records, or dirty, or a skill holds a nested submodule
-    or an escaping symlink. `warn` controls the `../` stderr warning (off in --check).
+    the commit the parent records, or dirty, or the recorded commit is not on the
+    source's declared ref (nor tagged), or a skill holds a nested submodule or an
+    escaping symlink. `warn` controls the `../` stderr warning (off in --check).
+    `strict` is False only for --check: there a SHALLOW checkout that cannot prove
+    reachability is skipped with a notice (CI clones submodules at depth 1) instead
+    of failing; writing a lock (strict) still refuses.
     """
     baseline = os.path.join(grid_dir, cfg["wired"]["baseline"])
     if not os.path.isfile(baseline):
@@ -862,6 +935,7 @@ def generate_lock(grid_dir, cfg, warn=True):
             raise GridError("grid: repos/%s is at %s but the parent repo records %s; check out the "
                             "recorded commit (or stage the pointer bump) before locking"
                             % (source, head[:12], sha[:12]))
+        check_sha_on_ref(repo, source, sha, cfg["sources"][source]["ref"], shallow_ok=not strict)
         with BlobReader(repo) as blobs:
             for name, path, target in sorted(by_source[source]):
                 label = "repos/%s/%s" % (source, path)
@@ -948,14 +1022,23 @@ def lock_check(grid_dir, cfg):
         return report_findings(findings)
 
     locked = read_grid_lock(grid_dir, cfg["sources"])
-    for source in sorted(set(e["source"] for e in locked)):
-        if not os.path.exists(os.path.join(grid_dir, "repos", source, ".git")):
-            sys.stderr.write("grid: lock --check not possible here: repos/%s is not a checkout\n" % source)
-            return EXIT_NOT_CHECKABLE
+    sources = sorted(set(e["source"] for e in locked))
+    missing = [s for s in sources if not os.path.exists(os.path.join(grid_dir, "repos", s, ".git"))]
+    if missing and len(missing) == len(sources):
+        # Nothing at all to compare against: not checkable here (exit 3, as before).
+        sys.stderr.write("grid: lock --check not possible here: repos/%s is not a checkout\n" % missing[0])
+        return EXIT_NOT_CHECKABLE
+    # Some checkouts are absent: check the present ones and say which were skipped, so one
+    # missing checkout cannot hide a stale hash in another source.
+    for source in missing:
+        sys.stderr.write("grid: lock --check skipped repos/%s (not a checkout)\n" % source)
+    locked = [e for e in locked if e["source"] not in missing]
 
     # Regenerate in memory and diff by (name, source). Only `kind: skill` entries
-    # are compared: the reader already skipped other kinds with a notice.
-    fresh = dict(((e["name"], e["source"]), e) for e in generate_lock(grid_dir, cfg, warn=False))
+    # are compared: the reader already skipped other kinds with a notice. The
+    # duplicate (name, source) case cannot reach here: read_grid_lock rejects it.
+    fresh = dict(((e["name"], e["source"]), e) for e in generate_lock(grid_dir, cfg, warn=False, strict=False)
+                 if e["source"] not in missing)
     have = dict(((e["name"], e["source"]), e) for e in locked)
     for key in sorted(fresh):
         if key not in have:
@@ -2148,7 +2231,18 @@ def cmd_lock(args):
     cfg = load_grid_yaml(grid_dir)
     if args.check:
         return lock_check(grid_dir, cfg)
+    # A baseline source that is not checked out contributes no wired links, so lock would drop
+    # its skills without a word and replace the tracked lock with a partial one. Refuse first.
+    adds, _denies = read_wired_entries([os.path.join(grid_dir, cfg["wired"]["baseline"])])
+    for repo in sorted(set(a.split("/")[0] for a in adds)):
+        if repo in cfg["sources"] and not os.path.exists(os.path.join(grid_dir, "repos", repo, ".git")):
+            raise GridError("grid: baseline source '%s' has no checkout at repos/%s; initialise that "
+                            "submodule first (grid.lock left unchanged)" % (repo, repo))
     entries = generate_lock(grid_dir, cfg)
+    if not entries:
+        # e.g. a clone with no submodules and an empty baseline: not a lock anyone wants.
+        raise GridError("grid: refusing to write grid.lock with 0 entries (are the submodules "
+                        "checked out?); grid.lock left unchanged")
     # atomic_write leaves an unchanged file alone, so a second run is byte-identical
     # (same inode, same mtime).
     wrote = atomic_write(os.path.join(grid_dir, "grid.lock"), render_lock(entries))

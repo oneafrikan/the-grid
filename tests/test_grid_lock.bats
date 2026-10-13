@@ -414,6 +414,168 @@ open(sys.argv[1], "w").write(json.dumps(doc, indent=2, sort_keys=True) + "\n")
   [ -z "$(find "$G" -name __pycache__ -not -path '*/repos/up/*')" ]
 }
 
+# --- (h) lock integrity (private WP-033) ---------------------------------------------------------------
+
+# edit_lock PYCODE: run PYCODE (python, `doc` is the parsed grid.lock) and write it back.
+edit_lock() {
+  python3 -B -c '
+import json, sys
+path = sys.argv[1]
+doc = json.load(open(path))
+exec(sys.argv[2])
+json.dump(doc, open(path, "w"), indent=2, sort_keys=True)
+open(path, "a").write("\n")
+' "$G/grid.lock" "$1"
+}
+
+# orphan_commit: add a commit upstream on a branch that is then deleted, so no ref in the
+# upstream reaches it. Sets ORPHAN to its sha and fetches it into repos/up with the pointer bumped.
+orphan_commit() {
+  git -C "$U" checkout -q -b scratch
+  printf 'orphan\n' >> "$U/skills/alpha/SKILL.md"
+  git -C "$U" commit -q -a -m "on a deleted branch"
+  ORPHAN=$(git -C "$U" rev-parse HEAD)
+  git -C "$U" checkout -q -
+  git -C "$U" branch -q -D scratch
+  git -C "$G/repos/up" fetch -q origin "$ORPHAN"
+  git -C "$G/repos/up" checkout -q "$ORPHAN"
+  git -C "$G" update-index --add --cacheinfo "160000,$ORPHAN,repos/up"
+}
+
+@test "lock of a sha that is not reachable from the declared ref exits 2 naming the source and sha" {
+  orphan_commit
+  run lock
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"repos/up"* ]]
+  [[ "$output" == *"${ORPHAN:0:12}"* ]]
+  [ ! -e "$G/grid.lock" ]
+}
+
+@test "lock of a sha that a tag points at passes" {
+  orphan_commit
+  git -C "$U" tag v1 "$ORPHAN"
+  git -C "$G/repos/up" fetch -q origin "refs/tags/v1:refs/tags/v1"
+  run lock
+  [ "$status" -eq 0 ]
+  [ -f "$G/grid.lock" ]
+}
+
+@test "lock --check re-proves reachability" {
+  run lock
+  [ "$status" -eq 0 ]
+  orphan_commit
+  run lock --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"${ORPHAN:0:12}"* ]]
+}
+
+@test "lock with the remote-tracking ref absent exits 2 with the fetch hint" {
+  git -C "$G/repos/up" update-ref -d refs/remotes/origin/HEAD
+  run lock
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"fetch origin"* ]]
+}
+
+@test "a shallow checkout that cannot prove reachability: lock exits 2 mentioning shallow, lock --check skips with a notice" {
+  run lock
+  [ "$status" -eq 0 ]
+  rm -rf "$G/repos/up"
+  git clone -q --depth 1 "file://$U" "$G/repos/up"
+  printf 'next\n' >> "$U/skills/alpha/SKILL.md"
+  upstream_commit "tip moves on"
+  tip=$(git -C "$U" rev-parse HEAD)
+  git -C "$G/repos/up" fetch -q --depth 1 origin "$tip"
+  git -C "$G/repos/up" checkout -q "$tip"
+  git -C "$G" update-index --add --cacheinfo "160000,$tip,repos/up"
+  run lock
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"shallow"* ]]
+  run lock --check
+  [ "$status" -ne 2 ]
+  [[ "$output" == *"shallow"* ]]
+}
+
+@test "a duplicate (name, source) entry in grid.lock is rejected by lock --check, exit 2 naming both entries" {
+  run lock
+  [ "$status" -eq 0 ]
+  edit_lock 'e = dict(doc["entries"][0]); e["path"] = "skills/other"; doc["entries"].append(e)'
+  run lock --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"duplicate"* ]]
+  [[ "$output" == *"entry 0"* ]]
+  [[ "$output" == *"entry 2"* ]]
+}
+
+@test "a duplicate dest in grid.lock (same source and path under another name) is rejected, exit 2" {
+  run lock
+  [ "$status" -eq 0 ]
+  edit_lock 'e = dict(doc["entries"][0]); e["name"] = "alpha-copy"; doc["entries"].append(e)'
+  run lock --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"duplicate"* ]]
+  [[ "$output" == *"entry 0"* ]]
+  [[ "$output" == *"entry 2"* ]]
+}
+
+@test "lock with no checkouts exits non-zero and leaves grid.lock byte-identical" {
+  run lock
+  [ "$status" -eq 0 ]
+  before=$(cksum < "$G/grid.lock")
+  rm -rf "$G/repos/up"
+  mkdir "$G/repos/up"
+  run lock
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repos/up"* ]]
+  [ "$before" = "$(cksum < "$G/grid.lock")" ]
+}
+
+@test "lock that would write zero entries is refused and leaves grid.lock byte-identical" {
+  run lock
+  [ "$status" -eq 0 ]
+  before=$(cksum < "$G/grid.lock")
+  printf 'project:core\n' > "$G/baseline-submodules.example.txt"
+  run lock
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"0 entries"* ]]
+  [ "$before" = "$(cksum < "$G/grid.lock")" ]
+}
+
+# add_second_source: grid.yaml and the baseline also name `up2`, which has NO checkout.
+add_second_source() {
+  python3 -B -c '
+import sys
+p = sys.argv[1]
+s = open(p).read()
+s = s.replace("wired:", "  up2:\n    url: file:///nonexistent/up2\nwired:", 1)
+open(p, "w").write(s)
+' "$G/grid.yaml"
+  printf 'up\nup2\n' > "$G/baseline-submodules.example.txt"
+}
+
+@test "a baseline source without a checkout is refused by lock, naming it, and grid.lock is not written" {
+  add_second_source
+  run lock
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"up2"* ]]
+  [ ! -e "$G/grid.lock" ]
+}
+
+@test "lock --check with one missing checkout and one stale present source reports the stale one and names the skipped one" {
+  run lock
+  [ "$status" -eq 0 ]
+  add_second_source
+  edit_lock 'e = dict(doc["entries"][0]); e["name"] = "gamma"; e["source"] = "up2"; e["path"] = "skills/gamma"; doc["entries"].append(e)'
+  printf 'changed body\n' >> "$U/skills/alpha/SKILL.md"
+  upstream_commit "alpha changed"
+  fixture_advance "$G" "$U"
+  run lock --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lock changed alpha"* ]]
+  [[ "$output" == *"skipped repos/up2"* ]]
+  # The skipped source is not reported as removed.
+  [[ "$output" != *"gamma"* ]]
+}
+
 # --- (g) the real repo -------------------------------------------------------------------------------
 
 @test "the committed grid.lock matches the real checkouts (or is not checkable here)" {

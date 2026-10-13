@@ -36,9 +36,27 @@ Pin every default-wired skill to a reviewed commit and content hash, generated f
 - **THEN** `grid lock` exits 2 naming it
 
 #### Scenario: Check not possible here
-- **WHEN** `grid lock --check` runs and a source named in `grid.lock` has no `repos/<source>/.git`
+- **WHEN** `grid lock --check` runs and no source named in `grid.lock` has a `repos/<source>/.git`
 - **THEN** it exits 3 with a message and `gate.sh` reports the check as skipped, not failed
+
+#### Scenario: Partial checkouts are still checked
+- **WHEN** `grid lock --check` runs and some, but not all, sources named in `grid.lock` have a checkout
+- **THEN** it compares the present sources, names each skipped source on stderr, and exits 1 if a present source is stale
 
 #### Scenario: Symlink escaping the skill directory
 - **WHEN** a wired skill contains a symlink whose target resolves outside the skill directory
 - **THEN** `grid lock` exits 2 and names the file
+
+#### Scenario: Locked commit not on the declared ref
+- **WHEN** the commit recorded for a source is not an ancestor of the source's declared ref (`origin/HEAD` for `HEAD`) and no tag points at it
+- **THEN** `grid lock` and `grid lock --check` exit 2 naming the source, the commit and the ref, and `grid lock` writes nothing
+- **AND** a shallow checkout that cannot show the ancestry makes `grid lock` exit 2, while `grid lock --check` skips the reachability check for it with a notice
+- **AND** the lock is only as trustworthy as the review of the change that edits it: the commit is checked against the ref at lock time, not against what upstream does later
+
+#### Scenario: Duplicate lock entries
+- **WHEN** `grid.lock` holds two entries with the same destination, or the same name and source
+- **THEN** every command that reads it (`lock --check`, `install`, `doctor`, `drift`) exits 2 naming both entries
+
+#### Scenario: Empty or partial lock refused
+- **WHEN** `grid lock` would write zero entries, or a baseline source named in `grid.yaml` has no checkout
+- **THEN** it exits 2 naming the cause and leaves `grid.lock` unchanged
