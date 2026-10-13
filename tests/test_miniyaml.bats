@@ -488,3 +488,168 @@ print(' ' * 3000 + 'b: 1')" > "$W/t.yaml"
   rejected "a: 'x\n" 1
   rejected 'a: [x\n' 1
 }
+
+# --- WP-047 review follow-up: whitespace, line breaks, flow structure, markers -------------
+# miniyaml must never type or structure an input differently from PyYAML (or crash on it).
+
+@test "Unicode whitespace is data, not padding: a trailing NBSP keeps the value a string" {
+  printf 'k: 1\xc2\xa0\n' > "$W/t.yaml"
+  run mini_json "$W/t.yaml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"k": "1\u00a0"}' ]
+}
+
+@test "a trailing U+3000 and a trailing U+2003 keep the value a string" {
+  printf 'a: 2\xe3\x80\x80\nb: 3\xe2\x80\x83\n' > "$W/t.yaml"
+  run mini_json "$W/t.yaml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"a": "2\u3000", "b": "3\u2003"}' ]
+}
+
+@test "a leading NBSP keeps the value a string" {
+  printf 'k: \xc2\xa07\n' > "$W/t.yaml"
+  run mini_json "$W/t.yaml"
+  [ "$output" = '{"k": "\u00a07"}' ]
+}
+
+@test "a colon followed by an NBSP is not a key separator" {
+  rejected 'k:\xc2\xa01\n' 1
+}
+
+@test "an NBSP before '#' does not start a comment" {
+  printf 'k: a\xc2\xa0# b\n' > "$W/t.yaml"
+  run mini_json "$W/t.yaml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"k": "a\u00a0# b"}' ]
+}
+
+@test "a lone CR line break is rejected with its line" {
+  # The comment would swallow the next line here, where PyYAML starts a new one at the CR.
+  rejected 'a: 1 #c\rb: 2\n' 1
+}
+
+@test "mixed CR and CRLF endings are rejected at the lone CR" {
+  rejected 'a: 1\r\nb: 2 #c\rc: 3\r\n' 2
+}
+
+@test "a CR at the very end of the text is rejected" {
+  rejected 'a: 1\r' 1
+}
+
+@test "NEL (U+0085) is a line break to PyYAML and is rejected" {
+  rejected 'a: 1\nb: 2 #c\xc2\x85c: 3\n' 2
+}
+
+@test "LINE SEPARATOR (U+2028) and PARAGRAPH SEPARATOR (U+2029) are rejected" {
+  rejected 'a: 1 \xe2\x80\xa8b: 2\n' 1
+  rejected 'a: 1\nb: x\xe2\x80\xa9\n' 2
+}
+
+@test "VT and FF are rejected" {
+  rejected 'a: 1\x0bb: 2\n' 1
+  rejected 'a: 1\nb: 2\x0c\n' 2
+}
+
+@test "a flow map key with a colon against the next token is rejected" {
+  rejected 'k: {a:true}\n' 1
+  rejected 'k: {1:a}\n' 1
+  rejected 'k: {true:b}\n' 1
+}
+
+@test "a bracket or brace inside a bare flow scalar is rejected" {
+  rejected 'k: [a:{}]\n' 1
+  rejected 'k: [a{b]\n' 1
+  rejected 'k: {a: x]}\n' 1
+}
+
+@test "a quoted flow key may touch its colon, as in JSON" {
+  printf 'k: {"a":1, '"'"'b'"'"': 2}\n' > "$W/t.yaml"
+  run mini_json "$W/t.yaml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"k": {"a": 1, "b": 2}}' ]
+}
+
+@test "a document-start marker with content is rejected, not read as a key" {
+  rejected '--- {a: b}\n' 1
+  rejected 'a: 1\n--- b\n' 2
+}
+
+@test "a bare document-start or document-end marker line is rejected" {
+  rejected '---\na: 1\n' 1
+  rejected 'a: 1\n...\n' 2
+}
+
+@test "a non-scalar flow map key is a ParseError, not a TypeError" {
+  rejected 'k: {[]: v}\n' 1
+  rejected 'k: {{a: b}: v}\n' 1
+}
+
+@test "a digit followed by an Arabic-Indic digit is a string, not the integer 13" {
+  printf 'k: 1\xd9\xa3\n' > "$W/t.yaml"
+  run mini_json "$W/t.yaml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"k": "1\u0663"}' ]
+}
+
+@test "a bare block key that PyYAML would type is rejected (integer, boolean, null)" {
+  rejected '1: a\n' 1
+  rejected 'a: 1\ntrue: b\n' 2
+  rejected 'null: c\n' 1
+}
+
+@test "an inline value starting with ':' or '?' is rejected" {
+  rejected 'k: [:x]\n' 1
+  rejected 'k: [?x]\n' 1
+  rejected 'k: {a: ?x}\n' 1
+}
+
+# Second differential, wider alphabet: Unicode spaces, every line-break character PyYAML honours,
+# and structural characters. Whatever miniyaml accepts must not crash and must equal PyYAML;
+# where PyYAML itself rejects the text miniyaml is allowed to be lenient (a known, documented
+# gap: it never mis-types, it only fails to refuse some malformed input).
+@test "differential 2: no crash and no type or structure disagreement over a wide alphabet" {
+  local py=python3
+  [ -x "$REPO_ROOT/agent-factory/.venv/bin/python" ] && py="$REPO_ROOT/agent-factory/.venv/bin/python"
+  if ! "$py" -c "import yaml" 2>/dev/null; then
+    skip "PyYAML not importable by $py"
+  fi
+  run "$py" -c '
+import itertools, sys, yaml
+sys.path.insert(0, sys.argv[1])
+import miniyaml
+alphabet = ["a", "1", "-", ":", "#", ",", " ", "\t", "[", "]", "{", "}", "\"", "\x27",
+            "\xa0", "\u3000", "\u2003", "\r", "\r\n", "\x85", "\u2028", "\u2029", "\x0b", "\x0c", ".", "?"]
+words = ["".join(p) for n in (1, 2) for p in itertools.product(alphabet, repeat=n)]
+templates = ["k: @\n", "- @\n", "k: [@]\n", "k: [x, @]\n", "k: {a: @}\n", "k: {@: 1}\n", "@: 1\n",
+             "k: @\nj: 2\n", "@"]
+def same(a, b):
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        return a.keys() == b.keys() and all(same(a[k], b[k]) for k in a)
+    if isinstance(a, list):
+        return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
+    return a == b or (a != a and b != b)
+bad = []
+for t in templates:
+    for w in words:
+        text = t.replace("@", w)
+        try:
+            mine = miniyaml.loads(text)
+        except miniyaml.ParseError:
+            continue
+        except Exception as exc:
+            bad.append("CRASH %r: %r" % (text, exc)); continue
+        try:
+            theirs = yaml.safe_load(text)
+        except Exception:
+            continue
+        if not same(mine, theirs):
+            bad.append("%r: miniyaml %r, PyYAML %r" % (text, mine, theirs))
+print(len(bad), "problems")
+print("\n".join(bad[:15]))
+sys.exit(1 if bad else 0)
+' "$LIB"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
