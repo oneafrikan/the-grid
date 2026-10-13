@@ -50,7 +50,8 @@ Pin every default-wired skill to a reviewed commit and content hash, generated f
 #### Scenario: Locked commit not on the declared ref
 - **WHEN** the commit recorded for a source is not an ancestor of the source's declared ref (`origin/HEAD` for `HEAD`) and no tag points at it
 - **THEN** `grid lock` and `grid lock --check` exit 2 naming the source, the commit and the ref, and `grid lock` writes nothing
-- **AND** a shallow checkout that cannot show the ancestry makes `grid lock` exit 2, while `grid lock --check` skips the reachability check for it with a notice
+- **AND** a shallow checkout that cannot show the ancestry makes `grid lock` and `grid lock --check` exit 2 naming the source
+- **AND** `grid lock --check` skips that reachability check, with a notice, only when `GRID_LOCK_ALLOW_SHALLOW=1` is set (CI clones submodules at depth 1); `grid lock` never skips it
 - **AND** the lock is only as trustworthy as the review of the change that edits it: the commit is checked against the ref at lock time, not against what upstream does later
 
 #### Scenario: Duplicate lock entries

@@ -966,7 +966,11 @@ def git_status(args, timeout=GIT_TIMEOUT):
     return proc.returncode, proc.stdout
 
 
-def check_sha_on_ref(repo, source, sha, ref, shallow_ok=False):
+# Opt-in for `lock --check` on shallow checkouts (see check_sha_on_ref). Exactly "1".
+SHALLOW_ENV = "GRID_LOCK_ALLOW_SHALLOW"
+
+
+def check_sha_on_ref(repo, source, sha, ref, shallow_ok=False, hint_opt_in=False):
     """GridError unless commit `sha` is on source's declared `ref` (or a tag points at it).
 
     install fetches the pinned sha directly and never looks at the ref, so without this a
@@ -975,6 +979,9 @@ def check_sha_on_ref(repo, source, sha, ref, shallow_ok=False):
     for ref HEAD, else origin/<ref>, or the tag <ref>), or any commit a tag points at
     (D53 default: tags allowed). The proof needs history: a shallow checkout that cannot
     show the ancestry is a failure, or with `shallow_ok` a notice and no check.
+    `shallow_ok` is the explicit opt-in (generate_lock sets it only for `lock --check`
+    with GRID_LOCK_ALLOW_SHALLOW=1): a silent skip would let a sha that is on no
+    upstream ref pass the check.
     The sha is only as trustworthy as the review of the lock change itself.
     """
     if run_git(["-C", repo, "tag", "--points-at", sha]).strip():
@@ -1002,7 +1009,10 @@ def check_sha_on_ref(repo, source, sha, ref, shallow_ok=False):
                    % (shown, sha[:12], ref))
             return
         raise GridError("grid: %s: shallow checkout, cannot prove %s is on ref %s; run: "
-                        "git -C %s fetch --unshallow origin" % (shown, sha[:12], ref, shown))
+                        "git -C %s fetch --unshallow origin%s"
+                        % (shown, sha[:12], ref, shown,
+                           "; or, for `lock --check` in CI (depth-1 clones), set %s=1 to skip this proof"
+                           % SHALLOW_ENV if hint_opt_in else ""))
     raise GridError("grid: %s: commit %s is not on the declared ref %s (nor tagged); lock a commit "
                     "that is on it, or fetch it: git -C %s fetch origin%s"
                     % (shown, sha[:12], ref, shown, fetch_arg))
@@ -1015,9 +1025,11 @@ def generate_lock(grid_dir, cfg, warn=True, strict=True):
     the commit the parent records, or dirty, or the recorded commit is not on the
     source's declared ref (nor tagged), or a skill holds a nested submodule or an
     escaping symlink. `warn` controls the `../` stderr warning (off in --check).
-    `strict` is False only for --check: there a SHALLOW checkout that cannot prove
-    reachability is skipped with a notice (CI clones submodules at depth 1) instead
-    of failing; writing a lock (strict) still refuses.
+    `strict` is False only for --check. There a SHALLOW checkout that cannot prove
+    reachability fails (exit 2) like in `grid lock`, unless GRID_LOCK_ALLOW_SHALLOW=1
+    is set: then it is skipped with a notice (CI clones submodules at depth 1).
+    Fail closed by default, because a skip lets a dangling-upstream sha pass; writing
+    a lock (strict) never skips.
     """
     baseline = os.path.join(grid_dir, cfg["wired"]["baseline"])
     if not os.path.isfile(baseline):
@@ -1047,7 +1059,9 @@ def generate_lock(grid_dir, cfg, warn=True, strict=True):
             raise GridError("grid: repos/%s is at %s but the parent repo records %s; check out the "
                             "recorded commit (or stage the pointer bump) before locking"
                             % (source, head[:12], sha[:12]))
-        check_sha_on_ref(repo, source, sha, cfg["sources"][source]["ref"], shallow_ok=not strict)
+        check_sha_on_ref(repo, source, sha, cfg["sources"][source]["ref"],
+                         shallow_ok=(not strict) and os.environ.get(SHALLOW_ENV) == "1",
+                         hint_opt_in=not strict)
         with BlobReader(repo) as blobs:
             for name, path, target in sorted(by_source[source]):
                 label = "repos/%s/%s" % (source, path)
