@@ -476,9 +476,10 @@ def source_root(grid_dir, source):
     """<realpath(<grid>/repos)>/<source>: the containment root of one source.
 
     realpath is applied to repos/ ONLY, never to the source dir. A symlinked repos/
-    (the whole directory, e.g. kept on another disk) is a deliberate layout and is
-    followed; a symlinked repos/<source> must stay refused, and resolving it here
-    would make it contain its own target (see is_contained).
+    (the whole directory) is a deliberate layout and is followed, but its target must be
+    on the same filesystem as the grid: install and repair rename staged copies into
+    place and fail with EXDEV across filesystems. A symlinked repos/<source> must stay
+    refused, and resolving it here would make it contain its own target (see is_contained).
     """
     return os.path.join(os.path.realpath(os.path.join(grid_dir, "repos")), source)
 
@@ -1637,10 +1638,11 @@ def _seed_copy(grid_dir, src, rel):
     """
     parts = rel.split("/")
     # The example is read with O_NOFOLLOW too, so a symlinked example cannot pull an
-    # outside file's content into a seeded file; anything that is not a regular file is
-    # treated as a missing example.
+    # outside file's content into a seeded file. O_NONBLOCK: a blocking open of a FIFO waits
+    # for a writer for ever, so the type check below must come from an fstat on a descriptor
+    # that is already open. Anything that is not a regular file is treated as a missing example.
     try:
-        sfd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
+        sfd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
     except OSError:
         return
     dirfd = None
@@ -1655,8 +1657,18 @@ def _seed_copy(grid_dir, src, rel):
                 os.mkdir(part, 0o777, dir_fd=dirfd)
                 nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
             except OSError:
-                raise GridError("grid: refusing to seed %s: %s is a symlink or not a directory "
-                                "(grid never writes through a symlink)" % (rel, part))
+                # A symlinked directory (a user may keep machines/ in a private repo) is not
+                # written through, but it is not fatal either: skip this file and go on.
+                # Anything else that is in the way (a regular file) is an error.
+                try:
+                    is_link = stat.S_ISLNK(os.lstat(part, dir_fd=dirfd).st_mode)
+                except OSError:
+                    is_link = False
+                if is_link:
+                    notice("grid: not seeding %s: %s is a symlink and grid never writes through "
+                           "one" % (rel, part))
+                    return
+                raise GridError("grid: refusing to seed %s: %s is not a directory" % (rel, part))
             os.close(dirfd)
             dirfd = nfd
         try:

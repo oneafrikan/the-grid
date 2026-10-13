@@ -992,7 +992,7 @@ print(g.is_contained(sys.argv[1], "up", "repos/up/skills/alpha"))
 }
 
 # --- symlinked repos/ directory (hardening, refs private NF-066 E1) ---------------------------
-# Some machines keep repos/ on another disk behind a symlink. That whole-directory link
+# Some machines keep repos/ elsewhere (same filesystem) behind a symlink. That whole-directory link
 # is legitimate; what must stay refused is a link at repos/<source> or below it. The
 # containment root is realpath(<grid>/repos)/<source>, so nothing can land outside the
 # real repos/ tree. Every command that reads the lock (install, doctor, drift, repair,
@@ -1416,15 +1416,20 @@ open(p, "w").write("\n".join(rows))
   [ ! -e "$T/outside/NEWHOST" ]
 }
 
-@test "seeding: machines/ symlinked outside the grid is refused, nothing is written through it" {
+# Changed in the review round (VH5): a symlinked machines/ used to abort the whole install
+# with exit 2. A user may keep machines/ symlinked into a private repo, and base installed fine
+# on a new host, so grid still refuses to WRITE through the link but skips the host overlay
+# with a notice and carries on. Only a machines/ that is not a directory at all stays exit 2.
+@test "seeding: machines/ symlinked outside the grid: nothing is written through it, a notice, install continues" {
   build_grids
   mkdir -p "$T/outside/mdir"
   : > "$T/outside/mdir/example.txt"
   ln -s "$T/outside/mdir" "$GREAL/machines"
   run install
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 0 ]
   [[ "$output" == *"symlink"* ]]
   [ ! -e "$T/outside/mdir/testhost.txt" ]
+  [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
   # A dangling machines/ link has no example behind it, so there is nothing to seed:
   # no traceback and nothing created at its target.
   rm "$GREAL/machines"
@@ -1432,6 +1437,51 @@ open(p, "w").write("\n".join(rows))
   run install
   [[ "$output" != *"Traceback"* ]]
   [ ! -e "$T/outside/nodir" ]
+}
+
+@test "seeding: machines that is a regular file gives no traceback and is left alone" {
+  build_grids
+  printf 'x\n' > "$GREAL/machines"
+  run install
+  [[ "$output" != *"Traceback"* ]]
+  [ "$(cat "$GREAL/machines")" = "x" ]
+}
+
+# --- review round: FIFO examples must not hang, and non-regular examples are skipped ---------
+
+@test "seeding: a FIFO as machines/example.txt never hangs and writes nothing" {
+  build_grids
+  mkdir -p "$GREAL/machines"
+  mkfifo "$GREAL/machines/example.txt"
+  run timeout 20 python3 -B "$G/scripts/grid" --grid-dir "$G" install
+  [ "$status" -ne 124 ]
+  [[ "$output" != *"Traceback"* ]]
+  [ ! -e "$GREAL/machines/testhost.txt" ]
+}
+
+@test "seeding: a symlinked or directory example file is skipped and nothing is written" {
+  build_grids
+  mkdir -p "$GREAL/machines" "$T/outside"
+  printf 'SECRET\n' > "$T/outside/secret"
+  # machines/example.txt as a link to an outside file: no host overlay is seeded from it.
+  ln -s "$T/outside/secret" "$GREAL/machines/example.txt"
+  run install
+  [ "$status" -eq 0 ]
+  [ ! -e "$GREAL/machines/testhost.txt" ]
+  [ -f "$GREAL/baseline-submodules.txt" ]
+  # ... or as a directory.
+  rm "$GREAL/machines/example.txt"
+  mkdir "$GREAL/machines/example.txt"
+  run install
+  [ ! -e "$GREAL/machines/testhost.txt" ]
+  # The baseline example as a link: it is still READ for the wired set, but never copied.
+  rm -r "$GREAL/machines/example.txt" "$GREAL/baseline-submodules.txt"
+  rm "$GREAL/baseline-submodules.example.txt"
+  printf 'up\n' > "$T/outside/secret"
+  ln -s "$T/outside/secret" "$GREAL/baseline-submodules.example.txt"
+  run install
+  [ ! -e "$GREAL/baseline-submodules.txt" ]
+  [ "$(cat "$T/outside/secret")" = "up" ]
 }
 
 @test "seeding: a normal install still seeds both files from the examples" {
