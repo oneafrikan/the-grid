@@ -518,6 +518,23 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
   done
 }
 
+@test "a deeply nested budget-target.json exits non-zero with a named message, no traceback (NF-055 VF3)" {
+  skill_raw alpha "name: alpha" "description: Does a thing"
+  local n=100000
+  # json.load raises RecursionError (not ValueError) on nesting this deep.
+  python3 -c "import sys; sys.stdout.write('[' * $n)" > "$MOCK_GRID/docs/budget-target.json"
+  budget --check
+  echo "$output" | head -c 600
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"docs/budget-target.json"*"nested"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+  python3 -c "import sys; sys.stdout.write('{\"a\":' * $n)" > "$MOCK_GRID/docs/budget-target.json"
+  budget --update-target
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"docs/budget-target.json"*"nested"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+}
+
 @test "a quoted top-level key fails --check and names the file" {
   skill_raw q "name: q" '"description": Quoted key probe text'
   write_target 1000 0 0 0 250 100000
