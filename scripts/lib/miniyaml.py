@@ -23,6 +23,12 @@ Rejected (ParseError)
   anchors/aliases, tags, block scalars (| and >), flow collections spanning
   lines, tab indentation, duplicate keys, floats/null/yes/no (bare words whose
   meaning differs between YAML versions), bare strings containing ': '.
+  The governing rule: if PyYAML would read a bare scalar as a different value
+  (True/FALSE, 010, 0x1F, 1_0, +1, 1:30, 2026-10-11, .inf ...) or fail on it
+  (`<<`, `- ` inside a value, `#` inside a flow collection, TAB before `#`), it
+  is a ParseError here too. Quote the value to get a string. Also: nesting that
+  is too deep, or an integer too long to convert, is a ParseError (callers
+  catch only ParseError); a leading UTF-8 BOM is ignored, as PyYAML does.
 
 API
   loads(text) -> dict | list | None (None for an empty document)
@@ -44,9 +50,22 @@ class ParseError(Exception):
 # Bare words PyYAML would turn into non-strings (null, booleans other than
 # true/false, floats). Reading them as strings would make this reader disagree
 # with PyYAML, so they are refused instead. Quote them to get a string.
-_AMBIGUOUS_WORDS = {"null", "~", "yes", "no", "on", "off"}
-_FLOAT_RE = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?$|[-+]?\d+[eE][-+]?\d+$")
-_INT_RE = re.compile(r"-?\d+$")
+# `=` and `<<` are YAML 1.1 value/merge tags PyYAML has no constructor for.
+_AMBIGUOUS_WORDS = {"null", "~", "yes", "no", "on", "off", "=", "<<"}
+# [0-9], never \d: \d also matches Arabic-Indic and other Unicode digits, which
+# PyYAML reads as strings.
+_FLOAT_RE = re.compile(r"[-+]?(?:[0-9][0-9_]*\.[0-9_]*|\.[0-9_]+)(?:[eE][-+]?[0-9]+)?$|[-+]?[0-9][0-9_]*[eE][-+]?[0-9]+$")
+_INT_RE = re.compile(r"-?(?:0|[1-9][0-9]*)$")  # the only integer spelling both readers agree on
+# Words PyYAML reads as a number or date but _INT_RE does not accept: leading zero
+# (octal), `_` separators, a leading `+`, 0x/0o/0b prefixes, sexagesimal (1:30),
+# dates and timestamps, .inf/.nan. Refused rather than read as strings.
+_NUMBERISH_RES = (
+    re.compile(r"[-+]?[0-9][0-9_]*$"),
+    re.compile(r"[-+]?0[xXoObB]"),
+    re.compile(r"[-+]?[0-9][0-9_]*(?::[0-9]+)+(?:\.[0-9_]*)?$"),
+    re.compile(r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt ].*)?$"),
+    re.compile(r"[-+]?\.(?:inf|nan)$", re.I),
+)
 # First characters that start YAML features this reader does not implement.
 _BAD_START = {
     "&": "anchors are not supported",
@@ -106,17 +125,35 @@ def _bare_scalar(raw, lineno):
         raise ParseError(lineno, _BAD_START[s[0]])
     if s in ("true", "false"):
         return s == "true"
+    if s.lower() in ("true", "false"):
+        # PyYAML reads True/FALSE as booleans; returning the string would disagree.
+        raise ParseError(lineno, "ambiguous bare value %r (write true/false, or quote it)" % s)
+    if s in ("-", "?") or s.startswith(("- ", "? ")):
+        # A nested sequence entry or a complex-key indicator: PyYAML builds a
+        # collection (or fails) where this reader would keep a string.
+        raise ParseError(lineno, "a '- ' or '? ' indicator is not allowed inside a value")
     if _INT_RE.match(s):
-        return int(s)
-    if s.lower() in _AMBIGUOUS_WORDS or _FLOAT_RE.match(s):
+        try:
+            return int(s)
+        except ValueError:  # more digits than int() converts (4300 by default)
+            raise ParseError(lineno, "integer too long")
+    if (s.lower() in _AMBIGUOUS_WORDS or _FLOAT_RE.match(s)
+            or any(rx.match(s) for rx in _NUMBERISH_RES)):
         raise ParseError(lineno, "ambiguous bare value %r (quote it to get a string)" % s)
     if ": " in s or s.endswith(":"):
         raise ParseError(lineno, "bare string contains ': ' (quote it)")
     return s
 
 
-def _strip_comment(text):
-    """Cut a trailing ` # comment` from a BARE text (no quotes involved)."""
+def _strip_comment(text, lineno=None):
+    """Cut a trailing ` # comment` from a BARE text (no quotes involved).
+
+    With `lineno`, a TAB before the `#` is a ParseError: PyYAML does not end a
+    plain scalar there (it is an error or part of the scalar), so cutting would
+    disagree. Callers that only look for emptiness pass no lineno.
+    """
+    if lineno is not None and "\t#" in text:
+        raise ParseError(lineno, "TAB before '#': use a space to start a comment")
     m = re.search(r"(?:^|\s)#", text)
     return text[:m.start()] if m else text
 
@@ -159,7 +196,15 @@ def _flow_value(text, i, lineno, closers):
         i += 1
     if i >= len(text):
         raise ParseError(lineno, "flow collection spans lines or is unterminated")
-    return _bare_scalar(text[start:i], lineno), i
+    raw = text[start:i]
+    if raw.startswith((":", "?")):
+        # PyYAML reads a flow `?x` as a one-key map and rejects `:x`.
+        raise ParseError(lineno, "an inline value cannot start with ':' or '?' (quote it)")
+    if re.search(r"(?:^|\s)#", raw):
+        # PyYAML ends or rejects a flow collection at a comment; reading it as part
+        # of the scalar would disagree.
+        raise ParseError(lineno, "'#' comment inside an inline collection")
+    return _bare_scalar(raw, lineno), i
 
 
 def _flow_list(text, i, lineno):
@@ -226,7 +271,7 @@ def _parse_value(text, lineno):
         val, end = _flow_map(text, 0, lineno)
         _only_comment_left(text[end:], lineno)
         return val
-    return _bare_scalar(_strip_comment(text), lineno)
+    return _bare_scalar(_strip_comment(text, lineno), lineno)
 
 
 # --- block structure ---------------------------------------------------------
@@ -252,12 +297,21 @@ def _split_key(text, lineno):
         raise ParseError(lineno, "empty key")
     if key[0] in _BAD_START:
         raise ParseError(lineno, _BAD_START[key[0]])
+    if key == "<<":
+        raise ParseError(lineno, "merge keys ('<<') are not supported")
+    # PyYAML types a bare key like a value (`1:` is an int key, `true:` a bool),
+    # this reader always keeps a string: refuse any key that would not be one.
+    if not isinstance(_bare_scalar(key, lineno), str):
+        raise ParseError(lineno, "ambiguous bare key %r (quote it to get a string)" % key)
     # Whatever follows the colon, including a trailing comment, is the value text.
     return key, text[m.start() + 1:]
 
 
 class _Parser:
     def __init__(self, text):
+        if text.startswith("\ufeff"):
+            text = text[1:]  # one leading BOM, as PyYAML (Windows editors add it)
+        self.lineno = 1  # line being parsed, for errors raised far from it (RecursionError)
         # lines: [lineno, indent, text] with blanks and comment-only lines dropped.
         self.lines = []
         for n, raw in enumerate(text.split("\n"), 1):
@@ -291,6 +345,7 @@ class _Parser:
         out = {}
         while self.pos < len(self.lines):
             n, ind, text = self.lines[self.pos]
+            self.lineno = n
             if ind < indent:
                 break
             if ind > indent:
@@ -318,6 +373,7 @@ class _Parser:
         out = []
         while self.pos < len(self.lines):
             n, ind, text = self.lines[self.pos]
+            self.lineno = n
             if ind < indent:
                 break
             if ind > indent:
@@ -342,9 +398,10 @@ class _Parser:
 
 def loads(text):
     """Parse restricted YAML text. Raises ParseError(line, msg) on anything else."""
+    parser = _Parser(text)
     try:
-        return _Parser(text).parse_document()
+        return parser.parse_document()
     except RecursionError:
         # Pathologically nested flow collections / blocks: a parse error like any
         # other, not an interpreter traceback (callers expect ParseError only).
-        raise ParseError(0, "nesting too deep")
+        raise ParseError(parser.lineno, "nesting too deep")

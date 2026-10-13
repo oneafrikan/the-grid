@@ -612,6 +612,11 @@ class Rule:
             raise UsageError("policy: rule %r: bad %s: %s" % (rid, field, exc))
 
 
+# Top-level keys policy.yaml may carry (`version` is the schema number, never read).
+POLICY_KEYS = frozenset(("version", "owned_roots", "skip_dirs", "sources", "limits",
+                         "negation", "builtin", "classes", "rules"))
+
+
 class Policy:
     def __init__(self, path):
         try:
@@ -628,6 +633,11 @@ class Policy:
             raise UsageError("%s: not valid UTF-8" % path)
         if not isinstance(doc, dict):
             raise UsageError("%s: top level must be a map" % path)
+        # A misspelt key must not silently fall back to its default (an empty
+        # owned_roots would scan the owned tree as upstream).
+        unknown = sorted(str(k) for k in doc if k not in POLICY_KEYS)
+        if unknown:
+            raise UsageError("%s: unknown top-level key %s" % (path, ", ".join(repr(k) for k in unknown)))
         self.owned_roots = [str(x) for x in (doc.get("owned_roots") or [])]
         self.skip_dirs = set(str(x) for x in (doc.get("skip_dirs") or []))
         limits = doc.get("limits") or {}

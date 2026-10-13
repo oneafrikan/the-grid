@@ -287,6 +287,9 @@ def load_grid_yaml(grid_dir):
             text = fh.read()
     except FileNotFoundError:
         raise GridError("grid: grid.yaml not found in %s" % grid_dir)
+    except UnicodeDecodeError:
+        # Not a traceback with exit 1: a bad file is exit 2, as audit reports it.
+        raise _yaml_error("not valid UTF-8")
     try:
         doc = miniyaml.loads(text)
     except miniyaml.ParseError as exc:

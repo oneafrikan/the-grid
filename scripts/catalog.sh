@@ -48,14 +48,29 @@ fi
 # the 200-char cap cut multibyte descriptions (em dashes etc.) at different
 # points per machine. Under LC_ALL=C every awk counts bytes; the cut is then
 # backed off to a UTF-8 character boundary so it never splits a character.
+#
+# Agreement with scripts/lib/skill_frontmatter.py (the reader wire.sh uses): the same
+# file must give the same name and description from either, so the awk follows its
+# rules for the inputs that used to differ (tests/test_catalog.bats pins each):
+#   - the frontmatter opens on LINE 1 (a leading BOM is ignored) and closes at the next
+#     line that is only `---` (surrounding whitespace allowed); an UNCLOSED fence is no
+#     frontmatter at all, so the skill falls back to its directory name;
+#   - the FIRST `name:` and the FIRST `description:` win (a later duplicate is ignored);
+#   - a plain (unquoted, non-block) description ends at ` #` (a YAML comment).
+# Not aligned, on purpose (about 1320 python spawns would slow the gate): backslash
+# escapes inside a double-quoted description (the python reader decodes \" and \\, this
+# one keeps them) and a multi-line `name: |` (python folds the continuation lines, this
+# reads the first line only). No wired skill uses either.
 parse_skill() {
   LC_ALL=C awk '
     function trim(s){ sub(/^[[:space:]]+/,"",s); sub(/[[:space:]]+$/,"",s); return s }
-    BEGIN { fm=0; coll=0; name=""; desc="" }
+    BEGIN { fm=0; coll=0; gotname=0; gotdesc=0; plain=0; name=""; desc="" }
     {
-      # Frontmatter fence: first --- opens, second --- closes.
-      if ($0 ~ /^---[[:space:]]*$/) {
-        if (fm==0) { fm=1; next }
+      if (NR==1) sub(/^(\357\273\277)+/, "")      # leading UTF-8 BOM(s)
+      # Frontmatter fence: only line 1 opens (a fence anywhere else leaves fm at 0: no
+      # frontmatter), the next fence line closes.
+      if ($0 ~ /^[[:space:]]*---[[:space:]]*$/) {
+        if (NR==1) { fm=1; next }
         else if (fm==1) { fm=2; exit }
       }
       if (fm!=1) next
@@ -66,20 +81,30 @@ parse_skill() {
         else { coll=0 }   # de-indented line ends the block; re-parse it below
       }
 
-      if ($0 ~ /^name:/) {
-        v=$0; sub(/^name:[[:space:]]*/,"",v); v=trim(v)
+      if ($0 ~ /^name[[:space:]]*:/) {
+        if (gotname) next                          # first name: wins
+        gotname=1
+        v=$0; sub(/^name[[:space:]]*:[[:space:]]*/,"",v); v=trim(v)
+        if (v !~ /^["'\'']/) { sub(/[[:space:]]+#.*$/,"",v); v=trim(v) }   # plain: " #" is a comment
         gsub(/^["'\'']|["'\'']$/,"",v); name=v; next
       }
-      if ($0 ~ /^description:/) {
-        v=$0; sub(/^description:[[:space:]]*/,"",v); v=trim(v)
-        # Block/folded indicators (>, |, with optional +/-) → gather next lines.
-        if (v ~ /^[>|][+-]?$/ || v=="") { coll=1; desc="" }
-        else { gsub(/^["'\'']|["'\'']$/,"",v); desc=v; coll=1 }
+      if ($0 ~ /^description[[:space:]]*:/) {
+        if (gotdesc) next                          # first description: wins
+        gotdesc=1
+        v=$0; sub(/^description[[:space:]]*:[[:space:]]*/,"",v); v=trim(v)
+        # Block/folded indicators (>, |, with optional +/-/digit) → gather next lines.
+        if (v ~ /^[>|][-+0-9]*$/ || v=="") { coll=1; desc=""; plain=(v=="") }
+        else { plain=(v !~ /^["'\'']/); gsub(/^["'\'']|["'\'']$/,"",v); desc=v; coll=1 }
         next
       }
     }
     END {
+      # An unclosed fence (or no fence) is no frontmatter: print an empty record, so the
+      # caller falls back to the directory name, as it does for skill_frontmatter.py.
+      if (fm!=2) { name=""; desc=""; plain=0 }
       desc=trim(desc)
+      # A plain scalar ends at " #" (YAML comment); quoted and block scalars keep their #.
+      if (plain) { sub(/[[:space:]]+#.*$/,"",desc); desc=trim(desc) }
       # Quick summary = first sentence (up to ". "), else the whole thing.
       summary=desc
       if (match(desc, /\. /)) summary=substr(desc, 1, RSTART)
