@@ -974,6 +974,68 @@ sys.exit(g.main(["--grid-dir", grid, "install"]))
   [ -z "$(ls -A "$T/outside")" ]
 }
 
+# VH1: the E1 change stopped checking `repos` itself for a swap between check and act. A
+# same-user process swapping repos/ for a symlink in that window must not redirect the delete
+# or the placement outside the realpath(repos)/<source> that was checked.
+@test "remove_placed_dir: repos/ swapped for a symlink after the check does not delete elsewhere" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  mkdir -p "$T/elsewhere"
+  cp -R "$GREAL/repos/up" "$T/elsewhere/up"
+  run python3 -B -c '
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+grid, elsewhere = sys.argv[1], sys.argv[2]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+rows, _foreign = g.read_ledger()
+row = [r for r in rows if r["name"] == "alpha"][0]
+real = g.placed_dir_status
+def swapping(grid_dir, r, force=False):
+    res = real(grid_dir, r, force)
+    # The window: after the check said ok, before the delete.
+    os.rename(grid + "/repos", grid + "/repos.moved")
+    os.symlink(elsewhere, grid + "/repos")
+    return res
+g.placed_dir_status = swapping
+status, detail = g.remove_placed_dir(grid, row, True)
+print("status=%s %s" % (status, detail))
+' "$GREAL" "$T/elsewhere"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"status=removed"* ]]
+  [ -f "$T/elsewhere/up/skills/alpha/SKILL.md" ]
+}
+
+@test "place_staged: repos/ swapped for a symlink after the containment check places nothing elsewhere" {
+  build_grids
+  mkdir -p "$T/elsewhere/up"
+  run python3 -B -c '
+import os, importlib.util, sys
+from importlib.machinery import SourceFileLoader
+grid, elsewhere = sys.argv[1], sys.argv[2]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+real = g.is_contained
+def swapping(grid_dir, source, dest):
+    res = real(grid_dir, source, dest)
+    # Only the call made by place_staged, and only once: swap repos/ for a link.
+    if sys._getframe(1).f_code.co_name == "place_staged" and not os.path.islink(grid + "/repos"):
+        os.rename(grid + "/repos", grid + "/repos.moved")
+        os.symlink(elsewhere, grid + "/repos")
+    return res
+g.is_contained = swapping
+sys.exit(g.main(["--grid-dir", grid, "install"]))
+' "$GREAL" "$T/elsewhere"
+  [ "$status" -ne 0 ]
+  # Only the entry whose check was swapped is refused; a later entry sees a stable (supported)
+  # symlinked repos/ and is placed normally.
+  [[ "$output" == *"repos changed while placing"* ]]
+  [ ! -e "$T/elsewhere/up/skills" ]
+}
+
 @test "is_contained is False for a path under a symlinked repos/<source> (root is not the resolved source dir)" {
   build_grids
   outside_canary
