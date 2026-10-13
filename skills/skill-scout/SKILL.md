@@ -7,7 +7,7 @@ description: Scout public agent-skill directories (ranked by installs) and propo
 
 Find popular Claude skills the-grid doesn't have yet, and propose them — ranked
 by install count. **Propose only.** Never add submodules or run `wire.sh`; the
-user adds skills via the-grid's normal flow (`git submodule add … && bash wire.sh`).
+user adds skills via the-grid's normal flow (`git submodule add … && bash scripts/wire.sh`).
 
 ## How to run
 
@@ -52,7 +52,7 @@ user adds skills via the-grid's normal flow (`git submodule add … && bash wire
    ```bash
    git submodule add <repo-url> repos/<name>
    git submodule update --init
-   bash wire.sh
+   bash scripts/wire.sh
    ```
 
 ## Notes

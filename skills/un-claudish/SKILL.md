@@ -24,7 +24,7 @@ See `sections/kill-list.md` for the kill-list.
 
 When invoked within a session:
 
-1. **Pass 1: Detect & Strip:** Scan the source text and identify all violations of the kill-list above.
+1. **Pass 1: Detect & Strip:** Scan the source text and identify all violations of the kill-list in `sections/kill-list.md`.
 2. **Pass 2: Rewrite:** Produce the revised version in active voice, using simple Anglo-Saxon business terms (e.g., "use" instead of "utilize", "shows" instead of "serves as a testament to").
 3. **Pass 3: Verification Check:** Scan the rewrite to ensure no replacement tells (especially leftover em-dashes or replacement cliches) crept back in.
 

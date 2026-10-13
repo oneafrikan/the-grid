@@ -233,7 +233,7 @@ The installer never runs `launchctl`, `systemctl`, `crontab` or `loginctl`, apar
 
 ### 5. Prune report
 
-`scripts/prune-report.sh [--window-days 90] [--rare 2] [--min-days 28] [--usage-dir D] [--out FILE] [--json]` wraps `prune_report.py`; `--usage-dir` defaults to `${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}/usage`. Read-only: it writes stdout (or `--out`) and nothing else.
+`scripts/prune-report.sh [--window-days 90] [--rare 2] [--min-days 14] [--usage-dir D] [--out FILE] [--json]` wraps `prune_report.py`; `--usage-dir` defaults to `${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}/usage`. Read-only: it writes stdout (or `--out`) and nothing else.
 
 `aggregate(dir, window_days)` reads every `*.json` in the usage dir, ignores non-JSON files, files that do not parse and unknown `schema` (the ignored file names are returned under `ignored` so the report can print them), and returns a dict keyed by harness name, each value holding: `skills`/`agents`/`slash` totals over the window (window ends at the latest `days` key), `hosts` count, `first_day`/`last_day`/`coverage_days` (inclusive span across all hosts), union of `wired`, and `tokens`: `{ "YYYY-MM": { model: {msgs, in, out, cache_read, cache_write} } }` summed over hosts and over ALL stored days (months are the unit, so the window does not cut them). `hooks` totals over the window are returned alongside `skills`/`agents`/`slash`. `prune_report.py` never reads `tokens` or `hooks`; the host-file recipe for reading it is in `docs/usage.md`.
 
@@ -244,7 +244,7 @@ uses  = skill-tool calls + slash invocations of that name, all hosts, in window
 state = never (0) | rare (1..--rare) | used
 ```
 
-Skipped from proposals: names in `docs/prune-keep.txt` (one name per line, `#` comments); everything when `coverage_days < --min-days` (report says "insufficient history: N days of M required" and stops after the evidence section).
+Skipped from proposals: names in `docs/prune-keep.txt` (one name per line, `#` comments); everything when `active_days < --min-days` (distinct days holding data; report says "insufficient history: N active days of M required" and stops after the evidence section).
 
 Proposals, ordered by chars saved, numbered so the operator can reply "apply 2, skip 3":
 
@@ -292,7 +292,7 @@ Evidence footer: hosts reporting, day coverage, and the standing caveats (only S
 - Decided: `prune-report` is `scripts/prune-report.sh`; `manifest-lock-install` may later route `grid prune-report` to it; reason: this change must not depend on that change.
 - Decided: aggregation is an importable function used by the report, not its own CLI; reason: one entry point is enough.
 - Decided: usage for a skill = Skill-tool calls + slash invocations of the same name; reason: user-typed slash skills may not emit a Skill call, and over-counting only makes the report more conservative.
-- Decided: defaults `--window-days 90 --rare 2 --min-days 28`; reason: one month of data across hosts is the minimum to call anything unused.
+- Decided: defaults `--window-days 90 --rare 2 --min-days 14`; reason: two weeks of active days across hosts is the minimum to call anything unused (the code counts distinct days holding data, not the calendar span).
 - Decided: repo demotion threshold 90% unused; reason: avoids proposing to drop a repo for one dead skill (that case is a `name-only` line).
 - Decided: `docs/prune-keep.txt` is tracked and starts with `handoff` and `grid-help`; reason: front-door skills must never be proposed even if unused for a month.
 - Decided: the report prints the `skillOverrides` snippet in the documented shape and never writes settings; reason: settings.json is not grid-owned and the override is per machine.

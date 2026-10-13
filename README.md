@@ -378,7 +378,7 @@ GRID_DIR=/path/to/grid SKILLS_DIR=/path/to/skills bash scripts/wire.sh
 
 ## Reconciling a machine (removing stale shadows)
 
-`wire.sh` won't clobber a real directory that shadows a grid skill (safety). On a fresh machine those shadows are often stale copies. `reconcile.sh` removes them so the-grid owns the slot, then re-wires.
+`wire.sh` won't clobber a real directory that shadows a grid skill (safety). On a fresh machine those shadows are often stale copies. `reconcile.sh` moves them aside so the-grid owns the slot, then re-wires.
 
 ```bash
 bash scripts/reconcile.sh           # dry run — list shadowing dirs

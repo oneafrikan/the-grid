@@ -1,6 +1,6 @@
 ---
 name: caveman
-description: Ultra-compressed replies, no filler or hedging, technical accuracy kept. Use when the user says "caveman mode", "terse", "be brief" or "less tokens".
+description: Ultra-compressed replies, no filler or hedging, technical accuracy kept. Use when the user says "caveman mode", "spartan mode", "terse", "be brief" or "less tokens".
 ---
 
 Terse mode. Minimum words, maximum signal. No performance — just compression. Think telegram: every word earns its place.

@@ -266,8 +266,8 @@ Refresh one with `git submodule update --remote repos/<name>`.
 
 `wire.sh` won't clobber a *real* directory that shadows a grid skill (safety).
 On a fresh machine those shadows are often stale, root-owned copies. `reconcile.sh`
-removes them so the-grid owns the slot, then re-wires. It parses wire.sh's own
-`skip (real dir, not managed)` output, so it never hardcodes names.
+moves them aside so the-grid owns the slot, then re-wires. It learns the names from
+a dry wire into a throwaway home (`GRID_DRY_HOME`), so it never hardcodes names.
 
 ```bash
 bash scripts/reconcile.sh          # dry run — list shadowing dirs

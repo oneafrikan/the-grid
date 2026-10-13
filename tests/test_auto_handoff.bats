@@ -493,6 +493,35 @@ fake_token() { printf 'gh%s_%s' p "$(printf 'a%.0s' $(seq 36))"; }
   git -C "$P" show --name-only --format= HEAD | grep -q "^notes/handoffs/2026-01-01-testhost-stub-handoff.md$"
 }
 
+@test "mapped location matches the directory case-insensitively: | proj | LOGS | finds Logs/ (R24.qa.F9)" {
+  mk_tx 6
+  mkdir -p "$HOME/.the-grid-private" "$P/Logs"
+  rmdir "$P/LOGS"
+  printf '| proj | LOGS |\n' > "$HOME/.the-grid-private/handoff-locations.md"
+  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$P/Logs"
+  run_worker
+  allowed="$(claude_line)"; allowed="${allowed#*--allowedTools }"; allowed="${allowed%% --disallowedTools*}"
+  contains "$allowed" "$(edit_rule "$P/Logs")"
+  log_has "action=done"
+  git -C "$P" show --name-only --format= HEAD | grep -q "^Logs/2026-01-01-testhost-stub-handoff.md$"
+}
+
+@test "a matched row whose directory is missing grants no rule and does not fall through to LOGS" {
+  mk_tx 6
+  mkdir -p "$HOME/.the-grid-private"
+  # P/LOGS exists (the default), but the row names a directory that does not.
+  [ -d "$P/LOGS" ]
+  printf '| proj | notes/handoffs |\n' > "$HOME/.the-grid-private/handoff-locations.md"
+  export STUB_CLAUDE_MODE=handoff-fallback
+  run_worker
+  log_has "action=done"
+  allowed="$(claude_line)"; allowed="${allowed#*--allowedTools }"; allowed="${allowed%% --disallowedTools*}"
+  lacks "$allowed" "$P/LOGS"
+  lacks "$allowed" "$P/notes"
+  contains "$(claude_line)" "Target directory: none"
+  [ ! -e "$P/notes" ]
+}
+
 @test "mapped location outside cwd is committed in its own repo" {
   mk_tx 6
   OR="$MOCK_HOOK_ROOT/other-repo"
