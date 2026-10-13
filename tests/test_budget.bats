@@ -725,6 +725,89 @@ linebreak_cases() {
   [ "$(jget "$output" entries.skills.1.listing_chars)" = "12" ]     # crlf: no stray \r counted
 }
 
+# --- fence-adjacent separators (NF-060 VG2) ---------------------------------------------------
+# A separator glued to a fence line (`---<sep>`) is not a fence to a reader that cuts on \n
+# alone, but IS one to a reader that also breaks on it. Whichever side it sits on, the file
+# must fail --check by name (never measure silently, never a traceback).
+
+# fence_seps — printf escapes for the separators that can sit next to `---`.
+fence_seps() { printf '%s\n' '\x0b' '\x0c' '\xc2\x85' '\xe2\x80\xa8' '\xe2\x80\xa9' '\x1c'; }
+
+@test "a separator after the OPENING fence fails --check by name for every separator" {
+  local esc
+  write_target 1000 0 0 0 250 100000
+  while IFS= read -r esc; do
+    rm -rf "$MOCK_GRID/skills"; mkdir -p "$MOCK_GRID/skills/open"
+    # shellcheck disable=SC2059   # the escape is the point
+    printf -- "---${esc}\nname: open\ndescription: Does a thing\n---\nbody\n" > "$MOCK_GRID/skills/open/SKILL.md"
+    budget --check
+    echo "$esc -> $status $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"budget: FAIL skills/open/SKILL.md: "* ]] || false
+    [[ "$output" != *"Traceback"* ]] || false
+  done < <(fence_seps)
+}
+
+@test "a separator after the CLOSING fence fails --check by name for every separator" {
+  local esc
+  write_target 1000 0 0 0 250 100000
+  while IFS= read -r esc; do
+    rm -rf "$MOCK_GRID/skills"; mkdir -p "$MOCK_GRID/skills/close"
+    # shellcheck disable=SC2059
+    printf -- "---\nname: close\ndescription: Does a thing\n---${esc}\nbody\n" > "$MOCK_GRID/skills/close/SKILL.md"
+    budget --check
+    echo "$esc -> $status $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"budget: FAIL skills/close/SKILL.md: "* ]] || false
+    [[ "$output" != *"Traceback"* ]] || false
+  done < <(fence_seps)
+}
+
+# --- a long whitespace run must not hang the scalar reader (NF-060 VG1) ---------------------
+# The comment strip was `re.sub(r"\s+#.*$", ...)`, quadratic on a long whitespace run (a 1 MB
+# run took over 100 s). It is a linear scan now; these run under `timeout 5` so a regression is
+# a failure (status 124), not a hung CI job.
+
+@test "a 1 MB whitespace run inside a SKILL.md description finishes in under 5 s" {
+  local variant
+  write_target 5000000 0 0 0 5000000 100000
+  mkdir -p "$MOCK_GRID/skills/ws"
+  for variant in plain comment continuation; do
+    case "$variant" in
+      plain)        python3 -c 'import sys; sys.stdout.write("---\nname: ws\ndescription: a" + " " * (1 << 20) + "b\n---\nbody\n")' ;;
+      comment)      python3 -c 'import sys; sys.stdout.write("---\nname: ws\ndescription: a" + " " * (1 << 20) + "# c\n---\nbody\n")' ;;
+      continuation) python3 -c 'import sys; sys.stdout.write("---\nname: ws\ndescription: a\n  b" + " " * (1 << 20) + "c\n---\nbody\n")' ;;
+    esac > "$MOCK_GRID/skills/ws/SKILL.md"
+    GRID_DIR="$MOCK_GRID" run timeout 5 python3 "$BUDGET" --check
+    echo "$variant -> $status"
+    [ "$status" -ne 124 ]
+    [[ "$output" != *"Traceback"* ]] || false
+  done
+}
+
+@test "a 1 MB whitespace run inside a role.yaml description finishes in under 5 s" {
+  write_target 0 5000000 5000000 0 5000000 100000
+  mkdir -p "$MOCK_GRID/agent-factory/roles/ws"
+  python3 -c 'import sys; sys.stdout.write("name: ws\ndescription: a" + " " * (1 << 20) + "b\n")' > "$MOCK_GRID/agent-factory/roles/ws/role.yaml"
+  GRID_DIR="$MOCK_GRID" run timeout 5 python3 "$BUDGET" --check
+  echo "$status"
+  [ "$status" -ne 124 ]
+  [[ "$output" != *"Traceback"* ]] || false
+}
+
+@test "comment stripping keeps its meaning: ' #' and tab-# end the value, a bare # or '#' first does not" {
+  skill_raw c1 "name: c1" "description: keep this # drop this"        # "keep this"           = 9
+  skill_raw c2 "name: c2" $'description: keep	# drop this'            # tab before #: "keep" = 4
+  skill_raw c3 "name: c3" "description: a#b stays"                     # no space before #     = 9
+  skill_raw c4 "name: c4" "description: x   #   # y"                  # first # wins: "x"    = 1
+  budget --json
+  [ "$status" -eq 0 ]
+  [ "$(jget "$output" entries.skills.0.listing_chars)" = "9" ]
+  [ "$(jget "$output" entries.skills.1.listing_chars)" = "4" ]
+  [ "$(jget "$output" entries.skills.2.listing_chars)" = "9" ]
+  [ "$(jget "$output" entries.skills.3.listing_chars)" = "1" ]
+}
+
 # --- the real repo --------------------------------------------------------------
 
 @test "the real repo passes its own committed target on the example baseline (exit 0, or 3 when submodules are uninitialised)" {
