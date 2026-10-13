@@ -6,7 +6,7 @@
   (Socratic tutor for any topic), **`/oracle`** (learns about you; you choose your
   own name/role/avatar), and the `tank` subagent (agent-to-agent lessons from run
   logs, proposes changes, never applies them). All manual. Learning data is private,
-  under `~/.the-grid-private/learning/`.
+  kept in the private store outside this repo.
 - **Want a one-off capability?** A wired skill is a slash command — e.g.
   `/standup`, `/ponytail`, `/skill-scout`. Ask "is there a skill for X?" and
   check [SKILLS.md](../../../SKILLS.md) if unsure.
