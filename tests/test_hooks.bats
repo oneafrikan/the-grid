@@ -655,6 +655,25 @@ STUB
   [[ "$output" == *"not closed"* && "$output" == *"Simplify"* ]] || { echo "$output" >&2; false; }
 }
 
+@test "no-bypass: the 'not closed' message names apostrophes in heredocs and the -F <file> workaround" {
+  # the usual cause is a commit message heredoc holding don't / it's: the message must say
+  # so, not just "simplify", and name the way out
+  expect_block $'git commit -m "$(cat <<\'EOF\'\nfix: don\'t crash\nEOF\n)"'
+  [[ "$output" == *"apostrophe"* && "$output" == *"heredoc"* ]] || { echo "$output" >&2; false; }
+  [[ "$output" == *"git commit -F <file>"* ]] || { echo "$output" >&2; false; }
+  # and the workaround it names actually passes
+  expect_pass 'git commit -F msg.txt'
+}
+
+@test "README: the 'file run later' example is not a heredoc (a heredoc body is read as code, so it blocks)" {
+  # a heredoc whose body holds a git flag blocks under option B, so it cannot be the
+  # documented example of what slips through; a quoted string written by printf is
+  expect_block $'cat > run.sh <<EOF\ngit commit -n -m x\nEOF\nsh run.sh'
+  expect_pass $'printf \'%s\\n\' \'git commit -n -m x\' > run.sh; sh run.sh'
+  ! grep -qF 'EOF; sh run.sh' "$REPO_ROOT/hooks/README.md" || false
+  grep -qF "printf '%s\\n' 'git commit -n' > run.sh" "$REPO_ROOT/hooks/README.md"
+}
+
 @test "no-bypass: two apostrophes in a heredoc body pair up and can hide a later git call (accepted residual)" {
   # Documented, not fixed: with the body read as code, an EVEN number of apostrophes forms a
   # quoted span that swallows the text between them, including a later git call. An odd
@@ -1882,4 +1901,161 @@ _padded_line() {
   # 300 KB of blanks around nothing: still fails closed (a scan that cannot be shown to
   # be complete blocks); it must not become clean because the blanks collapsed
   expect_plain oversize-line "$(head -c 300000 /dev/zero | tr '\0' ' ')x"
+}
+
+# ===========================================================================
+# NF-057 (hardening, refs private NF-057): follow-ups to the strict-scan review. Each
+# value is plainly fake.
+# ===========================================================================
+
+# N3: a URL with an empty user name (redis://:password@host) is a password all the same.
+@test "url password: an empty user name is still a password (table row and strict row)" {
+  expect_plain  db-url-password 'redis://:S3cretPw9@cachehost:6379'
+  expect_strict db-url-password 'redis://:S3cretPw9@cachehost:6379'
+  expect_strict url-password 'https://:$ecretPw9@host'
+  expect_strict url-password 'https://:pa:ss12345@host'
+  expect_strict url-password 'https://:{pw123456}@host'
+}
+
+@test "url password: empty-user shapes that carry no password stay clean" {
+  # no password, port only, a path with @, a password shorter than the rows' minimum (the
+  # table row wants 3 characters, the strict row 6)
+  expect_strict clean 'see https://:8080/x@y'
+  expect_strict clean 'see http://:@host'
+  expect_strict clean 'see https://:ab@host'
+  expect_plain  clean 'see https://:ab@host'
+  expect_plain  clean 'see https://:${DB_PASSWORD}@host'
+}
+
+# (c): JSON that sits inside a string literal has its quotes escaped: {\"token\":\"V\"}.
+@test "assigned secret: an escaped-quote JSON key and value are judged like an unescaped one" {
+  local h32='0123456789abcdef0123456789abcdef' h40='0123456789abcdef0123456789abcdef01234567'
+  expect_plain  assigned-secret '{\"token\":\"'$h32'\"}'
+  expect_strict assigned-secret '{\"token\":\"'$h32'\"}'
+  expect_plain  assigned-secret '{\"api_key\":\"'$h40'\"}'
+  expect_strict assigned-secret '{\"password\":\"'$h40'\"}'
+  # JSON in JSON: two backslashes before each quote
+  expect_plain  assigned-secret '{\\\"token\\\":\\\"'$h32'\\\"}'
+  # an unescaped one still works, and the escape does not change the value rules
+  expect_plain  assigned-secret '{"token":"'$h32'"}'
+  expect_plain  clean '{\"token\":\"short\"}'
+  expect_plain  clean '{\"token\":\"$'$h32'\"}'
+  expect_strict clean '{\"token\":\"$'$h32'\"}'
+  # the placeholder exemption keeps working inside the escaped value (default mode only)
+  expect_plain  clean '{\"token\":\"exampleAb3dEAb3dEAb3dE\"}'
+  expect_strict assigned-secret '{\"token\":\"exampleAb3dEAb3dEAb3dE\"}'
+}
+
+# N5: a key-dense line made the per-key loop quadratic (about 20 s at 240 KB). The loop is
+# now bounded; a line with more keys than the bound is a finding, not a skip.
+@test "key-dense line: the per-key loop is bounded and fails closed" {
+  local line start
+  line="$(head -c 30000 /dev/zero | tr '\0' x | sed 's/x/token=1 /g')"   # 240 KB, 30,000 keys
+  start=$SECONDS
+  expect_plain key-dense-line "$line"
+  expect_strict key-dense-line "$line"
+  [ $((SECONDS - start)) -le 10 ] || { echo "took $((SECONDS - start)) s" >&2; false; }
+}
+
+@test "key-dense line: ordinary key counts are unaffected, and a real secret after many keys is still found" {
+  local few more v='Ab3dEf9Gh2Jk4Lm6Np8Q'
+  few="$(head -c 50 /dev/zero | tr '\0' x | sed 's/x/token=1 /g')"
+  expect_plain clean "$few"
+  expect_plain assigned-secret "${few}token=$v"
+  expect_strict assigned-secret "${few}token=$v"
+  # past the bound the line is reported (fails closed) rather than skipped
+  more="$(head -c 400 /dev/zero | tr '\0' x | sed 's/x/token=1 /g')"
+  expect_plain key-dense-line "${more}token=$v"
+}
+
+# (a): the key word, a long run of identifier characters and the = may straddle a piece cut
+# with neither piece holding the word and the =. A cut inside (or just after) such a run
+# is moved to the run's end.
+_identrun_line() {   # <pad before> <run length> <pad after> [<run char> [<key word>]]
+  # the run is underscores by default: a run of letters would be a base64-run hit in strict
+  # mode on the first piece, before the straddling key is ever in question
+  printf '%s%s%s="Ab3dEf9Gh2Jk4Lm6Np8Q"%s' \
+    "$(head -c "$1" /dev/zero | tr '\0' .)" "${5:-secret}" "$(head -c "$2" /dev/zero | tr '\0' "${4:-_}")" \
+    "$(head -c "$3" /dev/zero | tr '\0' .)"
+}
+
+@test "long line: a key word, a long identifier run and the = are found across a piece cut" {
+  local pad run
+  for pad in 3500 3900 4000 4090 4100 4200; do
+    for run in 300 1500 4000; do
+      expect_strict assigned-secret "$(_identrun_line "$pad" "$run" 3000)"
+      expect_plain  assigned-secret "$(_identrun_line "$pad" "$run" 3000)"
+    done
+  done
+  # a run of letters (plain mode only: strict reads it as a base64-run first)
+  expect_plain assigned-secret "$(_identrun_line 3990 600 3000 A)"
+  # every key word, including ones whose spelling has a - or a case change
+  local kw
+  for kw in token password PASSWD api-key api_key ACCESS-KEY private_key Secret; do
+    expect_strict assigned-secret "$(_identrun_line 3950 1000 3000 _ "$kw")"
+    expect_plain  assigned-secret "$(_identrun_line 3950 1000 3000 _ "$kw")"
+  done
+}
+
+@test "long line: a long identifier run with no key word in it is cut as before (a hex or base64 word is not refused)" {
+  local blob
+  blob="$(head -c 3900 /dev/zero | tr '\0' .)$(head -c 9000 /dev/zero | tr '\0' A)$(head -c 3000 /dev/zero | tr '\0' .)"
+  expect_plain clean "$blob"
+  expect_plain assigned-secret "${blob} secret=\"Ab3dEf9Gh2Jk4Lm6Np8Q\""
+}
+
+@test "long line: many long identifier runs (with and without a key word) are checked in linear time" {
+  # Every piece of this line is cut inside a long run, so each one pays for the run check.
+  # That check once used a regex over the whole piece (cost: piece length x run length,
+  # about 25 s for 60 KB). It must stay under a few seconds.
+  local unit line kind t0 ms
+  for kind in plain keyword; do
+    if [ "$kind" = plain ]; then unit="$(head -c 3500 /dev/zero | tr '\0' a)."
+    else unit="$(rep secrets 500 | head -c 3500)."; fi
+    line="$(rep "$unit" 17)"   # about 60 KB
+    t0=$(date +%s%N)
+    expect_plain clean "$line"
+    ms=$((($(date +%s%N) - t0) / 1000000))
+    [ "$ms" -lt 3000 ] || { echo "$kind: took $ms ms" >&2; false; }
+  done
+}
+
+@test "long line: an identifier run too long to keep whole fails closed instead of passing" {
+  expect_plain oversize-line "$(_identrun_line 3900 9000 3000)"
+  expect_strict oversize-line "$(_identrun_line 3900 9000 3000)"
+}
+
+# N4 test gaps ---------------------------------------------------------------
+@test "long line: multibyte blank padding is squeezed in a UTF-8 locale, so it cannot straddle a cut" {
+  locale -a | grep -qi 'c\.utf-\?8' || skip "no C.UTF-8 locale on this machine"
+  local pad line
+  # 7,000 em spaces: over the 6,000-character limit in this locale, so the line is cut in pieces
+  pad="$(yes "$(printf '\xe2\x80\x83')" | head -n 7000 | tr -d '\n')"
+  line="token=${pad}Ab3dEf9Gh2Jk4Lm6Np8Q"
+  printf '%s' "$line" > "$BATS_TEST_TMPDIR/line.txt"
+  run env LC_ALL=C.UTF-8 bash -c '. "$1/hooks/lib/secret-patterns.sh"; SECRET_STRICT=1
+    line="$(cat "$2")"
+    if secret_match_long "$line"; then printf "%s" "$SECRET_MATCH_NAME"; else printf clean; fi' \
+    _ "$REPO_ROOT" "$BATS_TEST_TMPDIR/line.txt"
+  [ "$output" = assigned-secret ] || { echo "got: $output" >&2; false; }
+}
+
+@test "long line: a line of nothing but blanks squeezes to nothing and is clean, not an error" {
+  expect_plain  clean "$(head -c 7000 /dev/zero | tr '\0' ' ')"
+  expect_strict clean "$(head -c 7000 /dev/zero | tr '\0' ' ')"
+}
+
+@test "strict: a quoted value whose first character is a template marker is skipped, like an unquoted one" {
+  expect_strict clean 'token = "$abcdefghijklmnopqrstuv"'
+  expect_strict clean "token = '<abcdefghijklmnopqrstuv>'"
+  expect_strict clean 'secret: "{abcdefghijklmnopqrstuv}"'
+  expect_strict assigned-secret 'token = "abcdefghijklmnopqrstuv"'
+}
+
+@test "README: the strict-scan paragraph does not name the allow pragma and states the 6-character and first-character rules" {
+  ! grep -qi 'pragma' "$REPO_ROOT/hooks/README.md" || false
+  grep -qF 'URL password of 6 or more characters' "$REPO_ROOT/hooks/README.md"
+  grep -qF 'first character is `$`, `<` or `{`' "$REPO_ROOT/hooks/README.md"
+  # lengths are characters in a UTF-8 locale, not bytes
+  grep -qF '262144 characters' "$REPO_ROOT/hooks/README.md"
 }
