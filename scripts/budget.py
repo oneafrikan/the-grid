@@ -28,14 +28,15 @@ Usage (python3 scripts/budget.py ...):
   --check          exit 1 on any regression/limit breach (each failure prints the
                    offending path), 3 if only the baseline scope was skipped, else 0
   --update-target  rewrite the totals in docs/budget-target.json to the current
-                   measurement; refuses to RAISE a number without --allow-raise
+                   measurement; refuses to RAISE a number without --allow-raise,
+                   and while any owned file cannot be measured faithfully
   --json           machine-readable output, sorted keys
 Environment: GRID_DIR (repo root; default: parent of scripts/), GRID_BASELINE
 (baseline manifest, passed through to wire.sh).
 
 Fail closed: a SKILL.md or role.yaml this reader cannot measure faithfully (UTF-8 BOM,
 invalid UTF-8, quoted top-level key, indented `---` in the frontmatter, duplicate key, no
-description) fails --check by path and reason instead of counting 0 characters. For
+description, a line-break character other than \\n such as U+2028) fails --check by path and reason instead of counting 0 characters. For
 baseline (upstream) skills the same problems are only warned on stderr.
 
 Stdlib only. --check also enforces the sections/ integrity rule for split
@@ -101,6 +102,13 @@ KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):(?:[ \t]+(.*))?$")
 QUOTED_KEY_RE = re.compile(r"""^["'][A-Za-z_][\w-]*["']\s*:""")
 BOM = "\ufeff"
 NO_FRONTMATTER = "no `---` frontmatter block at the top of the file"
+# str.splitlines() also breaks on these; YAML 1.2 readers keep U+0085/U+2028/U+2029 inside the
+# line and none of the others is a YAML break at all (a bare CR is, to some readers). A reader
+# that breaks where another does not sees a different key set, so `description: short<sep>...`
+# was under-counted (NF-055 VF2). Lines are cut on \n only (CRLF tolerated) and any of these
+# in the text that is read is a named problem, the stance scripts/lib/fmshape.py takes
+# (its _BAD_CHAR class carries the same characters; tabs stay legal here as indentation).
+LINE_BREAK_RE = re.compile("[\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
 
 
 def _collapse(text: str) -> str:
@@ -139,6 +147,22 @@ def _scalar(rest: str, cont: list):
     # Plain scalar: " #..." starts a comment; continuation lines fold to one line.
     parts = [re.sub(r"\s+#.*$", "", p) for p in [rest] + [ln.strip() for ln in body]]
     return _collapse(" ".join(parts)), True
+
+
+def split_lines(text: str) -> list:
+    """Lines of `text` cut on \\n alone; one trailing \\r per line (CRLF) is dropped."""
+    return [ln[:-1] if ln.endswith("\r") else ln for ln in text.split("\n")]
+
+
+def line_break_problems(lines: list) -> list:
+    """A named problem when `lines` hold a character that some reader treats as a line break
+    and this one does not (see LINE_BREAK_RE); empty when they are clean."""
+    found = sorted({m.group() for ln in lines for m in LINE_BREAK_RE.finditer(ln)})
+    if not found:
+        return []
+    names = ", ".join(f"U+{ord(c):04X}" for c in found)
+    return [f"a line-break character other than \\n ({names}) in the text that is read: readers "
+            "disagree on where the line ends, so the description may be under-counted; remove it"]
 
 
 def parse_top_level(lines: list):
@@ -193,10 +217,12 @@ def read_frontmatter(path: str):
     text, problems = read_text(path)
     if text is None:
         return {}, problems
-    lines = text.splitlines()
-    if not lines or lines[0].rstrip() != "---":
+    lines = split_lines(text)
+    if lines[0].rstrip(" \t") != "---":
         return {}, problems + [NO_FRONTMATTER]
-    end = next((i for i in range(1, len(lines)) if lines[i].rstrip() == "---"), len(lines))
+    end = next((i for i in range(1, len(lines)) if lines[i].rstrip(" \t") == "---"), len(lines))
+    # The fences included: a separator that hides or fakes a fence moves the region itself.
+    problems += line_break_problems(lines[:end + 1])
     if any(ln.strip() == "---" for ln in lines[1:end]):
         problems.append("an indented `---` inside the frontmatter: some readers end the "
                         "block there; rewrite the text so no line is only `---`")
@@ -209,8 +235,9 @@ def read_yaml(path: str):
     text, problems = read_text(path)
     if text is None:
         return {}, problems
-    meta, more = parse_top_level(text.splitlines())
-    return meta, problems + more
+    lines = split_lines(text)
+    meta, more = parse_top_level(lines)
+    return meta, problems + line_break_problems(lines) + more
 
 
 # --------------------------------------------------------------------------
@@ -252,6 +279,22 @@ def skill_entry(name, skill_md, rel, truncate_at):
     return e
 
 
+def dangling(path):
+    """True for a symlink whose target is missing: os.path.isfile() calls that False too, so
+    the entry used to be skipped without a word (NF-055 VF6)."""
+    return os.path.islink(path) and not os.path.exists(path)
+
+
+def dangling_entry(name, rel, truncate_at):
+    """An owned entry for a dangling SKILL.md / role.yaml symlink: nothing to measure, so only
+    the problem (which fails --check by path) and a zero body."""
+    e = make_entry(name, rel, "", True, "", False, truncate_at,
+                   ["dangling symlink (its target does not exist), so nothing can be measured"])
+    e["body_bytes"] = 0
+    e["unreadable"] = True
+    return e
+
+
 def total(entries):
     return {"count": len(entries), "chars": sum(e["chars"] for e in entries)}
 
@@ -264,16 +307,24 @@ def measure(grid, truncate_at):
     sdir = os.path.join(grid, "skills")
     for name in sorted(os.listdir(sdir)) if os.path.isdir(sdir) else []:
         md = os.path.join(sdir, name, "SKILL.md")
-        if os.path.isfile(md):
-            entries["skills"].append(
-                skill_entry(name, md, os.path.join("skills", name, "SKILL.md"), truncate_at))
+        rel = os.path.join("skills", name, "SKILL.md")
+        if dangling(md):
+            entries["skills"].append(dangling_entry(name, rel, truncate_at))
+        elif os.path.isfile(md):
+            entries["skills"].append(skill_entry(name, md, rel, truncate_at))
 
     # owned roles: measured from role.yaml source, never from composed output or
     # private roles, so the number is the same on every machine.
     rdir = os.path.join(grid, "agent-factory", "roles")
     for name in sorted(os.listdir(rdir)) if os.path.isdir(rdir) else []:
         ry = os.path.join(rdir, name, "role.yaml")
-        if name == "_retired" or not os.path.isfile(ry):
+        if name == "_retired":
+            continue
+        if dangling(ry):
+            entries["agent_roles"].append(dangling_entry(
+                name, os.path.join("agent-factory", "roles", name, "role.yaml"), truncate_at))
+            continue
+        if not os.path.isfile(ry):
             continue
         meta, problems = read_yaml(ry)
         if "description" in meta:
@@ -334,6 +385,8 @@ def load_target(grid):
         return None
     except ValueError as exc:       # bad JSON and invalid UTF-8 (UnicodeDecodeError) alike
         sys.exit(f"budget: {TARGET_REL} is not valid JSON: {exc}")
+    except RecursionError:          # nesting thousands deep: json raises this, not ValueError
+        sys.exit(f"budget: {TARGET_REL} is nested too deeply to read")
     # Every later step does target.get(...), so a list, string or number would end in a
     # traceback; a mistyped limit would crash a comparison. Say which, once, here.
     if not isinstance(data, dict):
@@ -436,7 +489,8 @@ def run_checks(summary, target, grid=None):
     # 4. sections/ integrity for every owned skill
     if grid is not None:
         for e in summary["entries"]["skills"]:
-            fails.extend(check_sections(grid, e["path"]))
+            if not e.get("unreadable"):         # a dangling SKILL.md has no index to check
+                fails.extend(check_sections(grid, e["path"]))
     return fails
 
 
@@ -449,6 +503,13 @@ def baseline_warnings(summary):
 
 def update_target(grid, summary, target, allow_raise):
     """Rewrite totals to the current measurement. Returns (exit code, messages)."""
+    # A ratchet written from a file the reader cannot measure faithfully records an
+    # under-count (--check would fail on the next run anyway): refuse, naming each one.
+    unmeasurable = [f"  {e['path']}: {p}" for g in ("skills", "orchestrator_roles", "agent_roles")
+                    for e in summary["entries"][g] for p in e["problems"]]
+    if unmeasurable:
+        return 1, ["refusing to write a target while owned files cannot be measured "
+                   "(fix them first; see --check):"] + unmeasurable
     data = json.loads(json.dumps(target if target is not None else DEFAULT_TARGET))
     msgs, raises = [], []
     for (scope, tkey), measured in sorted(current_numbers(summary).items()):

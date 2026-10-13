@@ -254,7 +254,8 @@ run_bats() {
   # `bats --version` prints "Bats X.Y.Z".
   local bats_ver
   bats_ver="$(tests/lib/bats-core/bin/bats --version 2>/dev/null)" || bats_ver=""
-  if [ "${bats_ver#Bats }" != "$PINNED_BATS_VERSION" ]; then
+  # Compare the whole string: `${bats_ver#Bats }` is a no-op on a bare "1.13.0" and let it pass.
+  if [ "$bats_ver" != "Bats $PINNED_BATS_VERSION" ]; then
     echo "    bats version is '${bats_ver:-unknown}', the gate pins $PINNED_BATS_VERSION" >&2
     echo "    fix: git submodule update --init tests/lib/bats-core (or bump PINNED_BATS_VERSION with the submodule)" >&2
     return 1
