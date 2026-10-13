@@ -403,6 +403,71 @@ snapshot() { tree_digest "$GREAL"; echo "--"; tree_digest "$SKILLS_DIR"; echo "-
   [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
 }
 
+# bounded ARGS...: run ARGS with a 10 second limit (python, so no GNU `timeout` is needed);
+# prints TIMED_OUT and exits 124 when the limit hits. A hung grid is the failure under test.
+bounded() {
+  python3 -B -c '
+import subprocess, sys
+try:
+    proc = subprocess.run(sys.argv[1:], timeout=10)
+    sys.exit(proc.returncode)
+except subprocess.TimeoutExpired:
+    print("TIMED_OUT")
+    sys.exit(124)
+' "$@"
+}
+
+@test "a FIFO in a placed skill dir: doctor returns within 10 s with a modified finding" {
+  installed
+  mkfifo "$G/repos/up/skills/alpha/trap"
+  run bounded python3 -B "$G/scripts/grid" --grid-dir "$G" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"TIMED_OUT"* ]]
+  [[ "$output" == *"disk skill alpha modified"* ]]
+}
+
+@test "a FIFO in a placed skill dir: install and uninstall also return, treating it as an edit" {
+  installed
+  mkfifo "$G/repos/up/skills/alpha/trap"
+  run bounded python3 -B "$G/scripts/grid" --grid-dir "$G" install
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"TIMED_OUT"* ]]
+  run bounded python3 -B "$G/scripts/grid" --grid-dir "$G" uninstall --yes
+  [ "$status" -ne 124 ]
+  [[ "$output" != *"TIMED_OUT"* ]]
+}
+
+@test "disk_content_hash with check_escape (staging) raises on a FIFO instead of opening it" {
+  mkdir -p "$T/skilldir"
+  printf 'x' > "$T/skilldir/SKILL.md"
+  mkfifo "$T/skilldir/trap"
+  run python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader("gridmod", sys.argv[1] + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+try:
+    g.disk_content_hash(sys.argv[2], check_escape=True)
+except g.GridError as exc:
+    print("refused: %s" % exc)
+' "$REPO_ROOT" "$T/skilldir"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"refused"* ]]
+  [[ "$output" == *"trap"* ]]
+}
+
+@test "a unix socket in a placed skill dir is hashed as an edit, not opened" {
+  installed
+  python3 -B -c '
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])
+' "$G/repos/up/skills/alpha/sock"
+  run bounded python3 -B "$G/scripts/grid" --grid-dir "$G" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"disk skill alpha modified"* ]]
+}
+
 @test "corrupt ledger: doctor --json is valid JSON with a ledger finding naming the file" {
   installed
   printf 'skill\tshort\n' > "$(LEDGER)"

@@ -75,6 +75,10 @@ Notes:
 - The ledger is trusted same-user state, not an authenticated record:
   `grid uninstall --force` removes any directory under `repos/<source>/` that a
   ledger row names. Keep `~/.grid` writable only by you.
+- `grid` runs git without your user or system gitconfig (so a URL rewrite there
+  cannot redirect what it fetches). Behind a corporate proxy or credential
+  helper set `GRID_GIT_FORWARD_CONFIG=1` to forward your git environment.
+  `GRID_AUDIT_TIMEOUT=<seconds>` (default 300) bounds each `audit.py` run.
 - A damaged ledger is reported by `grid doctor` with its path. Restore a backup,
   or delete the file and re-run `grid install`, which adopts directories that
   still match `grid.lock`.

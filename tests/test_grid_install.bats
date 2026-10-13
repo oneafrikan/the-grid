@@ -658,6 +658,174 @@ bad_link_install() {
   [[ "$output" == *"outside the skill directory"* ]]
 }
 
+# bad_file_install REL: commit a regular file REL (relative to skills/alpha) upstream, lock it
+# BY HAND (the lock-time refusal is bypassed; the stage-time one is under test) and install.
+bad_file_install() {
+  make_grid_fixture "$M" "$U"
+  mkdir -p "$U/skills/alpha/$(dirname "$1")"
+  printf 'junk' > "$U/skills/alpha/$1"
+  upstream_commit "file $1"
+  fixture_advance "$M" "$U"
+  make_install_grid
+  handlock
+  commit_install_grid
+  run install
+}
+
+@test "a tracked .DS_Store, __pycache__/x.pyc or sourceless .pyc in a hand-built lock is refused at install, naming it" {
+  for rel in .DS_Store __pycache__/x.pyc helper.pyc; do
+    rm -rf "$M" "$GREAL" "$G" "$GRID_STATE_DIR"/*
+    bad_file_install "$rel"
+    [ "$status" -eq 1 ]
+    [ ! -e "$G/repos/up/skills/alpha" ]
+    [ -f "$G/repos/up/nested/cat/beta/SKILL.md" ]
+    [[ "$output" == *"$rel"* ]]
+    git -C "$U" reset -q --hard HEAD~1
+  done
+}
+
+@test "a __pycache__ file injected into the staged dir after the audit is not placed, the skill still is" {
+  build_grids
+  run python3 -B -c '
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+grid = sys.argv[1]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+real = g.audit_staged
+def injecting(grid_dir, run, source, entries):
+    res = real(grid_dir, run, source, entries)
+    # After verify and audit, before place: add litter to every staged skill dir.
+    for e in entries:
+        d = os.path.join(run, "repos", source, *e["path"].split("/"), "__pycache__")
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, "evil.pyc"), "w").write("x")
+        open(os.path.join(run, "repos", source, *e["path"].split("/"), "stray.pyc"), "w").write("x")
+    return res
+g.audit_staged = injecting
+sys.exit(g.main(["--grid-dir", grid, "install"]))
+' "$G"
+  [ "$status" -eq 0 ]
+  [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+  [ -f "$G/repos/up/nested/cat/beta/SKILL.md" ]
+  [ ! -e "$G/repos/up/skills/alpha/__pycache__" ]
+  [ ! -e "$G/repos/up/skills/alpha/stray.pyc" ]
+  [ ! -e "$G/repos/up/nested/cat/beta/__pycache__" ]
+}
+
+# https_source_grid: build the grids, then point the install grid's source at an https URL that
+# only an insteadOf mapping can turn into the local upstream. Nothing here reaches the network:
+# the proxy is a closed local port, and example.invalid never resolves.
+https_source_grid() {
+  build_grids
+  python3 -B -c '
+import sys
+p = sys.argv[1]
+s = open(p).read().replace("file://" + sys.argv[2], "https://example.invalid/up.git")
+open(p, "w").write(s)
+' "$GREAL/grid.yaml" "$U"
+  export https_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9
+  export GRID_AUDIT=warn          # policy.yaml does not allow example.invalid; not under test
+}
+
+@test "an env-injected url insteadOf mapping no longer redirects the fetched URL" {
+  https_source_grid
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.file://$U.insteadOf" GIT_CONFIG_VALUE_0="https://example.invalid/up.git"
+  run install
+  [ "$status" -ne 0 ]
+  [ ! -e "$G/repos/up/skills/alpha" ]
+}
+
+@test "a user gitconfig insteadOf mapping (global file or HOME) no longer redirects the fetched URL" {
+  https_source_grid
+  printf '[url "file://%s"]\n\tinsteadOf = https://example.invalid/up.git\n' "$U" > "$T/mapping.gitconfig"
+  GIT_CONFIG_GLOBAL="$T/mapping.gitconfig" run install
+  [ "$status" -ne 0 ]
+  [ ! -e "$G/repos/up/skills/alpha" ]
+  cp "$T/mapping.gitconfig" "$HOME/.gitconfig"
+  run install
+  [ "$status" -ne 0 ]
+  [ ! -e "$G/repos/up/skills/alpha" ]
+}
+
+@test "GRID_GIT_FORWARD_CONFIG=1 restores the env-injected mapping" {
+  https_source_grid
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.file://$U.insteadOf" GIT_CONFIG_VALUE_0="https://example.invalid/up.git"
+  GRID_GIT_FORWARD_CONFIG=1 run install
+  [ "$status" -eq 0 ]
+  [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+}
+
+@test "git_env scrubs ssh, askpass, exec-path and template overrides, keeps GIT_ALLOW_PROTOCOL" {
+  build_grids
+  run env GIT_SSH=x GIT_SSH_COMMAND=y GIT_PROXY_COMMAND=z GIT_EXEC_PATH=/nope GIT_ASKPASS=a \
+    GIT_TEMPLATE_DIR=/tmp GIT_CONFIG_PARAMETERS="'a.b=c'" GIT_CONFIG_KEY_3=k GIT_CONFIG_VALUE_3=v \
+    python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader("gridmod", sys.argv[1] + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+env = g.git_env()
+for k in ("GIT_SSH", "GIT_SSH_COMMAND", "GIT_PROXY_COMMAND", "GIT_EXEC_PATH", "GIT_ASKPASS",
+          "GIT_TEMPLATE_DIR", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_KEY_3", "GIT_CONFIG_VALUE_3",
+          "GIT_CONFIG_COUNT"):
+    print("%s=%s" % (k, "present" if k in env else "absent"))
+print("GIT_CONFIG_GLOBAL=%s" % env.get("GIT_CONFIG_GLOBAL"))
+print("GIT_CONFIG_SYSTEM=%s" % env.get("GIT_CONFIG_SYSTEM"))
+print("GIT_ALLOW_PROTOCOL=%s" % env.get("GIT_ALLOW_PROTOCOL"))
+print("HOME_is_real=%s" % (env.get("HOME") == sys.argv[2]))
+' "$G" "$HOME"
+  [ "$status" -eq 0 ]
+  ! [[ "$output" == *"=present"* ]]
+  [[ "$output" == *"GIT_CONFIG_GLOBAL=/dev/null"* ]]
+  [[ "$output" == *"GIT_CONFIG_SYSTEM=/dev/null"* ]]
+  [[ "$output" == *"GIT_ALLOW_PROTOCOL=https:file"* ]]
+  [[ "$output" == *"HOME_is_real=False"* ]]
+}
+
+@test "audit.py children get a timeout (default 300 s, GRID_AUDIT_TIMEOUT overrides) and a timeout is a refusal" {
+  build_grids
+  run python3 -B -c '
+import importlib.util, subprocess, sys, os
+from importlib.machinery import SourceFileLoader
+grid = sys.argv[1]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+seen = []
+def hang(cmd, *a, **k):
+    seen.append(k.get("timeout"))
+    raise subprocess.TimeoutExpired(cmd, k.get("timeout"))
+g.subprocess.run = hang
+cfg = {"sources": {"up": {"url": "https://example.com/up.git", "ref": "HEAD"}}}
+entry = {"dest": "repos/up/skills/alpha", "path": "skills/alpha"}
+try:
+    g.check_source_policy(grid, cfg, {"up"}, True)
+    print("policy: ALLOWED")
+except g.GridError as exc:
+    print("policy: refused: %s" % exc)
+print("staged: %s" % g.audit_staged(grid, grid + "/run", "up", [entry]))
+os.environ["GRID_AUDIT_TIMEOUT"] = "7"
+try:
+    g.check_source_policy(grid, cfg, {"up"}, True)
+except g.GridError:
+    pass
+os.environ["GRID_AUDIT_TIMEOUT"] = "bogus"
+try:
+    g.check_source_policy(grid, cfg, {"up"}, True)
+except g.GridError:
+    pass
+print("timeouts: %s" % seen)
+' "$GREAL"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"policy: refused"* ]]
+  [[ "$output" == *"timed out"* ]]
+  [[ "$output" == *"could not vet it"* ]]
+  [[ "$output" == *"timeouts: [300, 300, 7, 300]"* ]]
+}
+
 @test "grid lock refuses an escaping symlink even under an excluded name" {
   make_grid_fixture "$M" "$U"
   ln -s ../../../outside "$U/skills/alpha/__pycache__"
