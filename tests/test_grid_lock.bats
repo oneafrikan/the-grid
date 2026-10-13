@@ -205,6 +205,33 @@ print("ok")
   [ ! -e "$G/grid.lock" ]
 }
 
+# VG4 (hardening, refs private NF-066): lock used only the lexical symlink test, so a chain of
+# links that each look inside the skill dir but leave it once resolved was locked and then
+# refused by install. Lock now also runs install's realpath containment test.
+@test "a chain symlink that escapes only through an intermediate link is refused at lock time" {
+  mkdir -p "$U/skills/alpha/sub" "$U/skills/alpha/sub2"
+  ln -s .. "$U/skills/alpha/sub/up"
+  ln -s ../sub/up/.. "$U/skills/alpha/sub2/x"
+  upstream_commit "chain link"
+  fixture_advance "$G" "$U"
+  run lock
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"points outside"* ]]
+  [[ "$output" == *"sub2/x"* ]]
+  [ ! -e "$G/grid.lock" ]
+}
+
+@test "a link that stays inside the skill dir is still locked (lock-time realpath check has no false positive)" {
+  mkdir -p "$U/skills/alpha/sub"
+  ln -s ../run.sh "$U/skills/alpha/sub/runner"
+  ln -s sub "$U/skills/alpha/subdir"
+  upstream_commit "inside links"
+  fixture_advance "$G" "$U"
+  run lock
+  [ "$status" -eq 0 ]
+  [ -f "$G/grid.lock" ]
+}
+
 @test "an absolute symlink target also counts as escaping" {
   ln -s /etc/hosts "$U/skills/alpha/abs"
   upstream_commit "absolute link"
@@ -559,6 +586,26 @@ shallow_tip_checkout() {
   [[ "$output" == *"duplicate"* ]]
   [[ "$output" == *"entry 0"* ]]
   [[ "$output" == *"entry 2"* ]]
+}
+
+# J3 (hardening, refs private NF-066): names and destinations are compared case-folded, so
+# two entries that differ only in case (one directory on a case-insensitive filesystem) clash.
+@test "grid.lock entries whose names differ only in case are duplicates, exit 2" {
+  run lock
+  [ "$status" -eq 0 ]
+  edit_lock 'e = dict(doc["entries"][0]); e["name"] = e["name"].upper(); e["path"] = "skills/other"; doc["entries"].append(e)'
+  run lock --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"duplicate"* ]]
+}
+
+@test "grid.lock entries whose destinations differ only in case are duplicates, exit 2" {
+  run lock
+  [ "$status" -eq 0 ]
+  edit_lock 'e = dict(doc["entries"][0]); e["name"] = "alpha-copy"; e["path"] = e["path"].upper(); doc["entries"].append(e)'
+  run lock --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"duplicate"* ]]
 }
 
 @test "a duplicate dest in grid.lock (same source and path under another name) is rejected, exit 2" {
