@@ -366,13 +366,19 @@ def load_config(path: Path) -> dict:
         if not isinstance(agent.get("bare", False), bool):
             errors.append(f"{where}: bare must be true/false")
 
-        for stack in agent.get("stacks", []) or []:
-            if not (STACKS_DIR / stack).is_dir():
-                errors.append(f"{where}: stack '{stack}' has no dir at {STACKS_DIR / stack}")
-
-        for skill in agent.get("skills", []) or []:
-            if not (SKILLS_DIR / skill).is_dir():
-                errors.append(f"{where}: skill '{skill}' has no dir at {SKILLS_DIR / skill}")
+        # stacks:/skills: names become read paths (STACKS_DIR / name), so each must be a plain
+        # kebab-case name (same rule as `project`) BEFORE any path is built from it.
+        for key, base, code in (("stacks", STACKS_DIR, "E_STACK_NAME"), ("skills", SKILLS_DIR, "E_SKILL_NAME")):
+            names = agent.get(key, []) or []
+            if not isinstance(names, list):
+                errors.append(f"{where}: {code}: `{key}` must be a list of names")
+                continue
+            for name in names:
+                if not (isinstance(name, str) and PROJECT_RE.fullmatch(name)):
+                    errors.append(f"{where}: {code}: {key} entry {name!r} must be lowercase "
+                                  f"kebab-case, at most 64 chars (no paths, '..' or control characters)")
+                elif not (base / name).is_dir():
+                    errors.append(f"{where}: {key[:-1]} '{name}' has no dir at {base / name}")
 
     # Roster validation: an orchestrator's roster is generated from delegates_to
     # and injected at the {{ROSTER_TABLE}} token in its AGENTS.md. Enforce that
@@ -436,6 +442,12 @@ def render_stack_overlay(stacks: list[str]) -> str:
         if summary:
             sections.extend(["", summary])
         for fragment in meta.get("fragments", []) or []:
+            # A fragment is read into the generated agent file: it must stay inside its own
+            # stack dir (no '..', absolute path or symlink out), else refuse rather than read.
+            if not isinstance(fragment, str) or "\0" in fragment or not (
+                    STACKS_DIR / stack / fragment).resolve().is_relative_to((STACKS_DIR / stack).resolve()):
+                sys.exit(f"E_STACK_FRAGMENT: stack {stack!r}: fragment {str(fragment)!r} "
+                         f"is outside the stack dir")
             frag_path = STACKS_DIR / stack / fragment
             if frag_path.is_file():
                 sections.extend(["", _read(frag_path).rstrip()])
