@@ -1423,6 +1423,10 @@ def remove_placed_dir(grid_dir, row, force=False):
     removed up to but not including repos/<source>. These are the rules
     `uninstall` uses.
     """
+    # The containment root as it is BEFORE the check: dest_chain_link skips repos/ itself
+    # (a symlinked repos/ is supported), so a swap of repos/ in the window is caught by
+    # comparing the root again right before the delete.
+    expected_root = source_root(grid_dir, row["source"])
     status, detail = placed_dir_status(grid_dir, row, force)
     if status != "ok":
         return status, detail
@@ -1431,7 +1435,11 @@ def remove_placed_dir(grid_dir, row, force=False):
     link = dest_chain_link(grid_dir, row["dest"], include_leaf=True)
     if link:
         return "refused", "%s became a symlink during the removal" % link
+    if source_root(grid_dir, row["source"]) != expected_root:
+        return "refused", "repos changed during the removal"
     target = os.path.realpath(os.path.join(grid_dir, row["dest"]))
+    if os.path.commonpath([expected_root, target]) != expected_root:
+        return "refused", "%s resolves outside repos/%s" % (row["dest"], row["source"])
     try:
         shutil.rmtree(target)
     except OSError as exc:
@@ -1961,6 +1969,9 @@ def place_staged(grid_dir, run, repo, entry, counter):
         raise _entry_error(entry, "the copy to be placed hashes %s, not the locked %s"
                            % (got[:19], entry["hash"][:19]))
     # Re-check containment against the filesystem as it is NOW, just before the write.
+    # expected_root is taken first: if repos/ is swapped for a link after the check below,
+    # the root differs at the re-checks that follow (dest_chain_link does not look at repos/).
+    expected_root = source_root(grid_dir, entry["source"])
     if source_dir_is_link(grid_dir, entry["source"]):
         raise _entry_error(entry, "repos/%s is a symlink" % entry["source"])
     if not is_contained(grid_dir, entry["source"], entry["dest"]):
@@ -1970,12 +1981,16 @@ def place_staged(grid_dir, run, repo, entry, counter):
     link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
     if link:                                    # before makedirs, which would follow it
         raise _entry_error(entry, "%s became a symlink while placing" % link)
+    if source_root(grid_dir, entry["source"]) != expected_root:
+        raise _entry_error(entry, "repos changed while placing")
     os.makedirs(os.path.dirname(final), exist_ok=True)
     # Re-check after the parents exist and right before the renames (see dest_chain_link):
     # a parent swapped for a symlink since is_contained ran would redirect them.
     link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
     if link:
         raise _entry_error(entry, "%s became a symlink while placing" % link)
+    if source_root(grid_dir, entry["source"]) != expected_root:
+        raise _entry_error(entry, "repos changed while placing")
     moved = None
     if os.path.lexists(final):
         moved = os.path.join(run, "old", str(next(counter)))
