@@ -24,6 +24,13 @@ load helpers/stubs
 SID="11111111-1111-4111-8111-111111111111"
 
 setup() {
+  # NF-001/NF-033 (gate "tests leaked temp files into their TMPDIR: tmp.*"): GATE_TMPDIR is the
+  # directory the gate watches; the line below moves every temp dir this file creates (the
+  # sandboxes and the worker's own digest/snapshot dirs) into the per-test dir that bats
+  # removes itself, so a worker that is SIGKILLed before its EXIT trap, or a write that lands
+  # after teardown's rm -rf, cannot leave an entry in the gate's TMPDIR.
+  GATE_TMPDIR="${TMPDIR:-/tmp}"
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   common_setup
   # Temp HOME AFTER common_setup (it captured REAL_HOME for the sandbox check).
   export HOME="$MOCK_HOOK_ROOT/home"
@@ -1144,9 +1151,26 @@ cwd_lock() { printf '%s/handoff/cwd-%s.lock\n' "$GRID_HOOK_STATE_DIR" "$(printf 
   [ ! -d "$(lock_dir)" ]                              # the EXIT trap still ran
 }
 
+@test "a SIGKILLed worker leaves nothing in the gate's TMPDIR (NF-001: its temp dirs live in the test sandbox)" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs STUB_CLAUDE_SLEEP=20
+  local before after
+  before="$(find "$GATE_TMPDIR" -maxdepth 1 -name 'tmp.*' | sort)"
+  bash "$WORKER" "$SID" "$TXN" "$P" other > /dev/null 2>&1 &
+  wpid=$!
+  wait_for 20 test -s "$STUB_DIR/claude.pid"
+  kill -KILL "$wpid"                                  # no EXIT trap runs: the worker's temp dirs stay behind
+  wait "$wpid" 2>/dev/null || true
+  kill "$(cat "$STUB_DIR/claude.pid")" 2>/dev/null || true
+  after="$(find "$GATE_TMPDIR" -maxdepth 1 -name 'tmp.*' | sort)"
+  [ "$after" = "$before" ] || { echo "new in the gate TMPDIR:" >&2; comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2; false; }
+}
+
 @test "a terminated worker removes its temp dirs (no leak into TMPDIR)" {
   mk_tx 6
-  export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
+  # A dir of its own inside the per-test TMPDIR (setup already points TMPDIR there, and the
+  # sandboxes live in it): only the worker's temp dirs may show up here.
+  export TMPDIR="$BATS_TEST_TMPDIR/worker-tmp"; mkdir -p "$TMPDIR"
   export STUB_CLAUDE_MODE=handoff-logs STUB_CLAUDE_SLEEP=20
   bash "$WORKER" "$SID" "$TXN" "$P" other > /dev/null 2>&1 &
   wpid=$!
