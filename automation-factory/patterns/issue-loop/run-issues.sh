@@ -43,8 +43,9 @@ die_pre() { echo "run-issues: $*" >&2; exit 2; }
 
 lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
-# loose_perms <file> — true when group or other has ANY access. (`find -perm -077`
-# needs all six bits set, so every bit is tested on its own; GNU and BSD alike.)
+# loose_perms <file> — true when group or other has ANY access. (A `find -perm` mask
+# of 077 without a leading slash needs all six bits set, so every bit is tested on its
+# own; GNU and BSD alike.)
 loose_perms() {
   [ -n "$(find "$1" \( -perm -040 -o -perm -020 -o -perm -010 -o -perm -004 -o -perm -002 -o -perm -001 \) -print 2>/dev/null)" ]
 }

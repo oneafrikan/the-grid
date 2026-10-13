@@ -44,6 +44,10 @@ import tempfile
 import time
 import urllib.parse
 
+# ...and the same for every child (audit.py runs under sys.executable): dont_write_bytecode
+# only covers this process, so without the variable the children write scripts/lib/__pycache__.
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 # miniyaml lives next to us in scripts/lib, the same way audit.py finds it.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "lib"))
 import miniyaml  # noqa: E402  (must follow the sys.path insert)

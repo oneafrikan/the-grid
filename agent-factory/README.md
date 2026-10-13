@@ -81,6 +81,13 @@ one 5-file source, a different artifact shape per `--target`:
 # Portable target: one plain-Markdown persona per role (orchestrators too), no frontmatter.
 # The committed copies live in dist/personas/; regenerate them with scripts/build-personas.sh
 .venv/bin/python compose.py examples/grid.yaml --target portable
+
+# Harness agent targets: one native subagent file per specialist (orchestrators ship as skills).
+# wire.sh links this output into a harness's agents dir for `harness:<name>` entries
+# (docs/harnesses.md); each target writes only its own _<target>/ dir.
+.venv/bin/python compose.py examples/grid.yaml --target codex        # _codex/agents/*.toml
+.venv/bin/python compose.py examples/grid.yaml --target opencode     # _opencode/agents/*.md
+.venv/bin/python compose.py examples/grid.yaml --target gemini-cli   # _gemini-cli/agents/*.md
 ```
 
 Output is regenerable and idempotent: re-running with an unchanged config
@@ -256,7 +263,7 @@ Any violation is a hard `compose.py` error. **grid topology:**
 
 ## Status
 
-**Claude Code delivery target is done and live.** Three public projects compose
+**Claude Code delivery target is done and live.** Four public projects compose
 independently and are gated independently:
 
 | Config | Roles | Shape |
@@ -273,15 +280,15 @@ Claude Code skill/subagent shape; `scripts/wire.sh` wires the CC output into
 directory (see **Private projects** above).
 
 Remaining work (see repo-root `TODO.md` and the issue tracker):
-- **New CLI targets** — `opencode`, OpenAI Codex CLI, Gemini CLI, Cursor, and
-  portable single-file personas for chat-UI Projects. All scoped from the
-  2026-07-24 portability research; none implemented.
+- **Harness targets: real-install checks** — `codex`, `opencode`, `gemini-cli` and
+  `portable` are implemented (see **Running it**); none has been smoke-tested on a
+  real install (`docs/harnesses.md` lists what is unverified). Cursor has rule packs
+  only (`scripts/rules.py emit --harness cursor`), no agent target.
 - **OpenClaw + Paperclip targets** — 5 files → workspace + `openclaw.json`; the
   async/autonomous heartbeat loop. Deferred (Claude Code was built first). Implementation
   plan, scoped to a curated orchestrator roster + chunked into single-session specialist
   work: `agent-factory/openclaw/README.md`.
 - **Stack overlays** — `stacks/*` are still `stack.yaml` stubs with empty `fragments`.
-- **Golden-output conformance tests** — `compose.py` has no regression suite.
 
 *(Machine gating is **done**: `project:<name>` entries in the baseline or a
 per-machine overlay control which composed projects `wire.sh` links. With no

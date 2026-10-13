@@ -2,7 +2,7 @@
 
 the-grid wires its curated skills into Claude Code by default. With a harness opted in, `scripts/wire.sh` also fans the same wired set out to the other agent harnesses (Codex CLI, OpenCode, Gemini CLI, Pi, OpenClaw, Antigravity CLI). Nothing is hand-copied: the registry drives it, and the links are generated on every run.
 
-This page covers the skill wiring (spec `harness-wiring`) and rules delivery (spec `harness-rules-delivery`). Agent formats and the real-install smoke table are added as those parts land.
+This page covers the skill wiring (spec `harness-wiring`) and rules delivery (spec `harness-rules-delivery`). Agent formats are under "Agent targets" below. No target has been smoke-tested on a real install yet; each target's section lists what is unverified.
 
 ## Shared-dir finding
 
@@ -206,7 +206,7 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
 
 - Required keys are `name`, `description` and `developer_instructions`. `name` is the agent's identity, not the filename.
 - Key order is fixed: `name`, `description`, `sandbox_mode`, `developer_instructions`.
-- Sandbox mapping: `sandbox_mode = "read-only"` is written only when the role's `role.yaml` has a `tools:` allowlist containing neither `Edit` nor `Write` (today `qa-engineer` and `security-reviewer`). A role with no allowlist, or one that can edit, gets no `sandbox_mode` and inherits Codex's default.
+- Sandbox mapping: `sandbox_mode = "read-only"` is written only when the role's `role.yaml` has a `tools:` allowlist containing neither `Edit` nor `Write` (for example `qa-engineer` and `security-reviewer`; the composed `_codex/agents/*.toml` files show the full set). A role with no allowlist, or one that can edit, gets no `sandbox_mode` and inherits Codex's default.
 - `sandbox_mode = "read-only"` is a best-effort default, not an enforced control (see "What each harness enforces"). While it applies it also blocks writes through Bash, which is stricter than Claude, where an allowlisted Bash can still write.
 - A role whose allowlist has `Edit` or `Write` but no `Bash` gets no `sandbox_mode`, so it runs with a shell on Codex; compose prints one `warning: role <name> gets a shell on Codex` line to stderr for each (the files are unchanged).
 - `model` and the other optional keys (`model_reasoning_effort`, `mcp_servers`, `skills.config`) are never written.
@@ -246,7 +246,7 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
 - Required frontmatter is `description`; `mode` is always `subagent`. The body is the system prompt, identical to the Claude and Codex agents.
 - Key order is fixed: `description`, `mode`, `permission`. Long descriptions are folded over several lines by the YAML writer, which is valid YAML.
 - Permission mapping: `permission` is written only when the role's `role.yaml` has a `tools:` allowlist that denies something. Keys, in this order: `edit: deny` when neither `Edit` nor `Write` is listed, `bash: deny` when `Bash` is absent, `webfetch: deny` when neither `WebFetch` nor `WebSearch` is listed. A key that is not written inherits OpenCode's default. A role with no allowlist gets no `permission` block. This is a partial denylist of those three keys only; every other tool (`task`, MCP servers) keeps OpenCode's default, so the role is not read-only.
-- Today that gives `qa-engineer` and `security-reviewer` `edit: deny` and `webfetch: deny` (they keep `Bash`, so no `bash` key).
+- For example `qa-engineer` gets `edit: deny` and `webfetch: deny`, and `security-reviewer` gets `edit: deny` only (it lists `WebFetch`); both keep `Bash`, so neither gets a `bash` key. The composed `_opencode/agents/*.md` files show every role's mapping.
 - `model` is never written (model ids are provider-specific and rot), and neither is the deprecated `tools` key.
 - Skills reach OpenCode through the shared skills dir, not through this target. OpenCode also reads `~/.claude/skills`, so a skill present in both dirs may be listed twice (not verified); set `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` to stop it reading the Claude dir.
 - Checkers: `tests/lib/validate_harness.py opencode-agent FILE...` validates an agent file (`description` present, `mode: subagent`, permission values `ask`/`allow`/`deny`), and `validate_harness.py skill DIR...` validates a skill dir against the OpenCode skill rules (dir name `^[a-z0-9]+(-[a-z0-9]+)*$` and at most 64 chars, frontmatter `name` equal to the dir, description 1 to 1024 chars). The tests run the second over every link `wire.sh` puts in the shared dir.

@@ -25,9 +25,13 @@ Prerequisites: `python3` 3.8+, `git` 2.25+. On macOS both come from the Xcode
 Command Line Tools (`xcode-select --install`); `/usr/bin/python3` without them
 opens an installer prompt.
 
+`scripts/grid` exists on the `next` branch only until `next` is promoted to `main`.
+Until then add `--branch next` to the clone. Using your own fork? Put its URL in
+place of `oneafrikan/the-grid`.
+
 ```bash
 # 1. Clone without blobs (the skill repos are fetched separately by grid)
-git clone --filter=blob:none https://github.com/<your-username>/the-grid.git ~/.the-grid
+git clone --filter=blob:none --branch next https://github.com/oneafrikan/the-grid.git ~/.the-grid
 
 # 2. Look before you place anything: prints the plan, no network access, no writes
 python3 ~/.the-grid/scripts/grid install --dry-run
@@ -72,8 +76,8 @@ Notes:
 ## Maintainer path: new machine (submodules, fresh Claude Code install)
 
 ```bash
-# 1. Clone the-grid
-git clone https://github.com/<your-username>/the-grid.git ~/.the-grid
+# 1. Clone the-grid (your fork's URL works too)
+git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid
 
 # 2. Pull all skill submodules
 cd ~/.the-grid && git submodule update --init --recursive
@@ -93,7 +97,7 @@ bash ~/.the-grid/scripts/wire.sh
 cp ~/.the-grid/agent-factory/user.yaml.example ~/.the-grid/agent-factory/user.yaml
 # then edit agent-factory/user.yaml
 
-# 6. Build the composed agent teams (three public projects) and wire into Claude
+# 6. Build the composed agent teams (four public projects) and wire into Claude
 cd ~/.the-grid/agent-factory
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python compose.py examples/core.yaml --target claude-code
@@ -115,6 +119,11 @@ bash ~/.the-grid/scripts/runtime-setup.sh gstack
 ```
 
 Skills are live after step 4. Agents (subagents + orchestrator skills) are live after step 6.
+
+`wire.sh` also adds one generated auto-handoff SessionEnd hook to
+`~/.claude/settings.json`, on by default. Put `-hook:auto-handoff` in your baseline
+or machine overlay (`machines/<host>.txt`) and re-wire to switch it off; see
+[hooks/README.md](hooks/README.md).
 No restart needed — Claude picks up symlinks immediately (open a fresh session for new agents/skills).
 
 **Step 3 is what decides which skills actually load.** Without it, `wire.sh`'s
@@ -140,7 +149,7 @@ runtime. Without the binary they load and dead-end on the first step. Verify wit
 `openspec --version` — it should match `repos/openspec/package.json`.
 
 Nothing else in the-grid needs it, so skip step 7 if you're not using specs;
-the other ~209 skills are unaffected.
+the rest of the wired skills are unaffected.
 
 ### Private projects (optional)
 
@@ -171,7 +180,7 @@ git submodule update --init --recursive     #    sync submodule pointers
 
 # 3. If ANYTHING under agent-factory/ changed (roles, compose.py, or a compose
 #    config), recompose — projects/ is git-ignored, so a pull alone does NOT
-#    refresh the composed agents/rosters on this machine. Recompose all three
+#    refresh the composed agents/rosters on this machine. Recompose all four
 #    public projects (cheap even if only one actually changed):
 cd agent-factory
 .venv/bin/python compose.py examples/core.yaml --target claude-code
@@ -196,7 +205,7 @@ not enough. If your pull touched nothing under `agent-factory/`, skip step 3;
 
 > ⚠ **Recompose private projects in the same pass.** A change under
 > `agent-factory/_core/` or to `compose.py` affects *every* project, but only the
-> three public configs are listed above. `compose.py` **overwrites**
+> four public configs are listed above. `compose.py` **overwrites**
 > `projects/<name>/` wholesale — so recomposing the public set while a private
 > project's roles are unreachable (repo not cloned, `GRID_PRIVATE_ROLES_DIR`
 > unset) silently destroys that project's composed output, and the next
@@ -238,10 +247,10 @@ the-grid doesn't already provide. It's idempotent: a clean machine reports "Noth
 
 wire.sh wires skills in two passes:
 
-1. **Repo skills first** (mattpocock, superpowers, gstack, jeffallan, anthropic)
-2. **Root-level skills second** — your skills in `~/.the-grid/` directly, which override any same-named repo skill
+1. **Repo skills first** (alphabetical, later wins on a name clash: anthropic, gstack, jeffallan, mattpocock, superpowers)
+2. **Skills in `skills/` second** — your own skills in `~/.the-grid/skills/`, which override any same-named repo skill
 
-So if you've modified mattpocock's `tdd` and put it in `~/.the-grid/tdd/`, your version
+So if you've modified mattpocock's `tdd` and put it in `~/.the-grid/skills/tdd/`, your version
 wins. If you haven't touched it, mattpocock's version is served directly from the submodule.
 
 ---
@@ -249,8 +258,8 @@ wins. If you haven't touched it, mattpocock's version is served directly from th
 ## Adding a new skill (yours)
 
 ```bash
-mkdir ~/.the-grid/my-skill
-cat > ~/.the-grid/my-skill/SKILL.md <<'EOF'
+mkdir ~/.the-grid/skills/my-skill
+cat > ~/.the-grid/skills/my-skill/SKILL.md <<'EOF'
 ---
 name: my-skill
 description: What it does and when to use it.
@@ -266,11 +275,11 @@ bash ~/.the-grid/scripts/wire.sh
 
 ## Overriding a repo skill
 
-To customise e.g. mattpocock's `caveman`:
+To customise e.g. mattpocock's `tdd`:
 
 ```bash
-cp -r ~/.the-grid/repos/mattpocock/skills/productivity/caveman ~/.the-grid/caveman
-# edit ~/.the-grid/caveman/SKILL.md
+cp -r ~/.the-grid/repos/mattpocock/skills/engineering/tdd ~/.the-grid/skills/tdd
+# edit ~/.the-grid/skills/tdd/SKILL.md
 bash ~/.the-grid/scripts/wire.sh   # your version now takes precedence
 ```
 
@@ -282,7 +291,7 @@ bash ~/.the-grid/scripts/wire.sh   # your version now takes precedence
 cd ~/.the-grid
 git submodule add <repo-ssh-url> repos/<name>
 git submodule update --init
-bash wire.sh
+bash scripts/wire.sh
 git add .gitmodules repos/<name>
 git commit -m "feat: add <name> skills submodule"
 ```
@@ -294,7 +303,7 @@ git commit -m "feat: add <name> skills submodule"
 ```bash
 cd ~/.the-grid
 git submodule update --remote   # pull latest from all upstream repos
-bash wire.sh                    # re-wire in case new skills were added
+bash scripts/wire.sh            # re-wire in case new skills were added
 git add repos/
 git commit -m "chore: update skill submodules"
 ```
@@ -308,7 +317,8 @@ cd ~/.the-grid
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 36 tests should be green. If they're not, something is misconfigured.
+This is the full suite (many minutes; roughly 15 on CI), and every test should be
+green. If one is not, something is misconfigured.
 
 ---
 
