@@ -27,6 +27,8 @@ setup() {
 }
 
 teardown() {
+  # A test may leave a chmod 555 directory behind; rm cannot enter it otherwise.
+  chmod -R u+rwX "$T" 2>/dev/null || true
   rm -rf "$T"
   common_teardown
 }
@@ -399,6 +401,135 @@ snapshot() { tree_digest "$GREAL"; echo "--"; tree_digest "$SKILLS_DIR"; echo "-
   [ "$status" -eq 2 ]
   [ "$(cat "$T/victim/file")" = "precious" ]
   [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+}
+
+# bounded ARGS...: run ARGS with a 10 second limit (python, so no GNU `timeout` is needed);
+# prints TIMED_OUT and exits 124 when the limit hits. A hung grid is the failure under test.
+bounded() {
+  python3 -B -c '
+import subprocess, sys
+try:
+    proc = subprocess.run(sys.argv[1:], timeout=10)
+    sys.exit(proc.returncode)
+except subprocess.TimeoutExpired:
+    print("TIMED_OUT")
+    sys.exit(124)
+' "$@"
+}
+
+@test "a FIFO in a placed skill dir: doctor returns within 10 s with a modified finding" {
+  installed
+  mkfifo "$G/repos/up/skills/alpha/trap"
+  run bounded python3 -B "$G/scripts/grid" --grid-dir "$G" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"TIMED_OUT"* ]]
+  [[ "$output" == *"disk skill alpha modified"* ]]
+}
+
+@test "a FIFO in a placed skill dir: install and uninstall also return, treating it as an edit" {
+  installed
+  mkfifo "$G/repos/up/skills/alpha/trap"
+  run bounded python3 -B "$G/scripts/grid" --grid-dir "$G" install
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"TIMED_OUT"* ]]
+  run bounded python3 -B "$G/scripts/grid" --grid-dir "$G" uninstall --yes
+  [ "$status" -ne 124 ]
+  [[ "$output" != *"TIMED_OUT"* ]]
+}
+
+@test "disk_content_hash with check_escape (staging) raises on a FIFO instead of opening it" {
+  mkdir -p "$T/skilldir"
+  printf 'x' > "$T/skilldir/SKILL.md"
+  mkfifo "$T/skilldir/trap"
+  run python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader("gridmod", sys.argv[1] + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+try:
+    g.disk_content_hash(sys.argv[2], check_escape=True)
+except g.GridError as exc:
+    print("refused: %s" % exc)
+' "$REPO_ROOT" "$T/skilldir"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"refused"* ]]
+  [[ "$output" == *"trap"* ]]
+}
+
+@test "a unix socket in a placed skill dir is hashed as an edit, not opened" {
+  installed
+  python3 -B -c '
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])
+' "$G/repos/up/skills/alpha/sock"
+  run bounded python3 -B "$G/scripts/grid" --grid-dir "$G" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"disk skill alpha modified"* ]]
+}
+
+@test "corrupt ledger: doctor --json is valid JSON with a ledger finding naming the file" {
+  installed
+  printf 'skill\tshort\n' > "$(LEDGER)"
+  run grid doctor --json
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | python3 -m json.tool >/dev/null
+  [[ "$output" == *'"check": "ledger"'* ]]
+  [[ "$output" == *"installed.manifest"* ]]
+}
+
+@test "corrupt ledger: doctor without --json prints the finding and exits 1" {
+  installed
+  printf 'skill\tshort\n' > "$(LEDGER)"
+  run grid doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ledger "* ]]
+  [[ "$output" == *"installed.manifest"* ]]
+}
+
+@test "uninstall --yes with a read-only dir: no traceback, that row is kept, the other row is processed, exit 2" {
+  # Root ignores file modes, which would make this test pass vacuously: fail loudly instead.
+  [ "$(id -u)" -ne 0 ]
+  installed
+  chmod 555 "$G/repos/up/skills/alpha"
+  run grid uninstall --yes --force
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" == *"repos/up/skills/alpha"* ]]
+  # alpha stays on disk and in the ledger; beta (the second row) was still removed.
+  [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+  grep -q "alpha" "$(LEDGER)"
+  [ ! -e "$G/repos/up/nested" ]
+  ! grep -q "beta" "$(LEDGER)" || false
+  chmod 755 "$G/repos/up/skills/alpha"
+  # A re-run finishes the job.
+  run grid uninstall --yes
+  [ "$status" -eq 0 ]
+  [ ! -e "$G/repos/up/skills" ]
+  [ ! -e "$(LEDGER)" ]
+}
+
+@test "uninstall --yes keeps the ledger row when remove_placed_dir reports modified" {
+  installed
+  run python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+grid = sys.argv[1]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+real = g.remove_placed_dir
+def patched(grid_dir, row, force=False):
+    if row["name"] == "alpha":
+        return "modified", "changed under us"       # the dir was NOT removed
+    return real(grid_dir, row, force)
+g.remove_placed_dir = patched
+sys.exit(g.main(["--grid-dir", grid, "uninstall", "--yes"]))
+' "$G"
+  [ "$status" -eq 1 ]
+  [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+  grep -q "alpha" "$(LEDGER)"
+  ! grep -q "beta" "$(LEDGER)" || false
 }
 
 @test "uninstall keeps rows of an unknown kind in the ledger" {
