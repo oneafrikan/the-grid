@@ -265,8 +265,29 @@ snapshot() { tree_digest "$GREAL"; echo "--"; tree_digest "$SKILLS_DIR"; echo "-
   run grid repair
   [ "$status" -eq 0 ]
   [[ "$output" == *"no install ledger: maintainer mode"* ]]
-  [ "$(tree_digest "$GREAL")" = "$before" ]
+  # NF-046: this assert flaked on CI only. On a mismatch name the paths that changed (never
+  # their content) so the next occurrence says which file the run touched.
+  after=$(tree_digest "$GREAL")
+  [ "$after" = "$before" ] || { echo "grid tree changed during repair:" >&2; tree_digest_changed "$before" "$after" >&2; false; }
   [ ! -e "$GRID_TRACE_FETCH" ]
+}
+
+# NF-046 helper contract: names and kinds only, no hashes and no file content.
+@test "tree_digest_changed names added, removed and modified paths and prints no content" {
+  mkdir -p "$T/d/sub"
+  printf 'one SECRET-CONTENT\n' > "$T/d/keep.txt"
+  printf 'two\n' > "$T/d/sub/gone.txt"
+  before=$(tree_digest "$T/d")
+  rm "$T/d/sub/gone.txt"
+  printf 'changed SECRET-CONTENT\n' > "$T/d/keep.txt"
+  printf 'new\n' > "$T/d/added.txt"
+  after=$(tree_digest "$T/d")
+  run tree_digest_changed "$before" "$after"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'f added.txt\nf keep.txt\nf sub/gone.txt')" ]
+  [[ "$output" != *SECRET* ]]
+  run tree_digest_changed "$before" "$before"
+  [ -z "$output" ]
 }
 
 # --- uninstall ------------------------------------------------------------------------------
