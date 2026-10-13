@@ -331,6 +331,23 @@ open(p, "w").write(json.dumps(doc, indent=2, sort_keys=True) + "\n")
   grep -q "^rule	sql	up" "$(LEDGER)"
 }
 
+@test "deselecting a skill whose dir cannot be deleted keeps its ledger row and prints no traceback" {
+  # Root ignores file modes, which would make this test pass vacuously: fail loudly instead.
+  [ "$(id -u)" -ne 0 ]
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  mkdir -p "$GREAL/machines"
+  printf -- '-up/beta\n' > "$GREAL/machines/testhost.txt"
+  chmod 555 "$G/repos/up/nested/cat/beta"
+  run install
+  chmod 755 "$G/repos/up/nested/cat/beta"
+  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" == *"repos/up/nested/cat/beta"* ]]
+  [ -f "$G/repos/up/nested/cat/beta/SKILL.md" ]
+  grep -q "beta" "$(LEDGER)"
+}
+
 # --- (f) vetting at install --------------------------------------------------------------------------
 
 @test "a skill whose file has a curl-pipe-sh line is not placed and install exits 1; the other is placed" {
@@ -508,4 +525,323 @@ open(p, "w").write(json.dumps(doc, indent=2, sort_keys=True) + "\n")
   GRID_DIR="$GREAL" run bash "$G/scripts/wire.sh"
   [ "$status" -eq 0 ]
   [ -f "$G/SKILLS.md" ]
+}
+
+# --- (l) containment hardening (private WP-031) --------------------------------------------------------------------------------
+# A symlinked repos/<source> (or a symlinked parent below it) must never let install or
+# repair write or delete outside the source dir. Each test plants a canary outside.
+
+# outside_canary: a dir outside the grid with a canary file, as $T/outside.
+outside_canary() {
+  mkdir -p "$T/outside"
+  printf 'canary\n' > "$T/outside/CANARY"
+}
+
+# only_canary: assert nothing but the canary file lives in $T/outside.
+only_canary() {
+  [ "$(ls -A "$T/outside")" = "CANARY" ]
+}
+
+@test "install with repos/up replaced by a symlink to an outside dir exits non-zero naming repos/up and writes nothing outside" {
+  build_grids
+  outside_canary
+  rm -rf "$GREAL/repos/up"
+  ln -s "$T/outside" "$GREAL/repos/up"
+  run install
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repos/up"* ]]
+  only_canary
+  [ ! -e "$(LEDGER)" ]
+  [ ! -e "$GRID_TRACE_FETCH" ]
+}
+
+@test "install --force through a symlinked repos/up leaves an outside MYDATA.txt in place" {
+  build_grids
+  outside_canary
+  mkdir -p "$T/outside/skills/alpha"
+  printf 'mine\n' > "$T/outside/skills/alpha/MYDATA.txt"
+  rm -rf "$GREAL/repos/up"
+  ln -s "$T/outside" "$GREAL/repos/up"
+  run install --force
+  [ "$status" -ne 0 ]
+  [ "$(cat "$T/outside/skills/alpha/MYDATA.txt")" = "mine" ]
+  [ ! -e "$T/outside/nested" ]
+}
+
+@test "repair --force through a symlinked repos/up leaves an outside MYDATA.txt in place" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  outside_canary
+  mv "$GREAL/repos/up" "$T/outside/up"
+  printf 'mine\n' > "$T/outside/up/skills/alpha/MYDATA.txt"
+  ln -s "$T/outside/up" "$GREAL/repos/up"
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" repair --force --prune
+  [ "$status" -ne 0 ]
+  [ "$(cat "$T/outside/up/skills/alpha/MYDATA.txt")" = "mine" ]
+  [ -f "$T/outside/up/skills/alpha/SKILL.md" ]
+}
+
+@test "a symlinked directory below repos/up that points outside is refused and nothing is written there" {
+  build_grids
+  outside_canary
+  ln -s "$T/outside" "$GREAL/repos/up/skills"
+  run install
+  [ "$status" -ne 0 ]
+  only_canary
+}
+
+@test "a relative symlinked repos/up (../x) is refused like an absolute one" {
+  build_grids
+  outside_canary
+  rm -rf "$GREAL/repos/up"
+  # $GREAL is $T/real/grid, so ../../../outside from repos/ is $T/outside.
+  ln -s ../../../outside "$GREAL/repos/up"
+  run install
+  [ "$status" -ne 0 ]
+  only_canary
+}
+
+# bad_link_install LINKPATH TARGET: commit a symlink LINKPATH (relative to skills/alpha) -> TARGET
+# upstream, lock it BY HAND (so lock-time checks are bypassed), and run install with
+# GRID_AUDIT=warn (the scanner's own verdict is not what is under test: the place-time
+# escape check is). Leaves the install output in $output / $status.
+bad_link_install() {
+  make_grid_fixture "$M" "$U"
+  mkdir -p "$U/skills/alpha/$(dirname "$1")"
+  ln -s "$2" "$U/skills/alpha/$1"
+  upstream_commit "link $1"
+  fixture_advance "$M" "$U"
+  make_install_grid
+  handlock
+  commit_install_grid
+  GRID_AUDIT=warn run install
+}
+
+@test "GRID_AUDIT=warn: a chain symlink that escapes only through an intermediate link is not placed" {
+  # sub/up -> .. is the skill root (inside); sub2/x -> ../sub/up/.. is "sub" lexically but
+  # leaves the skill dir once sub/up is resolved.
+  mkdir -p "$U/skills/alpha/sub"
+  ln -s .. "$U/skills/alpha/sub/up"
+  bad_link_install sub2/x ../sub/up/..
+  [ "$status" -eq 1 ]
+  [ ! -e "$G/repos/up/skills/alpha" ]
+  [ -f "$G/repos/up/nested/cat/beta/SKILL.md" ]
+  [[ "$output" == *"outside the skill directory"* ]]
+}
+
+@test "GRID_AUDIT=warn: an escaping symlink named __pycache__ is not placed" {
+  bad_link_install __pycache__ ../../../outside
+  [ "$status" -eq 1 ]
+  [ ! -e "$G/repos/up/skills/alpha" ]
+  [[ "$output" == *"outside the skill directory"* ]]
+}
+
+@test "GRID_AUDIT=warn: an escaping symlink named x.pyc is not placed" {
+  bad_link_install x.pyc ../../../outside
+  [ "$status" -eq 1 ]
+  [ ! -e "$G/repos/up/skills/alpha" ]
+  [[ "$output" == *"outside the skill directory"* ]]
+}
+
+@test "GRID_AUDIT=warn: an escaping symlink named .DS_Store is not placed" {
+  bad_link_install .DS_Store /etc
+  [ "$status" -eq 1 ]
+  [ ! -e "$G/repos/up/skills/alpha" ]
+  [[ "$output" == *"outside the skill directory"* ]]
+}
+
+@test "GRID_AUDIT=warn: an escaping symlink inside a real __pycache__ dir is not placed" {
+  bad_link_install __pycache__/evil.pyc ../../../../outside
+  [ "$status" -eq 1 ]
+  [ ! -e "$G/repos/up/skills/alpha" ]
+  [[ "$output" == *"outside the skill directory"* ]]
+}
+
+@test "grid lock refuses an escaping symlink even under an excluded name" {
+  make_grid_fixture "$M" "$U"
+  ln -s ../../../outside "$U/skills/alpha/__pycache__"
+  upstream_commit "excluded-name escaping link"
+  fixture_advance "$M" "$U"
+  run python3 -B "$M/scripts/grid" --grid-dir "$M" lock
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"points outside the skill directory"* ]]
+}
+
+# outside_old_entries: $T/outside holds stale-looking entries (mtime 2000) a sweep would delete.
+outside_old_entries() {
+  mkdir -p "$T/outside/99999" "$T/outside/other"
+  printf 'old\n' > "$T/outside/oldfile"
+  printf 'old\n' > "$T/outside/99999/inner"
+  touch -t 200001010000 "$T/outside/oldfile" "$T/outside/99999" "$T/outside/other"
+}
+
+@test "a symlinked .grid-tmp is refused by install: outside old entries survive and nothing is staged there" {
+  build_grids
+  outside_old_entries
+  ln -s "$T/outside" "$GREAL/.grid-tmp"
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *".grid-tmp"* ]]
+  [ -f "$T/outside/oldfile" ]
+  [ -f "$T/outside/99999/inner" ]
+  [ -d "$T/outside/other" ]
+  # Nothing new was created through the link (no pid dir, no staged repos).
+  [ "$(ls -A "$T/outside" | sort | tr '\n' ' ')" = "99999 oldfile other " ]
+  [ ! -e "$(LEDGER)" ]
+}
+
+@test "a symlinked .grid-tmp is not swept by a no-op install or by repair" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  outside_old_entries
+  ln -s "$T/outside" "$GREAL/.grid-tmp"
+  run install
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".grid-tmp"* ]]
+  [ -f "$T/outside/oldfile" ]
+  [ -f "$T/outside/99999/inner" ]
+  [ -d "$T/outside/other" ]
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" repair
+  [ "$status" -eq 0 ]
+  [ -f "$T/outside/oldfile" ]
+  [ -f "$T/outside/99999/inner" ]
+  [ -d "$T/outside/other" ]
+}
+
+@test "the stale sweep deletes only run dirs named like a pid, never other names" {
+  build_grids
+  mkdir -p "$G/.grid-tmp/keepme" "$G/.grid-tmp/99999"
+  touch -t 200001010000 "$G/.grid-tmp/keepme" "$G/.grid-tmp/99999"
+  run install
+  [ "$status" -eq 0 ]
+  [ ! -e "$G/.grid-tmp/99999" ]
+  [ -d "$G/.grid-tmp/keepme" ]
+}
+
+@test "StagingRun and staging_run raise GridError for a symlinked .grid-tmp" {
+  build_grids
+  outside_old_entries
+  ln -s "$T/outside" "$GREAL/.grid-tmp"
+  run python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader("gridmod", sys.argv[1] + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+for label, make in (("StagingRun", lambda: g.StagingRun(sys.argv[1]).dir("x")),
+                    ("staging_run", lambda: g.staging_run(sys.argv[1]).__enter__())):
+    try:
+        make()
+    except g.GridError:
+        print("%s refused" % label)
+    else:
+        print("%s NOT refused" % label)
+' "$GREAL"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"StagingRun refused"* ]]
+  [[ "$output" == *"staging_run refused"* ]]
+  [ "$(ls -A "$T/outside" | sort | tr '\n' ' ')" = "99999 oldfile other " ]
+}
+
+# --- check-to-use races (private WP-031) ------------------------------------------------------
+# A same-user process could swap a parent directory for a symlink between grid's check and
+# its delete/rename. The harnesses below do that swap from inside a wrapped check function,
+# i.e. in the window, and assert nothing outside the source dir is touched.
+
+@test "remove_placed_dir: a parent swapped for a symlink after the check does not delete outside" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  mkdir -p "$T/outside"
+  cp -R "$GREAL/repos/up/skills" "$T/outside/skills"
+  run python3 -B -c '
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+grid, outside = sys.argv[1], sys.argv[2]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+rows, _foreign = g.read_ledger()
+row = [r for r in rows if r["name"] == "alpha"][0]
+real = g.placed_dir_status
+def swapping(grid_dir, r, force=False):
+    res = real(grid_dir, r, force)
+    # The window: after the check said ok, before the delete.
+    os.rename(grid + "/repos/up/skills", grid + "/repos/up/skills.moved")
+    os.symlink(outside + "/skills", grid + "/repos/up/skills")
+    return res
+g.placed_dir_status = swapping
+status, detail = g.remove_placed_dir(grid, row, True)
+print("status=%s" % status)
+' "$GREAL" "$T/outside"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"status=removed"* ]]
+  [ -f "$T/outside/skills/alpha/SKILL.md" ]
+}
+
+@test "place_staged: a parent swapped for a symlink after the containment check places nothing outside" {
+  build_grids
+  mkdir -p "$T/outside"
+  run python3 -B -c '
+import os, importlib.util, sys
+from importlib.machinery import SourceFileLoader
+grid, outside = sys.argv[1], sys.argv[2]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+real = g.is_contained
+def swapping(grid_dir, source, dest):
+    res = real(grid_dir, source, dest)
+    # Only the call made by place_staged, and only once: swap repos/up/skills for a link.
+    if sys._getframe(1).f_code.co_name == "place_staged" and dest.startswith("repos/up/skills/") \
+            and not os.path.islink(grid + "/repos/up/skills"):
+        os.symlink(outside, grid + "/repos/up/skills")
+    return res
+g.is_contained = swapping
+sys.exit(g.main(["--grid-dir", grid, "install"]))
+' "$GREAL" "$T/outside"
+  [ "$status" -ne 0 ]
+  [ -z "$(ls -A "$T/outside")" ]
+}
+
+@test "is_contained is False for a path under a symlinked repos/<source> (root is not the resolved source dir)" {
+  build_grids
+  outside_canary
+  rm -rf "$GREAL/repos/up"
+  ln -s "$T/outside" "$GREAL/repos/up"
+  run python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader("gridmod", sys.argv[1] + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+print(g.is_contained(sys.argv[1], "up", "repos/up/skills/alpha"))
+' "$GREAL"
+  [ "$status" -eq 0 ]
+  [ "$output" = "False" ]
+}
+
+@test "classify_entries refuses a symlinked repos/<source> even when the lock reader is bypassed" {
+  build_grids
+  outside_canary
+  rm -rf "$GREAL/repos/up"
+  ln -s "$T/outside" "$GREAL/repos/up"
+  run python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader("gridmod", sys.argv[1] + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+entry = {"name": "alpha", "source": "up", "dest": "repos/up/skills/alpha", "path": "skills/alpha"}
+try:
+    g.classify_entries(sys.argv[1], [entry], [], False)
+except g.GridError as exc:
+    print("refused: %s" % exc)
+    sys.exit(0)
+sys.exit(3)
+' "$GREAL"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"repos/up is a symlink"* ]]
 }

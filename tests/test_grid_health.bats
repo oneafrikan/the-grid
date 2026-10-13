@@ -27,6 +27,8 @@ setup() {
 }
 
 teardown() {
+  # A test may leave a chmod 555 directory behind; rm cannot enter it otherwise.
+  chmod -R u+rwX "$T" 2>/dev/null || true
   rm -rf "$T"
   common_teardown
 }
@@ -399,6 +401,51 @@ snapshot() { tree_digest "$GREAL"; echo "--"; tree_digest "$SKILLS_DIR"; echo "-
   [ "$status" -eq 2 ]
   [ "$(cat "$T/victim/file")" = "precious" ]
   [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+}
+
+@test "uninstall --yes with a read-only dir: no traceback, that row is kept, the other row is processed, exit 2" {
+  # Root ignores file modes, which would make this test pass vacuously: fail loudly instead.
+  [ "$(id -u)" -ne 0 ]
+  installed
+  chmod 555 "$G/repos/up/skills/alpha"
+  run grid uninstall --yes --force
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" == *"repos/up/skills/alpha"* ]]
+  # alpha stays on disk and in the ledger; beta (the second row) was still removed.
+  [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+  grep -q "alpha" "$(LEDGER)"
+  [ ! -e "$G/repos/up/nested" ]
+  ! grep -q "beta" "$(LEDGER)" || false
+  chmod 755 "$G/repos/up/skills/alpha"
+  # A re-run finishes the job.
+  run grid uninstall --yes
+  [ "$status" -eq 0 ]
+  [ ! -e "$G/repos/up/skills" ]
+  [ ! -e "$(LEDGER)" ]
+}
+
+@test "uninstall --yes keeps the ledger row when remove_placed_dir reports modified" {
+  installed
+  run python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+grid = sys.argv[1]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+real = g.remove_placed_dir
+def patched(grid_dir, row, force=False):
+    if row["name"] == "alpha":
+        return "modified", "changed under us"       # the dir was NOT removed
+    return real(grid_dir, row, force)
+g.remove_placed_dir = patched
+sys.exit(g.main(["--grid-dir", grid, "uninstall", "--yes"]))
+' "$G"
+  [ "$status" -eq 1 ]
+  [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+  grep -q "alpha" "$(LEDGER)"
+  ! grep -q "beta" "$(LEDGER)" || false
 }
 
 @test "uninstall keeps rows of an unknown kind in the ledger" {
