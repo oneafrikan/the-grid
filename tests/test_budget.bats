@@ -605,6 +605,19 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
   [[ "$output" == *"budget: FAIL agent-factory/roles/nodesc/role.yaml: role nodesc has no description"* ]] || false
 }
 
+@test "a dangling SKILL.md or role.yaml symlink fails --check and names the path (NF-055 VF6)" {
+  mkdir -p "$MOCK_GRID/skills/dang" "$MOCK_GRID/agent-factory/roles/dang"
+  ln -s "$MOCK_GRID/nowhere/SKILL.md" "$MOCK_GRID/skills/dang/SKILL.md"
+  ln -s "$MOCK_GRID/nowhere/role.yaml" "$MOCK_GRID/agent-factory/roles/dang/role.yaml"
+  write_target 1000 1000 1000 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/dang/SKILL.md: "*"dangling"* ]] || false
+  [[ "$output" == *"budget: FAIL agent-factory/roles/dang/role.yaml: "*"dangling"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+}
+
 @test "a baseline (upstream) skill with a quoted key only warns: the exit status is unchanged" {
   mkdir -p "$MOCK_GRID/repos/x/skills/q"
   printf -- '---\nname: q\n"description": Quoted key probe text\n---\nbody\n' > "$MOCK_GRID/repos/x/skills/q/SKILL.md"

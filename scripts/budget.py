@@ -278,6 +278,22 @@ def skill_entry(name, skill_md, rel, truncate_at):
     return e
 
 
+def dangling(path):
+    """True for a symlink whose target is missing: os.path.isfile() calls that False too, so
+    the entry used to be skipped without a word (NF-055 VF6)."""
+    return os.path.islink(path) and not os.path.exists(path)
+
+
+def dangling_entry(name, rel, truncate_at):
+    """An owned entry for a dangling SKILL.md / role.yaml symlink: nothing to measure, so only
+    the problem (which fails --check by path) and a zero body."""
+    e = make_entry(name, rel, "", True, "", False, truncate_at,
+                   ["dangling symlink (its target does not exist), so nothing can be measured"])
+    e["body_bytes"] = 0
+    e["unreadable"] = True
+    return e
+
+
 def total(entries):
     return {"count": len(entries), "chars": sum(e["chars"] for e in entries)}
 
@@ -290,16 +306,24 @@ def measure(grid, truncate_at):
     sdir = os.path.join(grid, "skills")
     for name in sorted(os.listdir(sdir)) if os.path.isdir(sdir) else []:
         md = os.path.join(sdir, name, "SKILL.md")
-        if os.path.isfile(md):
-            entries["skills"].append(
-                skill_entry(name, md, os.path.join("skills", name, "SKILL.md"), truncate_at))
+        rel = os.path.join("skills", name, "SKILL.md")
+        if dangling(md):
+            entries["skills"].append(dangling_entry(name, rel, truncate_at))
+        elif os.path.isfile(md):
+            entries["skills"].append(skill_entry(name, md, rel, truncate_at))
 
     # owned roles: measured from role.yaml source, never from composed output or
     # private roles, so the number is the same on every machine.
     rdir = os.path.join(grid, "agent-factory", "roles")
     for name in sorted(os.listdir(rdir)) if os.path.isdir(rdir) else []:
         ry = os.path.join(rdir, name, "role.yaml")
-        if name == "_retired" or not os.path.isfile(ry):
+        if name == "_retired":
+            continue
+        if dangling(ry):
+            entries["agent_roles"].append(dangling_entry(
+                name, os.path.join("agent-factory", "roles", name, "role.yaml"), truncate_at))
+            continue
+        if not os.path.isfile(ry):
             continue
         meta, problems = read_yaml(ry)
         if "description" in meta:
@@ -464,7 +488,8 @@ def run_checks(summary, target, grid=None):
     # 4. sections/ integrity for every owned skill
     if grid is not None:
         for e in summary["entries"]["skills"]:
-            fails.extend(check_sections(grid, e["path"]))
+            if not e.get("unreadable"):         # a dangling SKILL.md has no index to check
+                fails.extend(check_sections(grid, e["path"]))
     return fails
 
 
