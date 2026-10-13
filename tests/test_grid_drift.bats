@@ -161,6 +161,30 @@ empty_dir() { [ -z "$(ls -A "$1")" ]; }
   lacks "$report" "does-not-exist"
 }
 
+@test "J2: an unreachable upstream's report says GRID_GIT_FORWARD_CONFIG=1 may be needed, with no path" {
+  printf 'version: 1\nsources:\n  up:\n    url: file://%s/does-not-exist\nwired:\n  baseline: baseline-submodules.example.txt\n' \
+    "$T" > "$G/grid.yaml"
+  run drift --quiet
+  [ "$status" -eq 0 ]
+  report=$(cat "$REPORTS/drift-latest.md")
+  contains "$report" "GRID_GIT_FORWARD_CONFIG=1"
+  lacks "$report" "does-not-exist"
+}
+
+@test "J2: a clean drift report carries no forward-config hint" {
+  run drift --quiet
+  [ "$status" -eq 0 ]
+  lacks "$(cat "$REPORTS/drift-latest.md")" "GRID_GIT_FORWARD_CONFIG"
+}
+
+@test "J2: schedule install notes that the scheduled job runs git without your gitconfig" {
+  for os in Darwin Linux Other; do
+    GRID_OS=$os run schedule install
+    [ "$status" -eq 0 ]
+    contains "$output" "GRID_GIT_FORWARD_CONFIG=1"
+  done
+}
+
 @test "a ref that does not exist upstream is unreachable with 'ref not found'" {
   printf 'version: 1\nsources:\n  up:\n    url: file://%s\n    ref: no-such-branch\nwired:\n  baseline: baseline-submodules.example.txt\n' \
     "$U" > "$G/grid.yaml"

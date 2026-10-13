@@ -1097,6 +1097,92 @@ False" ]
   [[ "$output" == *"repos/up/skills is a symlink"* ]]
 }
 
+# --- git failure hints, uninstall preflight, host key (hardening, refs private NF-066 J2/VG5/VG7) ---
+
+# run_git_stub STDERR [ENV=VAL]: call run_git with subprocess.run stubbed to fail with STDERR;
+# prints the GridError text.
+run_git_stub() {
+  python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader("gridmod", sys.argv[1] + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+class Done(object):
+    returncode, stdout = 128, ""
+    stderr = sys.argv[2]
+g.subprocess.run = lambda *a, **k: Done()
+try:
+    g.run_git(["status"])
+except g.GridError as exc:
+    print(exc)
+' "$GREAL" "$1"
+}
+
+@test "J2: a git failure from dubious ownership or auth points at GRID_GIT_FORWARD_CONFIG=1" {
+  build_grids
+  for msg in "fatal: detected dubious ownership in repository at '/x'" \
+             "fatal: could not read Username for 'https://example.com': terminal prompts disabled" \
+             "fatal: Authentication failed for 'https://example.com/r.git/'"; do
+    run run_git_stub "$msg"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"GRID_GIT_FORWARD_CONFIG=1"* ]]
+  done
+}
+
+@test "J2: no hint for an unrelated git failure, nor when the config is already forwarded" {
+  build_grids
+  run run_git_stub "fatal: not a git repository"
+  [[ "$output" != *"GRID_GIT_FORWARD_CONFIG"* ]]
+  GRID_GIT_FORWARD_CONFIG=1 run run_git_stub "fatal: detected dubious ownership in repository at '/x'"
+  [[ "$output" != *"set GRID_GIT_FORWARD_CONFIG"* ]]
+}
+
+@test "VG5: uninstall --yes with an unwritable state dir exits 2 before deleting anything" {
+  [ "$(id -u)" -ne 0 ]
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  chmod 555 "$GRID_STATE_DIR"
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" uninstall --yes
+  chmod 755 "$GRID_STATE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+  [ -L "$SKILLS_DIR/alpha" ]
+  [ -f "$(LEDGER)" ]
+}
+
+@test "VG7: a hostname that is not a valid machine key says to set GRID_HOST" {
+  build_grids
+  run python3 -B -c '
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader("gridmod", sys.argv[1] + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+os.environ.pop("GRID_HOST", None)
+g.socket.gethostname = lambda: "h\u00f6st.local"
+try:
+    g.host_key()
+except g.GridError as exc:
+    print(exc)
+os.environ["GRID_HOST"] = "../x"
+try:
+    g.host_key()
+except g.GridError as exc:
+    print(exc)
+' "$GREAL"
+  [ "$status" -eq 0 ]
+  first=$(printf '%s\n' "$output" | sed -n 1p)
+  second=$(printf '%s\n' "$output" | sed -n 2p)
+  [[ "$first" == *"hostname"* ]]
+  [[ "$first" == *"set GRID_HOST"* ]]
+  [[ "$first" != *"GRID_HOST is not"* ]]
+  # A value the user DID set keeps the old wording.
+  [[ "$second" == *"GRID_HOST"*"is not a valid machine key"* ]]
+}
+
 # --- (m) robustness (private WP-032) ---------------------------------------------------------------------------------------
 # A state dir or ledger problem is a clean exit 2 found BEFORE anything is fetched or placed.
 
@@ -1187,6 +1273,26 @@ False" ]
   [[ "$output" == *"installed.manifest line 3"* ]]
   [[ "$output" == *"re-run"* ]]
   [ "$(cat "$(LEDGER)")" = "$before" ]
+}
+
+@test "ledger rows whose dest differs only in case are duplicates, exit 2" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  python3 -B -c '
+import sys
+p = sys.argv[1]
+rows = open(p).read().split("\n")
+cols = rows[0].split("\t")
+# Same row with the path (and so dest) upper-cased and a different name: only the case differs.
+cols[1] = cols[1] + "-copy"
+cols[4] = cols[4].upper()
+cols[5] = "repos/" + cols[2] + "/" + cols[4]
+open(p, "a").write("\t".join(cols) + "\n")
+' "$(LEDGER)"
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"duplicate"* ]]
 }
 
 @test "a malformed ledger row names the ledger path and the remedy" {

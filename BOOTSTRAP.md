@@ -77,7 +77,9 @@ Notes:
   ledger row names. Keep `~/.grid` writable only by you.
 - `grid` runs git without your user or system gitconfig (so a URL rewrite there
   cannot redirect what it fetches). Behind a corporate proxy or credential
-  helper set `GRID_GIT_FORWARD_CONFIG=1` to forward your git environment.
+  helper (or `~/.netrc`, or a `safe.directory` entry) set `GRID_GIT_FORWARD_CONFIG=1`
+  to forward your git environment. A scheduled `grid drift` job does not inherit your
+  shell, so add the variable to the job's own environment.
   `GRID_AUDIT_TIMEOUT=<seconds>` (default 300) bounds each `audit.py` run.
 - `grid lock --check` fails (exit 2) on a shallow submodule checkout that cannot prove
   a locked commit is on its declared ref. A CI job that clones submodules at depth 1
