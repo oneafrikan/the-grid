@@ -655,6 +655,25 @@ STUB
   [[ "$output" == *"not closed"* && "$output" == *"Simplify"* ]] || { echo "$output" >&2; false; }
 }
 
+@test "no-bypass: the 'not closed' message names apostrophes in heredocs and the -F <file> workaround" {
+  # the usual cause is a commit message heredoc holding don't / it's: the message must say
+  # so, not just "simplify", and name the way out
+  expect_block $'git commit -m "$(cat <<\'EOF\'\nfix: don\'t crash\nEOF\n)"'
+  [[ "$output" == *"apostrophe"* && "$output" == *"heredoc"* ]] || { echo "$output" >&2; false; }
+  [[ "$output" == *"git commit -F <file>"* ]] || { echo "$output" >&2; false; }
+  # and the workaround it names actually passes
+  expect_pass 'git commit -F msg.txt'
+}
+
+@test "README: the 'file run later' example is not a heredoc (a heredoc body is read as code, so it blocks)" {
+  # a heredoc whose body holds a git flag blocks under option B, so it cannot be the
+  # documented example of what slips through; a quoted string written by printf is
+  expect_block $'cat > run.sh <<EOF\ngit commit -n -m x\nEOF\nsh run.sh'
+  expect_pass $'printf \'%s\\n\' \'git commit -n -m x\' > run.sh; sh run.sh'
+  ! grep -qF 'EOF; sh run.sh' "$REPO_ROOT/hooks/README.md"
+  grep -qF "printf '%s\\n' 'git commit -n' > run.sh" "$REPO_ROOT/hooks/README.md"
+}
+
 @test "no-bypass: two apostrophes in a heredoc body pair up and can hide a later git call (accepted residual)" {
   # Documented, not fixed: with the body read as code, an EVEN number of apostrophes forms a
   # quoted span that swallows the text between them, including a later git call. An odd

@@ -408,8 +408,9 @@ The guards do not inspect:
   `--no-{verify,x}`), pathname globs in a command word (`/usr/bin/g?t commit -n`), and
   `${x}` / `$((..))` results,
 - nested escaped backticks (`` `echo \`git commit -n\`` ``),
-- data written to a file and executed later (`cat > run.sh <<EOF ... EOF; sh run.sh`): the
-  same hole as a script written with the Write tool,
+- data written to a file and executed later (`printf '%s\n' 'git commit -n' > run.sh; sh run.sh`):
+  the same hole as a script written with the Write tool. (A heredoc is not an example:
+  its body is read as code, so `cat > run.sh <<EOF` holding a git flag blocks.)
 - an interpreter that runs git from a quoted string (`python3 -c "os.system('git ...')"`,
   `node -e "execSync('git ...')"`),
 - `cp`, `ln -sf`, `dd`, `install`, `unlink` and `find -delete` are read as writers, but a

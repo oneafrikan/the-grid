@@ -84,7 +84,7 @@ grid_check_balanced() {
   if [ -n "${GIT_FAIL:-}" ]; then
     echo "BLOCKED by the-grid hook $1: command too complex to inspect ($GIT_FAIL). Simplify the command, or write the content to a file with the Write tool." >&2
   else
-    echo "BLOCKED by the-grid hook $1: a quote or substitution in this command is not closed, so the command cannot be inspected. Simplify the command: close the quote, or write the content to a file with the Write tool." >&2
+    echo "BLOCKED by the-grid hook $1: a quote or substitution in this command is not closed, so the command cannot be inspected. An apostrophe inside a heredoc body (a commit message with don't or it's) opens a quote, as the body is read as shell text. Simplify the command: close the quote, or write the content to a file with the Write tool and use git commit -F <file>." >&2
   fi
   exit 2
 }
