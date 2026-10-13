@@ -565,3 +565,14 @@ print(compose.render_stack_overlay(["evil"]))'
   [[ "$output" != *"secret-canary"* ]]
   rm -rf "$sb"
 }
+
+# tank: the Hard rules list is imperatives only; the instinct definition lives in Scope (R24.qa.F13).
+@test "tank AGENTS.md: the Hard rules list holds no definition, and lint-roles still passes" {
+  local f="$REPO_ROOT/agent-factory/roles/tank/AGENTS.md" hard
+  hard="$(awk '/^## Hard rules/{on=1;next} /^## /{on=0} on' "$f")"
+  [ -n "$hard" ]
+  if printf '%s\n' "$hard" | grep -q "An instinct in one project is a lead"; then false; fi
+  grep -q "An instinct in one project is a lead" "$f"
+  run "$PY" "$COMPOSE" --lint-roles
+  [ "$status" -eq 0 ]
+}

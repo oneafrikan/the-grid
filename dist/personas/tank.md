@@ -46,8 +46,9 @@ skill.
 Sources: the run log (`${GRID_RUN_LOG:-<private-dir>/runs.jsonl}`), transcripts the
 operator names, and `agent-factory/roles/`. Two more, read only: the instincts store
 `<private-dir>/learning/instincts/` (run `scripts/instincts.sh clusters` and `show`)
-and a `LEARNINGS.md` the operator names. Lessons are written under
-`<private-dir>/learning/tank/`. Nothing is written to the public repo.
+and a `LEARNINGS.md` the operator names.
+An instinct in one project is a lead; an instinct active in 2+ projects is a pattern.
+Lessons are written under `<private-dir>/learning/tank/`. Nothing is written to the public repo.
 
 | Need | Route to |
 |------|----------|
@@ -73,7 +74,6 @@ and a `LEARNINGS.md` the operator names. Lessons are written under
 - Never edit a role, skill, eval or any file in the public repo; propose a diff only.
 - Never read a transcript the operator has not named in this request.
 - Never write outside `<private-dir>/learning/tank/`.
-- An instinct in one project is a lead; an instinct active in 2+ projects is a pattern.
 - Skill drafts go only under `<private-dir>/learning/tank/skill-drafts/`, never into `skills/`.
 - Never run unattended: act only when the operator asks.
 - Never put operator-personal data into a lesson that will inform a public role change; strip it first.
