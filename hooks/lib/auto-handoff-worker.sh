@@ -293,7 +293,9 @@ FALLBACK_REAL="$(rp "$FALLBACK" 2>/dev/null)" || FALLBACK_REAL="$FALLBACK"
 # resolve_target: the directory the handoff skill will choose, with the skill's own
 # first-match rule (skills/handoff/SKILL.md "Document locations reference"):
 #   1. the first row of ~/.the-grid-private/handoff-locations.md whose first column
-#      matches the cwd name or path glob; its location (relative = against cwd)
+#      matches the cwd name or path glob; its location (relative = against cwd, ~ = home,
+#      directory matched case-insensitively). A matched row whose directory is missing
+#      ends the search: no fallthrough to 2.
 #   2. otherwise the existing direct child of cwd named logs, in any casing
 # Sets TARGET to an absolute, EXISTING directory, or "" (no rule for it is then
 # granted and the child can write only to the fallback dir).
@@ -326,6 +328,21 @@ resolve_target() {
         case "$loc" in /*) ROW_ABS=1 ;; *) loc="$CWD/$loc" ;; esac
         loc="${loc%/}"
         ROW_LOC="$loc"
+        # The skill matches the directory case-insensitively (`LOGS` finds `Logs/`), so do
+        # the same: when the exact path is not a directory, look for a sibling whose last
+        # component differs only in case. tr, not ${var,,}: bash 3.2 (macOS) has no `,,`.
+        if [ ! -d "$loc" ]; then
+          local parent="${loc%/*}" leaf want cand
+          [ -n "$parent" ] || parent=/
+          want="$(printf '%s' "${loc##*/}" | tr '[:upper:]' '[:lower:]')"
+          for cand in "$parent"/* "$parent"/.[!.]*; do
+            [ -d "$cand" ] || continue
+            leaf="$(printf '%s' "${cand##*/}" | tr '[:upper:]' '[:lower:]')"
+            [ "$leaf" = "$want" ] && { loc="$cand"; break; }
+          done
+        fi
+        # A matched row whose directory is still missing stops the search: no fallthrough
+        # to the default, and no rule is granted (the child writes to the fallback dir).
         [ -d "$loc" ] && { TARGET="$loc"; TARGET_ROW=1; }
         return 0
       fi

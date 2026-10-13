@@ -1,7 +1,7 @@
 ## Adopting it in a repo
 
 **`openspec init` is optional.** `openspec new change` creates
-`openspec/{specs,changes,archive}` + `config.yaml` on its own, so the skills
+`openspec/{specs,changes/archive}` + `config.yaml` on its own, so the skills
 work in a repo that has never been initialised. What `init` adds is
 project-local `.claude/` copies of six skills plus `/opsx:*` commands —
 redundant here, since the-grid already wires all 12 globally.

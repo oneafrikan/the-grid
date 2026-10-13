@@ -19,7 +19,7 @@ setup() {
   grep -qF 'scripts/instincts.sh clusters' "$TANK/AGENTS.md"
 }
 
-@test "tank AGENTS.md has the two new hard rules and the evolve routing row" {
+@test "tank AGENTS.md has the instinct definition, the skill-drafts hard rule and the evolve routing row" {
   grep -qF 'An instinct in one project is a lead; an instinct active in 2+ projects is a pattern' "$TANK/AGENTS.md"
   grep -qF 'never into `skills/`' "$TANK/AGENTS.md"
   grep -qF 'tank `evolve`' "$TANK/AGENTS.md"

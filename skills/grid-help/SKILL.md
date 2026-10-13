@@ -1,11 +1,11 @@
 ---
 name: grid-help
-description: Explain how to use the-grid (which slash command or subagent to reach for, orchestrators vs specialists, the four factories). Use when the user asks "how do I use the-grid" or "what can I do here".
+description: Explain how to use the-grid (which slash command or subagent to reach for, orchestrators vs specialists, the four factories). Use when the user asks "how do I use the-grid", "what can I do here" or "how do I add a skill/agent/automation".
 ---
 
 # grid-help
 
-A live, in-session guide to the-grid. Answer from the summary below; point to
+A live, in-session guide to the-grid. Answer from the summary in `sections/orientation.md`; point to
 [USAGE.md](../../USAGE.md) (repo root) for the full walkthrough rather than
 reproducing it verbatim — it changes independently of this skill.
 
