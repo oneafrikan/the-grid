@@ -18,7 +18,7 @@ produces new entries.
    an empty stub up front.
 
 2. **Read the hash ledger.** If `LEARNINGS.md` exists, parse its hidden
-   ledger comments (see "LEARNINGS.md format" below) for both accepted
+   ledger comments (see `sections/learnings-format.md`) for both accepted
    hashes (entries already written) and rejected hashes (candidates the user
    declined on a previous run). Both sets are things to never re-propose.
 
