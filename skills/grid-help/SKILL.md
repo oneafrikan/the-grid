@@ -5,7 +5,7 @@ description: Explain how to use the-grid (which slash command or subagent to rea
 
 # grid-help
 
-A live, in-session guide to the-grid. Answer from the summary below; point to
+A live, in-session guide to the-grid. Answer from the summary in `sections/orientation.md`; point to
 [USAGE.md](../../USAGE.md) (repo root) for the full walkthrough rather than
 reproducing it verbatim — it changes independently of this skill.
 
