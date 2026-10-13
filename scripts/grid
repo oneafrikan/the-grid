@@ -39,6 +39,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import tempfile
 import time
@@ -378,18 +379,56 @@ def dest_for(source, path):
 
 
 def is_contained(grid_dir, source, dest):
-    """True when realpath(<grid>/<dest>) lies under realpath(<grid>/repos/<source>).
+    """True when realpath(<grid>/<dest>) lies under <realpath(grid)>/repos/<source>.
 
     The one containment test, applied before every write or delete (install and
     uninstall reuse it). realpath resolves symlinks, so a symlinked parent that
     points elsewhere is caught as well as a `..` component.
+
+    The root is built from the realpath of the GRID dir, NOT from the realpath of
+    repos/<source>: resolving the source dir itself would make a symlinked
+    repos/<source> contain its own target, so everything under it would pass.
     """
-    root = os.path.realpath(os.path.join(grid_dir, "repos", source))
+    root = os.path.join(os.path.realpath(grid_dir), "repos", source)
     target = os.path.realpath(os.path.join(grid_dir, dest))
     try:
         return os.path.commonpath([root, target]) == root
     except ValueError:                      # different drives (Windows) etc.
         return False
+
+
+def dest_chain_link(grid_dir, dest, include_leaf):
+    """The first component of <dest> (from `repos` down) that is a symlink, or None.
+
+    lstat on each prefix, so nothing is followed. Meant to be called IMMEDIATELY
+    before an rmtree or rename: is_contained is a check on an earlier moment, and
+    a same-user process could have swapped a parent for a symlink since. This
+    re-check narrows that window to the gap between this lstat and the syscall;
+    it does not close it (an O_NOFOLLOW dir_fd walk would). Chosen over the fd
+    walk because it is a small change and the threat needs a concurrent process
+    of the same user, so this is hardening, not a boundary. A component that does
+    not exist ends the walk (the caller creates or has already removed it).
+    """
+    parts = dest.split("/")
+    upto = len(parts) if include_leaf else len(parts) - 1
+    for i in range(1, upto + 1):
+        prefix = "/".join(parts[:i])
+        try:
+            st = os.lstat(os.path.join(grid_dir, prefix))
+        except FileNotFoundError:
+            return None
+        if stat.S_ISLNK(st.st_mode):
+            return prefix
+    return None
+
+
+def source_dir_is_link(grid_dir, source):
+    """True when repos/<source> is itself a symlink (grid never writes or deletes through one).
+
+    Same wording as uninstall's refusal (placed_dir_status) so the operator sees
+    one message for the shape whichever command meets it.
+    """
+    return os.path.islink(os.path.join(grid_dir, "repos", source))
 
 
 # --- grid.lock reader --------------------------------------------------------------
@@ -453,6 +492,8 @@ def read_grid_lock(grid_dir, sources):
         except ValueError as exc:
             raise GridError("grid: grid.lock %s: %s" % (label, exc))
         dest = dest_for(entry["source"], entry["path"])
+        if source_dir_is_link(grid_dir, entry["source"]):
+            raise GridError("grid: grid.lock %s: repos/%s is a symlink" % (label, entry["source"]))
         if not is_contained(grid_dir, entry["source"], dest):
             raise GridError("grid: grid.lock %s: %s escapes repos/%s" % (label, dest, entry["source"]))
         item = dict(entry)
@@ -567,6 +608,13 @@ def git_content_hash(repo_dir, sha, path, blobs, label):
         meta, rel = record.split("\t", 1)
         mode, _kind, oid = meta.split(" ")
         if is_excluded(rel):
+            # Excluded from the hash, but an escaping link under an excluded name would
+            # still be copied into place, so it must still be refused (private WP-031).
+            if mode == "120000":
+                target = blobs.read(oid).decode("utf-8", "surrogateescape")
+                if symlink_escapes(rel, target):
+                    raise GridError("grid: %s: symlink %s -> %s points outside the skill directory"
+                                    % (label, rel, target))
             continue
         if mode == "160000":
             raise GridError("grid: %s: nested submodule at %s cannot be pinned by a content hash"
@@ -590,18 +638,34 @@ def disk_content_hash(top, check_escape=False):
     changes the hash). A symlink, including one to a directory (os.walk lists
     those under dirnames, so both lists are checked), is class `l` with its
     link target as content and is never followed. With `check_escape`, a link
-    that points outside `top` is exit 2 (used when staging for install).
+    that points outside `top` is exit 2 (used when staging for install): both
+    the lexical test (what a git blob can be checked with) and a realpath test,
+    because a chain of links can leave `top` although each hop looks inside. The
+    escape check runs BEFORE the exclusion rule, so a link named `__pycache__`,
+    `*.pyc` or `.DS_Store` (which the hash ignores but a copy would still carry)
+    is checked like any other.
     """
     items = []
+    real_top = os.path.realpath(top) if check_escape else None
+
+    def escapes(full, rel, target):
+        if symlink_escapes(rel, target):
+            return True
+        try:
+            return os.path.commonpath([real_top, os.path.realpath(full)]) != real_top
+        except ValueError:
+            return True
 
     def add(full, rel):
-        if is_excluded(rel):
-            return
-        if os.path.islink(full):
+        is_link = os.path.islink(full)
+        if is_link:
             target = os.readlink(full)
-            if check_escape and symlink_escapes(rel, target):
+            if check_escape and escapes(full, rel, target):
                 raise GridError("grid: %s: symlink %s -> %s points outside the skill directory"
                                 % (top, rel, target))
+        if is_excluded(rel):
+            return
+        if is_link:
             items.append(("l", rel, hashlib.sha256(_b(target)).hexdigest()))
             return
         digest = hashlib.sha256()
@@ -618,7 +682,10 @@ def disk_content_hash(top, check_escape=False):
             if os.path.islink(os.path.join(root, name)):
                 dirnames.remove(name)                 # a link to a dir: hashed as a link, not walked
                 add(os.path.join(root, name), prefix + name)
-        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        if not check_escape:
+            # Only the hash-only walk may skip it. A staging walk must still look inside
+            # a real __pycache__ dir for links, since a copy of the tree would carry them.
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
         for name in filenames:
             add(os.path.join(root, name), prefix + name)
     return _combine(items)
@@ -1014,16 +1081,27 @@ def placed_dir_status(grid_dir, row, force=False):
 def remove_placed_dir(grid_dir, row, force=False):
     """Delete one placed skill dir with every safety check. Returns (status, detail).
 
-    status: "removed", "absent", "modified" or "refused" (see placed_dir_status;
-    the last two keep the dir). After removing, now-empty parent directories are
+    status: "removed", "absent", "modified", "refused" (see placed_dir_status;
+    the last two keep the dir) or "failed" (the delete itself raised OSError, for
+    example a read-only subtree; the dir may be partly deleted, so a re-run with
+    --force is what finishes it). After removing, now-empty parent directories are
     removed up to but not including repos/<source>. These are the rules
     `uninstall` uses.
     """
     status, detail = placed_dir_status(grid_dir, row, force)
     if status != "ok":
         return status, detail
-    target = os.path.join(grid_dir, row["dest"])
-    shutil.rmtree(target)
+    # Re-check right before the delete (see dest_chain_link), then delete the path that was
+    # resolved ONCE, so the path named in the check is the path removed.
+    link = dest_chain_link(grid_dir, row["dest"], include_leaf=True)
+    if link:
+        return "refused", "%s became a symlink during the removal" % link
+    target = os.path.realpath(os.path.join(grid_dir, row["dest"]))
+    try:
+        shutil.rmtree(target)
+    except OSError as exc:
+        # No traceback and no silent success: the caller keeps the ledger row.
+        return "failed", "%s: %s" % (row["dest"], exc.strerror or exc)
     root = os.path.join(grid_dir, "repos", row["source"])
     parent = os.path.dirname(target)
     while parent != root and parent.startswith(root + os.sep):
@@ -1216,6 +1294,11 @@ def classify_entries(grid_dir, selected, old_rows, force):
     by_dest = dict((r["dest"], r) for r in old_rows)
     plan = []
     for entry in selected:
+        # Defence in depth: read_grid_lock already refuses this shape, but classification
+        # decides what gets replaced, so it must never trust a link at repos/<source>.
+        if source_dir_is_link(grid_dir, entry["source"]):
+            raise GridError("grid: repos/%s is a symlink; grid will not install through it"
+                            % entry["source"])
         old = by_dest.get(entry["dest"])
         target = os.path.join(grid_dir, entry["dest"])
         if not os.path.lexists(target):
@@ -1238,17 +1321,57 @@ TMP_DIRNAME = ".grid-tmp"
 STALE_SECONDS = 24 * 3600
 
 
+def staging_top_problem(grid_dir):
+    """Why <grid>/.grid-tmp cannot be trusted as the staging parent, or None.
+
+    None means it is absent (it will be created by us) or is a real directory
+    owned by the current user. lstat, never stat: a symlink there (for example
+    committed by a hostile fork; `.gitignore` does not match a symlink) would
+    point the sweep's deletes and the staging writes at its target.
+    """
+    top = os.path.join(grid_dir, TMP_DIRNAME)
+    try:
+        st = os.lstat(top)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return "cannot be inspected (%s)" % (exc.strerror or exc)
+    if stat.S_ISLNK(st.st_mode):
+        return "is a symlink"
+    if not stat.S_ISDIR(st.st_mode):
+        return "is not a directory"
+    if hasattr(os, "getuid") and st.st_uid != os.getuid():
+        return "is not owned by the current user"
+    return None
+
+
+def require_staging_top(grid_dir):
+    """GridError when <grid>/.grid-tmp is not safe to stage into (see staging_top_problem)."""
+    problem = staging_top_problem(grid_dir)
+    if problem:
+        raise GridError("grid: %s/%s %s; refusing to stage there (remove it and re-run)"
+                        % (grid_dir, TMP_DIRNAME, problem))
+
+
 def sweep_stale_staging(grid_dir):
     """Delete <grid>/.grid-tmp/* entries older than a day (leftovers of a SIGKILL).
 
     A leftover staged SKILL.md must never be found by a whole-tree `find`, and a
-    killed scheduler job must not leave staging dirs for ever.
+    killed scheduler job must not leave staging dirs for ever. Only entries named
+    like a run dir (all digits, the pid) are ever deleted, and nothing is swept
+    when .grid-tmp itself is not a plain directory of ours.
     """
     top = os.path.join(grid_dir, TMP_DIRNAME)
+    problem = staging_top_problem(grid_dir)
+    if problem:
+        notice("grid: %s %s; stale staging not swept" % (top, problem))
+        return
     if not os.path.isdir(top):
         return
     cutoff = time.time() - STALE_SECONDS
     for name in os.listdir(top):
+        if not re.fullmatch(r"[0-9]+", name):
+            continue                                           # not a run dir of ours: leave it
         full = os.path.join(top, name)
         try:
             if os.lstat(full).st_mtime >= cutoff:
@@ -1273,6 +1396,7 @@ def staging_run(grid_dir):
     under a scheduler kill. The dir is inside the grid dir so the final rename
     into place stays on one filesystem.
     """
+    require_staging_top(grid_dir)
     top = os.path.join(grid_dir, TMP_DIRNAME)
     run = os.path.join(top, str(os.getpid()))
     if os.path.lexists(run):
@@ -1402,10 +1526,20 @@ def place_staged(grid_dir, run, repo, entry, counter):
         raise _entry_error(entry, "the copy to be placed hashes %s, not the locked %s"
                            % (got[:19], entry["hash"][:19]))
     # Re-check containment against the filesystem as it is NOW, just before the write.
+    if source_dir_is_link(grid_dir, entry["source"]):
+        raise _entry_error(entry, "repos/%s is a symlink" % entry["source"])
     if not is_contained(grid_dir, entry["source"], entry["dest"]):
         raise _entry_error(entry, "%s escapes repos/%s" % (entry["dest"], entry["source"]))
     final = os.path.join(grid_dir, entry["dest"])
+    link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
+    if link:                                    # before makedirs, which would follow it
+        raise _entry_error(entry, "%s became a symlink while placing" % link)
     os.makedirs(os.path.dirname(final), exist_ok=True)
+    # Re-check after the parents exist and right before the renames (see dest_chain_link):
+    # a parent swapped for a symlink since is_contained ran would redirect them.
+    link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
+    if link:
+        raise _entry_error(entry, "%s became a symlink while placing" % link)
     moved = None
     if os.path.lexists(final):
         moved = os.path.join(run, "old", str(next(counter)))
@@ -1551,7 +1685,7 @@ def apply_plan(grid_dir, cfg, skills_dir, vetted, plan, failed, remove_rows, kee
         status, detail = remove_placed_dir(grid_dir, row)
         if status == "removed":
             print("grid: removed %s" % row["dest"])
-        elif status in ("modified", "refused"):
+        elif status in ("modified", "refused", "failed"):
             notice("grid: %s: kept (%s)" % (row["dest"], detail))
             kept_rows.append(row)
 
@@ -1840,7 +1974,9 @@ def cmd_uninstall(args):
     kept dir stays. Never touched: `.git` dirs, baseline-submodules.txt,
     machines/*, foreign links, real dirs in SKILLS_DIR, repos/<source> itself.
     A second run finds nothing and says `nothing to remove`.
-    Exit 0, or 1 when --yes had to leave a dir behind (edited or refused).
+    Exit 0, 1 when --yes had to leave a dir behind (edited or refused), or 2 when a
+    delete itself failed (for example a read-only subtree); a dir left behind for
+    any reason keeps its ledger row and the remaining rows are still processed.
     """
     grid_dir = resolve_grid_dir(args.grid_dir)
     skills_dir = skills_dir_for(args)
@@ -1878,20 +2014,36 @@ def cmd_uninstall(args):
     # Links first, then directories (a link must never outlive the dir it points at).
     for link, _row in links:
         os.unlink(link)
+    # Every row is processed even when an earlier one fails. The result of each removal
+    # decides its ledger row: a dir that is still there (a refusal that appeared since the
+    # check, an edit, or a delete that raised) keeps its row, so the ledger never forgets
+    # something grid placed and did not remove.
+    left = [(row, status, detail) for row, status, detail in kept]
+    failed_rows = []
     for row in removable:
-        remove_placed_dir(grid_dir, row, args.force)
+        status, detail = remove_placed_dir(grid_dir, row, args.force)
+        if status in ("modified", "refused"):
+            left.append((row, status, detail))
+        elif status == "failed":
+            left.append((row, status, detail))
+            failed_rows.append((row, detail))
     # The ledger keeps the rows whose dirs were left behind, and any row of an unknown
     # kind (a newer grid's); with none left the file goes.
-    if ledger_goes:
+    if ledger_exists and not left and not foreign:
         os.unlink(ledger_path())
-    elif kept or foreign:
-        write_ledger([row for row, _s, _d in kept], foreign)
+    elif left or foreign:
+        write_ledger([row for row, _s, _d in left], foreign)
     # Refresh .wired.manifest (never SKILLS.md); only when something was removed.
     wired_ok = run_wire(grid_dir, args.skills_dir) if (links or to_delete) else True
-    if kept:
+    for row, detail in failed_rows:
+        notice("grid: %s: not removed (%s); fix the cause and re-run `grid uninstall --yes --force`"
+               % (row["dest"], detail))
+    if left:
         notice("grid: %d dir%s left in place; --force removes an edited one"
-               % (len(kept), "" if len(kept) == 1 else "s"))
-    return EXIT_OK if not kept and wired_ok else EXIT_FINDINGS
+               % (len(left), "" if len(left) == 1 else "s"))
+    if failed_rows:
+        return EXIT_ERROR
+    return EXIT_OK if not left and wired_ok else EXIT_FINDINGS
 
 
 # --- subcommands ---------------------------------------------------------------------
@@ -1946,12 +2098,14 @@ class StagingRun(object):
     """
 
     def __init__(self, grid_dir):
-        self.parent = os.path.join(grid_dir, ".grid-tmp")
+        self.grid_dir = grid_dir
+        self.parent = os.path.join(grid_dir, TMP_DIRNAME)
         self.path = os.path.join(self.parent, str(os.getpid()))
         self.made = False
 
     def dir(self, name):
         """A fresh sub-directory `name` inside the run dir; returns its path."""
+        require_staging_top(self.grid_dir)                      # never stage through a symlinked .grid-tmp
         full = os.path.join(self.path, name)
         os.makedirs(full)
         self.made = True
