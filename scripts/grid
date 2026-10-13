@@ -109,8 +109,14 @@ def host_key():
     `_` is allowed on purpose: `grid lock` passes the sentinel `__baseline__` to
     wire.sh. Same rule as scripts/wire.sh.
     """
-    host = os.environ.get("GRID_HOST") or socket.gethostname().split(".")[0]
+    env_host = os.environ.get("GRID_HOST")
+    host = env_host or socket.gethostname().split(".")[0]
     if not HOST_RE.fullmatch(host):
+        if not env_host:
+            # The user set nothing: do not blame a GRID_HOST they never wrote.
+            raise GridError("grid: the hostname %s is not usable as a machine key (letters, digits, "
+                            "`_`, `.`, `-`; not starting with `.` or `-`); set GRID_HOST to a valid one"
+                            % _printable(host))
         raise GridError("grid: GRID_HOST %s is not a valid machine key (letters, digits, `_`, `.`, "
                         "`-`; not starting with `.` or `-`)" % _printable(host))
     return host
@@ -201,6 +207,16 @@ def git_env():
     return env
 
 
+# stderr of a git failure that grid's config isolation (git_env) can cause or hide: safe.directory
+# ("dubious ownership"), and credentials/proxy that live in ~/.netrc or gitconfig.
+_GIT_CONFIG_FAILURE_RE = re.compile(
+    r"dubious ownership|safe\.directory|Authentication failed|could not read (?:Username|Password)"
+    r"|terminal prompts disabled|Proxy Authentication|Could not resolve proxy", re.IGNORECASE)
+FORWARD_CONFIG_HINT = ("grid runs git without your gitconfig, ~/.netrc and environment; if this is "
+                       "safe.directory, a credential helper, netrc or a proxy, set "
+                       "GRID_GIT_FORWARD_CONFIG=1 and re-run")
+
+
 def run_git(args, timeout=GIT_TIMEOUT):
     """Run `git <args>`; return stdout (str). Raise GridError(2) on non-zero or timeout.
 
@@ -217,8 +233,11 @@ def run_git(args, timeout=GIT_TIMEOUT):
     except FileNotFoundError:
         raise GridError("grid: git is required but not on PATH")
     if proc.returncode != 0:
-        raise GridError("grid: git failed (exit %d): %s\n%s"
-                        % (proc.returncode, shown, proc.stderr.strip()))
+        hint = ""
+        if os.environ.get("GRID_GIT_FORWARD_CONFIG") != "1" and _GIT_CONFIG_FAILURE_RE.search(proc.stderr):
+            hint = "\ngrid: hint: " + FORWARD_CONFIG_HINT
+        raise GridError("grid: git failed (exit %d): %s\n%s%s"
+                        % (proc.returncode, shown, proc.stderr.strip(), hint))
     return proc.stdout
 
 
@@ -453,18 +472,32 @@ def dest_for(source, path):
     return "repos/%s/%s" % (source, path)
 
 
+def source_root(grid_dir, source):
+    """<realpath(<grid>/repos)>/<source>: the containment root of one source.
+
+    realpath is applied to repos/ ONLY, never to the source dir. A symlinked repos/
+    (the whole directory) is a deliberate layout and is followed, but its target must be
+    on the same filesystem as the grid: install and repair rename staged copies into
+    place and fail with EXDEV across filesystems. A symlinked repos/<source> must stay
+    refused, and resolving it here would make it contain its own target (see is_contained).
+    """
+    return os.path.join(os.path.realpath(os.path.join(grid_dir, "repos")), source)
+
+
 def is_contained(grid_dir, source, dest):
-    """True when realpath(<grid>/<dest>) lies under <realpath(grid)>/repos/<source>.
+    """True when realpath(<grid>/<dest>) lies under realpath(<grid>/repos)/<source>.
 
     The one containment test, applied before every write or delete (install and
     uninstall reuse it). realpath resolves symlinks, so a symlinked parent that
     points elsewhere is caught as well as a `..` component.
 
-    The root is built from the realpath of the GRID dir, NOT from the realpath of
+    The root is built from the realpath of repos/, NOT from the realpath of
     repos/<source>: resolving the source dir itself would make a symlinked
     repos/<source> contain its own target, so everything under it would pass.
+    A symlinked repos/ moves the root with it, so nothing can land outside the
+    real repos tree whatever repos/ points at.
     """
-    root = os.path.join(os.path.realpath(grid_dir), "repos", source)
+    root = source_root(grid_dir, source)
     target = os.path.realpath(os.path.join(grid_dir, dest))
     try:
         return os.path.commonpath([root, target]) == root
@@ -486,7 +519,9 @@ def dest_chain_link(grid_dir, dest, include_leaf):
     """
     parts = dest.split("/")
     upto = len(parts) if include_leaf else len(parts) - 1
-    for i in range(1, upto + 1):
+    # Start below repos/ (i = 2 is repos/<source>): a symlinked repos/ is a supported
+    # layout and the containment root already follows it, so it is not a "swap".
+    for i in range(2, upto + 1):
         prefix = "/".join(parts[:i])
         try:
             st = os.lstat(os.path.join(grid_dir, prefix))
@@ -495,6 +530,19 @@ def dest_chain_link(grid_dir, dest, include_leaf):
         if stat.S_ISLNK(st.st_mode):
             return prefix
     return None
+
+
+def escape_hint(grid_dir, dest):
+    """The text " (<path> is a symlink)" for the first symlink on <dest>, else "".
+
+    Appended to an "escapes repos/<source>" error: the only way a validated path can
+    leave its root is through a link, and saying which one is the useful part.
+    repos/ itself is named only when no deeper link explains the escape.
+    """
+    link = dest_chain_link(grid_dir, dest, include_leaf=True)
+    if link is None and os.path.islink(os.path.join(grid_dir, "repos")):
+        link = "repos"
+    return " (%s is a symlink)" % link if link else ""
 
 
 def source_dir_is_link(grid_dir, source):
@@ -576,9 +624,13 @@ def read_grid_lock(grid_dir, sources):
         if source_dir_is_link(grid_dir, entry["source"]):
             raise GridError("grid: grid.lock %s: repos/%s is a symlink" % (label, entry["source"]))
         if not is_contained(grid_dir, entry["source"], dest):
-            raise GridError("grid: grid.lock %s: %s escapes repos/%s" % (label, dest, entry["source"]))
-        for what, key in (("destination", ("dest", dest)),
-                          ("name and source", ("name", entry["name"], entry["source"]))):
+            raise GridError("grid: grid.lock %s: %s escapes repos/%s%s"
+                            % (label, dest, entry["source"], escape_hint(grid_dir, dest)))
+        # casefold: names and destinations that differ only in case are one directory (or
+        # one link) on a case-insensitive filesystem, so they clash (private NF-066 J3).
+        for what, key in (("destination", ("dest", dest.casefold())),
+                          ("name and source", ("name", entry["name"].casefold(),
+                                               entry["source"].casefold()))):
             if key in seen_by:
                 raise GridError("grid: grid.lock %s duplicates %s (same %s)"
                                 % (label, seen_by[key], what))
@@ -720,6 +772,42 @@ def git_content_hash(repo_dir, sha, path, blobs, label):
     return _combine(items)
 
 
+def link_escapes(real_top, full, rel, target):
+    """True when symlink `full` (`rel` inside the skill dir, pointing at `target`) leaves the dir.
+
+    Both tests install applies: the lexical one (what a git blob can be checked with) and a
+    realpath one, because a chain of links can leave the dir although each hop looks inside.
+    `real_top` is realpath(skill dir).
+    """
+    if symlink_escapes(rel, target):
+        return True
+    try:
+        return os.path.commonpath([real_top, os.path.realpath(full)]) != real_top
+    except ValueError:
+        return True
+
+
+def check_links_contained(top, label):
+    """GridError when any symlink under `top` leaves it (install's realpath test, links only).
+
+    `grid lock` hashes from git objects, which only allows the lexical test; install
+    stages from disk and also applies the realpath test, so a chain-link skill used to
+    lock fine and then fail to install. Running the same test on the (clean, at-the-sha)
+    checkout here refuses such a lock at lock time. Reads no file content.
+    """
+    real_top = os.path.realpath(top)
+    for root, dirnames, filenames in os.walk(top, followlinks=False):
+        reldir = os.path.relpath(root, top).replace(os.sep, "/")
+        prefix = "" if reldir == "." else reldir + "/"
+        for name in dirnames + filenames:
+            full = os.path.join(root, name)
+            if os.path.islink(full):
+                target = os.readlink(full)
+                if link_escapes(real_top, full, prefix + name, target):
+                    raise GridError("grid: %s: symlink %s -> %s points outside the skill directory"
+                                    % (label, prefix + name, target))
+
+
 def disk_content_hash(top, check_escape=False):
     """Content hash of directory `top` on disk; equals git_content_hash for a clean checkout.
 
@@ -738,12 +826,7 @@ def disk_content_hash(top, check_escape=False):
     real_top = os.path.realpath(top) if check_escape else None
 
     def escapes(full, rel, target):
-        if symlink_escapes(rel, target):
-            return True
-        try:
-            return os.path.commonpath([real_top, os.path.realpath(full)]) != real_top
-        except ValueError:
-            return True
+        return link_escapes(real_top, full, rel, target)
 
     def add(full, rel):
         is_link = os.path.islink(full)
@@ -937,7 +1020,11 @@ def git_status(args, timeout=GIT_TIMEOUT):
     return proc.returncode, proc.stdout
 
 
-def check_sha_on_ref(repo, source, sha, ref, shallow_ok=False):
+# Opt-in for `lock --check` on shallow checkouts (see check_sha_on_ref). Exactly "1".
+SHALLOW_ENV = "GRID_LOCK_ALLOW_SHALLOW"
+
+
+def check_sha_on_ref(repo, source, sha, ref, shallow_ok=False, hint_opt_in=False):
     """GridError unless commit `sha` is on source's declared `ref` (or a tag points at it).
 
     install fetches the pinned sha directly and never looks at the ref, so without this a
@@ -946,6 +1033,9 @@ def check_sha_on_ref(repo, source, sha, ref, shallow_ok=False):
     for ref HEAD, else origin/<ref>, or the tag <ref>), or any commit a tag points at
     (D53 default: tags allowed). The proof needs history: a shallow checkout that cannot
     show the ancestry is a failure, or with `shallow_ok` a notice and no check.
+    `shallow_ok` is the explicit opt-in (generate_lock sets it only for `lock --check`
+    with GRID_LOCK_ALLOW_SHALLOW=1): a silent skip would let a sha that is on no
+    upstream ref pass the check.
     The sha is only as trustworthy as the review of the lock change itself.
     """
     if run_git(["-C", repo, "tag", "--points-at", sha]).strip():
@@ -973,7 +1063,10 @@ def check_sha_on_ref(repo, source, sha, ref, shallow_ok=False):
                    % (shown, sha[:12], ref))
             return
         raise GridError("grid: %s: shallow checkout, cannot prove %s is on ref %s; run: "
-                        "git -C %s fetch --unshallow origin" % (shown, sha[:12], ref, shown))
+                        "git -C %s fetch --unshallow origin%s"
+                        % (shown, sha[:12], ref, shown,
+                           "; or, for `lock --check` in CI (depth-1 clones), set %s=1 to skip this proof"
+                           % SHALLOW_ENV if hint_opt_in else ""))
     raise GridError("grid: %s: commit %s is not on the declared ref %s (nor tagged); lock a commit "
                     "that is on it, or fetch it: git -C %s fetch origin%s"
                     % (shown, sha[:12], ref, shown, fetch_arg))
@@ -986,9 +1079,11 @@ def generate_lock(grid_dir, cfg, warn=True, strict=True):
     the commit the parent records, or dirty, or the recorded commit is not on the
     source's declared ref (nor tagged), or a skill holds a nested submodule or an
     escaping symlink. `warn` controls the `../` stderr warning (off in --check).
-    `strict` is False only for --check: there a SHALLOW checkout that cannot prove
-    reachability is skipped with a notice (CI clones submodules at depth 1) instead
-    of failing; writing a lock (strict) still refuses.
+    `strict` is False only for --check. There a SHALLOW checkout that cannot prove
+    reachability fails (exit 2) like in `grid lock`, unless GRID_LOCK_ALLOW_SHALLOW=1
+    is set: then it is skipped with a notice (CI clones submodules at depth 1).
+    Fail closed by default, because a skip lets a dangling-upstream sha pass; writing
+    a lock (strict) never skips.
     """
     baseline = os.path.join(grid_dir, cfg["wired"]["baseline"])
     if not os.path.isfile(baseline):
@@ -1018,7 +1113,9 @@ def generate_lock(grid_dir, cfg, warn=True, strict=True):
             raise GridError("grid: repos/%s is at %s but the parent repo records %s; check out the "
                             "recorded commit (or stage the pointer bump) before locking"
                             % (source, head[:12], sha[:12]))
-        check_sha_on_ref(repo, source, sha, cfg["sources"][source]["ref"], shallow_ok=not strict)
+        check_sha_on_ref(repo, source, sha, cfg["sources"][source]["ref"],
+                         shallow_ok=(not strict) and os.environ.get(SHALLOW_ENV) == "1",
+                         hint_opt_in=not strict)
         with BlobReader(repo) as blobs:
             for name, path, target in sorted(by_source[source]):
                 label = "repos/%s/%s" % (source, path)
@@ -1026,6 +1123,7 @@ def generate_lock(grid_dir, cfg, warn=True, strict=True):
                 if dirty:
                     raise GridError("grid: repos/%s: %s has uncommitted changes (%s); the lock must "
                                     "describe committed state only" % (source, path, dirty[0]))
+                check_links_contained(target, label)
                 entries.append({
                     "hash": git_content_hash(repo, sha, path, blobs, label),
                     "kind": "skill",
@@ -1192,7 +1290,7 @@ def read_ledger(path=None):
     except FileNotFoundError:
         return [], []
     rows, foreign, seen = [], [], set()
-    first_line = {}                                 # dest -> line of its first row
+    first_line = {}                                 # casefolded dest -> line of its first row
     for lineno, line in enumerate(text.split("\n"), 1):
         if not line:
             continue
@@ -1224,10 +1322,13 @@ def read_ledger(path=None):
             raise _ledger_error(path, lineno, str(exc))
         # A doubled dest would plan the same directory twice; it also means the file was
         # damaged or hand-edited, so refuse rather than guess which row is right.
-        if row["dest"] in first_line:
+        # casefold, as in read_grid_lock: dests that differ only in case are one dir on a
+        # case-insensitive filesystem.
+        folded = row["dest"].casefold()
+        if folded in first_line:
             raise _ledger_error(path, lineno, "duplicate row for %s (first on line %d)"
-                                % (row["dest"], first_line[row["dest"]]))
-        first_line[row["dest"]] = lineno
+                                % (row["dest"], first_line[folded]))
+        first_line[folded] = lineno
         rows.append(row)
     return rows, foreign
 
@@ -1302,7 +1403,7 @@ def placed_dir_status(grid_dir, row, force=False):
     if os.path.islink(os.path.join(grid_dir, "repos", source)):
         return "refused", "repos/%s is a symlink" % source
     if not is_contained(grid_dir, source, dest):
-        return "refused", "%s resolves outside repos/%s" % (dest, source)
+        return "refused", "%s resolves outside repos/%s%s" % (dest, source, escape_hint(grid_dir, dest))
     if os.path.islink(target):
         return "refused", "%s is a symlink" % dest
     if not os.path.lexists(target):
@@ -1322,6 +1423,10 @@ def remove_placed_dir(grid_dir, row, force=False):
     removed up to but not including repos/<source>. These are the rules
     `uninstall` uses.
     """
+    # The containment root as it is BEFORE the check: dest_chain_link skips repos/ itself
+    # (a symlinked repos/ is supported), so a swap of repos/ in the window is caught by
+    # comparing the root again right before the delete.
+    expected_root = source_root(grid_dir, row["source"])
     status, detail = placed_dir_status(grid_dir, row, force)
     if status != "ok":
         return status, detail
@@ -1330,13 +1435,17 @@ def remove_placed_dir(grid_dir, row, force=False):
     link = dest_chain_link(grid_dir, row["dest"], include_leaf=True)
     if link:
         return "refused", "%s became a symlink during the removal" % link
+    if source_root(grid_dir, row["source"]) != expected_root:
+        return "refused", "repos changed during the removal"
     target = os.path.realpath(os.path.join(grid_dir, row["dest"]))
+    if os.path.commonpath([expected_root, target]) != expected_root:
+        return "refused", "%s resolves outside repos/%s" % (row["dest"], row["source"])
     try:
         shutil.rmtree(target)
     except OSError as exc:
         # No traceback and no silent success: the caller keeps the ledger row.
         return "failed", "%s: %s" % (row["dest"], exc.strerror or exc)
-    root = os.path.join(grid_dir, "repos", row["source"])
+    root = source_root(grid_dir, row["source"])          # target is a realpath, so is the root
     parent = os.path.dirname(target)
     while parent != root and parent.startswith(root + os.sep):
         try:
@@ -1524,15 +1633,80 @@ def check_source_policy(grid_dir, cfg, sources, vetted, announce_file=True):
             raise GridError(msg)
 
 
+def _seed_copy(grid_dir, src, rel):
+    """Copy `src` to <grid>/<rel> without ever writing outside the grid.
+
+    The copy is a NO-FOLLOW, EXCLUSIVE create walked down from an fd on the grid dir:
+    each parent directory is opened with O_NOFOLLOW (a symlinked `machines/`, even a
+    dangling one, is refused rather than followed out of the grid), and the file is
+    created with O_CREAT|O_EXCL|O_NOFOLLOW (a dangling symlink at the leaf makes the
+    create fail instead of materialising its target). A plain exists/copyfile pair
+    followed such a link: os.path.exists is False for a dangling link and
+    shutil.copyfile writes through it.
+    """
+    parts = rel.split("/")
+    # The example is read with O_NOFOLLOW too, so a symlinked example cannot pull an
+    # outside file's content into a seeded file. O_NONBLOCK: a blocking open of a FIFO waits
+    # for a writer for ever, so the type check below must come from an fstat on a descriptor
+    # that is already open. Anything that is not a regular file is treated as a missing example.
+    try:
+        sfd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return
+    dirfd = None
+    try:
+        if not stat.S_ISREG(os.fstat(sfd).st_mode):
+            return
+        dirfd = os.open(grid_dir, os.O_RDONLY | os.O_DIRECTORY)
+        for part in parts[:-1]:
+            try:
+                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+            except FileNotFoundError:
+                os.mkdir(part, 0o777, dir_fd=dirfd)
+                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+            except OSError:
+                # A symlinked directory (a user may keep machines/ in a private repo) is not
+                # written through, but it is not fatal either: skip this file and go on.
+                # Anything else that is in the way (a regular file) is an error.
+                try:
+                    is_link = stat.S_ISLNK(os.lstat(part, dir_fd=dirfd).st_mode)
+                except OSError:
+                    is_link = False
+                if is_link:
+                    notice("grid: not seeding %s: %s is a symlink and grid never writes through "
+                           "one" % (rel, part))
+                    return
+                raise GridError("grid: refusing to seed %s: %s is not a directory" % (rel, part))
+            os.close(dirfd)
+            dirfd = nfd
+        try:
+            dfd = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                          0o666, dir_fd=dirfd)
+        except FileExistsError:
+            return                        # already there (or a link there): never overwritten
+        try:
+            with os.fdopen(dfd, "wb") as out, os.fdopen(sfd, "rb", closefd=False) as inp:
+                shutil.copyfileobj(inp, out)
+        except BaseException:
+            os.unlink(parts[-1], dir_fd=dirfd)    # no half-written seed file left behind
+            raise
+    finally:
+        os.close(sfd)
+        if dirfd is not None:
+            os.close(dirfd)
+
+
 def seed_wired_files(grid_dir, host):
     """Install step 2: create baseline-submodules.txt and machines/<host>.txt from their
-    tracked examples when absent. Never overwrites; a missing example is skipped."""
+    tracked examples when absent. Never overwrites; a missing example is skipped.
+
+    "Absent" means lexists: a dangling symlink at the destination counts as present
+    (and is left alone). The write itself is _seed_copy's no-follow create."""
     for src, dst in (("baseline-submodules.example.txt", "baseline-submodules.txt"),
-                     (os.path.join("machines", "example.txt"), os.path.join("machines", host + ".txt"))):
-        src, dst = os.path.join(grid_dir, src), os.path.join(grid_dir, dst)
-        if os.path.exists(src) and not os.path.exists(dst):
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copyfile(src, dst)
+                     ("machines/example.txt", "machines/" + host + ".txt")):
+        if os.path.lexists(os.path.join(grid_dir, dst)):
+            continue
+        _seed_copy(grid_dir, os.path.join(grid_dir, src), dst)
 
 
 # --- install: classification (step 6) ----------------------------------------------------
@@ -1795,20 +1969,28 @@ def place_staged(grid_dir, run, repo, entry, counter):
         raise _entry_error(entry, "the copy to be placed hashes %s, not the locked %s"
                            % (got[:19], entry["hash"][:19]))
     # Re-check containment against the filesystem as it is NOW, just before the write.
+    # expected_root is taken first: if repos/ is swapped for a link after the check below,
+    # the root differs at the re-checks that follow (dest_chain_link does not look at repos/).
+    expected_root = source_root(grid_dir, entry["source"])
     if source_dir_is_link(grid_dir, entry["source"]):
         raise _entry_error(entry, "repos/%s is a symlink" % entry["source"])
     if not is_contained(grid_dir, entry["source"], entry["dest"]):
-        raise _entry_error(entry, "%s escapes repos/%s" % (entry["dest"], entry["source"]))
+        raise _entry_error(entry, "%s escapes repos/%s%s"
+                           % (entry["dest"], entry["source"], escape_hint(grid_dir, entry["dest"])))
     final = os.path.join(grid_dir, entry["dest"])
     link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
     if link:                                    # before makedirs, which would follow it
         raise _entry_error(entry, "%s became a symlink while placing" % link)
+    if source_root(grid_dir, entry["source"]) != expected_root:
+        raise _entry_error(entry, "repos changed while placing")
     os.makedirs(os.path.dirname(final), exist_ok=True)
     # Re-check after the parents exist and right before the renames (see dest_chain_link):
     # a parent swapped for a symlink since is_contained ran would redirect them.
     link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
     if link:
         raise _entry_error(entry, "%s became a symlink while placing" % link)
+    if source_root(grid_dir, entry["source"]) != expected_root:
+        raise _entry_error(entry, "repos changed while placing")
     moved = None
     if os.path.lexists(final):
         moved = os.path.join(run, "old", str(next(counter)))
@@ -2292,6 +2474,10 @@ def cmd_uninstall(args):
         print("grid: dry run: nothing changed; pass --yes to remove")
         return EXIT_OK
 
+    # Same state-dir preflight as install and repair, BEFORE anything is deleted: an unwritable
+    # state dir used to fail only at the ledger write, after the links and dirs were gone,
+    # leaving a ledger that listed them (private NF-066 VG5).
+    preflight_state()
     # Links first, then directories (a link must never outlive the dir it points at).
     for link, _row in links:
         os.unlink(link)
@@ -2547,6 +2733,10 @@ def render_drift_report(date, results, unreachable):
         for source, detail, n in sorted(unreachable):
             lines.append("- `%s`: %s (%d skill%s not checked)" % (source, detail, n, "" if n == 1 else "s"))
         lines.append("")
+    if unreachable:
+        # The report is stored and must carry no path or remote output, so the hint is static.
+        lines += ["An unreachable source may need your git config (proxy, credentials, ~/.netrc): "
+                  "set GRID_GIT_FORWARD_CONFIG=1 in the job's environment.", ""]
     lines += ["Maintainer response (manual): `git submodule update --remote repos/<name>`, "
               "`grid lock`, review, PR.", ""]
     return "\n".join(lines)
@@ -2699,6 +2889,9 @@ def cmd_schedule(args):
             notice("grid: note: GRID_STATE_DIR is not carried into the scheduled job; the job uses its "
                    "own environment (default $HOME/.grid) for the ledger and reports; only the log "
                    "directory is placed under it")
+        notice("grid: note: the scheduled job runs git without your gitconfig, ~/.netrc or proxy "
+               "settings; if an upstream needs them, add GRID_GIT_FORWARD_CONFIG=1 to the job's "
+               "environment")
         files, printed = schedule_plan(grid_dir, scheduler)     # renders everything first
         if scheduler == "launchd":
             # launchd does not create the log dir the plist points at.

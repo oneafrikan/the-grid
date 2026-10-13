@@ -29,7 +29,9 @@ grid_env_isolate() {
   export GIT_CONFIG_SYSTEM=/dev/null
   # file:// sources are only legal behind this flag (tests only).
   export GRID_ALLOW_FILE=1
-  unset GRID_DIR GRID_HOST GRID_BASELINE GRID_DRY_HOME GRID_SKIP_CATALOG GRID_SKIP_AUDIT
+  # GRID_LOCK_ALLOW_SHALLOW: CI sets it for the gate step, and it would turn the lock tests' shallow
+  # case into a skip.
+  unset GRID_DIR GRID_HOST GRID_BASELINE GRID_DRY_HOME GRID_SKIP_CATALOG GRID_SKIP_AUDIT GRID_LOCK_ALLOW_SHALLOW
 }
 
 # --- python helpers ------------------------------------------------------------

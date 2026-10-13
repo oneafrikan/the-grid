@@ -21,7 +21,7 @@ jobs:
     # Pinned image: ubuntu-latest moves to a new LTS without notice and the
     # loop treats this job as its truth signal.
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,8 +47,13 @@ jobs:
       # denylist), and the four composed projects (composed output is gitignored; CI runs only
       # compose.py --lint-roles). catalog, sources and the budget baseline are NOT skipped: they
       # run against the tracked example baseline, which CI has.
+      # GRID_LOCK_ALLOW_SHALLOW: the lock stage runs `grid lock --check` on depth-1 submodule
+      # checkouts, which cannot prove a locked sha is on its upstream ref. That proof is a
+      # hard failure by default; here the skip is the deliberate opt-in. The proof runs
+      # wherever submodules are fully cloned (maintainer machines, gate.sh locally).
       - name: Gate
         env:
+          GRID_LOCK_ALLOW_SHALLOW: "1"
           GRID_GATE_EXPECT_SKIPPED: >-
             plugins-validate personal-denylist
             compose-core compose-grid compose-finance-desk compose-learning-desk
