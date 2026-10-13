@@ -1,5 +1,7 @@
 # Design: vetting
 
+> **Superseded in part by the audit hardening batch.** The scanner behaviour described below for binary and NUL-bearing files, `binary-exec` severity and the downgrade contexts is historical; `scripts/audit.py` and `policy.yaml` are the source of truth. In the code a NUL anywhere in a file is no longer a silent skip (UTF-16 with a BOM is decoded; other NUL-bearing files are reported `unscannable-file`, and executable classes are also scanned with the NULs dropped), `binary-exec` and `unscannable-file` are `high` for script/hook/config files, `SKILL.md` and agent `.md` files and `low` otherwise, and the downgrade contexts are `test`, `negation`, `negation-quoted` and `comment`.
+
 ## Context
 
 - Wired content (skills, agents, soon rules and hooks) executes with the user's privileges. 160 skills and 26 agents are wired on the reference Mac; most come from submodules the-grid does not control.

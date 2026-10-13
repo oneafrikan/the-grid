@@ -270,3 +270,13 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
   grep -q 'full test suite' scripts/check-grid.sh
   grep -q 'full test suite' USAGE.md
 }
+
+# --- NF-037 VF1: reconcile.sh moves shadows aside (dated backup dir) and learns names from a dry wire ---
+
+@test "NF-037: reconcile docs say moves-aside and dry wire, not removes or parses wire output" {
+  # the code: GRID_DRY_HOME wire for the names, `mv` into .grid-reconcile-backup-<stamp>
+  grep -q "GRID_DRY_HOME" scripts/reconcile.sh
+  grep -q "grid-reconcile-backup" scripts/reconcile.sh
+  ! grep -n -E "removes them so the-grid|parses wire.sh.s own|remove those shadows|only ever removes a path" BOOTSTRAP.md CLAUDE.md README.md || false
+  grep -q "dry wire" CLAUDE.md
+}
