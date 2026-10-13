@@ -139,6 +139,11 @@ PY
   if grep -n 'kill-list above' "$REPO_ROOT/skills/un-claudish/SKILL.md"; then false; fi
 }
 
+@test "handoff SKILL.md has no 'create the directory if it doesn't exist' (contradicts ask-before-creating)" {
+  if grep -in "create the directory if it doesn't exist" "$REPO_ROOT/skills/handoff/SKILL.md"; then false; fi
+  grep -q 'ask before creating' "$REPO_ROOT/skills/handoff/SKILL.md"
+}
+
 @test "skill-scout names the wiring script by its real path (bash scripts/wire.sh)" {
   if grep -n 'bash wire\.sh' "$REPO_ROOT/skills/skill-scout/SKILL.md"; then false; fi
 }

@@ -16,7 +16,7 @@ Write a handoff document summarising the current conversation so a fresh agent c
 - `<slug>` is a 2-4 word kebab-case summary of the session topic (e.g. `machine-overlays`, `agent-factory-roster`)
 - `-handoff` is appended to make the file self documenting
 
-**Save location:** follow the Document locations reference below. Read the file before writing (create the directory if it doesn't exist).
+**Save location:** the location resolved by the Document locations reference below (ask before creating the directory).
 
 **Rules:**
 - Do not duplicate content already captured in commits, diffs, PRDs, plans, or ADRs — reference them by path or URL instead
