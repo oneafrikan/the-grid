@@ -176,11 +176,13 @@ def read_regular(path):
         return fh.read()
 
 
-def collect(root, prefix, ignore=True):
+def collect(root, prefix, ignore=True, tracked=None, grid=None):
     """Map every file under `root` to {posix path under `prefix`: (bytes, exec)}.
 
     `ignore` skips IGNORED names (source side only). Raises GuardError on any symlink or
-    non-regular entry anywhere under (or at) `root`.
+    non-regular entry anywhere under (or at) `root`. When `tracked` (a set of grid-relative
+    posix paths from git_tracked) is given, only files in it are bundled: an untracked file in
+    a working tree (.env.local, __pycache__) is never copied into the public tree.
     """
     reject_odd(root)
     out = {}
@@ -190,9 +192,47 @@ def collect(root, prefix, ignore=True):
             if ignore and fn in IGNORED:
                 continue
             p = Path(dirpath) / fn
+            if tracked is not None and p.relative_to(grid).as_posix() not in tracked:
+                continue
             rel = p.relative_to(root).as_posix()
             out[f"{prefix}/{rel}"] = (read_regular(p), os.access(p, os.X_OK))
     return out
+
+
+def git_tracked(grid):
+    """Set of grid-relative posix paths git tracks under skills/ and agents/.
+
+    Source files are bundled from the working tree, but only if they are tracked: the build
+    must not publish what a developer merely has lying around. Refuses (GuardError) when `grid`
+    is not itself the top of a git work tree, so the filter can never silently turn into
+    "everything". Git runs with a scrubbed environment (no GIT_DIR/GIT_INDEX_FILE redirect).
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        top = subprocess.run(["git", "-C", str(grid), "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, env=env)
+        r = subprocess.run(["git", "-C", str(grid), "ls-files", "-z", "--", "skills", "agents"],
+                           capture_output=True, env=env)
+    except OSError as e:
+        raise GuardError(f"cannot run git to list tracked files: {e}")
+    if top.returncode != 0 or os.path.realpath(top.stdout.strip()) != os.path.realpath(grid):
+        raise GuardError(f"{grid} is not the top of a git work tree: only git-tracked files "
+                         "are bundled, so the builder needs one")
+    if r.returncode != 0:
+        raise GuardError(f"git ls-files failed: {r.stderr.decode('utf-8', 'replace').strip()}")
+    return {x.decode("utf-8", "surrogateescape") for x in r.stdout.split(b"\0") if x}
+
+
+def check_source_roots(grid):
+    """Refuse a symlinked skills/, agents/ or agent-factory/ (an absent one is fine).
+
+    reject_odd vets what is UNDER a source dir but never the dir's own ancestors, so a
+    committed `skills -> elsewhere` link would otherwise be followed into the public tree.
+    """
+    for name in ("skills", "agents", "agent-factory"):
+        p = grid / name
+        if p.is_symlink():
+            raise GuardError(f"{p}: is a symlink (refusing to follow it)")
 
 
 def repos_skill_names(grid):
@@ -244,7 +284,7 @@ def run_compose(grid, project, tmp):
 
 
 # ---- render ----------------------------------------------------------------
-def render_bundle(grid, name, b, manifest, repo_skills, tmp):
+def render_bundle(grid, name, b, manifest, repo_skills, tmp, tracked):
     """Return {repo-relative path: FileSpec} for one bundle, or raise GuardError."""
     base = f"plugins/{name}"
     files = {}
@@ -269,7 +309,11 @@ def render_bundle(grid, name, b, manifest, repo_skills, tmp):
         if repo_skills is not None and s in repo_skills:
             raise GuardError(f"bundle '{name}': skill '{s}' also exists under repos/ "
                              "(provenance unknown); remove it from the bundle")
-        add_skill(s, collect(d, f"{base}/skills/{s}"), "skills/")
+        content = collect(d, f"{base}/skills/{s}", tracked=tracked, grid=grid)
+        if f"{base}/skills/{s}/SKILL.md" not in content:
+            raise GuardError(f"bundle '{name}': skill '{s}' has no git-tracked SKILL.md "
+                             "(git add it, or it would ship without one)")
+        add_skill(s, content, "skills/")
 
     # Composed output: orchestrator skills + specialist agents.
     for p in b["compose"]:
@@ -289,6 +333,9 @@ def render_bundle(grid, name, b, manifest, repo_skills, tmp):
         f = grid / "agents" / f"{a}.md"
         if not f.is_file():
             raise GuardError(f"bundle '{name}': listed agent '{a}' has no {f}")
+        if f"agents/{a}.md" not in tracked:
+            raise GuardError(f"bundle '{name}': agent '{a}' is not tracked by git "
+                             "(git add it, or it would not ship)")
         add_agent(a, (read_regular(f), os.access(f, os.X_OK)), "agents/")
 
     if not skills and not agents:
@@ -373,12 +420,14 @@ def check_skill_classification(grid, manifest):
 
 def render(grid, manifest, tmp):
     """Render every generated file: {path: FileSpec}. Raises GuardError before any write."""
+    check_source_roots(grid)   # before any source dir is read
+    tracked = git_tracked(grid)
     repo_skills = repos_skill_names(grid)
     if repo_skills is None:
         print("notice: repos/ is empty; skipped the repos/ name-collision check", file=sys.stderr)
     files = {}
     for name, b in manifest["bundles"].items():
-        files.update(render_bundle(grid, name, b, manifest, repo_skills, tmp))
+        files.update(render_bundle(grid, name, b, manifest, repo_skills, tmp, tracked))
     check_skill_classification(grid, manifest)
     files.update(render_marketplace(manifest))
     return files

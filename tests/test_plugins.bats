@@ -10,7 +10,15 @@ load helpers/setup
 load helpers/venv
 
 # shellcheck disable=SC2120  # "$@" is forwarded; callers pass flags only sometimes
-BUILD() { python3 "$REPO_ROOT/scripts/build-plugins.py" "$@"; }
+# The builder bundles only git-tracked files (NF-044), so the mock grid is a git repo and each
+# run first stages everything (like a developer would), unless PLUGINS_NO_ADD=1 is set to keep a
+# file deliberately untracked.
+BUILD() {
+  if [ -z "${PLUGINS_NO_ADD:-}" ] && [ -d "$MOCK_GRID/.git" ]; then
+    git -C "$MOCK_GRID" add -A >/dev/null 2>&1 || true
+  fi
+  python3 "$REPO_ROOT/scripts/build-plugins.py" "$@"
+}
 
 # Write the manifest for the mock grid: two bundles, so "all four versions" is checkable.
 # $1 (optional) overrides the grid-agents description.
@@ -45,6 +53,8 @@ setup() {
   printf 'Mock third-party notice\n' > "$MOCK_GRID/THIRD-PARTY-NOTICES.md"
   write_manifest
   export GRID_DIR="$MOCK_GRID"
+  git -C "$MOCK_GRID" init -q
+  git -C "$MOCK_GRID" add -A
 }
 
 teardown() {
@@ -641,4 +651,107 @@ plugin_tree_problems() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"hooks frontmatter: $skill"* ]]
   [[ "$output" == *"hooks in json: "*"inline.json"* ]]
+}
+
+# ---- NF-044 (VS4): the bundled LICENSE copies are scan-exempt paths --------------------------
+# personal-allow-paths.txt skips plugins/<bundle>/LICENSE entirely (allow rules are match-level
+# and cannot express a whole-line copyright rule). What keeps that safe: the copy is byte-identical
+# to the root LICENSE (scanned with no exemption; test above) and its copyright lines are only
+# "Copyright (c) <year> <name>" with no address, path or number after the name.
+@test "NF-044: every copyright line in a bundled LICENSE is a plain 'Copyright (c) YEAR Name'" {
+  local f n=0
+  for f in "$REPO_ROOT"/plugins/*/LICENSE; do
+    run grep -i 'copyright (c)' "$f"
+    [ "$status" -eq 0 ]
+    n=$((n + 1))
+    # every such line must fully match the tight pattern (grep -v prints any that do not)
+    run bash -c 'grep -i "copyright (c)" "$1" | grep -vE "^Copyright \(c\) [0-9]{4} [A-Za-z][A-Za-z .'"'"'-]*$"' _ "$f"
+    echo "$f: $output"
+    [ "$status" -eq 1 ]
+  done
+  [ "$n" -ge 1 ]
+}
+
+# ---- NF-044 (VS2, VS3): ancestor symlinks, and only git-tracked content is bundled ------------
+
+@test "NF-044: a symlinked skills/, agents/ or agent-factory/ exits 2 and writes nothing" {
+  # skills/ replaced by a link to a real dir holding the same skills
+  mv "$MOCK_GRID/skills" "$OTHER_DIR/skills"
+  ln -s "$OTHER_DIR/skills" "$MOCK_GRID/skills"
+  for mode in "" --check; do
+    run BUILD $mode
+    echo "skills $mode: $output"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"skills"*"symlink"* ]]
+  done
+  [ ! -e "$MOCK_GRID/plugins/core" ]
+  rm "$MOCK_GRID/skills"
+  mv "$OTHER_DIR/skills" "$MOCK_GRID/skills"
+
+  mv "$MOCK_GRID/agents" "$OTHER_DIR/agents"
+  ln -s "$OTHER_DIR/agents" "$MOCK_GRID/agents"
+  for mode in "" --check; do
+    run BUILD $mode
+    echo "agents $mode: $output"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"agents"*"symlink"* ]]
+  done
+  [ ! -e "$MOCK_GRID/plugins/core" ]
+  rm "$MOCK_GRID/agents"
+  mv "$OTHER_DIR/agents" "$MOCK_GRID/agents"
+
+  mkdir "$OTHER_DIR/af"
+  ln -s "$OTHER_DIR/af" "$MOCK_GRID/agent-factory"
+  run BUILD
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"agent-factory"*"symlink"* ]]
+  [ ! -e "$MOCK_GRID/plugins/core" ]
+  # with the links gone the same tree builds
+  rm "$MOCK_GRID/agent-factory"
+  run BUILD
+  [ "$status" -eq 0 ]
+}
+
+@test "NF-044: untracked files in a source skill are not bundled" {
+  BUILD
+  # Debris a developer's working tree may hold: not committed, so it must not ship.
+  printf 'TOKEN=x\n' > "$MOCK_GRID/skills/alpha/.env.local"
+  mkdir -p "$MOCK_GRID/skills/alpha/__pycache__"
+  printf 'pyc\n' > "$MOCK_GRID/skills/alpha/__pycache__/a.pyc"
+  PLUGINS_NO_ADD=1 run BUILD
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ ! -e "$MOCK_GRID/plugins/core/skills/alpha/.env.local" ]
+  [ ! -e "$MOCK_GRID/plugins/core/skills/alpha/__pycache__" ]
+  [ -f "$MOCK_GRID/plugins/core/skills/alpha/ref.md" ]
+  PLUGINS_NO_ADD=1 run BUILD --check
+  [ "$status" -eq 0 ]
+  # Once tracked (git add), the same file is bundled: tracked content is what ships.
+  git -C "$MOCK_GRID" add skills/alpha/.env.local
+  PLUGINS_NO_ADD=1 run BUILD
+  [ "$status" -eq 0 ]
+  [ -f "$MOCK_GRID/plugins/core/skills/alpha/.env.local" ]
+}
+
+@test "NF-044: an untracked SKILL.md or root agent file, or a grid that is not a git repo, exits 2" {
+  git -C "$MOCK_GRID" rm -q --cached skills/beta/SKILL.md
+  PLUGINS_NO_ADD=1 run BUILD
+  echo "$output"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"beta"* ]]
+  git -C "$MOCK_GRID" add skills/beta/SKILL.md
+
+  git -C "$MOCK_GRID" rm -q --cached agents/bot.md
+  PLUGINS_NO_ADD=1 run BUILD
+  echo "$output"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"bot"* ]]
+  git -C "$MOCK_GRID" add agents/bot.md
+
+  rm -rf "$MOCK_GRID/.git"
+  run BUILD
+  echo "$output"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"git"* ]]
+  [ ! -e "$MOCK_GRID/plugins/core" ]
 }
