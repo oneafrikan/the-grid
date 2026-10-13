@@ -2004,6 +2004,22 @@ _identrun_line() {   # <pad before> <run length> <pad after> [<run char> [<key w
   expect_plain assigned-secret "${blob} secret=\"Ab3dEf9Gh2Jk4Lm6Np8Q\""
 }
 
+@test "long line: many long identifier runs (with and without a key word) are checked in linear time" {
+  # Every piece of this line is cut inside a long run, so each one pays for the run check.
+  # That check once used a regex over the whole piece (cost: piece length x run length,
+  # about 25 s for 60 KB). It must stay under a few seconds.
+  local unit line kind t0 ms
+  for kind in plain keyword; do
+    if [ "$kind" = plain ]; then unit="$(head -c 3500 /dev/zero | tr '\0' a)."
+    else unit="$(rep secrets 500 | head -c 3500)."; fi
+    line="$(rep "$unit" 17)"   # about 60 KB
+    t0=$(date +%s%N)
+    expect_plain clean "$line"
+    ms=$((($(date +%s%N) - t0) / 1000000))
+    [ "$ms" -lt 3000 ] || { echo "$kind: took $ms ms" >&2; false; }
+  done
+}
+
 @test "long line: an identifier run too long to keep whole fails closed instead of passing" {
   expect_plain oversize-line "$(_identrun_line 3900 9000 3000)"
   expect_strict oversize-line "$(_identrun_line 3900 9000 3000)"

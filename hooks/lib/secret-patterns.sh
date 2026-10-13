@@ -138,10 +138,9 @@ _SM_KEYS_LEFT=""
 # A cut inside this is a cut inside a long identifier run (see secret_match_long): 200
 # identifier characters, then at most 16 characters that are not.
 _IDRUN_RE='[[:alnum:]_]{200}[^[:alnum:]_]{0,16}$'
-# The identifier run at the end of a piece (group 1), and the tail of every key word that
-# can sit inside one: `api-key` has a `-`, so only its `key` is part of the run. A superset
-# on purpose (any run holding "key" counts); case-insensitive, see _has_keyword_tail.
-_IDTAIL_RE='([[:alnum:]_]+)[^[:alnum:]_]{0,16}$'
+# The tail of every key word that can sit inside an identifier run: `api-key` has a `-`,
+# so only its `key` is part of the run. A superset on purpose (any run holding "key"
+# counts); case-insensitive, see _has_keyword_tail.
 _KEYWORD_TAIL_RE='secret|token|passw|key'
 
 # Set by _secret_match: the matched pattern name and the matched text without its
@@ -300,7 +299,7 @@ _has_keyword_tail() {
 #   on the ORIGINAL length: squeezing must not turn a line the scan could not have
 #   finished into a clean one.
 secret_match_long() {
-  local t="$1" len=${#1} off=0 pieces=0 tlen sq end w rest run
+  local t="$1" len=${#1} off=0 pieces=0 tlen sq end w rest run piece core lead runl
   _SM_KEYS_LEFT=$SECRET_MAX_KEYS   # the key bound is per line, not per piece
   if [ "$len" -le 6000 ]; then _secret_match "$t"; return; fi
   # if sed fails the unsqueezed text is scanned (fail closed on size, never on emptiness)
@@ -322,8 +321,15 @@ secret_match_long() {
         fi
         # only a run that holds a key word can hide a key (a long hex or base64 word with
         # none cannot), so only then pay for the extension, or refuse a run too long to keep
-        [[ "${t:$off:$((end - off))}" =~ $_IDTAIL_RE ]]
-        if _has_keyword_tail "${BASH_REMATCH[1]}$rest"; then
+        # The run's part before the cut is taken with parameter expansion, which is linear:
+        # a regex over the whole piece retries every start and costs piece length x run
+        # length (25 s on a 60 KB line of 4000-character runs). The window w already says
+        # the piece ends in at most 16 non-identifier characters after the run.
+        piece="${t:$off:$((end - off))}"
+        core="${piece%"${w##*[[:alnum:]_]}"}"          # without those trailing characters
+        lead="${core%[![:alnum:]_]*}"                  # up to the last non-identifier char
+        if [ "$lead" = "$core" ]; then runl="$core"; else runl="${core:$((${#lead} + 1))}"; fi
+        if _has_keyword_tail "$runl$rest"; then
           if [ "$run" -gt 4096 ]; then SECRET_MATCH_NAME="oversize-line"; SECRET_MATCH_TEXT=""; return 0; fi
           end=$((end + run + 256))
         fi
