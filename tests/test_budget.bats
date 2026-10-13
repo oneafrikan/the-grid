@@ -349,6 +349,19 @@ split_skill() {
   [ "$(jget "$(cat "$MOCK_GRID/docs/budget-target.json")" owned.skills_max_chars)" = "21" ]
 }
 
+@test "--update-target refuses to write a ratchet while an owned file cannot be measured (NF-055 VF5)" {
+  skill_raw q "name: q" '"description": Quoted key probe text'
+  write_target 100 0 0 0 250 100000
+  local before
+  before="$(cat "$MOCK_GRID/docs/budget-target.json")"
+  budget --update-target
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/q/SKILL.md"* ]] || false
+  # the refused run left the file untouched
+  [ "$(cat "$MOCK_GRID/docs/budget-target.json")" = "$before" ]
+}
+
 # --- (e)(f)(i)(j) baseline scope ------------------------------------------------
 
 @test "baseline scope is skipped (exit 3) without a baseline file" {
@@ -518,6 +531,23 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
   done
 }
 
+@test "a deeply nested budget-target.json exits non-zero with a named message, no traceback (NF-055 VF3)" {
+  skill_raw alpha "name: alpha" "description: Does a thing"
+  local n=100000
+  # json.load raises RecursionError (not ValueError) on nesting this deep.
+  python3 -c "import sys; sys.stdout.write('[' * $n)" > "$MOCK_GRID/docs/budget-target.json"
+  budget --check
+  echo "$output" | head -c 600
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"docs/budget-target.json"*"nested"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+  python3 -c "import sys; sys.stdout.write('{\"a\":' * $n)" > "$MOCK_GRID/docs/budget-target.json"
+  budget --update-target
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"docs/budget-target.json"*"nested"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+}
+
 @test "a quoted top-level key fails --check and names the file" {
   skill_raw q "name: q" '"description": Quoted key probe text'
   write_target 1000 0 0 0 250 100000
@@ -588,6 +618,19 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
   [[ "$output" == *"budget: FAIL agent-factory/roles/nodesc/role.yaml: role nodesc has no description"* ]] || false
 }
 
+@test "a dangling SKILL.md or role.yaml symlink fails --check and names the path (NF-055 VF6)" {
+  mkdir -p "$MOCK_GRID/skills/dang" "$MOCK_GRID/agent-factory/roles/dang"
+  ln -s "$MOCK_GRID/nowhere/SKILL.md" "$MOCK_GRID/skills/dang/SKILL.md"
+  ln -s "$MOCK_GRID/nowhere/role.yaml" "$MOCK_GRID/agent-factory/roles/dang/role.yaml"
+  write_target 1000 1000 1000 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/dang/SKILL.md: "*"dangling"* ]] || false
+  [[ "$output" == *"budget: FAIL agent-factory/roles/dang/role.yaml: "*"dangling"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+}
+
 @test "a baseline (upstream) skill with a quoted key only warns: the exit status is unchanged" {
   mkdir -p "$MOCK_GRID/repos/x/skills/q"
   printf -- '---\nname: q\n"description": Quoted key probe text\n---\nbody\n' > "$MOCK_GRID/repos/x/skills/q/SKILL.md"
@@ -599,6 +642,74 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
   [ "$status" -eq 0 ]
   [[ "$output" == *"budget: WARN repos/x/skills/q/SKILL.md: "*"quoted"* ]] || false
   [[ "$output" != *"FAIL"* ]] || false
+}
+
+# --- line breaks YAML does not share with str.splitlines() (NF-055 VF2) ----------------------
+# splitlines() also breaks on U+0085, U+2028, U+2029, \x0b, \x0c, \x1c-\x1e, which YAML 1.2
+# readers keep inside the line, so `description: short<sep><300 chars>` was measured as "short"
+# and --check printed OK. The reader now splits on \n (CRLF tolerated) only and FAILS CLOSED on
+# any of these characters in the frontmatter, the same stance as scripts/lib/fmshape.py.
+
+# linebreak_cases — "label<TAB>printf escape" for every separator under test.
+linebreak_cases() {
+  printf '%s\t%s\n' NEL '\xc2\x85' LS '\xe2\x80\xa8' PS '\xe2\x80\xa9' VT '\x0b' FF '\x0c' \
+    FS '\x1c' GS '\x1d' RS '\x1e' CR '\r'
+}
+
+@test "a line-separator character inside a SKILL.md description fails --check by name (no under-count)" {
+  local label esc long
+  long="$(head -c 300 /dev/zero | tr '\0' x)"
+  write_target 1000 0 0 0 250 100000
+  while IFS=$'\t' read -r label esc; do
+    rm -rf "$MOCK_GRID/skills"; mkdir -p "$MOCK_GRID/skills/sep"
+    # shellcheck disable=SC2059   # the escape is the point
+    printf -- "---\nname: sep\ndescription: short${esc}${long}\n---\nbody\n" > "$MOCK_GRID/skills/sep/SKILL.md"
+    budget --check
+    echo "$label -> $status $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"budget: FAIL skills/sep/SKILL.md: "*"line"* ]] || false
+    [[ "$output" != *"Traceback"* ]] || false
+  done < <(linebreak_cases)
+}
+
+@test "a line-separator character in a role.yaml fails --check by name" {
+  local label esc
+  write_target 1000 1000 1000 0 250 100000
+  while IFS=$'\t' read -r label esc; do
+    rm -rf "$MOCK_GRID/agent-factory"; mkdir -p "$MOCK_GRID/agent-factory/roles/sep"
+    # shellcheck disable=SC2059
+    printf -- "name: sep\ndescription: short${esc}name: other\n" > "$MOCK_GRID/agent-factory/roles/sep/role.yaml"
+    budget --check
+    echo "$label -> $status $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"budget: FAIL agent-factory/roles/sep/role.yaml: "*"line"* ]] || false
+  done < <(linebreak_cases)
+}
+
+@test "a separator that only hides the closing fence is still reported (the region is cut on \\n alone)" {
+  # `---` after U+2028 is column 0 to a YAML 1.1 reader, mid-line to a \n-only one: the two
+  # disagree about where the frontmatter ends, so the gate must not pick one silently.
+  mkdir -p "$MOCK_GRID/skills/fence"
+  printf -- '---\nname: fence\ndescription: short\xe2\x80\xa8---\nbody\n' > "$MOCK_GRID/skills/fence/SKILL.md"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/fence/SKILL.md: "* ]] || false
+}
+
+@test "separators in the BODY (after the closing fence) do not matter; CRLF line endings still measure" {
+  mkdir -p "$MOCK_GRID/skills/body" "$MOCK_GRID/skills/crlf"
+  printf -- '---\nname: body\ndescription: Does a thing\n---\nbody\xe2\x80\xa8more\x0cstill\n' > "$MOCK_GRID/skills/body/SKILL.md"
+  printf -- '---\r\nname: crlf\r\ndescription: Does a thing\r\n---\r\nbody\r\n' > "$MOCK_GRID/skills/crlf/SKILL.md"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 3 ] || [ "$status" -eq 0 ]
+  [[ "$output" != *"FAIL"* ]] || false
+  budget --json
+  [ "$(jget "$output" entries.skills.0.listing_chars)" = "12" ]     # body
+  [ "$(jget "$output" entries.skills.1.listing_chars)" = "12" ]     # crlf: no stray \r counted
 }
 
 # --- the real repo --------------------------------------------------------------
