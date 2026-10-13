@@ -2,6 +2,8 @@
 
 A static, offline, deterministic scan of skill, agent, rule and hook content against a tracked policy, so that obviously dangerous or hidden behaviour in third-party or owned assets is caught before it is wired.
 
+> **Superseded in part by the audit hardening batch.** The scenarios below for binary and NUL-bearing files, `binary-exec` severity and downgrade contexts describe the first implementation; `scripts/audit.py` and `policy.yaml` are the source of truth. Today a NUL anywhere in a file is not a silent skip (UTF-16 with a BOM is decoded, other NUL-bearing files are reported `unscannable-file`, and executable classes are also scanned with the NULs dropped), and `binary-exec` is `high` for script/hook/config files, `SKILL.md` and agent `.md` files, `low` otherwise.
+
 ## ADDED Requirements
 
 ### Requirement: Policy-driven scan of an explicit target list

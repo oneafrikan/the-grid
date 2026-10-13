@@ -28,7 +28,7 @@ Deliver the same rule packs to harnesses other than Claude Code (Cursor, Codex, 
 - **THEN** it exits 1 and modifies nothing
 
 ### Requirement: Bounded managed instruction block
-`emit --harness agents-md|gemini` SHALL write a single block delimited by BEGIN/END marker comments into the `--out` file, creating it if absent, preserving all text outside the markers byte-for-byte, producing byte-identical output on repeated runs, and MUST exit 2 without writing when markers are unbalanced or the block exceeds 12288 bytes.
+`emit --harness agents-md|gemini` SHALL write a single block delimited by BEGIN/END marker comments into the `--out` file, creating it if absent, preserving all text outside the markers byte-for-byte, producing byte-identical output on repeated runs, and MUST exit 2 without writing when markers are unbalanced, and exit 3 without writing when the block exceeds 12288 bytes.
 
 #### Scenario: Update an existing file
 - **WHEN** `AGENTS.md` has user text before and after an existing block and `emit` runs with a different pack list
@@ -44,4 +44,4 @@ Deliver the same rule packs to harnesses other than Claude Code (Cursor, Codex, 
 
 #### Scenario: Too many packs
 - **WHEN** the selected packs produce a block over 12288 bytes
-- **THEN** the command exits 2 with a message to select fewer packs and the file is unchanged
+- **THEN** the command exits 3 with a message to select fewer packs and the file is unchanged

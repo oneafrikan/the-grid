@@ -241,15 +241,15 @@ bash ~/.the-grid/scripts/reconcile.sh   # dry run — lists real dirs shadowing 
 wire.sh will **skip** any real directory that shadows a grid skill — it only manages
 symlinks, so nothing is clobbered. `reconcile.sh` then shows exactly which shadows remain.
 
-To make the machine match the-grid exactly, remove those shadows and re-wire:
+To make the machine match the-grid exactly, move those shadows aside and re-wire:
 
 ```bash
 bash ~/.the-grid/scripts/reconcile.sh --force   # moves shadows to a dated backup dir (audit gate first, sudo only where needed) + re-wires
 ```
 
-`reconcile.sh` only ever removes a path that is a **real dir** (never a symlink) and that
-wire.sh itself flagged as shadowing a grid skill — so it can't delete anything custom that
-the-grid doesn't already provide. It's idempotent: a clean machine reports "Nothing to reconcile".
+`reconcile.sh` only ever moves aside a path that is a **real dir** (never a symlink) and that
+a dry wire flagged as shadowing a grid skill — so it can't touch anything custom that
+the-grid doesn't already provide, and what it moves stays recoverable in the backup dir. It's idempotent: a clean machine reports "Nothing to reconcile".
 
 > If a shadow is a skill you customised and want to keep, move it into `~/.the-grid/` first
 > (`mv ~/.claude/skills/<name> ~/.the-grid/<name>`) so it becomes a grid-owned skill before
