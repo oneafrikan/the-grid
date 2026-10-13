@@ -349,6 +349,19 @@ split_skill() {
   [ "$(jget "$(cat "$MOCK_GRID/docs/budget-target.json")" owned.skills_max_chars)" = "21" ]
 }
 
+@test "--update-target refuses to write a ratchet while an owned file cannot be measured (NF-055 VF5)" {
+  skill_raw q "name: q" '"description": Quoted key probe text'
+  write_target 100 0 0 0 250 100000
+  local before
+  before="$(cat "$MOCK_GRID/docs/budget-target.json")"
+  budget --update-target
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skills/q/SKILL.md"* ]] || false
+  # the refused run left the file untouched
+  [ "$(cat "$MOCK_GRID/docs/budget-target.json")" = "$before" ]
+}
+
 # --- (e)(f)(i)(j) baseline scope ------------------------------------------------
 
 @test "baseline scope is skipped (exit 3) without a baseline file" {

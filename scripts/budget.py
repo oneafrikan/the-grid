@@ -28,7 +28,8 @@ Usage (python3 scripts/budget.py ...):
   --check          exit 1 on any regression/limit breach (each failure prints the
                    offending path), 3 if only the baseline scope was skipped, else 0
   --update-target  rewrite the totals in docs/budget-target.json to the current
-                   measurement; refuses to RAISE a number without --allow-raise
+                   measurement; refuses to RAISE a number without --allow-raise,
+                   and while any owned file cannot be measured faithfully
   --json           machine-readable output, sorted keys
 Environment: GRID_DIR (repo root; default: parent of scripts/), GRID_BASELINE
 (baseline manifest, passed through to wire.sh).
@@ -502,6 +503,13 @@ def baseline_warnings(summary):
 
 def update_target(grid, summary, target, allow_raise):
     """Rewrite totals to the current measurement. Returns (exit code, messages)."""
+    # A ratchet written from a file the reader cannot measure faithfully records an
+    # under-count (--check would fail on the next run anyway): refuse, naming each one.
+    unmeasurable = [f"  {e['path']}: {p}" for g in ("skills", "orchestrator_roles", "agent_roles")
+                    for e in summary["entries"][g] for p in e["problems"]]
+    if unmeasurable:
+        return 1, ["refusing to write a target while owned files cannot be measured "
+                   "(fix them first; see --check):"] + unmeasurable
     data = json.loads(json.dumps(target if target is not None else DEFAULT_TARGET))
     msgs, raises = [], []
     for (scope, tkey), measured in sorted(current_numbers(summary).items()):
