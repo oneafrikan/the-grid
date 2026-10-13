@@ -682,7 +682,10 @@ open(p, "w").write(s)
 
 @test "the committed grid.lock matches the real checkouts (or is not checkable here)" {
   # 0 where every source is checked out, 3 on a checkout without the submodules.
-  run python3 -B "$REPO_ROOT/scripts/grid" --grid-dir "$REPO_ROOT" lock --check
+  # Opt in to skipping the reachability proof: CI clones submodules at depth 1, and this test is
+  # about the committed lock matching the checkouts, not about history. (grid_env_isolate unsets
+  # the variable, so it is set here explicitly.)
+  GRID_LOCK_ALLOW_SHALLOW=1 run python3 -B "$REPO_ROOT/scripts/grid" --grid-dir "$REPO_ROOT" lock --check
   if [ "$status" -ne 0 ] && [ "$status" -ne 3 ]; then
     echo "status $status: $output" >&2
     false
