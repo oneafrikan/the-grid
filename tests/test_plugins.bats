@@ -653,6 +653,25 @@ plugin_tree_problems() {
   [[ "$output" == *"hooks in json: "*"inline.json"* ]]
 }
 
+# ---- NF-044 (VS4): the bundled LICENSE copies are scan-exempt paths --------------------------
+# personal-allow-paths.txt skips plugins/<bundle>/LICENSE entirely (allow rules are match-level
+# and cannot express a whole-line copyright rule). What keeps that safe: the copy is byte-identical
+# to the root LICENSE (scanned with no exemption; test above) and its copyright lines are only
+# "Copyright (c) <year> <name>" with no address, path or number after the name.
+@test "NF-044: every copyright line in a bundled LICENSE is a plain 'Copyright (c) YEAR Name'" {
+  local f n=0
+  for f in "$REPO_ROOT"/plugins/*/LICENSE; do
+    run grep -i 'copyright (c)' "$f"
+    [ "$status" -eq 0 ]
+    n=$((n + 1))
+    # every such line must fully match the tight pattern (grep -v prints any that do not)
+    run bash -c 'grep -i "copyright (c)" "$1" | grep -vE "^Copyright \(c\) [0-9]{4} [A-Za-z][A-Za-z .'"'"'-]*$"' _ "$f"
+    echo "$f: $output"
+    [ "$status" -eq 1 ]
+  done
+  [ "$n" -ge 1 ]
+}
+
 # ---- NF-044 (VS2, VS3): ancestor symlinks, and only git-tracked content is bundled ------------
 
 @test "NF-044: a symlinked skills/, agents/ or agent-factory/ exits 2 and writes nothing" {
