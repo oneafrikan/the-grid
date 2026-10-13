@@ -159,6 +159,30 @@ PY
   done
 }
 
+# The openspec CLI version the skills tell people to install is pinned; it must follow the
+# pinned submodule, or a bump of repos/openspec leaves the install line one version behind.
+@test "pinned @fission-ai/openspec@x.y.z in the skills equals repos/openspec/package.json (skipped without the submodule)" {
+  local pkg="$REPO_ROOT/repos/openspec/package.json" want found f
+  [ -f "$pkg" ] || skip "repos/openspec is not checked out"
+  want="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$pkg" | head -1)"
+  [ -n "$want" ]
+  found=0
+  for f in "$REPO_ROOT"/skills/openspec-help/sections/the-grid-specifics.md "$REPO_ROOT"/skills/grid-help/sections/orientation.md; do
+    while IFS= read -r v; do
+      found=1
+      [ "$v" = "$want" ] || { echo "$f pins $v, repos/openspec is $want" >&3; false; }
+    done < <(grep -o '@fission-ai/openspec@[0-9][0-9.]*' "$f" | sed 's/.*@//')
+  done
+  [ "$found" -eq 1 ]
+}
+
+# openspec creates the archive under changes/, never at openspec/archive.
+@test "openspec-help adopting.md names the archive path openspec/changes/archive" {
+  local f="$REPO_ROOT/skills/openspec-help/sections/adopting.md"
+  if grep -n 'changes,archive}' "$f"; then false; fi
+  grep -q 'changes/archive' "$f"
+}
+
 @test "skill-scout names the wiring script by its real path (bash scripts/wire.sh)" {
   if grep -n 'bash wire\.sh' "$REPO_ROOT/skills/skill-scout/SKILL.md"; then false; fi
 }
