@@ -93,6 +93,29 @@ print(eval(sys.argv[1]))' "$1"
   [ "$status" -eq 1 ]
 }
 
+@test "--check-url: rejects #@, ?@, backslash-@, user:pw@, % and whitespace spellings of an allowed repo" {
+  # git/curl contact the host BEFORE the `#`/`?`/backslash; a naive userinfo
+  # regex reads everything before the `@` as userinfo and judges github.com.
+  for u in 'https://evil.invalid#@github.com/obra/superpowers.git' \
+           'https://evil.invalid?@github.com/obra/superpowers.git' \
+           'https://evil.invalid\@github.com/obra/superpowers.git' \
+           'https://user:pw@github.com/obra/superpowers.git' \
+           'https://github.com/obra/superpowers%2f.git' \
+           'https://github.com%2eevil.invalid/obra/superpowers.git' \
+           'https://github.com/obra/super powers.git' \
+           'https://github.com/obra/superpowers.git#frag' \
+           'https://github.com/obra/superpowers.git?x=1' \
+           'git@evil.invalid#@github.com:obra/superpowers.git'; do
+    run python3 "$AUDIT" --grid-dir "$T" --check-url "$u"
+    [ "$status" -eq 1 ] || { echo "accepted: $u -> $output"; return 1; }
+  done
+}
+
+@test "--check-url: a control character in the URL is rejected" {
+  run python3 "$AUDIT" --grid-dir "$T" --check-url "$(printf 'https://github.com/obra/superpowers.git\001')"
+  [ "$status" -eq 1 ]
+}
+
 # --- source-not-allowed --------------------------------------------------------
 
 @test "source-not-allowed is high for a baseline repo and blocks (exit 1), at .gitmodules:<url line>" {
@@ -152,6 +175,34 @@ print(eval(sys.argv[1]))' "$1"
   [ "$(q 'len(F)')" = "0" ]
   add_repo evil 'https://github.com/someone/evil.git'
   audit_json --baseline "$BASE" "$T/skills/s"        # .gitmodules exists, target is owned content
+  [ "$status" -eq 0 ]
+  [ "$(q 'len(F)')" = "0" ]
+}
+
+@test "a baseline repo with no .gitmodules entry and no lock entry is source-not-allowed (high)" {
+  add_repo fine 'https://github.com/obra/superpowers.git'      # .gitmodules exists
+  printf '### repos/fine\n### repos/plain\n' > "$T/CURATION.md"
+  mkdir -p "$T/repos/plain/x"
+  printf -- '---\nname: x\ndescription: clean\n---\nHello\n' > "$T/repos/plain/x/SKILL.md"
+  printf 'plain\n' > "$BASE"
+  audit_json --baseline "$BASE" "$T/repos/plain"
+  [ "$status" -eq 1 ]
+  [ "$(q '[(f["rule"], f["severity"], f["path"]) for f in F]')" = "[('source-not-allowed', 'high', 'repos/plain')]" ]
+  # not in the baseline: the policy default (low), still reported
+  printf 'other\n' > "$BASE"
+  audit_json --baseline "$BASE" "$T/repos/plain"
+  [ "$status" -eq 0 ]
+  [ "$(q '[(f["rule"], f["severity"]) for f in F]')" = "[('source-not-allowed', 'low')]" ]
+}
+
+@test "an unlisted repo that grid.lock records is not flagged" {
+  add_repo fine 'https://github.com/obra/superpowers.git'
+  printf '### repos/fine\n### repos/plain\n' > "$T/CURATION.md"
+  mkdir -p "$T/repos/plain/x"
+  printf -- '---\nname: x\ndescription: clean\n---\nHello\n' > "$T/repos/plain/x/SKILL.md"
+  printf '{"entries": [{"source": "plain", "name": "x"}]}\n' > "$T/grid.lock"
+  printf 'plain\n' > "$BASE"
+  audit_json --baseline "$BASE" "$T/repos/plain"
   [ "$status" -eq 0 ]
   [ "$(q 'len(F)')" = "0" ]
 }
@@ -233,4 +284,26 @@ print(eval(sys.argv[1]))' "$1"
   add_repo fine 'https://github.com/obra/superpowers.git'
   run python3 "$AUDIT" --root "$T" --grid-dir "$T" --baseline "$T/nope.txt" "$T/repos/fine"
   [ "$status" -eq 2 ]
+}
+
+@test "a .gitmodules section written as '[submodule \"x\"] path = ...' on one line is still read (source-not-allowed, high)" {
+  printf '[submodule "evil"] path = repos/evil\n\turl = https://evil.invalid/someone/evil.git\n' > "$T/.gitmodules"
+  mkdir -p "$T/repos/evil/x"
+  printf -- '---\nname: x\ndescription: clean\n---\nHello\n' > "$T/repos/evil/x/SKILL.md"
+  printf '### repos/evil\n' > "$T/CURATION.md"
+  printf 'evil\n' > "$BASE"
+  audit_json --baseline "$BASE" "$T/repos/evil"
+  [ "$status" -eq 1 ]
+  [ "$(q '[(f["rule"], f["severity"], f["path"], f["line"]) for f in F]')" = "[('source-not-allowed', 'high', '.gitmodules', 2)]" ]
+}
+
+@test "a .gitmodules entry with an allowed url in the same one-line spelling passes" {
+  printf '[submodule "fine"] path = repos/fine\n\turl = https://github.com/obra/superpowers.git\n' > "$T/.gitmodules"
+  mkdir -p "$T/repos/fine/x"
+  printf -- '---\nname: x\ndescription: clean\n---\nHello\n' > "$T/repos/fine/x/SKILL.md"
+  printf '### repos/fine\n' > "$T/CURATION.md"
+  printf 'fine\n' > "$BASE"
+  audit_json --baseline "$BASE" "$T/repos/fine"
+  [ "$status" -eq 0 ]
+  [ "$(q 'F')" = "[]" ]
 }

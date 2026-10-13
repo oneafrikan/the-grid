@@ -6,6 +6,9 @@
 #   bash scripts/audit.sh --owned [OPTS] [TARGET...]   the-grid's own assets
 #   bash scripts/audit.sh --wired [OPTS] [TARGET...]   what wire.sh would link on this machine
 #   bash scripts/audit.sh --gate  [OPTS] [TARGET...]   owned + the BASELINE's wired set (CI / gate.sh)
+#   --allow-partial   with --gate: when a baseline submodule is uninitialised, scan the owned
+#                     assets only and exit by that result (the unscanned wired set is announced
+#                     before AND after the summary). Without it that case is exit 2.
 #   bash scripts/audit.sh [OPTS] TARGET...             only the given directories/files
 #
 # Modes may be combined (--owned --wired). Non-option arguments are extra
@@ -34,7 +37,7 @@ export PYTHONDONTWRITEBYTECODE=1
 
 command -v python3 >/dev/null 2>&1 || { echo "audit: python3 is required but not on PATH" >&2; exit 2; }
 
-want_owned=0; want_wired=0; want_gate=0
+want_owned=0; want_wired=0; want_gate=0; allow_partial=0
 passthru=()   # options handed to audit.py untouched
 extra=()      # explicit targets
 
@@ -46,6 +49,7 @@ while [ $# -gt 0 ]; do
     --owned) want_owned=1 ;;
     --wired) want_wired=1 ;;
     --gate)  want_gate=1 ;;
+    --allow-partial) allow_partial=1 ;;
     --root|--grid-dir|--policy|--allow|--format|--baseline|--check-url)
       [ $# -ge 2 ] || { echo "audit: $1 needs a value" >&2; exit 2; }
       passthru+=("$1" "$2"); shift ;;
@@ -65,7 +69,7 @@ add_owned() {
   local p
   for p in "$GRID_DIR"/skills/*/ "$GRID_DIR"/agents/*.md "$GRID_DIR/rules" "$GRID_DIR/hooks" \
            "$GRID_DIR"/agent-factory/roles/*/ "$GRID_DIR/agent-factory/_core" \
-           "$GRID_DIR/plugins"; do
+           "$GRID_DIR/plugins" "$GRID_DIR/dist"; do
     # An unmatched glob stays literal, so the -e test also drops it.
     [ -e "$p" ] && targets+=("${p%/}")
   done
@@ -124,15 +128,46 @@ fi
 
 [ "$want_owned" = 0 ] || add_owned
 
+# Names of the repos a wiring manifest wires, one per line: same normalisation as
+# wire.sh (strip `#...` and all whitespace), then skip blanks, subtractions (`-x`)
+# and typed `kind:name` entries; the repo is the text before the first `/`.
+baseline_repo_names() {
+  local line head
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    line="${line//[[:space:]]/}"
+    [ -n "$line" ] || continue
+    case "$line" in -*) continue ;; esac
+    head="${line%%/*}"
+    case "$head" in *:*) continue ;; esac
+    printf '%s\n' "$head"
+  done < "$1" | LC_ALL=C sort -u
+}
+
+partial=0
 if [ "$want_gate" = 1 ]; then
-  # An uninitialised submodule (leading '-') means the wired set is incomplete:
-  # skip it loudly rather than audit half of it. git absent or not a repo
-  # (a mock grid, a tarball) is not "uninitialised": it just has no submodules.
+  # An uninitialised BASELINE submodule (leading '-') means the wired set is incomplete:
+  # never audit half of it and call it ok. Only baseline repos matter; a library-only
+  # submodule is not part of the wired set. git absent or not a repo (a mock grid, a
+  # tarball) is not "uninitialised": it just has no submodules.
   # Capture first: piping into `grep -q` SIGPIPEs git on long output, which
   # pipefail turns into a false "no uninitialised submodules".
-  sub_status="$( (cd "$GRID_DIR" && git submodule status 2>/dev/null) || true)"
-  if printf '%s\n' "$sub_status" | command grep -q '^-'; then
-    echo "audit: wired set not scanned (uninitialised submodules)"
+  uninit=()
+  if [ -f "$baseline" ]; then
+    while IFS= read -r name; do
+      sub_status="$( (cd "$GRID_DIR" && git submodule status -- "repos/$name" 2>/dev/null) || true)"
+      if printf '%s\n' "$sub_status" | command grep -q '^-'; then
+        uninit+=("$name")
+      fi
+    done < <(baseline_repo_names "$baseline")
+  fi
+  if [ ${#uninit[@]} -gt 0 ]; then
+    echo "audit: wired set NOT scanned (uninitialised baseline submodules: ${uninit[*]})"
+    if [ "$allow_partial" != 1 ]; then
+      echo "audit: initialise them (git submodule update --init) or pass --allow-partial" >&2
+      exit 2
+    fi
+    partial=1
   else
     add_wired "$baseline" "__baseline__"
   fi
@@ -172,4 +207,6 @@ args=()
 # No `exec`: the EXIT trap must still remove the dry-run tmp dir.
 rc=0
 python3 "$SCRIPT_DIR/audit.py" ${args[@]+"${args[@]}"} ${uniq_targets[@]+"${uniq_targets[@]}"} || rc=$?
+# The summary line says "ok": repeat the partial-scan notice after it so it is the last word.
+[ "$partial" = 0 ] || echo "audit: wired set NOT scanned"
 exit "$rc"

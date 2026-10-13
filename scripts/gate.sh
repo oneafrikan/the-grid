@@ -24,8 +24,9 @@
 #                their skills/ and agents/ dirs (skipped with a notice if `claude` or
 #                .claude-plugin/marketplace.json is absent; CI has no claude)
 #   audit        vetting scan of owned assets + the baseline's wired set (audit.sh --gate --quiet;
-#                skipped with a notice if python3 or scripts/audit.sh is absent; the wired half
-#                is skipped by audit.sh itself where submodules are uninitialised)
+#                skipped with a notice if python3 or scripts/audit.sh is absent; an uninitialised
+#                baseline submodule fails it in CI, locally it is --allow-partial and `audit-wired`
+#                is listed as skipped)
 #   personas     dist/personas/*.md is current (build-personas.sh --check; skipped with a
 #                notice if the script or the venv is absent)
 #   personal     no personal data in the tracked tree (check-personal.sh); with no private
@@ -326,13 +327,16 @@ check plugins-validate run_plugins_validate
 run_audit() {
   [ -f scripts/audit.sh ] || { echo "    scripts/audit.sh absent - skipped"; SKIPPED+=(audit); return 0; }
   command -v python3 >/dev/null || { echo "    python3 absent - skipped"; SKIPPED+=(audit); return 0; }
-  local out rc=0
-  out="$(bash scripts/audit.sh --gate --quiet 2>&1)" || rc=$?
+  # Locally a fresh clone has no wired submodules: scan the owned assets, say so, and list it
+  # as skipped. CI (CI set) stays strict: an unscanned wired set is a failure there.
+  local args=(--gate --quiet) out rc=0
+  [ -n "${CI:-}" ] || args+=(--allow-partial)
+  out="$(bash scripts/audit.sh "${args[@]}" 2>&1)" || rc=$?
   printf '%s\n' "$out"
-  # audit.sh skips the wired half itself where submodules are uninitialised and only says so
-  # in its output. Record that as a skip too (same technique as personal-denylist), so it
-  # reaches the summary and `--strict` instead of passing silently. Match the script's own line.
-  if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q '^audit: wired set not scanned'; then
+  # audit.sh says so in its output when the wired half was not scanned. Record that as a skip too
+  # (same technique as personal-denylist), so it reaches the summary and `--strict` instead of
+  # passing silently. Match the script's own marker line (either spelling).
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qi '^audit: wired set not scanned'; then
     SKIPPED+=(audit-wired)
   fi
   return "$rc"

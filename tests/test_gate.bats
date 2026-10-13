@@ -277,6 +277,34 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GA
   [[ "$output" == *"gate: FAIL — "*"audit"* ]] || false
 }
 
+# audit_stub: an audit.sh that, like the real one, refuses to pass unless --allow-partial is
+# given when the wired set cannot be scanned, and says so in both cases.
+audit_partial_stub() {
+  cat > "$G/scripts/audit.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "audit: wired set NOT scanned (uninitialised baseline submodules: ex)"
+case " $* " in *" --allow-partial "*) exit 0 ;; esac
+exit 2
+STUB
+  chmod +x "$G/scripts/audit.sh"
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+}
+
+@test "audit check: locally an unscanned wired set passes with audit-wired listed as skipped" {
+  audit_partial_stub
+  run run_gate
+  [ "$status" -eq 0 ]
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"audit-wired"* ]] || false
+}
+
+@test "audit check: with CI set an unscanned wired set FAILS the gate" {
+  audit_partial_stub
+  run bash -c 'cd "$1" && env -i HOME="$1" PATH="$1/stubbin" CI=true bash scripts/gate.sh' _ "$G"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — "*"audit"* ]] || false
+}
+
 @test "lock check: exit 0 passes and lock is not listed as skipped" {
   ln -s "$(command -v python3)" "$G/stubbin/python3"
   printf 'import sys\nsys.exit(0)\n' > "$G/scripts/grid"
