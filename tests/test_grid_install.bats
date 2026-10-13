@@ -188,6 +188,21 @@ open(out, "w").write(json.dumps({"lockVersion": 1, "entries": entries}, indent=2
   [ -z "$(tree_digest "$SKILLS_DIR")" ]
 }
 
+# WP-071 (R25.qa.F17): the docs say a dry run writes nothing, but only the parent process had
+# bytecode writing off; the audit.py child it spawns (here through the source-policy check,
+# which only runs for a non-file:// source) wrote scripts/lib/__pycache__/*.pyc into the grid
+# tree. `python3 -B` in install() does not reach children, so this case stays red until
+# scripts/grid exports PYTHONDONTWRITEBYTECODE for them.
+@test "--dry-run with a network source leaves no __pycache__ in the grid tree (audit.py child included)" {
+  build_grids
+  # a non-file:// url makes grid run `audit.py --check-url`; the verdict is irrelevant here
+  printf 'version: 1\nsources:\n  up:\n    url: https://example.invalid/up.git\nwired:\n  baseline: baseline-submodules.example.txt\n' \
+    > "$GREAL/grid.yaml"
+  unset PYTHONDONTWRITEBYTECODE
+  run install --dry-run
+  [ -z "$(find "$GREAL" -name __pycache__ -o -name '*.pyc')" ]
+}
+
 # --- (d) lock validation and tampering -------------------------------------------------------------
 
 @test "tampered lock hash exits 1 and places nothing for that skill; the other is placed" {

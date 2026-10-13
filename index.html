@@ -750,7 +750,7 @@
           <strong>What it does:</strong> clone once, run one command, and you get:
         </p>
         <ol>
-          <li><strong>~137 curated skills as slash commands</strong>
+          <li><strong>~130 curated skills as slash commands</strong>
             (<code>/standup</code>, <code>/review</code>, <code>/ship</code>, <code>/skill-scout</code>&hellip;).
             Another ~100 are searchable but kept switched off.</li>
           <li><strong>38 ready-made AI roles you can call on:</strong> a dev team (tech lead,
@@ -761,13 +761,15 @@
             already wired in.</li>
         </ol>
         <p>
-          <strong>How:</strong> one script symlinks everything into <code>~/.claude/</code>.
-          No installs, no config, and the same setup follows you across laptops and servers.
+          <strong>How:</strong> one script symlinks everything into <code>~/.claude/</code> and keeps one opt-out
+          session-end hook in <code>~/.claude/settings.json</code>.
+          No installs, and the same setup follows you across laptops and servers.
         </p>
         <p>
-          <strong>Today vs next:</strong> works today with <strong>Claude Code</strong>.
-          Other agent tools (opencode, Codex CLI, Gemini CLI, Cursor) are scoped but not
-          built yet.
+          <strong>Today vs next:</strong> <strong>Claude Code</strong> is the default and the tested target.
+          Codex CLI, OpenCode and Gemini CLI also get skills, subagents and rule packs through
+          opt-in <code>harness:&lt;name&gt;</code> entries; Cursor gets rule packs only. None of those
+          four has been smoke-tested on a real install yet.
         </p>
         <p class="tldr-next">
           <strong>Think of it as:</strong> dotfiles for your AI assistant.
@@ -995,7 +997,7 @@ bash scripts/wire.sh
         </p>
 
         <p>
-          <code>scripts/cut-project.sh &lt;template&gt; &lt;target-dir&gt;</code> either
+          <code>project-factory/scripts/cut-project.sh &lt;template&gt; &lt;target-dir&gt;</code> either
           <strong>seeds</strong> a brand-new project (empty target) or <strong>retrofits</strong>
           an existing one (non-empty target) — same script, same rule either way: never
           overwrite a file that already exists and differs from the template; anything
@@ -1469,9 +1471,9 @@ bash scripts/wire.sh
         <h2 id="skills-heading">Skills</h2>
 
         <p>
-          <strong>137 wired live</strong> (14 root-owned + 123 from allowlisted repos)
-          across 8 sources — active in every Claude session. Another 102 exist in those
-          same partial repos but aren't wired, and a further <strong>~1,275</strong> are
+          <strong>132 wired live</strong> (14 root-owned + 118 from allowlisted repos)
+          across 8 sources — active in every Claude session. Another 100 exist in those
+          same partial repos but aren't wired, and a further <strong>over 1,000</strong> are
           indexed across 19 dedicated library submodules — all searchable via
           <code>skill-scout</code>, none loaded by default.
         </p>
@@ -1716,11 +1718,11 @@ bash scripts/wire.sh
 
         <!-- ── Library + Reference summary ── -->
         <div class="library-summary">
-          <strong>~1,275 more skills across 19 library submodules</strong> — indexed, not wired.
+          <strong>over 1,000 more skills across 19 library submodules</strong> — indexed, not wired.
           Browse any repo as a submodule under <code>repos/</code>, or search across
           all of them with <code>skill-scout</code>. Promote a repo to wired by adding
           its name to <code>baseline-submodules.txt</code> and running <code>bash scripts/wire.sh</code>.
-          Seven more repos are reference-only (awesome-lists/indexes, no <code>SKILL.md</code> files).
+          Nine more repos are reference-only (awesome-lists/indexes, no <code>SKILL.md</code> files).
 
           <table class="lib-table">
             <thead>
@@ -1731,29 +1733,30 @@ bash scripts/wire.sh
               </tr>
             </thead>
             <tbody>
-              <tr><td><code>repos/alirezarezvani</code></td><td>763</td><td>Library</td></tr>
+              <tr><td><code>repos/alirezarezvani</code></td><td>345</td><td>Library</td></tr>
+              <tr><td><code>repos/ecc</code></td><td>293</td><td>Library</td></tr>
               <tr><td><code>repos/robertbstillwell</code></td><td>152</td><td>Library</td></tr>
-              <tr><td><code>repos/openclaw</code></td><td>113</td><td>Library</td></tr>
-              <tr><td><code>repos/paperclip</code></td><td>37</td><td>Library</td></tr>
+              <tr><td><code>repos/openclaw</code></td><td>73</td><td>Library</td></tr>
               <tr><td><code>repos/deanpeters</code></td><td>49</td><td>Library</td></tr>
               <tr><td><code>repos/amekala-ads-mcp</code></td><td>24</td><td>Library</td></tr>
-              <tr><td><code>repos/wordpress</code></td><td>17</td><td>Library</td></tr>
+              <tr><td><code>repos/paperclip</code></td><td>22</td><td>Library</td></tr>
               <tr><td><code>repos/nowork-toprank</code></td><td>18</td><td>Library</td></tr>
-              <tr><td><code>repos/avoid-ai-writing</code></td><td>8</td><td>Library</td></tr>
-              <tr><td><code>repos/hubspot</code></td><td>15</td><td>Library</td></tr>
+              <tr><td><code>repos/wordpress</code></td><td>17</td><td>Library</td></tr>
               <tr><td><code>repos/mattberman-google-ads</code></td><td>16</td><td>Library</td></tr>
-              <tr><td><code>repos/mozilla-bq-etl</code></td><td>13</td><td>Library</td></tr>
+              <tr><td><code>repos/hubspot</code></td><td>15</td><td>Library</td></tr>
               <tr><td><code>repos/automattic</code></td><td>13</td><td>Library</td></tr>
-              <tr><td><code>repos/clawhub</code></td><td>12</td><td>Library</td></tr>
+              <tr><td><code>repos/mozilla-bq-etl</code></td><td>13</td><td>Library</td></tr>
               <tr><td><code>repos/jdevalk</code></td><td>12</td><td>Library</td></tr>
+              <tr><td><code>repos/avoid-ai-writing</code></td><td>8</td><td>Library</td></tr>
               <tr><td><code>repos/mattberman-meta-ads</code></td><td>6</td><td>Library</td></tr>
               <tr><td><code>repos/automattic-wordpress</code></td><td>4</td><td>Library</td></tr>
               <tr><td><code>repos/sarai-wp-openclaw</code></td><td>2</td><td>Library</td></tr>
               <tr><td><code>repos/spillwave-astro</code></td><td>1</td><td>Library</td></tr>
+              <tr><td><code>repos/clawhub</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/hesamsheikh</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/humanize-writing</code></td><td>—</td><td>Reference (index)</td></tr>
-              <tr><td><code>repos/removing-ai-isms</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/quant-zero</code></td><td>—</td><td>Reference (index)</td></tr>
+              <tr><td><code>repos/removing-ai-isms</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/sebclawops</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/sjkncs</code></td><td>—</td><td>Reference (index)</td></tr>
               <tr><td><code>repos/voltagent</code></td><td>—</td><td>Reference (index)</td></tr>
@@ -1786,7 +1789,7 @@ bash scripts/wire.sh
             </tr>
             <tr>
               <td><code>project-factory/</code></td>
-              <td>Scaffolds whole new projects from a template via <code>scripts/cut-project.sh</code> (seed or retrofit).</td>
+              <td>Scaffolds whole new projects from a template via <code>project-factory/scripts/cut-project.sh</code> (seed or retrofit).</td>
             </tr>
             <tr>
               <td><code>scripts/wire.sh</code></td>
@@ -1846,7 +1849,7 @@ bash scripts/wire.sh
 
         <div class="command-block">
           <h3>Bootstrap a new machine</h3>
-          <pre><code>git clone https://github.com/&lt;your-username&gt;/the-grid.git ~/.the-grid \
+          <pre><code>git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid \
   &amp;&amp; bash ~/.the-grid/scripts/bootstrap.sh
 # add --with-agents to also compose + wire the agent team in the same run</code></pre>
         </div>
@@ -1936,22 +1939,23 @@ bash scripts/reconcile.sh --force  # remove + re-wire</code></pre>
         <p>
           <strong>Shipped:</strong> the Claude Code target is built and wired
           live. <code>--target</code> also accepts <code>openclaw</code>,
-          <code>openclaw-native</code>, and <code>paperclip</code>.
+          <code>openclaw-native</code>, <code>paperclip</code>, <code>codex</code>,
+          <code>gemini-cli</code>, <code>opencode</code> and <code>portable</code>
+          (single-file personas in <code>dist/personas/</code>). Skills, subagents and
+          rule packs reach Codex CLI, OpenCode and Gemini CLI through opt-in
+          <code>harness:&lt;name&gt;</code> manifest entries; Cursor gets rule packs only
+          (<code>scripts/rules.py emit --harness cursor</code>).
         </p>
 
-        <p><strong>Scoped but not built</strong> — tracked in Issues:</p>
+        <p><strong>Not built, or not yet verified</strong> — tracked in Issues:</p>
 
         <table class="files-table">
           <thead>
             <tr><th>Direction</th><th>Status</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>opencode</code> compose target</td><td>Researched and scoped, not implemented</td></tr>
-            <tr><td>OpenAI Codex CLI target</td><td>Scoped</td></tr>
-            <tr><td>Gemini CLI target</td><td>Scoped</td></tr>
-            <tr><td>Cursor</td><td>Validating whether the claude-code output is reusable as-is</td></tr>
+            <tr><td>Real-install smoke tests of the Codex, OpenCode and Gemini CLI targets</td><td>Not done; the vendor docs were read, not exercised</td></tr>
             <tr><td>Amp</td><td>Blocked — custom-agent mechanism needs verifying first</td></tr>
-            <tr><td>Portable single-file personas for chat-UI Projects</td><td>Scoped</td></tr>
             <tr><td>OpenSpec <em>stores</em> (cross-repo planning)</td><td>Open decision, deliberately not adopted</td></tr>
           </tbody>
         </table>
@@ -1977,7 +1981,7 @@ bash scripts/reconcile.sh --force  # remove + re-wire</code></pre>
           <li><strong>It will change under you.</strong> No versioning, no deprecation cycle.</li>
           <li><strong>It is opinionated and partly personal.</strong> Personal config (machine overlays, your baseline, the dev-journal) is gitignored or kept in a private repo, and <code>scripts/check-personal.sh</code> scans the tracked tree for personal data.</li>
           <li><strong>Fork rather than depend.</strong> The wiring model — manifest, symlinks, compose-then-wire — is the transferable part. Copy it and point it at your own skills.</li>
-          <li><strong><code>wire.sh</code> only touches symlinks that point into this repo.</strong> It won't clobber a real directory or a foreign symlink in <code>~/.claude/skills/</code>. Read it before running it anyway — it writes to your home directory.</li>
+          <li><strong><code>wire.sh</code> only replaces symlinks that point into this repo.</strong> It won't clobber a real directory or a foreign symlink in <code>~/.claude/skills/</code>. It also edits <code>~/.claude/settings.json</code> (the auto-handoff hook, on by default). Read it before running it anyway — it writes to your home directory.</li>
         </ul>
       </section>
 

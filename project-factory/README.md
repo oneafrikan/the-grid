@@ -125,7 +125,7 @@ see its own `README.md`.
 ## Usage
 
 ```bash
-bash scripts/cut-project.sh <template> <target-dir>
+bash ~/.the-grid/project-factory/scripts/cut-project.sh <template> <target-dir>
 ```
 
 Mode (seed vs. retrofit) is auto-detected from whether `<target-dir>` already has
