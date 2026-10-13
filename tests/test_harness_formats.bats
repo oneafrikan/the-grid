@@ -805,6 +805,7 @@ PYEOF
 }
 
 @test "validator: a directory argument is reported as such, not as a traceback" {
+  need_tomllib      # the codex-agent leg exits 3 ("cannot run") on Python < 3.11 (NF-055 VF1)
   mkdir "$TMP/adir"
   local c
   for c in opencode-agent gemini-agent codex-agent; do
