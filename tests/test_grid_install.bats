@@ -991,6 +991,112 @@ print(g.is_contained(sys.argv[1], "up", "repos/up/skills/alpha"))
   [ "$output" = "False" ]
 }
 
+# --- symlinked repos/ directory (hardening, refs private NF-066 E1) ---------------------------
+# Some machines keep repos/ on another disk behind a symlink. That whole-directory link
+# is legitimate; what must stay refused is a link at repos/<source> or below it. The
+# containment root is realpath(<grid>/repos)/<source>, so nothing can land outside the
+# real repos/ tree. Every command that reads the lock (install, doctor, drift, repair,
+# uninstall) goes through the same check.
+
+# link_repos_dir: move the grid's repos/ to $T/elsewhere and leave a symlink in its place.
+link_repos_dir() {
+  mv "$GREAL/repos" "$T/elsewhere"
+  ln -s "$T/elsewhere" "$GREAL/repos"
+}
+
+@test "a symlinked repos/ directory: install, doctor, drift, repair and uninstall all work" {
+  build_grids
+  link_repos_dir
+  run install
+  [ "$status" -eq 0 ]
+  [ -f "$T/elsewhere/up/skills/alpha/SKILL.md" ]
+  [ -f "$T/elsewhere/up/nested/cat/beta/SKILL.md" ]
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" doctor
+  [ "$status" -eq 0 ]
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" drift --quiet
+  [ "$status" -eq 0 ]
+  # repair re-places a deleted skill through the link.
+  rm -rf "$T/elsewhere/up/skills/alpha"
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" repair
+  [ "$status" -eq 0 ]
+  [ -f "$T/elsewhere/up/skills/alpha/SKILL.md" ]
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" uninstall --yes
+  [ "$status" -eq 0 ]
+  [ ! -e "$T/elsewhere/up/skills/alpha" ]
+  [ ! -e "$T/elsewhere/up/nested/cat/beta" ]
+  # Emptied parents are pruned up to (not including) <repos>/up.
+  [ ! -e "$T/elsewhere/up/nested" ]
+  [ -d "$T/elsewhere/up" ]
+}
+
+@test "a symlinked repos/ directory does not make repos/<source> symlinks acceptable" {
+  build_grids
+  link_repos_dir
+  outside_canary
+  rm -rf "$T/elsewhere/up"
+  ln -s "$T/outside" "$T/elsewhere/up"
+  run install
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repos/up is a symlink"* ]]
+  only_canary
+  run install --force
+  [ "$status" -ne 0 ]
+  only_canary
+}
+
+@test "a symlinked repos/ directory: a link below repos/<source> pointing outside is refused and the error names a symlink" {
+  build_grids
+  link_repos_dir
+  outside_canary
+  ln -s "$T/outside" "$T/elsewhere/up/skills"
+  run install
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"symlink"* ]]
+  only_canary
+}
+
+@test "uninstall through a symlinked repos/ never deletes outside the real repos tree" {
+  build_grids
+  link_repos_dir
+  run install
+  [ "$status" -eq 0 ]
+  outside_canary
+  # Swap a placed skill's parent for a link out of the tree; the row must be kept, not followed.
+  mv "$T/elsewhere/up/skills" "$T/outside/skills"
+  ln -s "$T/outside/skills" "$T/elsewhere/up/skills"
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" uninstall --yes --force
+  [ -f "$T/outside/skills/alpha/SKILL.md" ]
+}
+
+@test "is_contained under a symlinked repos/: True for a normal path, False for a link out of the source" {
+  build_grids
+  link_repos_dir
+  outside_canary
+  run python3 -B -c '
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+grid, outside = sys.argv[1], sys.argv[2]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+print(g.is_contained(grid, "up", "repos/up/skills/alpha"))
+os.symlink(outside, grid + "/repos/up/skills")
+print(g.is_contained(grid, "up", "repos/up/skills/alpha"))
+' "$GREAL" "$T/outside"
+  [ "$status" -eq 0 ]
+  [ "$output" = "True
+False" ]
+}
+
+@test "the escape error names the symlink when one is on the path" {
+  build_grids
+  outside_canary
+  ln -s "$T/outside" "$GREAL/repos/up/skills"
+  run install
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repos/up/skills is a symlink"* ]]
+}
+
 # --- (m) robustness (private WP-032) ---------------------------------------------------------------------------------------
 # A state dir or ledger problem is a clean exit 2 found BEFORE anything is fetched or placed.
 
