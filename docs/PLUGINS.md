@@ -74,6 +74,9 @@ hand-edit them.
   install until one exists.
 - Regenerate with `python3 scripts/build-plugins.py` (needs `agent-factory/.venv`).
 - `python3 scripts/build-plugins.py --check` reports drift and writes nothing.
+- Only git-tracked files under `skills/` and `agents/` are bundled (`git add` a new file
+  first; untracked files are skipped), and a symlinked `skills/`, `agents/` or
+  `agent-factory/` is refused.
 - Bundles are built with the neutral identity in `agent-factory/user.public.yaml`
   and no private roles, so they carry no operator, channel or hostname.
 - The gate runs `--check` (`plugins`) and `claude plugin validate --strict`
