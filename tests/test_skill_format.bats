@@ -183,6 +183,11 @@ PY
   grep -q 'changes/archive' "$f"
 }
 
+# A shipped skill must not name the operator's private learning store path (NF-043).
+@test "no shipped skill text names the private learning store path" {
+  if grep -rn 'the-grid-private/learning' "$REPO_ROOT/skills"; then false; fi
+}
+
 @test "skill-scout names the wiring script by its real path (bash scripts/wire.sh)" {
   if grep -n 'bash wire\.sh' "$REPO_ROOT/skills/skill-scout/SKILL.md"; then false; fi
 }
