@@ -924,6 +924,26 @@ print(g.is_contained(sys.argv[1], "up", "repos/up/skills/alpha"))
   [[ "$output" == *"grid install"* ]]
 }
 
+@test "install --dry-run with a duplicate lock entry exits 2 and places nothing" {
+  build_grids
+  python3 -B -c '
+import json, sys
+path = sys.argv[1]
+doc = json.load(open(path))
+twin = dict(doc["entries"][0])
+twin["path"] = "skills/other"                       # same (name, source), another path
+doc["entries"].append(twin)
+json.dump(doc, open(path, "w"), indent=2, sort_keys=True)
+' "$GREAL/grid.lock"
+  run install --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"duplicates"* ]]
+  run install
+  [ "$status" -eq 2 ]
+  [ ! -e "$G/repos/up/skills" ]
+  [ ! -e "$GRID_TRACE_FETCH" ]
+}
+
 @test "a control character in a lock name is rejected: ESC, BEL, DEL and a C1 character" {
   build_grids
   for esc in '\u001b[31m' '\u0007' '\u007f' '\u0085' '\u009b'; do
