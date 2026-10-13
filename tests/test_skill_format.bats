@@ -144,6 +144,21 @@ PY
   grep -q 'ask before creating' "$REPO_ROOT/skills/handoff/SKILL.md"
 }
 
+# The shortening pass dropped the natural-language prompts people actually type (D81:
+# restore them, within the 250-char description cap).
+@test "grid-help, openspec-help and caveman descriptions keep their restored trigger phrases and stay within 250 chars" {
+  local skill phrase d
+  for pair in 'grid-help|how do I add a skill/agent/automation' \
+              'openspec-help|how do I add specs to this repo' \
+              'caveman|spartan mode'; do
+    skill="${pair%%|*}"; phrase="${pair#*|}"
+    d="$(grep -m1 '^description:' "$REPO_ROOT/skills/$skill/SKILL.md")"
+    d="${d#description: }"
+    [[ "$d" == *"$phrase"* ]] || { echo "$skill description lacks: $phrase" >&3; false; }
+    [ "${#d}" -le 250 ] || { echo "$skill description is ${#d} chars" >&3; false; }
+  done
+}
+
 @test "skill-scout names the wiring script by its real path (bash scripts/wire.sh)" {
   if grep -n 'bash wire\.sh' "$REPO_ROOT/skills/skill-scout/SKILL.md"; then false; fi
 }
