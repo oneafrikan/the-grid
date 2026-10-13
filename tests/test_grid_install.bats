@@ -778,7 +778,7 @@ print("GIT_ALLOW_PROTOCOL=%s" % env.get("GIT_ALLOW_PROTOCOL"))
 print("HOME_is_real=%s" % (env.get("HOME") == sys.argv[2]))
 ' "$G" "$HOME"
   [ "$status" -eq 0 ]
-  ! [[ "$output" == *"=present"* ]]
+  [[ "$output" != *"=present"* ]]
   [[ "$output" == *"GIT_CONFIG_GLOBAL=/dev/null"* ]]
   [[ "$output" == *"GIT_CONFIG_SYSTEM=/dev/null"* ]]
   [[ "$output" == *"GIT_ALLOW_PROTOCOL=https:file"* ]]
