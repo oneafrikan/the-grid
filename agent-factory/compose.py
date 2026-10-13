@@ -892,6 +892,59 @@ def _remove(path: Path, strict: bool = True) -> None:
             raise
 
 
+# The swap dirs (<target>.tmp / <target>.old, <project>.tmp / .old) sit next to user content, so
+# a crashed run's debris may only be deleted when compose.py itself made it. Ownership is a
+# sibling marker FILE (<dir>.compose-owned), written before the dir exists: the dir's own
+# contents (a previous generated tree) cannot carry one. Anything unmarked is a user's, refused.
+OWNED_SUFFIX = ".compose-owned"
+
+
+def _marker(p: Path) -> Path:
+    return p.with_name(p.name + OWNED_SUFFIX)
+
+
+def _unmark(p: Path) -> None:
+    """Remove p's marker if it is a file or link (a link is unlinked, never followed); never a dir."""
+    m = _marker(p)
+    if m.is_symlink() or m.is_file():
+        m.unlink()
+
+
+def _recheck_not_link(*paths: Path) -> None:
+    """Re-verify, immediately before the first rename, what vet_target() checked at the start:
+    the project dir and the target are still not symlinks. Narrows (does not close) the window in
+    which a same-user process could swap a link in after vetting; an fd-based swap would close it."""
+    for p in paths:
+        if p.is_symlink():
+            sys.exit(f"error: refusing to write: {p} became a symlink after it was vetted")
+
+
+def _claim(p: Path) -> None:
+    """About to create `p`: clear compose.py's own debris there, refuse anything else, then mark it ours."""
+    m = _marker(p)
+    marked = m.is_symlink() or m.is_file()    # a marker that is a dir/FIFO is nobody's: refused below
+    if os.path.lexists(m) and not (m.is_symlink() or m.is_file()):
+        sys.exit(f"error: refusing to touch {m}: not a plain file")
+    if os.path.lexists(p) and not marked:
+        sys.exit(f"error: refusing to delete {p}: it was not created by compose.py "
+                 f"(no {m.name} beside it); move or remove it and re-run")
+    _remove(p)
+    _unmark(p)                                # stale marker: a link is unlinked, never followed
+    p.parent.mkdir(parents=True, exist_ok=True)   # the marker is a sibling; its dir may not exist yet
+    fd = os.open(_marker(p), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    os.close(fd)
+
+
+def _release(p: Path, strict: bool = True) -> None:
+    """Delete a dir we claimed, and its marker. Only ever called on a path _claim()ed first."""
+    _remove(p, strict)
+    try:
+        _unmark(p)
+    except OSError:
+        if strict:
+            raise
+
+
 def vet_target(out_dir: Path, name, sub: str | None = None) -> Path:
     """The dir a writer will replace: <out_dir>/<name>[/<sub>]. Exits (no traceback) unless the
     name is a plain project name, neither the project dir nor the target is a symlink or a
@@ -935,10 +988,11 @@ def install_tree(target: Path, files: dict[str, str], dirs=()) -> None:
     tmp = target.with_name(target.name + ".tmp")
     old = target.with_name(target.name + ".old")
     try:
-        for leftover in (tmp, old):          # a crashed earlier run's debris is ours to clear
-            _remove(leftover)
+        for leftover in (tmp, old):          # a crashed earlier run's own debris is ours to clear
+            _claim(leftover)                 # (anything unmarked is a user's: refused, untouched)
         tmp.mkdir(parents=True)
         _materialise(tmp, files, dirs)
+        _recheck_not_link(target.parent, target)
         if os.path.lexists(target):
             os.rename(target, old)
         try:
@@ -947,13 +1001,27 @@ def install_tree(target: Path, files: dict[str, str], dirs=()) -> None:
             if os.path.lexists(old):
                 os.rename(old, target)
             raise
-        _remove(old, strict=False)
+        _release(tmp, strict=False)          # tmp was renamed into place; this drops its marker
+        _release(old, strict=False)
     except OSError as exc:
-        _remove(tmp, strict=False)
+        _abort_swap(tmp, old)
         sys.exit(f"error: could not write {target}: {exc}")
     except BaseException:
-        _remove(tmp, strict=False)
+        _abort_swap(tmp, old)
         raise
+
+
+def _abort_swap(tmp: Path, old: Path) -> None:
+    """Failure cleanup after _claim() succeeded for both: drop our tmp dir, and `old`'s marker
+    if `old` is gone. A refused _claim() (a user's dir) never reaches here with that dir claimed:
+    its marker is absent, so nothing of the user's is deleted. `old` itself is never deleted here:
+    it may be the only copy of the previous tree."""
+    _release_if_ours(tmp)
+    if not os.path.lexists(old):
+        try:
+            _unmark(old)
+        except OSError:
+            pass
 
 
 def install_project(project_dir: Path, files: dict[str, str]) -> None:
@@ -966,11 +1034,12 @@ def install_project(project_dir: Path, files: dict[str, str]) -> None:
     moved_old: list[str] = []
     moved_new: list[str] = []
     try:
-        for leftover in (tmp, old):
-            _remove(leftover)
+        for leftover in (tmp, old):          # only compose.py's own marked debris is cleared
+            _claim(leftover)
         tmp.mkdir(parents=True)
         _materialise(tmp, files)
         old.mkdir()
+        _recheck_not_link(project_dir)
         project_dir.mkdir(parents=True, exist_ok=True)
         try:
             for entry in sorted(os.listdir(project_dir)):
@@ -986,15 +1055,22 @@ def install_project(project_dir: Path, files: dict[str, str]) -> None:
             for entry in moved_old:
                 os.rename(old / entry, project_dir / entry)
             raise
-        _remove(tmp, strict=False)
-        _remove(old, strict=False)
+        _release(tmp, strict=False)
+        _release(old, strict=False)
     except OSError as exc:
-        _remove(tmp, strict=False)
-        _remove(old, strict=False)
+        _release_if_ours(tmp)
+        _release_if_ours(old)
         sys.exit(f"error: could not write {project_dir}: {exc}")
     except BaseException:
-        _remove(tmp, strict=False)
+        _release_if_ours(tmp)
         raise
+
+
+def _release_if_ours(p: Path) -> None:
+    """Failure cleanup: delete `p` only when its marker shows compose.py made it. A refused
+    _claim() (a user's dir at that name) has no marker, so it is never deleted here."""
+    if os.path.lexists(_marker(p)):
+        _release(p, strict=False)
 
 
 def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:

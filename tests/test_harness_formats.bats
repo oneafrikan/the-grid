@@ -915,3 +915,103 @@ runpy.run_path(sys.argv[0], run_name="__main__")
   echo "$output"
   [ "$status" -eq 3 ]
 }
+
+# ============================================== NF-044 (VS7): delete scope of the swap dirs ====
+# The writers used to delete any <target>.tmp / <target>.old (and <project>.tmp / .old) next to
+# the output, which could be a user's own dir. Now only debris compose.py itself marked is
+# cleared; anything else is refused untouched. Author's own checks, not independent verification.
+
+# A user dir (no compose.py marker) at each swap name: canary inside, deep sandbox so a wrong
+# delete can only reach this test's own tree.
+@test "NF-044: a user dir at a swap name is refused and never deleted (install_tree and install_project)" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out" t d
+  mkdir -p "$out/fx"
+  # Targets that use install_tree: <out>/fx/_<target>.tmp|.old. Default target: <out>/fx.tmp|.old.
+  for d in "$out/fx/_claude-code.tmp" "$out/fx/_claude-code.old" "$out/fx.tmp" "$out/fx.old"; do
+    mkdir -p "$d"
+    printf 'mine\n' > "$d/canary.txt"
+  done
+  for t in claude-code default; do
+    if [ "$t" = default ]; then
+      run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+    else
+      run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$out"
+    fi
+    echo "$t: $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"refusing to delete"* ]]
+    [[ "$output" != *"Traceback"* ]]
+  done
+  for d in "$out/fx/_claude-code.tmp" "$out/fx/_claude-code.old" "$out/fx.tmp" "$out/fx.old"; do
+    [ "$(cat "$d/canary.txt")" = mine ]
+  done
+  # nothing was composed over the refusal
+  [ ! -e "$out/fx/_claude-code" ]
+  [ ! -e "$out/fx/agents.yaml" ]
+}
+
+@test "NF-044: a symlink at a swap name is refused, never followed" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out"
+  mkdir -p "$out/fx" "$TMP/sb/deep/victim"
+  printf 'mine\n' > "$TMP/sb/deep/victim/canary.txt"
+  ln -s "$TMP/sb/deep/victim" "$out/fx/_claude-code.old"
+  ln -s "$TMP/sb/deep/victim" "$out/fx.tmp"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$out"
+  [ "$status" -ne 0 ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+  [ "$status" -ne 0 ]
+  [ "$(cat "$TMP/sb/deep/victim/canary.txt")" = mine ]
+  [ -L "$out/fx/_claude-code.old" ]
+  [ -L "$out/fx.tmp" ]
+}
+
+@test "NF-044: debris compose.py itself left (dir plus its marker) is still cleared, and a run leaves no marker" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out"
+  mkdir -p "$out/fx/_claude-code.tmp" "$out/fx.old"
+  printf 'x\n' > "$out/fx/_claude-code.tmp/half.txt"
+  printf 'x\n' > "$out/fx.old/half.txt"
+  : > "$out/fx/_claude-code.tmp.compose-owned"
+  : > "$out/fx.old.compose-owned"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -z "$(find "$out" -name '*.tmp' -o -name '*.old' -o -name '*compose-owned*')" ]
+  [ -d "$out/fx/_claude-code" ]
+}
+
+# VS1 (cheap part): the writers re-check for a symlink right before the first rename, so a link
+# swapped in after vet_target() is refused. Called directly because the swap cannot be raced
+# reliably from a test; the in-function re-check is what is under test.
+@test "NF-044: install_tree and install_project refuse a project dir that is a symlink at swap time" {
+  local sb="$TMP/sb/deep"
+  mkdir -p "$sb/victim/_claude-code" "$sb/out"
+  printf 'keep\n' > "$sb/victim/_claude-code/canary.txt"
+  printf 'keep\n' > "$sb/victim/canary-top.txt"
+  ln -s "$sb/victim" "$sb/out/fx"
+  run env REPO_ROOT="$REPO_ROOT" OUT="$sb/out" "$PY" -c '
+import os, sys
+from pathlib import Path
+sys.path.insert(0, os.environ["REPO_ROOT"] + "/agent-factory")
+import compose
+out = Path(os.environ["OUT"])
+for fn, args in ((compose.install_tree, (out / "fx" / "_claude-code", {"a.txt": "x"})),
+                 (compose.install_project, (out / "fx", {"a.txt": "x"}))):
+    try:
+        fn(*args)
+    except SystemExit as e:
+        assert "symlink" in str(e.code), e.code
+    else:
+        raise SystemExit("accepted a symlinked project dir: " + fn.__name__)
+print("refused both")'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$sb/victim/_claude-code/canary.txt")" = keep ]
+  [ "$(cat "$sb/victim/canary-top.txt")" = keep ]
+  [ ! -e "$sb/victim/a.txt" ]
+}
