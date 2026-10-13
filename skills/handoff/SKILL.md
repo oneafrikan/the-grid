@@ -39,17 +39,25 @@ Also write a context file using today's actual date.
 Default: save to `LOGS/` — ask before creating it if it doesn't exist.
 
 Optional per-project overrides: if `handoff-locations.md` exists in the private dir
-(`$GRID_PRIVATE_DIR`, default `~/.the-grid-private/`), read its table first (rows: `| directory-name-or-glob | location |`);
-the first row matching the current working directory wins. If the file is
-absent or no row matches, use the default above.
+(`$GRID_PRIVATE_DIR`, default `~/.the-grid-private/`), read its table first (rows: `| directory-name-or-glob | location |`).
+If the file is absent or no row matches, use the default above.
 
-**Case handling:** match case-insensitively — if a directory matching the
-table's name already exists on disk in any casing (`logs`, `Logs`, `LOGS`),
-write there as-is. Do not compare on-disk casing against git's tracked
-casing, do not check `core.ignorecase`, do not investigate or flag a
-mismatch — that's out of scope for this skill and wastes tokens. Only
-create a new directory (using the table's casing) when nothing matching
-exists at all.
+**Table rules** (the unattended auto-handoff worker applies the same ones):
+- The first column matches the working directory's basename, or its full
+  path as a glob. The first matching row wins.
+- `location` is relative to the working directory unless it is absolute; a
+  leading `~` is the home directory.
+- A matched row whose directory does not exist stops the search: do not fall
+  through to the default. Interactive use asks before creating it; the
+  unattended worker creates nothing and writes to its fallback directory.
+
+**Case handling:** match the directory case-insensitively — if a directory
+matching the row's `location` (or the default `LOGS/`) already exists on disk
+in any casing (`logs`, `Logs`, `LOGS`), write there as-is. Do not compare
+on-disk casing against git's tracked casing, do not check `core.ignorecase`,
+do not investigate or flag a mismatch — that's out of scope for this skill
+and wastes tokens. Only create a new directory (using the table's casing)
+when nothing matching exists at all.
 
 ---
 
