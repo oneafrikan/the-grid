@@ -35,7 +35,7 @@ bibliography (not maintained, kept for provenance) see [`reference-resources.md`
 | `repos/mattberman-meta-ads` | library | <https://github.com/TheMattBerman/meta-ads-kit> |
 | `repos/mattpocock` | partial | <https://github.com/mattpocock/skills> |
 | `repos/mozilla-bq-etl` | library | <https://github.com/mozilla/bigquery-etl-skills> |
-| `repos/nowork-toprank` | library | <https://github.com/nowork-studio/NotFair> |
+| `repos/nowork-toprank` | library | <https://github.com/nowork-studio/notfair-plugin> |
 | `repos/openclaw` | library | <https://github.com/openclaw/openclaw> |
 | `repos/openspec` | wired | <https://github.com/Fission-AI/openspec> |
 | `repos/paperclip` | library | <https://github.com/paperclipai/paperclip> |

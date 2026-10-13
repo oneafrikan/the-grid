@@ -588,6 +588,19 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
   [[ "$output" == *"budget: FAIL skills/dup/SKILL.md: "*"duplicate"*"description"* ]] || false
 }
 
+# WP-047: skill_frontmatter.py and the catalogue read an unclosed fence as NO frontmatter (the
+# skill falls back to its directory name); measuring the body as if it were frontmatter would
+# disagree with them silently, so the gate names it instead.
+@test "an unclosed frontmatter fence fails --check, naming the file and the missing fence" {
+  mkdir -p "$MOCK_GRID/skills/open"
+  printf -- '---\nname: open\ndescription: never closed\nbody text\n' > "$MOCK_GRID/skills/open/SKILL.md"
+  write_target 1000 0 0 0 250 100000
+  budget --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"budget: FAIL skills/open/SKILL.md: "*"closing"* ]] || false
+}
+
 @test "an owned skill with no description key fails --check; a disabled one is exempt" {
   skill_raw nodesc "name: nodesc"
   skill_raw off "name: off" "disable-model-invocation: true"
