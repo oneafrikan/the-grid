@@ -145,6 +145,53 @@ sys.exit(1 if missing else 0)' "$REPO_ROOT"
   [[ "$output" == *"line 2"* ]]
 }
 
+@test "grid.yaml: an absolute or .. wired.baseline is rejected and no file text is printed" {
+  printf 'SECRETLINE\nroot:x:0:0\n' > "$F.secret"
+  mkdir -p "$F/sub"
+  for bad in "$F.secret" "../$(basename "$F").secret" "sub/../../$(basename "$F").secret" "/etc/passwd" "sub/../b.txt" "./../x"; do
+    write_yaml "version: 1\nsources:\n  alpha:\n    url: https://example.com/a.git\nwired:\n  baseline: $bad\n"
+    run load_yaml
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"wired.baseline"* ]]
+    # And through the CLI, where lock --check used to echo parts of the named file.
+    run python3 -B "$GRID" --grid-dir "$F" lock --check
+    [ "$status" -eq 2 ]
+    [[ "$output" != *"SECRETLINE"* ]]
+    [[ "$output" != *"root:"* ]]
+  done
+  rm -f "$F.secret"
+}
+
+@test "grid.yaml: a wired.baseline that is a symlink out of the grid dir is rejected" {
+  printf 'SECRETLINE\n' > "$F.secret"
+  ln -s "$F.secret" "$F/b.txt"
+  write_yaml "$VALID_YAML"
+  run load_yaml
+  rm -f "$F.secret"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"wired.baseline"* ]]
+}
+
+@test "grid.yaml: a plain relative wired.baseline inside the grid dir still loads" {
+  mkdir -p "$F/sub"
+  write_yaml 'version: 1\nsources:\n  alpha:\n    url: https://example.com/a.git\nwired:\n  baseline: sub/b.txt\n'
+  run load_yaml
+  [ "$status" -eq 0 ]
+}
+
+@test "manifest_findings prints a repo name only when it is a valid source name" {
+  printf 'ok-repo\n\033[2Jevil\n' > "$F/b.txt"
+  write_yaml "$VALID_YAML"
+  run gpy '
+cfg = g.load_grid_yaml(sys.argv[3])
+for f in g.manifest_findings(sys.argv[3], cfg):
+    print(f)' "$F"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ok-repo"* ]]
+  [[ "$output" == *"<invalid name>"* ]]
+  [[ "$output" != *$'\033'* ]]
+}
+
 @test "grid.yaml: reserved rules/harnesses keys load with the exact notice" {
   write_yaml "${VALID_YAML}rules:\n  - sql\nharnesses:\n  - codex\n"
   run load_yaml

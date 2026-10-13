@@ -238,22 +238,47 @@ print("ok")
 
 # --- (c) litter is not content ------------------------------------------------------------
 
-@test ".DS_Store and __pycache__/x.pyc, tracked or created on disk, do not change the hash" {
-  run lock
-  [ "$status" -eq 0 ]
-  before=$(lock_field alpha hash)
-
-  # Tracked in git.
-  mkdir -p "$U/skills/alpha/__pycache__"
-  printf 'junk' > "$U/skills/alpha/.DS_Store"
-  printf 'junk' > "$U/skills/alpha/__pycache__/x.pyc"
-  printf 'junk' > "$U/skills/alpha/helper.pyc"
-  upstream_commit "litter"
+# track_excluded REL: commit a regular file REL (relative to skills/alpha) upstream and
+# bump repos/up to it, then run `grid lock` (status/output for the caller).
+track_excluded() {
+  mkdir -p "$U/skills/alpha/$(dirname "$1")"
+  printf 'junk' > "$U/skills/alpha/$1"
+  upstream_commit "tracked $1"
   fixture_advance "$G" "$U"
   run lock
-  [ "$status" -eq 0 ]
-  [ "$(lock_field alpha hash)" = "$before" ]
+}
 
+@test "a tracked .DS_Store makes lock exit 2 naming the file, and nothing is written" {
+  track_excluded .DS_Store
+  [ "$status" -eq 2 ]
+  [[ "$output" == *".DS_Store"* ]]
+  [ ! -e "$G/grid.lock" ]
+}
+
+@test "a tracked __pycache__/x.pyc makes lock exit 2 naming the file" {
+  track_excluded __pycache__/x.pyc
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"__pycache__/x.pyc"* ]]
+}
+
+@test "a tracked sourceless .pyc makes lock exit 2 naming the file" {
+  track_excluded helper.pyc
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"helper.pyc"* ]]
+}
+
+@test "a tracked excluded file also fails lock --check" {
+  run lock
+  [ "$status" -eq 0 ]
+  track_excluded helper.pyc
+  run lock --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"helper.pyc"* ]]
+}
+
+@test ".DS_Store and __pycache__/x.pyc created on disk after checkout do not change the hash or dirty the skill" {
+  run lock
+  [ "$status" -eq 0 ]
   # Created on disk after checkout: neither a dirty skill dir nor a hash change.
   mkdir -p "$G/repos/up/nested/cat/beta/__pycache__"
   printf 'junk' > "$G/repos/up/nested/cat/beta/.DS_Store"

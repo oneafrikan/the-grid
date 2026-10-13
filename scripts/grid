@@ -29,6 +29,7 @@ import sys
 sys.dont_write_bytecode = True
 
 import argparse
+import atexit
 import contextlib
 import datetime
 import hashlib
@@ -144,6 +145,25 @@ def atomic_write(path, content):
     return True
 
 
+_GIT_HOME = []                  # one empty HOME per process, created on first use
+
+
+def _empty_git_home():
+    """An empty directory used as HOME (and XDG_CONFIG_HOME) for git children; removed at exit."""
+    if not _GIT_HOME:
+        path = tempfile.mkdtemp(prefix="grid-git-home-")
+        atexit.register(shutil.rmtree, path, True)
+        _GIT_HOME.append(path)
+    return _GIT_HOME[0]
+
+
+# Variables that can change which URL git really contacts, which program it runs, or what
+# config it reads. Dropped from every git child unless GRID_GIT_FORWARD_CONFIG=1.
+_GIT_SCRUB_EXACT = ("GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_PROXY_COMMAND",
+                    "GIT_EXEC_PATH", "GIT_ASKPASS", "GIT_TEMPLATE_DIR")
+_GIT_SCRUB_PREFIX = ("GIT_SSH", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+
+
 def git_env():
     """Environment for every git child.
 
@@ -155,6 +175,15 @@ def git_env():
     GIT_ALLOW_PROTOCOL: a child may speak https only (plus file when the test-only
     GRID_ALLOW_FILE=1 is set), so a source URL that slipped past the string checks
     still cannot make git use ssh, git:// or an ext:: helper.
+
+    Config isolation (private WP-034, D55): the URL that was checked against policy.yaml
+    must be the URL that is fetched, but a user or system gitconfig (or GIT_CONFIG_* in the
+    environment) can carry `url.<base>.insteadOf` rewrites. So git children read NO user or
+    system config: GIT_CONFIG_GLOBAL/SYSTEM point at /dev/null (git >= 2.32) AND HOME and
+    XDG_CONFIG_HOME point at an empty temp dir with GIT_CONFIG_NOSYSTEM=1 (older git), and
+    the variables listed above are dropped. Cost: a corporate proxy or credential helper
+    configured in gitconfig stops working; GRID_GIT_FORWARD_CONFIG=1 opts back in to the
+    caller's environment as it was (only the GIT_DIR family is still removed).
     """
     env = dict(os.environ)
     env["LC_ALL"] = "C"
@@ -162,6 +191,13 @@ def git_env():
     env["GIT_ALLOW_PROTOCOL"] = "https:file" if os.environ.get("GRID_ALLOW_FILE") == "1" else "https"
     for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"):
         env.pop(var, None)
+    if os.environ.get("GRID_GIT_FORWARD_CONFIG") != "1":
+        for var in list(env):
+            if var in _GIT_SCRUB_EXACT or var.startswith(_GIT_SCRUB_PREFIX):
+                del env[var]
+        home = _empty_git_home()
+        env.update({"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+                    "GIT_CONFIG_NOSYSTEM": "1", "HOME": home, "XDG_CONFIG_HOME": home})
     return env
 
 
@@ -294,6 +330,19 @@ def load_grid_yaml(grid_dir):
     if "baseline" not in wired:
         raise _yaml_error("'wired' is missing required key 'baseline'")
     baseline = _require_str("wired.baseline", wired["baseline"])
+    # The baseline file is parsed and parts of it are echoed by `lock --check`, so it must be a
+    # file of THIS grid: relative, no `..`, and (after symlinks) still inside the grid dir.
+    # Otherwise grid.yaml could name any readable file on the machine (private WP-034).
+    real_grid = os.path.realpath(grid_dir)
+    try:
+        inside = (not os.path.isabs(baseline) and ".." not in baseline.split("/")
+                  and os.path.commonpath([real_grid, os.path.realpath(os.path.join(grid_dir, baseline))])
+                  == real_grid)
+    except ValueError:                                  # NUL byte, different drive
+        inside = False
+    if not inside:
+        raise _yaml_error("'wired.baseline' must be a relative path inside the grid dir "
+                          "(no absolute path, no '..', no symlink out)")
 
     return {"version": 1, "sources": sources, "wired": {"baseline": baseline}}
 
@@ -643,14 +692,16 @@ def git_content_hash(repo_dir, sha, path, blobs, label):
         meta, rel = record.split("\t", 1)
         mode, _kind, oid = meta.split(" ")
         if is_excluded(rel):
-            # Excluded from the hash, but an escaping link under an excluded name would
-            # still be copied into place, so it must still be refused (private WP-031).
+            # An excluded name is never hashed, so anything tracked under one would be
+            # installed unhashed and unreviewed: refuse it outright (private WP-034).
+            # An escaping link keeps its more specific message (private WP-031).
             if mode == "120000":
                 target = blobs.read(oid).decode("utf-8", "surrogateescape")
                 if symlink_escapes(rel, target):
                     raise GridError("grid: %s: symlink %s -> %s points outside the skill directory"
                                     % (label, rel, target))
-            continue
+            raise GridError("grid: %s: %s is tracked under an excluded name (.DS_Store, *.pyc, "
+                            "__pycache__) and cannot be locked" % (label, rel))
         if mode == "160000":
             raise GridError("grid: %s: nested submodule at %s cannot be pinned by a content hash"
                             % (label, rel))
@@ -699,16 +750,45 @@ def disk_content_hash(top, check_escape=False):
                 raise GridError("grid: %s: symlink %s -> %s points outside the skill directory"
                                 % (top, rel, target))
         if is_excluded(rel):
+            if check_escape:
+                # Staging: same refusal as the git side, so the bytes verified, audited and
+                # placed are exactly the bytes hashed. Placed dirs (no check_escape) keep
+                # tolerating litter that Finder or Python create later.
+                raise GridError("grid: %s: %s has an excluded name (.DS_Store, *.pyc, __pycache__) "
+                                "and cannot be placed" % (top, rel))
             return
         if is_link:
             items.append(("l", rel, hashlib.sha256(_b(target)).hexdigest()))
             return
-        digest = hashlib.sha256()
-        with open(full, "rb") as fh:
-            for chunk in iter(lambda: fh.read(1 << 20), b""):
-                digest.update(chunk)
-        executable = os.stat(full).st_mode & 0o111
-        items.append(("x" if executable else "-", rel, digest.hexdigest()))
+        # Only a regular file is ever opened: open() on a FIFO blocks for ever, which would
+        # hang doctor, install and uninstall (private WP-034). O_NONBLOCK + O_NOFOLLOW and an
+        # fstat on the OPEN descriptor close the gap between a stat and the open, too.
+        def other(mode):
+            # FIFO, socket, device: hashed as its own class `o` (so the dir reads as modified),
+            # and never opened; staging refuses it.
+            if check_escape:
+                raise GridError("grid: %s: %s is not a regular file or symlink and cannot be placed"
+                                % (top, rel))
+            items.append(("o", rel, hashlib.sha256(_b(stat.filemode(mode)[0])).hexdigest()))
+
+        mode = os.lstat(full).st_mode
+        if not stat.S_ISREG(mode):
+            other(mode)
+            return
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(full, flags)
+        try:
+            mode = os.fstat(fd).st_mode                 # re-check the descriptor we actually hold
+            if not stat.S_ISREG(mode):
+                other(mode)
+                return
+            digest = hashlib.sha256()
+            with os.fdopen(fd, "rb", closefd=False) as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    digest.update(chunk)
+        finally:
+            os.close(fd)
+        items.append(("x" if mode & 0o111 else "-", rel, digest.hexdigest()))
 
     for root, dirnames, filenames in os.walk(top, followlinks=False):
         reldir = os.path.relpath(root, top).replace(os.sep, "/")
@@ -1009,8 +1089,10 @@ def manifest_findings(grid_dir, cfg):
     adds, _denies = read_wired_entries([baseline])
     for repo in sorted(set(a.split("/")[0] for a in adds)):
         if repo not in cfg["sources"]:
-            findings.append(("source-missing", repo,
-                             "baseline names repos/%s but grid.yaml has no sources entry for it" % repo))
+            # Print only something that can be a source name: a baseline line is file text.
+            shown = repo if SOURCE_RE.fullmatch(repo) else "<invalid name>"
+            findings.append(("source-missing", shown,
+                             "baseline names repos/%s but grid.yaml has no sources entry for it" % shown))
     return findings
 
 
@@ -1382,6 +1464,22 @@ def audit_available(grid_dir):
                     "set GRID_AUDIT=warn to override")
 
 
+AUDIT_TIMEOUT_DEFAULT = 300      # seconds for one audit.py child; GRID_AUDIT_TIMEOUT overrides
+
+
+def audit_timeout():
+    """Seconds an audit.py child may run: GRID_AUDIT_TIMEOUT (a positive integer), else 300.
+
+    Without a limit a scanner stuck on a hostile tree would hang install, repair and the
+    unattended drift job for ever.
+    """
+    try:
+        value = int(os.environ.get("GRID_AUDIT_TIMEOUT", ""))
+    except ValueError:
+        return AUDIT_TIMEOUT_DEFAULT
+    return value if value > 0 else AUDIT_TIMEOUT_DEFAULT
+
+
 def check_source_policy(grid_dir, cfg, sources, vetted, announce_file=True):
     """Install/drift step 1: `audit.py --check-url` for each source that has a selected entry.
 
@@ -1400,14 +1498,22 @@ def check_source_policy(grid_dir, cfg, sources, vetted, announce_file=True):
             continue
         if not vetted:
             continue
-        proc = subprocess.run(
-            [sys.executable, "-B", os.path.join(grid_dir, "scripts", "audit.py"),
-             "--grid-dir", grid_dir, "--check-url", url],
-            env=dict(os.environ, LC_ALL="C"), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            encoding="utf-8", errors="replace")
-        if proc.returncode == 0:
+        limit = audit_timeout()
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-B", os.path.join(grid_dir, "scripts", "audit.py"),
+                 "--grid-dir", grid_dir, "--check-url", url],
+                env=dict(os.environ, LC_ALL="C"), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                encoding="utf-8", errors="replace", timeout=limit)
+        except subprocess.TimeoutExpired:
+            # A scanner that does not answer has not allowed the source.
+            proc = None
+        if proc is not None and proc.returncode == 0:
             continue
-        reason = (proc.stdout.strip() or proc.stderr.strip() or "exit %d" % proc.returncode)
+        if proc is None:
+            reason = "audit.py --check-url timed out after %ds" % limit
+        else:
+            reason = (proc.stdout.strip() or proc.stderr.strip() or "exit %d" % proc.returncode)
         msg = "grid: source '%s' is not allowed by policy.yaml: %s" % (source, reason)
         if warn:
             notice(msg + " (continuing: GRID_AUDIT=warn)")
@@ -1630,8 +1736,12 @@ def audit_staged(grid_dir, run, source, entries):
     cmd = [sys.executable, "-B", os.path.join(grid_dir, "scripts", "audit.py"), "--format", "json",
            "--root", run, "--grid-dir", grid_dir]
     cmd += [os.path.join(run, "repos", source, *e["path"].split("/")) for e in entries]
-    proc = subprocess.run(cmd, env=dict(os.environ, LC_ALL="C"), stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, encoding="utf-8", errors="replace")
+    try:
+        proc = subprocess.run(cmd, env=dict(os.environ, LC_ALL="C"), stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
+                              timeout=audit_timeout())
+    except subprocess.TimeoutExpired:
+        return dict((e["dest"], "audit could not vet it (audit.py timed out)") for e in entries)
     if proc.returncode == 0:
         return {}
     everything = dict((e["dest"], "audit could not vet it (audit.py exit %d)" % proc.returncode)
@@ -1667,7 +1777,13 @@ def place_staged(grid_dir, run, repo, entry, counter):
     staged = os.path.join(repo, *entry["path"].split("/"))
     copy = os.path.join(run, "place", *entry["dest"].split("/"))
     os.makedirs(os.path.dirname(copy), exist_ok=True)
-    shutil.copytree(staged, copy, symlinks=True)
+    # `ignore`: skip every excluded name (same predicate as the hash), so what is placed is
+    # exactly what was hashed even if litter appeared in the staged dir after verification.
+    def skip_excluded(src, names):
+        reldir = os.path.relpath(src, staged).replace(os.sep, "/")
+        prefix = "" if reldir == "." else reldir + "/"
+        return [n for n in names if is_excluded(prefix + n)]
+    shutil.copytree(staged, copy, symlinks=True, ignore=skip_excluded)
     try:
         got = disk_content_hash(copy, check_escape=True)
     except GridError as exc:
