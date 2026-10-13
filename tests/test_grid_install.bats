@@ -1440,7 +1440,8 @@ open(p, "w").write("\n".join(rows))
   printf 'up\n' > "$GREAL/machines/example.txt"
   run install
   [ "$status" -eq 0 ]
-  [ -f "$GREAL/baseline-submodules.txt" ] && [ ! -L "$GREAL/baseline-submodules.txt" ]
+  [ -f "$GREAL/baseline-submodules.txt" ]
+  [ ! -L "$GREAL/baseline-submodules.txt" ]
   [ "$(cat "$GREAL/baseline-submodules.txt")" = "up" ]
   [ "$(cat "$GREAL/machines/testhost.txt")" = "up" ]
 }
