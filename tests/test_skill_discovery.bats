@@ -18,6 +18,13 @@ teardown() {
   common_teardown
 }
 
+# lacks <ERE> — succeeds only if no line on stdin matches. A bare `! cmd` mid-test never fails
+# the test (bash exempts negated commands from errexit), so the negation lives in a function
+# whose exit status is its last command's (as in test_harness_formats.bats).
+lacks() {
+  ! grep -qE "$1"
+}
+
 # Write a SKILL.md at <repo>/<rel>.
 mk() { # $1 = repo dir, $2 = relative dir holding the SKILL.md
   mkdir -p "$1/$2"
@@ -60,12 +67,12 @@ check_fixture() { # $1 = repo dir
   printf '%s\n' "$out" | grep -qx 'skills/engineering/b/SKILL.md'
   printf '%s\n' "$out" | grep -qx 'docs/guides/a/SKILL.md'
   # dropped: translations
-  ! printf '%s\n' "$out" | grep -q 'docs/ja-JP' || false
-  ! printf '%s\n' "$out" | grep -q 'docs/tr/' || false
-  ! printf '%s\n' "$out" | grep -q 'i18n/zh-CN' || false
+  printf '%s\n' "$out" | lacks 'docs/ja-JP'
+  printf '%s\n' "$out" | lacks 'docs/tr/'
+  printf '%s\n' "$out" | lacks 'i18n/zh-CN'
   # dropped: harness copies
-  ! printf '%s\n' "$out" | grep -q '^\.kiro' || false
-  ! printf '%s\n' "$out" | grep -q '^\.agents'
+  printf '%s\n' "$out" | lacks '^\.kiro'
+  printf '%s\n' "$out" | lacks '^\.agents'
 }
 
 @test "plain-dir branch: keeps real skills, drops translations and dot-dirs" {
@@ -88,7 +95,7 @@ check_fixture() { # $1 = repo dir
   local d="$FIX_ROOT/ecc"
   populate "$d"
   check_fixture "$d"
-  ! rels "$d" | grep -q '^pi/'
+  rels "$d" | lacks '^pi/'
 }
 
 @test "listed prefix: pi/ dropped only when the repo dir is named ecc (git)" {
@@ -96,7 +103,7 @@ check_fixture() { # $1 = repo dir
   populate "$d"
   gitify "$d"
   check_fixture "$d"
-  ! rels "$d" | grep -q '^pi/'
+  rels "$d" | lacks '^pi/'
 }
 
 @test "a repo-root SKILL.md is still reported (callers skip it themselves)" {
@@ -117,8 +124,8 @@ check_fixture() { # $1 = repo dir
   # No literal count: it moves with every ECC bump. Must be non-empty though.
   [ "$want" -gt 0 ]
   [ "$n" -eq "$want" ]
-  ! printf '%s\n' "$out" | grep -q '/docs/' || false
-  ! printf '%s\n' "$out" | grep -q '/\.' || false
+  printf '%s\n' "$out" | lacks '/docs/'
+  printf '%s\n' "$out" | lacks '/\.'
   # Every path sits under repos/ecc/skills/.
   [ "$(printf '%s\n' "$out" | grep -vc "^$REPO_ROOT/repos/ecc/skills/")" -eq 0 ]
 }
@@ -194,6 +201,15 @@ populate_hostile() { # $1 = repo dir
     run grep "$shape" <<< "$outg"
     [ "$status" -ne 0 ]
   done
+}
+
+@test "git branch: a tracked SKILL.md deleted from disk is not reported" {
+  local d="$FIX_ROOT/other"
+  mk "$d" skills/kept
+  mk "$d" skills/gone
+  gitify "$d"
+  rm "$d/skills/gone/SKILL.md"       # still in the index, no longer on disk
+  [ "$(rels "$d")" = "skills/kept/SKILL.md" ]
 }
 
 @test "docs/qa and docs/go are skills; docs/ja-JP, zh-CN, pt-BR, zh-Hans and tr are translations" {

@@ -223,6 +223,11 @@ def read_frontmatter(path: str):
     end = next((i for i in range(1, len(lines)) if lines[i].rstrip(" \t") == "---"), len(lines))
     # The fences included: a separator that hides or fakes a fence moves the region itself.
     problems += line_break_problems(lines[:end + 1])
+    if end == len(lines):
+        # skill_frontmatter.py and catalog.sh read an unclosed fence as NO frontmatter; the rest
+        # of the file is still measured (a conservative count), but the disagreement is named.
+        problems.append("the frontmatter has no closing `---` fence (other readers see no "
+                        "frontmatter at all); add the closing fence")
     if any(ln.strip() == "---" for ln in lines[1:end]):
         problems.append("an indented `---` inside the frontmatter: some readers end the "
                         "block there; rewrite the text so no line is only `---`")

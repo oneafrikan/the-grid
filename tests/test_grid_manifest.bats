@@ -179,6 +179,20 @@ sys.exit(1 if missing else 0)' "$REPO_ROOT"
   [ "$status" -eq 0 ]
 }
 
+@test "grid.yaml: invalid UTF-8 exits 2 naming grid.yaml, no traceback" {
+  printf 'version: 1\nsources: {a: \xff\xfe}\n' > "$F/grid.yaml"
+  run load_yaml
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"grid.yaml"* ]]
+  [[ "$output" != *"Traceback"* ]]
+}
+
+@test "grid.yaml: a BOM before the first key loads" {
+  { printf '\xef\xbb\xbf'; printf '%b' "$VALID_YAML"; } > "$F/grid.yaml"
+  run load_yaml
+  [ "$status" -eq 0 ]
+}
+
 @test "manifest_findings prints a repo name only when it is a valid source name" {
   printf 'ok-repo\n\033[2Jevil\n' > "$F/b.txt"
   write_yaml "$VALID_YAML"
