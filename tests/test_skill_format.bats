@@ -85,3 +85,60 @@ fake_wire_root() {
     return 1
   fi
 }
+
+# --- Text left behind by the skills section split (WP-069) --------------------------------
+# Moving prose into sections/ made `../../X` point one level too shallow and left
+# "above"/"below" pointing at content that now lives in another file.
+
+# broken_skill_links <skills dir>: prints "<file> -> <target>" for every relative markdown
+# link in skills/*/SKILL.md and skills/*/sections/*.md that does not resolve from the
+# file's OWN directory. Links inside code fences and inline code are examples, not links.
+broken_skill_links() {
+  python3 -I - "$1" <<'PY'
+import glob, os, re, sys
+root = sys.argv[1]
+files = sorted(glob.glob(os.path.join(root, "*", "SKILL.md")) +
+               glob.glob(os.path.join(root, "*", "sections", "*.md")))
+for f in files:
+    fence = False
+    for line in open(f, encoding="utf-8"):
+        if line.lstrip().startswith(("```", "~~~")):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        line = re.sub(r"`[^`]*`", "", line)
+        for target in re.findall(r"\]\(([^)\s]+)\)", line):
+            if re.match(r"[a-z][a-z0-9+.-]*:", target) or target.startswith("#"):
+                continue
+            path = target.split("#", 1)[0]
+            if path and not os.path.exists(os.path.join(os.path.dirname(f), path)):
+                print("%s -> %s" % (os.path.relpath(f, root), target))
+PY
+}
+
+@test "every relative markdown link in skills/*/SKILL.md and sections/*.md resolves from the file's own directory" {
+  run broken_skill_links "$REPO_ROOT/skills"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || { echo "$output" >&3; false; }
+}
+
+@test "the link checker catches a link one directory too shallow" {
+  mkdir -p "$BATS_TEST_TMPDIR/sk/x/sections"
+  echo "[ok](../../good.md)" > "$BATS_TEST_TMPDIR/sk/good.md"
+  printf '[bad](../../SKILLS.md)\n```\n[fenced](../../nope.md)\n```\n' > "$BATS_TEST_TMPDIR/sk/x/sections/a.md"
+  echo "[up](../good.md)" > "$BATS_TEST_TMPDIR/sk/x/SKILL.md"
+  run broken_skill_links "$BATS_TEST_TMPDIR/sk"
+  [ "$output" = "x/sections/a.md -> ../../SKILLS.md" ]
+}
+
+@test "no above/below pointer to moved content in mine-learnings, grid-help, un-claudish" {
+  # `! grep` does not fail a bats test (errexit ignores negated commands); test the status.
+  if grep -n 'LEARNINGS.md format" below' "$REPO_ROOT/skills/mine-learnings/SKILL.md"; then false; fi
+  if grep -n 'summary below' "$REPO_ROOT/skills/grid-help/SKILL.md"; then false; fi
+  if grep -n 'kill-list above' "$REPO_ROOT/skills/un-claudish/SKILL.md"; then false; fi
+}
+
+@test "skill-scout names the wiring script by its real path (bash scripts/wire.sh)" {
+  if grep -n 'bash wire\.sh' "$REPO_ROOT/skills/skill-scout/SKILL.md"; then false; fi
+}
