@@ -1011,6 +1011,18 @@ PYEOF
   done
 }
 
+# The same rule from the writing side: a grid path the tightened OWNED_RE would not recognise
+# must not be written, or every run would add another unowned copy.
+@test "H-02: a grid path with a control character is refused for --user, nothing written" {
+  local bad="$MOCK_HOOK_ROOT/gr"$'\t'"id"
+  mkdir -p "$bad/hooks"; : > "$bad/hooks/run.sh"; cp "$FGRID/hooks/catalogue.json" "$bad/hooks/"
+  export GRID_DIR="$bad"
+  emit_user
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot be written safely"* ]] || false
+  [ ! -e "$(user_file)" ]
+}
+
 @test "H-02: an ordinary generated command is still owned (off removes it)" {
   mkdir -p "$PROJ/.claude"
   set_profile minimal
