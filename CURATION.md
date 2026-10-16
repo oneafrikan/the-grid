@@ -19,6 +19,12 @@ not a guarantee. Popularity (stars) is deliberately not given as a reason. Count
 after the allowlist; `high` must be 0 for the gate to pass. An allowlist `contains` must equal
 the whole (stripped) line, so a reviewed line cannot gain an appended payload; an entry may set
 `contains_substring: true` to keep a substring match (only for a line too long to quote).
+A `hook-declared` entry for a line of a SKILL.md / agent .md frontmatter `hooks:` block must also carry
+`hooks_sha256`, the digest the scanner reports as `sha256` for that block (`audit.sh --format json`): it pins
+the line to exactly that block, so the same command moved under another event or matcher, or repeated as a
+further entry, is flagged again, and an upstream bump that touches the block needs a re-review and a new
+digest. A frontmatter over 128 KiB is not scanned line by line; it is one finding that only a contains-less
+`sha256` entry (the whole file's digest) allows.
 A NUL-bearing file in an executable class (script, hook, config, SKILL.md, agent .md) is always an
 `unscannable-file` finding and is also scanned with the NULs removed, even when it starts with an image,
 archive or font magic number (decision D48, fail closed: a magic number is trivially forged in front of
@@ -430,30 +436,37 @@ Every entry is a line the scanner flags that was read in context and judged to b
   reason: the skill's frontmatter pre-approves Bash among its tools (list form); the exact tool list is pinned by this whole-line entry, so a bump that changes it is flagged again; accepted with the gstack source trust
 - rule: hook-declared
   path: repos/gstack/autoplan/SKILL.md
+  hooks_sha256: 641b202e763521af3aa102d81eb1614290f6cb95fa5606a2a7f719ca58aeed7b
   contains: 'command: "bash -c ''S=\"$HOME/.claude/skills/gstack/autoplan/bin/phase-publication-hook\"\nif [ -f \"$S\" ]; then exec bash \"$S\"; fi\nprintf ''\\''''%s\\n''\\'''' ''\\''''{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Autoplan publication guard is unavailable. Restore the installed autoplan/bin/phase-publication-hook before continuing this skill.\"}}''\\''''''"'
   reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
 - rule: hook-declared
   path: repos/gstack/careful/SKILL.md
+  hooks_sha256: 3bd8d27b12c7f703de8d43b11685da894dec2231a2df5129780e379e228210ae
   contains: 'command: ''bash -c "exec bash \"$HOME/.claude/skills/gstack/careful/bin/check-careful.sh\""'''
   reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
 - rule: hook-declared
   path: repos/gstack/freeze/SKILL.md
+  hooks_sha256: fa0b642f69986748bf49b3de7893902392522c4e18f9b418901bb28c776ed23d
   contains: 'command: ''bash -c "exec bash \"$HOME/.claude/skills/gstack/freeze/bin/check-freeze.sh\""'''
   reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
 - rule: hook-declared
   path: repos/gstack/guard/SKILL.md
+  hooks_sha256: 2090855b8a8a7d3da5327de75873575b31805e5a1acc0faf1447ef229dd0ec10
   contains: 'command: ''bash -c "exec bash \"$HOME/.claude/skills/gstack/careful/bin/check-careful.sh\""'''
   reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
 - rule: hook-declared
   path: repos/gstack/guard/SKILL.md
+  hooks_sha256: 2090855b8a8a7d3da5327de75873575b31805e5a1acc0faf1447ef229dd0ec10
   contains: 'command: ''bash -c "exec bash \"$HOME/.claude/skills/gstack/freeze/bin/check-freeze.sh\""'''
   reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
 - rule: hook-declared
   path: repos/gstack/investigate/SKILL.md
+  hooks_sha256: e53c0e913fc744f01ef8fa98fb9be20bc59a7c0bd82347baf86aa8be598ef62c
   contains: 'command: ''bash -c "test -x \"$HOME/.claude/skills/gstack/freeze/bin/check-freeze.sh\" && exec bash \"$HOME/.claude/skills/gstack/freeze/bin/check-freeze.sh\"; exit 0"'''
   reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
 - rule: hook-declared
   path: repos/gstack/plan-ceo-review/SKILL.md
+  hooks_sha256: 7bacc39dee1f24a96fc02a88d001d1d5d78aa84c49de072c983164b49906de9d
   contains: 'command: "bash -c ''S=\"$HOME/.claude/skills/gstack/plan-ceo-review/bin/mode-handoff-hook\"\nif [ -f \"$S\" ]; then exec bash \"$S\"; fi\nexit 0''"'
   reason: frontmatter hook command line of a gstack skill; the exact command is pinned by this whole-line entry, so a bump that changes it is flagged again; reviewed, accepted with the gstack source trust
 - rule: runner-unpinned
