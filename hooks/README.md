@@ -122,7 +122,11 @@ the secret scan stops at its line cap, its 1 MB matcher-input cap or a 3 s time 
 (`oversize-scan`), and a candidate line over 262144 characters (bytes in the C locale)
 blocks as `oversize-line`. A line over 6,000 characters is matched in overlapping pieces; a
 run of letters, digits and `_` that holds a key word (`secret`, `token`, ...) and is too
-long to keep whole in a piece (over 4096 characters past a cut) is also `oversize-line`, and a line with more than 200
+long to keep whole in a piece (over 4096 characters past a cut) is also `oversize-line`. A
+key word followed by a long run of filler (identifier characters or backslashes) and then
+`=` and a value can be longer than the overlap of two pieces: when a piece ends inside such
+an assignment, the next piece starts at the key word instead of 4096 characters on, and an
+assignment that fills a whole piece is `oversize-line`. A line with more than 200
 `key =` candidates (`secret`, `token`, `password`, ...) is `key-dense-line`, because a scan
 that cannot finish must block, not pass. These
 are bounds, not a proof: an unusual input can still cost more than measured. Both catalogue entries carry
@@ -299,9 +303,13 @@ proven live (operator check B1), so the rules are not the only barrier:
    password that starts with `$`, `<` or `{` or holds a colon, and an empty user name,
    `scheme://:secret@host`) and `pass`/`pwd`/`password`
    assigned a value of 6 or more characters. An unquoted assigned value (`api_key =
-   abc...`) counts at 16+ characters even when it is all letters or holds parentheses;
-   as in the commit guard, a value whose first character is `$`, `<` or `{` is a
-   template and is skipped, quoted or not.
+   abc...`) counts at 16+ characters even when it is all letters or holds parentheses.
+   Unlike the commit guard (which skips a value whose first character is `$`, `<` or `{`),
+   the strict scan does not skip it (a model can put one in front of any value, and a
+   password may start with one), reads a quoted value that begins with blanks (`api_key = " abc..."`), counts a
+   run of 16 or more backslashes after the `=` as a value, and reads the multibyte blanks
+   that only some locales know (U+3000, U+2003, U+00A0 and the like) as ordinary blanks.
+   A templated value such as `token=${A_LONG_VARIABLE_NAME}` is therefore quarantined too.
    A long hex digest in a handoff is therefore quarantined too. The same
    scan runs first on the timeout, child-failure and `unexpected-file` paths: a NEW file
    with a hit moves to the quarantine directory (the reason stays `timeout` and so on,
@@ -515,7 +523,8 @@ entropy scoring, no token split over several lines, and (in this commit guard) a
 assigned value that is made only of letters is not flagged (the auto-handoff worker's
 strict scan flags it). An assignment value counts when it is quoted and
 16+ characters, or unquoted, 16+ characters, with a digit and no parentheses; a value
-that starts with `$`, `<` or `{` is a template and is skipped. A match is passed over
+that starts with `$`, `<` or `{` is a template and is skipped (the strict scan does not skip it, see
+the auto-handoff section). A match is passed over
 when the matched token itself holds a placeholder word such as `example` or `changeme`;
 a placeholder word elsewhere on the line does not exempt a real token. What it reads for
 a command:
