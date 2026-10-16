@@ -316,8 +316,8 @@ ci_walk() {
   # all three globs: visible names, dot names, and names starting with two dots
   for cand in "${cur%/}"/* "${cur%/}"/.[!.]* "${cur%/}"/..?*; do
     [ "$CI_N" -lt 2 ] || return 0
-    [ -d "$cand" ] || continue
-    if ci_eq "${cand##*/}" "$comp"; then ci_walk "$cand" "$rest"; fi
+    # name first (no fork, no stat), then the directory test
+    if ci_eq "${cand##*/}" "$comp" && [ -d "$cand" ]; then ci_walk "$cand" "$rest"; fi
   done
   return 0
 }
@@ -619,6 +619,8 @@ ssh_includes() {
       case "$tok" in '#'*) break ;; esac
       tok="${tok#\"}"; tok="${tok%\"}"
       [ -n "$tok" ] || continue
+      # the home directory spelled as a variable or as the %d token is the common case
+      tok="${tok//\$\{HOME\}/$HOME}"; tok="${tok//\$HOME/$HOME}"; tok="${tok//%d/$HOME}"
       case "$tok" in \~|\~/*) pat="$HOME${tok#\~}" ;; /*) pat="$tok" ;; *) pat="$SSH_DIR/$tok" ;; esac
       case "$pat" in
         *[\*\?\[\$%]*)
