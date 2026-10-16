@@ -290,20 +290,67 @@ FALLBACK="$FALLBACK_ROOT/$FALLBACK_NAME"
 mkdir -p "$FALLBACK" 2>/dev/null
 FALLBACK_REAL="$(rp "$FALLBACK" 2>/dev/null)" || FALLBACK_REAL="$FALLBACK"
 
+# ci_eq <a> <b>: equal ignoring case. nocasematch rather than tr in a subshell: this runs
+# once per directory entry. LC_ALL=C (top of file) keeps it to ASCII, like the skill's casings.
+ci_eq() {
+  local r=1
+  shopt -s nocasematch
+  [[ "$1" == "$2" ]] && r=0
+  shopt -u nocasematch
+  return "$r"
+}
+# ci_walk <dir> <rest>: count the existing directories that spell <rest> (components
+# separated by /) below <dir>, ignoring case at EVERY component. Sets CI_N (stops counting
+# at 2: more than one is already ambiguous) and CI_HIT (the last one found). `.` and empty
+# components are dropped, `..` is kept literally (accept_target refuses a row holding one).
+CI_N=0; CI_HIT=""
+ci_walk() {
+  local cur="$1" rest="$2" comp cand
+  if [ -z "$rest" ]; then CI_N=$((CI_N + 1)); CI_HIT="$cur"; return 0; fi
+  comp="${rest%%/*}"
+  case "$rest" in */*) rest="${rest#*/}" ;; *) rest="" ;; esac
+  case "$comp" in
+    ''|.) ci_walk "$cur" "$rest"; return 0 ;;
+    ..) ci_walk "${cur%/}/.." "$rest"; return 0 ;;
+  esac
+  # all three globs: visible names, dot names, and names starting with two dots
+  for cand in "${cur%/}"/* "${cur%/}"/.[!.]* "${cur%/}"/..?*; do
+    [ "$CI_N" -lt 2 ] || return 0
+    # name first (no fork, no stat), then the directory test
+    if ci_eq "${cand##*/}" "$comp" && [ -d "$cand" ]; then ci_walk "$cand" "$rest"; fi
+  done
+  return 0
+}
+# ci_dir <base> <rest>: sets TARGET to the one existing directory <rest> names below <base>
+# (casing ignored per component), or "" when there is none. Two or more (`Logs` and `LOGS`)
+# is TARGET_WHY=ambiguous-case: the skill's "any casing" rule has no single answer, and
+# picking the first sorted one could pick a tracked symlink into another work tree (H-02).
+ci_dir() {
+  CI_N=0; CI_HIT=""
+  ci_walk "$1" "$2"
+  TARGET=""
+  case "$CI_N" in
+    0) ;;
+    1) TARGET="$CI_HIT" ;;
+    *) TARGET_WHY="ambiguous-case" ;;
+  esac
+}
+
 # resolve_target: the directory the handoff skill will choose, with the skill's own
 # first-match rule (skills/handoff/SKILL.md "Document locations reference"):
 #   1. the first row of ~/.the-grid-private/handoff-locations.md whose first column
 #      matches the cwd name or path glob; its location (relative = against cwd, ~ = home,
-#      directory matched case-insensitively). A matched row whose directory is missing
-#      ends the search: no fallthrough to 2.
+#      directory matched case-insensitively at every component). A matched row whose
+#      directory is missing ends the search: no fallthrough to 2.
 #   2. otherwise the existing direct child of cwd named logs, in any casing
 # Sets TARGET to an absolute, EXISTING directory, or "" (no rule for it is then
 # granted and the child can write only to the fallback dir).
+TARGET_WHY=""
 resolve_target() {
   TARGET=""; TARGET_ROW=0; ROW_LOC=""; ROW_ABS=0
   # The table lives with the private data: GRID_PRIVATE_DIR first, then the default home
   # location (the skill documents ~/.the-grid-private/ and reads only that one).
-  local table="$PRIVATE/handoff-locations.md" base line c1 c2 loc e matched=0
+  local table="$PRIVATE/handoff-locations.md" base line c1 c2 loc matched=0
   [ -r "$table" ] || table="$HOME/.the-grid-private/handoff-locations.md"
   base="$(basename "$CWD")"
   if [ -r "$table" ]; then
@@ -325,32 +372,27 @@ resolve_target() {
         case "$loc" in \~|\~/*) loc="$HOME${loc#\~}" ;; esac
         # Was the row absolute AS WRITTEN? (decided before $CWD is prepended: a relative row
         # must resolve inside the cwd or the private repo, see accept_target.)
+        # cbase/crel: the part of the row that is matched exactly (the cwd, ~, /) and the
+        # part below it that is matched ignoring case.
+        local cbase="$CWD" crel="$c2"
+        case "$c2" in
+          \~|\~/*) cbase="$HOME"; crel="${c2#\~}" ;;
+          /*) cbase=/; crel="$c2" ;;
+        esac
         case "$loc" in /*) ROW_ABS=1 ;; *) loc="$CWD/$loc" ;; esac
         loc="${loc%/}"
         ROW_LOC="$loc"
-        # The skill matches the directory case-insensitively (`LOGS` finds `Logs/`), so do
-        # the same: when the exact path is not a directory, look for a sibling whose last
-        # component differs only in case. tr, not ${var,,}: bash 3.2 (macOS) has no `,,`.
-        if [ ! -d "$loc" ]; then
-          local parent="${loc%/*}" leaf want cand
-          [ -n "$parent" ] || parent=/
-          want="$(printf '%s' "${loc##*/}" | tr '[:upper:]' '[:lower:]')"
-          for cand in "$parent"/* "$parent"/.[!.]*; do
-            [ -d "$cand" ] || continue
-            leaf="$(printf '%s' "${cand##*/}" | tr '[:upper:]' '[:lower:]')"
-            [ "$leaf" = "$want" ] && { loc="$cand"; break; }
-          done
-        fi
+        # The skill matches the directory case-insensitively (`LOGS` finds `Logs/`), at
+        # every component, so ci_dir does the same; two matches grant nothing.
+        ci_dir "$cbase" "$crel"
         # A matched row whose directory is still missing stops the search: no fallthrough
         # to the default, and no rule is granted (the child writes to the fallback dir).
-        [ -d "$loc" ] && { TARGET="$loc"; TARGET_ROW=1; }
+        [ -n "$TARGET" ] && TARGET_ROW=1
         return 0
       fi
     done < "$table"
   fi
-  for e in "$CWD"/[Ll][Oo][Gg][Ss]; do
-    if [ -d "$e" ]; then TARGET="$e"; return 0; fi
-  done
+  ci_dir "$CWD" LOGS
   return 0
 }
 resolve_target
@@ -368,7 +410,7 @@ resolve_target
 # TARGET stays empty, only the fallback dir is granted, and the spawn log line says why
 # (target-refused=<why>).
 PRIVATE_REAL="$(rp "$PRIVATE" 2>/dev/null)" || PRIVATE_REAL="$PRIVATE"
-TARGET_REAL=""; TARGET_WHY=""
+TARGET_REAL=""   # (TARGET_WHY is initialised above resolve_target: ci_dir may already have refused)
 accept_target() {
   [ -n "$TARGET" ] || return 0
   local real s top
@@ -515,6 +557,94 @@ for d in "${GITDIRS[@]}"; do
   i=$((i + 1))
 done
 
+# Configuration that the user's own config pulls in is configuration too: a git
+# `include.path` / `includeIf.*.path` or an ssh `Include` file can carry core.sshCommand or a
+# ProxyCommand just as well as the file that names it (H-02). They are found ONCE, before the
+# child runs, and the same list is watched on both sides of the run (a config the child edits
+# to add an include is itself a watched file). Bounds, because these files are user data:
+# only paths under HOME, never HOME or ~/.ssh themselves (known_hosts changes under any
+# concurrent ssh), at most INC_MAX entries, five levels of nesting, a directory only when it
+# holds at most 500 entries, and nothing whose path holds a newline (the snapshot is line
+# based). A link is watched as itself (state_lines never follows) and so is where it points.
+INC_WATCH=(); INC_MAX=64
+SSH_DIR="$HOME/.ssh"; SSH_DIR_REAL="$HOME_REAL/.ssh"
+# inc_add <path>: remember it. Returns 1 when it is not watchable or already known, which is
+# also what ends an include cycle.
+inc_add() {
+  local p="$1" x l t
+  case "$p" in *$'\n'*|*/../*|*/..) return 1 ;; esac
+  case "$p" in "$HOME"/*|"$HOME_REAL"/*) ;; *) return 1 ;; esac
+  # (SSH_DIR rather than the literal path: the audit's credential-read rule flags `$HOME/.ssh/`
+  # followed by anything but config or known_hosts, and this only COMPARES against the name)
+  case "$p" in "$SSH_DIR"|"$SSH_DIR/"|"$SSH_DIR_REAL"|"$SSH_DIR_REAL/") return 1 ;; esac
+  for x in "${INC_WATCH[@]}"; do [ "$x" = "$p" ] && return 1; done
+  [ "${#INC_WATCH[@]}" -lt "$INC_MAX" ] || return 1
+  if [ -d "$p" ] && [ ! -L "$p" ] \
+     && [ "$(find -P "$p" 2>/dev/null | head -n 501 | wc -l | tr -d ' ')" -gt 500 ]; then return 1; fi
+  INC_WATCH+=("$p")
+  if [ -L "$p" ]; then
+    l="$(readlink "$p")" && {
+      case "$l" in /*) t="$l" ;; *) t="$(dirname "$p")/$l" ;; esac
+      inc_add "$t" || true
+    }
+  fi
+  return 0
+}
+# git_includes <config file> <depth>: the files <config file> includes, then theirs.
+# `git config --file` only reads; -z keeps a value with odd characters in one record.
+git_includes() {
+  local f="$1" depth="$2" rec val
+  [ "$depth" -lt 5 ] && [ -f "$f" ] || return 0
+  while IFS= read -r -d '' rec; do
+    val="${rec#*$'\n'}"
+    [ -n "$val" ] || continue
+    # relative = against the including file's directory (git's own rule); ~ is the home dir
+    case "$val" in \~|\~/*) val="$HOME${val#\~}" ;; /*) ;; *) val="$(dirname "$f")/$val" ;; esac
+    if inc_add "$val"; then git_includes "$val" $((depth + 1)); fi
+  done < <(git config --file "$f" -z --get-regexp '^include(if\..*)?\.path$' 2>/dev/null)
+  return 0
+}
+# ssh_includes <ssh config file> <depth>: every `Include` pattern in it (keyword in any case,
+# `Include a b`, `Include=a`, double quotes round a word, relative = against ~/.ssh). A glob,
+# or a pattern with a token (%h, $VAR), watches the files it matches today and the directory
+# in front of its first special character, so a NEW file there is seen too.
+ssh_includes() {
+  local f="$1" depth="$2" line tok pat pre dir m toks matches oldifs
+  local re='^[[:space:]]*[Ii][Nn][Cc][Ll][Uu][Dd][Ee][[:space:]=]+(.*)$'
+  [ "$depth" -lt 5 ] && [ -f "$f" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ $re ]] || continue
+    read -r -a toks <<< "${BASH_REMATCH[1]}"
+    for tok in "${toks[@]}"; do
+      case "$tok" in '#'*) break ;; esac
+      tok="${tok#\"}"; tok="${tok%\"}"
+      [ -n "$tok" ] || continue
+      # the home directory spelled as a variable or as the %d token is the common case
+      tok="${tok//\$\{HOME\}/$HOME}"; tok="${tok//\$HOME/$HOME}"; tok="${tok//%d/$HOME}"
+      case "$tok" in \~|\~/*) pat="$HOME${tok#\~}" ;; /*) pat="$tok" ;; *) pat="$SSH_DIR/$tok" ;; esac
+      case "$pat" in
+        *[\*\?\[\$%]*)
+          pre="${pat%%[*?[\$%]*}"; dir="${pre%/*}"
+          # Unquoted $pat is the glob expansion on purpose; IFS=newline keeps a space in a path
+          # whole. IFS is restored before anything is called: the recursion splits words too.
+          oldifs="$IFS"; IFS=$'\n'
+          # shellcheck disable=SC2206
+          matches=( $pat )
+          IFS="$oldifs"
+          for m in "${matches[@]}"; do
+            [ -f "$m" ] && inc_add "$m" && ssh_includes "$m" $((depth + 1))
+          done
+          [ -n "$dir" ] && inc_add "$dir" ;;
+        *) if inc_add "$pat"; then ssh_includes "$pat" $((depth + 1)); fi ;;
+      esac
+    done
+  done < "$f"
+  return 0
+}
+git_includes "$HOME/.gitconfig" 0
+git_includes "$HOME/.config/git/config" 0
+ssh_includes "$HOME/.ssh/config" 0
+
 # Files the child must never touch, outside every repo: shell startup files, ssh login
 # config, the global git config, Claude's own settings and the user systemd units (each of
 # these runs code or grants access later). Same state snapshot, same compare.
@@ -529,6 +659,8 @@ home_watch() {
   printf '%s\n' "$c"/settings*.json "$c/.credentials.json" "$c/CLAUDE.md" "$c/hooks" "$c/commands" "$HOME/.config/systemd/user"
   # The table that decides future write grants.
   printf '%s\n' "$PRIVATE/handoff-locations.md" "$HOME/.the-grid-private/handoff-locations.md"
+  # What the user's git and ssh config include (found once, above).
+  if [ "${#INC_WATCH[@]}" -gt 0 ]; then printf '%s\n' "${INC_WATCH[@]}"; fi
 }
 # Big directories: names, types, link targets and sizes only (no content hashing, no
 # following links). ~/.local/bin holds the claude launcher link into a ~1 GB versions
@@ -768,6 +900,7 @@ fi
 #     symlink named like a handoff file is reported whatever its age, because a
 #     pre-planted one would make the child write through it. No -maxdepth: a depth cap
 #     lets a deep write go unseen.
+fs_snapshot > "$SNAP_DIR/fs.after"
 NEW=()      # real paths, de-duplicated (the same file can be reached by two roots)
 NEW_DISP=()
 SYMS=()     # changed or new symlinks, and handoff-named ones of any age
@@ -780,12 +913,26 @@ while IFS=$'\t' read -r f ty _mt _sz; do
   [ "$dup" = 1 ] && continue
   if [ "$ty" = L ]; then SYMS+=("$r")
   else NEW+=("$r"); NEW_DISP+=("$(disp "$f")"); fi
-done < <({ fs_snapshot > "$SNAP_DIR/fs.after"; comm -13 "$SNAP_DIR/fs.before" "$SNAP_DIR/fs.after"
+done < <({ comm -13 "$SNAP_DIR/fs.before" "$SNAP_DIR/fs.after"
            awk -F'\t' '$2 == "L" && ($1 ~ /-handoff\.md$/ || $1 ~ /-context\.md$/)' "$SNAP_DIR/fs.after"; })
 if [ "${#SYMS[@]}" -gt 0 ]; then
   DISP=(); for p in "${SYMS[@]}"; do DISP+=("$(disp "$p")"); done
   scan_new_and_quarantine
   finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")${QNOTE:+ $QNOTE}"
+fi
+
+# 7b'. a path that was in the before-snapshot and is gone from the after-snapshot: the child
+#     only ever creates files, so a deletion is the same boundary failure as a stray write
+#     (it used to end `done`). Matched by path, not by line: an edited file is not "gone".
+#     Nothing is restored; the operator sees which paths went. (FILENAME, not NR == FNR: the
+#     after-snapshot is empty when the child removed the last file.)
+DELETED=()
+while IFS=$'\t' read -r f _ty _mt _sz; do
+  [ -n "$f" ] && DELETED+=("$(disp "$f")")
+done < <(awk -F'\t' 'FILENAME == ARGV[1] { seen[$1] = 1; next } !($1 in seen)' "$SNAP_DIR/fs.after" "$SNAP_DIR/fs.before")
+if [ "${#DELETED[@]}" -gt 0 ]; then
+  scan_new_and_quarantine
+  finish_error unexpected-file "deleted=$(join_csv "${DELETED[@]}")${QNOTE:+ $QNOTE}"
 fi
 
 HANDOFFS=()   # indexes into NEW
