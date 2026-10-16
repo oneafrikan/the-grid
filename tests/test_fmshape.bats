@@ -440,7 +440,7 @@ PY
   [ "$status" -eq 1 ]
   # one note for the frontmatter, and the body line is still found at its real number (1 + 1 + 30000 + fence + 1)
   [ "$(q "sorted((f['rule'], f['line']) for f in F if f['severity'] == 'high')")" = "[('curl-pipe-shell', 30004), ('frontmatter-complex', 1)]" ]
-  # a line pin cannot allow it (the lines inside were not scanned, so a line proves nothing)
+  # a line pin cannot allow it (the finding is about the whole file and has no line text to match)
   cat > "$T/CURATION.md" <<'EOF'
 # Curation
 

@@ -775,8 +775,6 @@ class AllowEntry:
         # that very block; an entry with a digest never allows anything outside a block.
         if f.get("_hooks_sha") != self.hooks_sha256:
             return False
-        if f.get("_file_pin") and self.contains is not None:
-            return False                        # a file-level finding is allowed by file hash, never by a line
         if self.contains is not None:
             if self.contains_substring:
                 return (self.contains in f["_line"]
@@ -873,7 +871,7 @@ class Scan:
         return "upstream"
 
     def _add(self, rule, severity, path, line, cls, tier, message, excerpt="",
-             downgraded=None, sha256=None, raw_line="", hooks_sha=None, file_pin=False):
+             downgraded=None, sha256=None, raw_line="", hooks_sha=None):
         self.findings.append({
             "rule": rule, "severity": severity, "path": path, "line": line,
             "class": cls, "tier": tier, "message": message,
@@ -883,8 +881,6 @@ class Scan:
             "_line": raw_line, "_line_escaped": escape_text(raw_line),
             # sha256 of the frontmatter hooks block this line sits in (see hooks_block_sha256), else None
             "_hooks_sha": hooks_sha,
-            # True: a whole-file finding that only a sha256-pinned (contains-less) entry may allow
-            "_file_pin": file_pin,
         })
 
     # -- traversal -----------------------------------------------------------
@@ -1058,7 +1054,7 @@ class Scan:
             self.findings[before:] = [f for f in self.findings[before:]
                                       if (f["rule"], f["severity"], f["_line"]) not in known]
 
-    def _hook_block_findings(self, lines, display, tier, file_sha, fm, shape=None):
+    def _hook_block_findings(self, lines, display, tier, file_sha, fm, shape=None, since=0):
         """Default-deny over the frontmatter's hooks blocks (see _HookStructure): every non-blank
         line of a block that is not pure structure is a `hook-declared` finding, reported at its
         own line so an allowlist entry pins that exact line. Two fail-closed extras: a frontmatter
@@ -1089,10 +1085,10 @@ class Scan:
             # moved under another event or matcher, or repeated as a further entry, is another block.
             last = min(last, len(lines) - 1)
             block = hooks_block_sha256(lines[first:last + 1])
-            # a hook-declared finding the line rules already made inside the block is bound too
-            for f in self.findings:
-                if (f["path"] == display and f["rule"] == "hook-declared"
-                        and first < f["line"] <= last + 1):
+            # a hook-declared finding the line rules made inside the block (in THIS view of the
+            # file: `since` is where its findings start) is bound to it too
+            for f in self.findings[since:]:
+                if f["rule"] == "hook-declared" and first < f["line"] <= last + 1:
                     f["_hooks_sha"] = f["sha256"] = block
             for idx in range(first, last + 1):
                 self._tick(display)
@@ -1132,6 +1128,7 @@ class Scan:
     def _scan_text(self, text, fclass, name, rel_target, rel_root, display, tier, file_sha):
         """Run the line rules over one text view of a file."""
         loaded_md = _is_skill_md(name) or _is_agent_md(rel_target, rel_root, name)
+        first_finding = len(self.findings)        # this view's findings start here
         # The shape whitelist reads the text as it is on disk (a bare CR is itself a violation),
         # so it runs before the line-ending normalisation below.
         shape = fmshape.check(text) if loaded_md else None
@@ -1156,7 +1153,7 @@ class Scan:
             self._add("frontmatter-complex", frule_sev, display, 1, "hook", tier,
                       BUILTIN_MESSAGES["frontmatter-complex"] + ": frontmatter larger than %d bytes; "
                       "not scanned (allow it by file sha256 only)" % fmshape.MAX_BYTES,
-                      sha256=file_sha, file_pin=True)
+                      sha256=file_sha)
             # no YAML read, no tool-list fold, and the blanked run is not even indexed
             fm, tool_lists = None, {}
             logical = _logical_lines(lines[:1], prefixes)
@@ -1180,7 +1177,7 @@ class Scan:
                 self._scan_line(lines[p].rstrip("\r"), p + 1, classes[p], display, tier,
                                 file_sha, ext, only_physical=True)
         if loaded_md:
-            self._hook_block_findings(lines, display, tier, file_sha, fm, shape)
+            self._hook_block_findings(lines, display, tier, file_sha, fm, shape, first_finding)
 
     def _line_classes(self, lines, fclass, name, rel_target, rel_root, fm=None):
         """Class of each line: the file's class, except (1) frontmatter `hooks:`
