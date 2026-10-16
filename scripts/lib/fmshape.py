@@ -32,7 +32,7 @@ The grammar (`key` is [A-Za-z][A-Za-z0-9_.-]*, top-level keys at column 0):
      hooks judging in audit.py (this module only keeps the block line-oriented).
 Not accepted (each is a finding): flow collections (`[` `{`) other than `[]`, anchors, aliases,
 tags, `?` keys, directives, comments, multi-line quoted or plain scalars, other escapes, tabs,
-`<<`, duplicate keys, control / invisible characters, an unterminated frontmatter, and any
+a bare CR as a line break, `<<`, duplicate keys, control / invisible characters, an unterminated frontmatter, and any
 `---` inside the frontmatter beyond the two fences (Claude's reader ends the text at the first
 one, mid-line or not).
 
@@ -67,6 +67,11 @@ class Shape:
         self.violations = []
         self.lines = []
         self.word_lines = []
+        # True when the frontmatter is over MAX_BYTES: it is then neither read nor line-scanned (the
+        # caller reports it as ONE finding that only a file-hash pin allows); `close` is the file
+        # line index of its closing fence (None: unterminated, the "frontmatter" runs to the end).
+        self.oversize = False
+        self.close = None
 
     def words(self, idx, text):
         """Record line `idx` when `text` (the part of it that could be a key) holds the whole
@@ -183,18 +188,22 @@ def check(text):
     """Shape of the frontmatter of the file `text`, or None when the file has none."""
     after_bom = text[1:] if text[:1] == "﻿" else text
     cut = _claude_cut(text)
-    raw_lines = after_bom.split("\n")
+    # Lines are numbered the way the rest of the scanner numbers them (audit.py normalises CRLF and a
+    # bare CR to LF before it splits), so a violation's index is the real line whatever the file's
+    # line breaks are; `bare` holds the indexes of the lines that END in a bare CR (a violation).
+    raw_lines, bare = _split_lines(after_bom)
     # Claude has a frontmatter, or the scanner's own reader (audit.py / fmyaml) would see one.
-    scanner_fm = text.lstrip("﻿").split("\n", 1)[0].strip() == "---"
+    scanner_fm = text.lstrip("﻿").split("\n", 1)[0].split("\r", 1)[0].strip() == "---"
     if cut is None and not scanner_fm:
         return None
     sh = Shape()
-    if cut is not None and raw_lines[0].rstrip("\r") != "---":
+    if cut is not None and raw_lines[0] != "---":
         sh.bad(0, "opening fence is not a bare `---` line")
     # The lines after the opening fence up to the first column-0 fence (the scanner's cut).
+    # (raw_lines holds no CR any more: _split_lines turned every one into a line break.)
     close = None
     for i in range(1, len(raw_lines)):
-        t = raw_lines[i].rstrip("\r")
+        t = raw_lines[i]
         if t.startswith("---") and t[3:].strip(" \t") == "":
             close = i
             break
@@ -206,19 +215,51 @@ def check(text):
         eol = after_bom.find("\n", end)
         tail = after_bom[end + 3:eol if eol >= 0 else len(after_bom)]
         if not ((end == 0 or after_bom[end - 1] == "\n") and tail.strip(" \t\r") == ""):
-            sh.bad(after_bom.count("\n", 0, end), "`---` inside the frontmatter ends Claude's reader early")
+            sh.bad(_breaks_before(after_bom, end), "`---` inside the frontmatter ends Claude's reader early")
     if close is None:
         sh.bad(len(raw_lines) - 1, "frontmatter has no closing --- fence")
-    lines = [b[:-1] if b.endswith("\r") else b for b in body]
-    if sum(len(b) + 1 for b in lines) > MAX_BYTES:
-        sh.bad(1, "frontmatter larger than %d bytes" % MAX_BYTES)
+    # A bare CR ends a fence line too: Claude's reader needs an LF there, YAML does not.
+    for fence in (0, close):
+        if fence is not None and fence in bare:
+            sh.bad(fence, "bare CR used as a line break")
+    lines = body
+    sh.close = close
+    if sum(map(len, lines)) + len(lines) > MAX_BYTES:
+        sh.oversize = True                              # reported by the caller, not as a line violation
         return sh
     sh.lines = lines
-    _grammar(sh, lines)
+    # body line i is file line i + 1
+    _grammar(sh, lines, {j - 1 for j in bare if 0 < j <= len(lines)})
     return sh
 
 
-def _grammar(sh, lines):
+def _split_lines(text):
+    """(lines, bare): `text` split at LF, CRLF and a bare CR (what YAML counts as a line break),
+    and the set of indexes of the lines that end in a BARE CR. Linear."""
+    if "\r" not in text:
+        return text.split("\n"), set()
+    out = []
+    bare = set()
+    for piece in text.replace("\r\n", "\n").split("\n"):
+        if "\r" in piece:
+            parts = piece.split("\r")
+            for k, part in enumerate(parts):
+                if k < len(parts) - 1:
+                    bare.add(len(out))
+                out.append(part)
+        else:
+            out.append(piece)
+    return out, bare
+
+
+def _breaks_before(text, offset):
+    """How many line breaks (LF, CRLF or bare CR each count once) precede `offset`: the index of
+    the line that offset sits on, in the numbering of _split_lines."""
+    head = text[:offset]
+    return head.count("\n") + head.count("\r") - head.count("\r\n")
+
+
+def _grammar(sh, lines, bare=frozenset()):
     seen = set()
     mode = "top"            # top | plain | nest | block | hooks
     block_min = None
@@ -229,6 +270,9 @@ def _grammar(sh, lines):
 
     for i, line in enumerate(lines):
         idx = i + 1                                     # file line index (line 0 is the fence)
+        if i in bare:
+            fail(idx, "bare CR used as a line break", line)
+            continue
         if _BAD_CHAR.search(line):
             fail(idx, "control, invisible or tab character", line)
             continue

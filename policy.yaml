@@ -48,7 +48,7 @@ builtin:
   oversize-file: low           # high for script/hook/config class, SKILL.md and agent .md (rule 7)
   unscannable-file: low        # NUL-bearing file that is not a known image/archive/font; same class-based raise
   vendored-deps: high          # a node_modules/ directory inside a target; not descended into
-  frontmatter-complex: high    # SKILL.md / agent .md frontmatter outside the plain shape of scripts/lib/fmshape.py (low for the grid's own assets)
+  frontmatter-complex: high    # SKILL.md / agent .md frontmatter outside the plain shape of scripts/lib/fmshape.py (low for the grid's own assets); a frontmatter over 128 KiB is one file-level finding, allowed only by a sha256 entry
   source-not-allowed: low      # raised to high for repos named in the baseline (see --baseline)
   source-uncurated: low        # raised to high for repos named in the baseline (see --baseline)
   allow-unused: low
@@ -188,8 +188,9 @@ rules:
   # hook-declared: a SKILL.md / agent .md frontmatter is checked by shape first (scripts/lib/fmshape.py, builtin
   # frontmatter-complex: only plain lines pass, anything reader-dependent is a finding) and then read by
   # scripts/lib/fmyaml.py, which denies by default inside every hooks block (see _HookStructure in audit.py); the whole
-  # word `hooks` in a key position nothing judged is a finding too. So this regex only covers the JSON manifests of
-  # class hook (hooks.json): any "command" key.
+  # word `hooks` in a key position nothing judged is a finding too. A frontmatter hook line is allowlisted only
+  # together with its block (an entry's `hooks_sha256`, the finding's `sha256`). So this regex only covers the JSON
+  # manifests of class hook (hooks.json): any "command" key.
   - id: hook-declared
     severity: high
     owned_severity: low

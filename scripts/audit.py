@@ -378,6 +378,14 @@ class _HookStructure:
             self.collect_content(value, depth + 1)
 
 
+def hooks_block_sha256(block_lines):
+    """The digest an allowlist entry's `hooks_sha256` carries: sha256 of one frontmatter hooks block,
+    from the `hooks:` key line to the last line of its value, line ends dropped, lines joined with
+    a newline. A hook-declared finding inside the block reports it as `sha256`."""
+    text = "\n".join(line.rstrip("\r") for line in block_lines)
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+
+
 def _hook_regions(fm, lines):
     """[(first line index, last line index, _HookStructure)] for each outermost `hooks` key."""
     out = []
@@ -424,6 +432,9 @@ def _frontmatter_tool_lists(lines):
     i = 1
     while i < len(lines):
         text = lines[i].rstrip("\r")
+        if not text:
+            i += 1
+            continue
         # Claude's reader ends the frontmatter at the first `---` anywhere (fmshape flags it).
         if "---" in text or text == "...":
             break
@@ -458,6 +469,10 @@ def _logical_lines(lines, comment_prefixes=DEFAULT_COMMENT_PREFIXES):
     i, n = 0, len(lines)
     while i < n:
         text = lines[i].rstrip("\r")
+        if not text:                    # a blank line joins nothing (the common case in a hostile file)
+            out.append((i, "", i))
+            i += 1
+            continue
         joined, j = text, i
         is_comment = bool(comment_prefixes) and text.lstrip().startswith(comment_prefixes)
         while not is_comment and j + 1 < n and j - i < MAX_JOIN - 1:
@@ -681,7 +696,8 @@ class Policy:
         proves nothing), and a file the agent loads or the harness reads
         (SKILL.md, an agent .md, .mcp.json, hooks.json) is never `test`."""
         base = rel_target.rsplit("/", 1)[-1]
-        loaded = base in ("SKILL.md", ".mcp.json", "hooks.json") or _is_agent_md(rel_target, rel_root, base)
+        loaded = (_is_skill_md(base) or base in (".mcp.json", "hooks.json")
+                  or _is_agent_md(rel_target, rel_root, base))
         for name, globs in self.classes:
             if name == "test":
                 if loaded:
@@ -725,6 +741,15 @@ class AllowEntry:
         if self.contains_substring and d.get("contains") is None:
             raise UsageError("%s: contains_substring needs `contains`" % where)
         self.sha256 = d.get("sha256")
+        # A line inside a SKILL.md / agent .md `hooks:` block is only pinned together with that
+        # block (see matches): the same command line moved or repeated is a different block.
+        self.hooks_sha256 = d.get("hooks_sha256")
+        if self.hooks_sha256 is not None:
+            if self.rule != "hook-declared":
+                raise UsageError("%s: hooks_sha256 is only valid on a hook-declared entry" % where)
+            if not (isinstance(self.hooks_sha256, str) and re.fullmatch(r"[0-9a-f]{64}", self.hooks_sha256)):
+                raise UsageError("%s: hooks_sha256 must be a 64-hex sha256 (the `sha256` of the "
+                                 "finding, or hooks_block_sha256)" % where)
         is_builtin = self.rule in policy.builtin
         if self.contains is not None:
             if not isinstance(self.contains, str) or not self.contains:
@@ -746,6 +771,12 @@ class AllowEntry:
         """Does finding `f` fall under this entry? (Stale-hash handling is separate.)"""
         if f["rule"] != self.rule or not self.path_rx.match(f["path"]):
             return False
+        # A line of a frontmatter hooks block is allowed only by an entry carrying the digest of
+        # that very block; an entry with a digest never allows anything outside a block.
+        if f.get("_hooks_sha") != self.hooks_sha256:
+            return False
+        if f.get("_file_pin") and self.contains is not None:
+            return False                        # a file-level finding is allowed by file hash, never by a line
         if self.contains is not None:
             if self.contains_substring:
                 return (self.contains in f["_line"]
@@ -789,12 +820,20 @@ def load_allowlist(path, policy):
 # Scanning
 # --------------------------------------------------------------------------
 
+def _is_skill_md(name):
+    """SKILL.md in any letter case: on a case-insensitive filesystem (macOS) `skill.md` is opened as
+    SKILL.md, so the spelling must not decide whether its frontmatter is checked."""
+    return name.lower() == "skill.md"
+
+
 def _is_agent_md(rel_target, rel_root, name):
-    """A `.md` file that Claude loads as an agent: has an `agents` path component."""
+    """A `.md` file whose frontmatter Claude loads as an agent or a slash command: it has an
+    `agents` or `commands` path component (any letter case, for the same reason as _is_skill_md).
+    Both kinds accept a `hooks` key, so both get the frontmatter checks."""
     if not name.lower().endswith(".md"):
         return False
     for rel in (rel_target, rel_root):
-        if rel and "agents" in rel.split("/")[:-1]:
+        if rel and any(p.lower() in ("agents", "commands") for p in rel.split("/")[:-1]):
             return True
     return False
 
@@ -834,7 +873,7 @@ class Scan:
         return "upstream"
 
     def _add(self, rule, severity, path, line, cls, tier, message, excerpt="",
-             downgraded=None, sha256=None, raw_line=""):
+             downgraded=None, sha256=None, raw_line="", hooks_sha=None, file_pin=False):
         self.findings.append({
             "rule": rule, "severity": severity, "path": path, "line": line,
             "class": cls, "tier": tier, "message": message,
@@ -842,6 +881,10 @@ class Scan:
             "allowed": False, "downgraded": downgraded, "sha256": sha256,
             # private fields used for allowlist matching; stripped before output
             "_line": raw_line, "_line_escaped": escape_text(raw_line),
+            # sha256 of the frontmatter hooks block this line sits in (see hooks_block_sha256), else None
+            "_hooks_sha": hooks_sha,
+            # True: a whole-file finding that only a sha256-pinned (contains-less) entry may allow
+            "_file_pin": file_pin,
         })
 
     # -- traversal -----------------------------------------------------------
@@ -923,7 +966,7 @@ class Scan:
     @staticmethod
     def _exec_class(fclass, name, rel_target, rel_root):
         """Content that is executed, loaded as an agent or read as configuration."""
-        return (fclass in ("script", "hook", "config") or name == "SKILL.md"
+        return (fclass in ("script", "hook", "config") or _is_skill_md(name)
                 or _is_agent_md(rel_target, rel_root, name))
 
     def _scan_file(self, full, rel_target, tier):
@@ -967,19 +1010,22 @@ class Scan:
         if b"\x00" in data:
             nul_in_head = b"\x00" in head
             exec_class = self._exec_class(fclass, name, rel_target, rel_root)
+            # A doc (.md/.txt/...) is read by the model as text whatever its head says, so a forged
+            # head works against it as against a script: it gets the NUL-stripped view too.
+            text_class = exec_class or fclass == "doc"
             if _plausible_utf16(data):
                 # Plausibly UTF-16 with a BOM: decode it and scan the text. "Plausible" can be
                 # forged (a NUL-free first line, aligned UTF-16 padding, then a plain ASCII
-                # payload that bash runs after dropping the NULs), so executable classes ALSO
-                # get the NUL-stripped view below. For real UTF-16 that view equals the decoded
-                # text and its findings are de-duplicated.
+                # payload that bash runs after dropping the NULs), so executable classes and
+                # docs ALSO get the NUL-stripped view below. For real UTF-16 that view equals
+                # the decoded text and its findings are de-duplicated.
                 text = data.decode("utf-16")
-                if exec_class:
+                if text_class:
                     # (without the two BOM bytes, so line 1 reads the same in both views)
                     stripped_view = data[2:].replace(b"\x00", b"").decode("utf-8", errors="replace")
-            elif nul_in_head and _is_known_binary(head) and not exec_class:
-                # An image/archive/font: nothing to scan. Never for executable classes:
-                # a magic-number first line is trivially forged in front of a script
+            elif nul_in_head and _is_known_binary(head) and not text_class:
+                # An image/archive/font: nothing to scan. Never for executable classes or docs:
+                # a magic-number first line is trivially forged in front of a script or a .md
                 # (fail closed; a genuine binary there is allowlisted by hash).
                 return
             else:
@@ -987,9 +1033,9 @@ class Scan:
                           self._not_scanned_severity("unscannable-file", fclass, name, rel_target, rel_root),
                           display, 0, fclass, tier, BUILTIN_MESSAGES["unscannable-file"],
                           sha256=sha256_bytes(data))
-                if nul_in_head and not exec_class:
+                if nul_in_head and not text_class:
                     return                    # genuine binary content
-                # Executable content, or text with a stray NUL deep inside: ALSO scan the
+                # Executable content, a doc, or text with a stray NUL deep inside: ALSO scan the
                 # bytes as bash would see them (NULs dropped), so the finding above is not
                 # the only signal.
                 text = data.replace(b"\x00", b"").decode("utf-8", errors="replace")
@@ -1001,14 +1047,16 @@ class Scan:
         self._scan_text(text, fclass, name, rel_target, rel_root, display, tier, file_sha)
         if stripped_view is not None:
             before = len(self.findings)
-            known = {(f["rule"], f["severity"], f["excerpt"]) for f in self.findings
+            known = {(f["rule"], f["severity"], f["_line"]) for f in self.findings
                      if f["path"] == display}
             self._scan_text(stripped_view, fclass, name, rel_target, rel_root, display, tier, file_sha)
             # Drop only a finding the decoded view already reported IDENTICALLY (same rule,
-            # severity and text). Never key on the line number: the two views number lines
-            # differently, and a LOW decoy on the same number must not hide a HIGH payload.
+            # severity and the WHOLE line: the excerpt is cut at EXCERPT_MAX, so two lines that
+            # share their first 120 characters would otherwise look the same, and an allowlist
+            # entry pins the whole line). Never key on the line number: the two views number
+            # lines differently, and a LOW decoy on the same number must not hide a HIGH payload.
             self.findings[before:] = [f for f in self.findings[before:]
-                                      if (f["rule"], f["severity"], f["excerpt"]) not in known]
+                                      if (f["rule"], f["severity"], f["_line"]) not in known]
 
     def _hook_block_findings(self, lines, display, tier, file_sha, fm, shape=None):
         """Default-deny over the frontmatter's hooks blocks (see _HookStructure): every non-blank
@@ -1026,18 +1074,27 @@ class Scan:
         have = {(f["rule"], f["line"]) for f in self.findings if f["path"] == display}
         sev = rule.owned_severity if (tier == "owned" and rule.owned_severity) else rule.severity
 
-        def flag(idx, raw):
+        def flag(idx, raw, block=None):
             if ("hook-declared", idx + 1) in have:
                 return
             have.add(("hook-declared", idx + 1))
             self._add("hook-declared", sev, display, idx + 1, "hook", tier, rule.message,
-                      excerpt=raw, raw_line=raw)
+                      excerpt=raw, raw_line=raw, sha256=block, hooks_sha=block)
 
         if fm.error is not None:
             idx, msg = fm.error
             flag(min(idx, len(lines) - 1), "frontmatter not parsed: " + msg)
         for first, last, st in _hook_regions(fm, lines):
-            for idx in range(first, min(last, len(lines) - 1) + 1):
+            # An allowlist entry pins a line of THIS block only (hooks_sha256): the same line
+            # moved under another event or matcher, or repeated as a further entry, is another block.
+            last = min(last, len(lines) - 1)
+            block = hooks_block_sha256(lines[first:last + 1])
+            # a hook-declared finding the line rules already made inside the block is bound too
+            for f in self.findings:
+                if (f["path"] == display and f["rule"] == "hook-declared"
+                        and first < f["line"] <= last + 1):
+                    f["_hooks_sha"] = f["sha256"] = block
+            for idx in range(first, last + 1):
                 self._tick(display)
                 raw = lines[idx].rstrip("\r")
                 body = raw.strip()
@@ -1045,7 +1102,7 @@ class Scan:
                     continue
                 if body.startswith("#") and idx not in st.content:
                     continue                            # a real YAML comment
-                flag(idx, raw)
+                flag(idx, raw, block)
         if not fm.hooks:
             for idx in fm.token_lines:
                 flag(idx, lines[idx].rstrip("\r"))
@@ -1074,7 +1131,7 @@ class Scan:
 
     def _scan_text(self, text, fclass, name, rel_target, rel_root, display, tier, file_sha):
         """Run the line rules over one text view of a file."""
-        loaded_md = name == "SKILL.md" or _is_agent_md(rel_target, rel_root, name)
+        loaded_md = _is_skill_md(name) or _is_agent_md(rel_target, rel_root, name)
         # The shape whitelist reads the text as it is on disk (a bare CR is itself a violation),
         # so it runs before the line-ending normalisation below.
         shape = fmshape.check(text) if loaded_md else None
@@ -1083,11 +1140,32 @@ class Scan:
             # as well as LF; split the way it does so a CR cannot hide a key from the scan.
             text = text.replace("\r\n", "\n").replace("\r", "\n")
         lines = text.split("\n")
-        fm = fmyaml.analyse(lines) if loaded_md else None
-        classes = self._line_classes(lines, fclass, name, rel_target, rel_root, fm)
         ext = os.path.splitext(name)[1].lower()
-        logical = _logical_lines(lines, COMMENT_PREFIXES_BY_EXT.get(ext, DEFAULT_COMMENT_PREFIXES))
-        tool_lists = _frontmatter_tool_lists(lines) if loaded_md else {}
+        prefixes = COMMENT_PREFIXES_BY_EXT.get(ext, DEFAULT_COMMENT_PREFIXES)
+        over = shape is not None and shape.oversize
+        if over:
+            # A frontmatter over the budget (fmshape.MAX_BYTES; a real one is a few KiB) is neither
+            # parsed nor scanned line by line: it is ONE finding, like `oversize-file`, and only an
+            # entry pinned to the file's sha256 allows it, so nothing inside can change after the
+            # review. (Running every rule over half a megabyte of hostile lines was also the one
+            # place the scanner took seconds.) The lines are blanked, not removed: the rest of the
+            # file keeps its line numbers.
+            end = len(lines) if shape.close is None else shape.close
+            lines[1:end] = [""] * max(end - 1, 0)
+            frule_sev = "low" if tier == "owned" else self.policy.builtin.get("frontmatter-complex", "high")
+            self._add("frontmatter-complex", frule_sev, display, 1, "hook", tier,
+                      BUILTIN_MESSAGES["frontmatter-complex"] + ": frontmatter larger than %d bytes; "
+                      "not scanned (allow it by file sha256 only)" % fmshape.MAX_BYTES,
+                      sha256=file_sha, file_pin=True)
+            # no YAML read, no tool-list fold, and the blanked run is not even indexed
+            fm, tool_lists = None, {}
+            logical = _logical_lines(lines[:1], prefixes)
+            logical += [(a + end, t, b + end) for a, t, b in _logical_lines(lines[end:], prefixes)]
+        else:
+            fm = fmyaml.analyse(lines) if loaded_md else None
+            logical = _logical_lines(lines, prefixes)
+            tool_lists = _frontmatter_tool_lists(lines) if loaded_md else {}
+        classes = self._line_classes(lines, fclass, name, rel_target, rel_root, fm)
         for k, (idx, line, last) in enumerate(logical):
             if line == "":
                 continue
@@ -1124,6 +1202,10 @@ class Scan:
             fence = None                      # (char, length) while inside one
             for i, raw in enumerate(lines):
                 text = raw.rstrip("\r")
+                if not text:                  # blank: never a fence, only part of one that is open
+                    if fence is not None:
+                        classes[i] = "script"
+                    continue
                 m = re.match(r"^\s*(`{3,}|~{3,})(.*)$", text)
                 if fence is None:
                     if not m:
