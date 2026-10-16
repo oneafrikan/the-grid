@@ -1676,3 +1676,287 @@ mkrepo() {
   [ "$(commits "$P")" -eq "$before" ]
   [ -f "$P/LOGS/2026-01-01-testhost-stub-handoff.md" ]
 }
+
+# ---------------------------------------------------------------------------
+# Hardening H-02 (hardening, refs private H-02): write-confinement residuals of the worker
+# ---------------------------------------------------------------------------
+
+# two_casings <a> <b>: create both directories; skip on a case-insensitive file system, where
+# they would be one directory.
+two_casings() {
+  mkdir -p "$1" "$2"
+  [ "$(find "$(dirname "$1")" -maxdepth 1 -iname "$(basename "$1")" | wc -l | tr -d ' ')" -ge 2 ] \
+    || skip "case-insensitive file system"
+}
+
+# N1: when the row's directory exists in two casings, the skill's "any casing" rule has no
+# single answer. The first sorted variant used to win, and that variant could be a tracked
+# symlink into another work tree. Nothing is granted; the child writes to the fallback dir.
+@test "H-02: a row whose directory exists in two casings grants nothing" {
+  mk_tx 6
+  two_casings "$P/Logs" "$P/LOGS"
+  printf '| proj | logs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  export STUB_CLAUDE_MODE=handoff-fallback
+  run_worker
+  log_has "target-refused=ambiguous-case"
+  lacks "$(allowed_rules)" "$P/LOGS"
+  lacks "$(allowed_rules)" "$P/Logs"
+  contains "$(claude_line)" "Target directory: none"
+  log_has "action=done"
+}
+
+@test "H-02: an exact-case row is ambiguous too when another casing exists" {
+  mk_tx 6
+  two_casings "$P/logs" "$P/LOGS"
+  printf '| proj | LOGS |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  export STUB_CLAUDE_MODE=handoff-fallback
+  run_worker
+  log_has "target-refused=ambiguous-case"
+  lacks "$(allowed_rules)" "$P/LOGS"
+  lacks "$(allowed_rules)" "$P/logs"
+}
+
+@test "H-02: the default LOGS lookup refuses two casings as well" {
+  mk_tx 6
+  rm -f "$GRID_PRIVATE_DIR/handoff-locations.md"
+  two_casings "$P/Logs" "$P/LOGS"
+  export STUB_CLAUDE_MODE=handoff-fallback
+  run_worker
+  log_has "target-refused=ambiguous-case"
+  lacks "$(allowed_rules)" "$P/LOGS"
+  lacks "$(allowed_rules)" "$P/Logs"
+}
+
+# N4: the skill matches the DIRECTORY case-insensitively, which includes the components on the way.
+@test "H-02: a row is matched case-insensitively at every component, not only the last" {
+  mk_tx 6
+  mkdir -p "$P/docs/handoffs"; rmdir "$P/LOGS"
+  printf '| proj | Docs/Handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$P/docs/handoffs"
+  run_worker
+  contains "$(allowed_rules)" "$(edit_rule "$P/docs/handoffs")"
+  refute log_has "target-refused"
+  log_has "action=done"
+  git -C "$P" show --name-only --format= HEAD | grep -q "^docs/handoffs/2026-01-01-testhost-stub-handoff.md$"
+}
+
+@test "H-02: two casings of an intermediate component grant nothing" {
+  mk_tx 6
+  two_casings "$P/docs" "$P/Docs"
+  mkdir -p "$P/docs/handoffs" "$P/Docs/handoffs"; rmdir "$P/LOGS"
+  printf '| proj | DOCS/handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  export STUB_CLAUDE_MODE=handoff-fallback
+  run_worker
+  log_has "target-refused=ambiguous-case"
+  lacks "$(allowed_rules)" "$P/docs"
+  lacks "$(allowed_rules)" "$P/Docs"
+}
+
+@test "H-02: an absolute row written in another casing still finds the other repo" {
+  mkrepo "$MOCK_HOOK_ROOT/other-abs"
+  printf '| proj | %s/Other-ABS |\n' "$MOCK_HOOK_ROOT" > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$MOCK_HOOK_ROOT/other-abs"
+  run_worker
+  contains "$(allowed_rules)" "$(edit_rule "$MOCK_HOOK_ROOT/other-abs")"
+  refute log_has "target-refused"
+  log_has "action=done"
+}
+
+# N8 / VE5: configuration that the user's own config pulls in is configuration too.
+# inc_conf <file>: a small, old config file.
+inc_conf() { printf '[core]\n\tpager = cat\n' > "$1"; touch -t 202001010000 "$1"; }
+
+@test "H-02: a new file at a gitconfig include.path (relative to the config) is unexpected-file" {
+  mkdir -p "$HOME/inc"
+  printf '[include]\n\tpath = inc/extra.conf\n' > "$HOME/.gitconfig"; touch -t 202001010000 "$HOME/.gitconfig"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$HOME/inc/extra.conf"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "inc/extra.conf"
+}
+
+@test "H-02: a ~ include.path, an includeIf path and the XDG config's includes are watched" {
+  mkdir -p "$HOME/inc" "$HOME/.config/git"
+  inc_conf "$HOME/inc/home.conf"; inc_conf "$HOME/inc/cond.conf"; inc_conf "$HOME/inc/xdg.conf"
+  printf '[include]\n\tpath = ~/inc/home.conf\n[includeIf "gitdir:~/work/"]\n\tpath = inc/cond.conf\n' > "$HOME/.gitconfig"
+  printf '[include]\n\tpath = %s/inc/xdg.conf\n' "$HOME" > "$HOME/.config/git/config"
+  touch -t 202001010000 "$HOME/.gitconfig" "$HOME/.config/git/config"
+  local f n=0
+  export STUB_CLAUDE_MODE=handoff-outside
+  for f in home cond xdg; do
+    n=$((n + 1)); mk_tx 6
+    export STUB_OUTSIDE_FILE="$HOME/inc/$f.conf"
+    SID="11111111-1111-4111-8111-66666666666$n"
+    clear_run
+    run_worker
+    grep -F "reason=unexpected-file" "$LOG" | grep -qF "inc/$f.conf" || { echo "include '$f' not watched" >&2; cat "$LOG" >&2; return 1; }
+  done
+}
+
+@test "H-02: an include inside an included gitconfig is followed; a cycle ends" {
+  mkdir -p "$HOME/inc"
+  printf '[include]\n\tpath = b.conf\n' > "$HOME/inc/a.conf"
+  printf '[include]\n\tpath = %s/.gitconfig\n' "$HOME" > "$HOME/inc/b.conf"       # back to the start
+  printf '[include]\n\tpath = inc/a.conf\n\tpath = .gitconfig\n' > "$HOME/.gitconfig"
+  touch -t 202001010000 "$HOME/inc/a.conf" "$HOME/inc/b.conf" "$HOME/.gitconfig"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$HOME/inc/b.conf"
+  run_worker
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "inc/b.conf"
+}
+
+@test "H-02: an untouched include, an include outside HOME and a flood of includes change nothing" {
+  mkdir -p "$HOME/inc"; inc_conf "$HOME/inc/quiet.conf"
+  inc_conf "$MOCK_HOOK_ROOT/outside.conf"
+  {
+    printf '[include]\n\tpath = inc/quiet.conf\n\tpath = %s/outside.conf\n' "$MOCK_HOOK_ROOT"
+    for i in $(seq 1 300); do printf '\tpath = inc/missing-%s.conf\n' "$i"; done
+  } > "$HOME/.gitconfig"
+  touch -t 202001010000 "$HOME/.gitconfig"
+  mk_tx 6
+  # Only paths under HOME are watched (the bound that keeps the snapshot small): a change to
+  # an include outside it is not this run's concern, whoever made it.
+  export STUB_CLAUDE_MODE=handoff-logs STUB_SIDE_FILE="$MOCK_HOOK_ROOT/outside.conf"
+  run_worker
+  log_has "action=done"
+}
+
+@test "H-02: a new file under an ssh Include glob is unexpected-file" {
+  mkdir -p "$HOME/.ssh/extra"; inc_conf "$HOME/.ssh/extra/a.conf"
+  printf 'Host *\n  Include extra/*.conf\n' > "$HOME/.ssh/config"; touch -t 202001010000 "$HOME/.ssh/config"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$HOME/.ssh/extra/evil.conf"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF ".ssh/extra/evil.conf"
+}
+
+@test "H-02: an Include inside a file that an ssh Include glob matched is followed" {
+  mkdir -p "$HOME/.ssh/extra" "$HOME/sshinc"
+  printf 'Include %s/sshinc/deeper.conf\n' "$HOME" > "$HOME/.ssh/extra/a.conf"
+  inc_conf "$HOME/sshinc/deeper.conf"
+  printf 'Include extra/*.conf\n' > "$HOME/.ssh/config"
+  touch -t 202001010000 "$HOME/.ssh/config" "$HOME/.ssh/extra/a.conf"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$HOME/sshinc/deeper.conf"
+  run_worker
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "sshinc/deeper.conf"
+}
+
+@test "H-02: ssh Include spellings: lower case, =, quotes, several paths per line, ~, nested" {
+  mkdir -p "$HOME/sshinc" "$HOME/.ssh"
+  inc_conf "$HOME/sshinc/one.conf"; inc_conf "$HOME/sshinc/two.conf"; inc_conf "$HOME/sshinc/deep.conf"
+  printf 'include = "~/sshinc/one.conf" %s/sshinc/two.conf\nInclude sshinc-nested.conf\n' "$HOME" > "$HOME/.ssh/config"
+  printf 'Include %s/sshinc/deep.conf\n' "$HOME" > "$HOME/.ssh/sshinc-nested.conf"
+  touch -t 202001010000 "$HOME/.ssh/config" "$HOME/.ssh/sshinc-nested.conf"
+  local f n=0
+  export STUB_CLAUDE_MODE=handoff-outside
+  for f in one two deep; do
+    n=$((n + 1)); mk_tx 6
+    export STUB_OUTSIDE_FILE="$HOME/sshinc/$f.conf"
+    SID="11111111-1111-4111-8111-77777777777$n"
+    clear_run
+    run_worker
+    grep -F "reason=unexpected-file" "$LOG" | grep -qF "sshinc/$f.conf" || { echo "ssh include '$f' not watched" >&2; cat "$LOG" >&2; return 1; }
+  done
+}
+
+@test "H-02: an Include glob directly in ~/.ssh watches its matches, not the whole directory" {
+  mkdir -p "$HOME/.ssh"; inc_conf "$HOME/.ssh/conf-a"
+  printf 'Include conf-*\n' > "$HOME/.ssh/config"; touch -t 202001010000 "$HOME/.ssh/config"
+  mk_tx 6
+  # another ssh session appends to known_hosts while the child runs: not this run's fault
+  export STUB_CLAUDE_MODE=handoff-logs STUB_SIDE_FILE="$HOME/.ssh/known_hosts"
+  run_worker
+  log_has "action=done"
+  SID="11111111-1111-4111-8111-888888888888"; clear_run; mk_tx 6
+  unset STUB_SIDE_FILE
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$HOME/.ssh/conf-a"
+  run_worker
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF ".ssh/conf-a"
+}
+
+# VS7: a deletion is a change like any other (the child only ever creates files).
+@test "H-02: a file the child deletes is reported" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs STUB_DELETE_FILE="$P/base.txt"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "deleted=base.txt"
+}
+
+@test "H-02: a deleted symlink and a deleted file in the fallback dir are reported too" {
+  mk_tx 6
+  ln -s base.txt "$P/alias"; touch -h -t 202001010000 "$P/alias"
+  export STUB_CLAUDE_MODE=handoff-logs STUB_DELETE_FILE="$P/alias"
+  run_worker
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "deleted=alias"
+  mkdir -p "$GRID_HANDOFF_FALLBACK_DIR/proj"; echo old > "$GRID_HANDOFF_FALLBACK_DIR/proj/old-note.md"
+  touch -t 202001010000 "$GRID_HANDOFF_FALLBACK_DIR/proj/old-note.md"
+  SID="11111111-1111-4111-8111-999999999999"; clear_run; mk_tx 6
+  export STUB_DELETE_FILE="$GRID_HANDOFF_FALLBACK_DIR/proj/old-note.md"
+  run_worker
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "deleted="
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "old-note.md"
+}
+
+@test "H-02: no deletion, no deleted= token" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=done"
+  refute log_has "deleted="
+}
+
+# VS5: the scanners never follow a link (find -P). Activity behind a link that sits in a
+# scanned root is not blamed on this run. A scanner switched to find -L reports it, so each
+# test below fails for exactly that mutation.
+@test "H-02: the file snapshot does not follow a link inside the cwd" {
+  mkdir -p "$MOCK_HOOK_ROOT/elsewhere"
+  ln -s "$MOCK_HOOK_ROOT/elsewhere" "$P/ext"; touch -h -t 202001010000 "$P/ext"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs STUB_SIDE_FILE="$MOCK_HOOK_ROOT/elsewhere/side.txt"
+  run_worker
+  log_has "action=done"
+}
+
+@test "H-02: the nested-repo listing does not follow a link inside the cwd" {
+  mkdir -p "$MOCK_HOOK_ROOT/elsewhere"
+  ln -s "$MOCK_HOOK_ROOT/elsewhere" "$P/ext"; touch -h -t 202001010000 "$P/ext"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs STUB_SIDE_FILE="$MOCK_HOOK_ROOT/elsewhere/.git/HEAD"
+  run_worker
+  log_has "action=done"
+}
+
+@test "H-02: the watched-state snapshot does not follow a link in ~/.local/bin" {
+  mkdir -p "$HOME/.local/bin" "$HOME/versions"
+  ln -s "$HOME/versions" "$HOME/.local/bin/claude-versions"; touch -h -t 202001010000 "$HOME/.local/bin/claude-versions"
+  mk_tx 6
+  # a self-update writing into the versions dir mid-run must not be a false alarm
+  export STUB_CLAUDE_MODE=handoff-logs STUB_SIDE_FILE="$HOME/versions/new-release"
+  run_worker
+  log_has "action=done"
+}
+
+# VS5: every row check refuses for its own reason (HOME is a work tree, so the work-tree
+# check cannot be what refuses these).
+@test "H-02: each sensitive home directory and CLAUDE_CONFIG_DIR is refused on its own" {
+  git -C "$HOME" init -q
+  mkdir -p "$HOME/.claude" "$HOME/.config" "$HOME/.gnupg" "$HOME/.aws/sub"
+  mkrepo "$MOCK_HOOK_ROOT/ccrepo"; mkdir -p "$MOCK_HOOK_ROOT/ccrepo/cfg/sub"
+  export CLAUDE_CONFIG_DIR="$(cd "$MOCK_HOOK_ROOT/ccrepo/cfg" && pwd -P)"
+  local rows=("~/.claude" "~/.config" "~/.gnupg" "~/.aws/sub" "$CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR/sub")
+  local row n=0
+  export STUB_CLAUDE_MODE=handoff-fallback
+  for row in "${rows[@]}"; do
+    n=$((n + 1)); mk_tx 6
+    printf '| proj | %s |\n' "$row" > "$GRID_PRIVATE_DIR/handoff-locations.md"
+    SID="11111111-1111-4111-8111-44444444444$n"
+    clear_run
+    run_worker
+    log_has "target-refused=sensitive-dir" || { echo "row '$row' expected sensitive-dir" >&2; cat "$LOG" >&2; return 1; }
+  done
+}

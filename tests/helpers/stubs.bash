@@ -50,6 +50,7 @@
 #     WP-017/018 knobs for handoff-* modes: STUB_HANDOFF_PREFIX (distinct pair names), STUB_CLAUDE_GRANDCHILD=1
 #     (a lingering grandchild, pid in grandchild.pid), STUB_CLAUDE_SLEEP_AFTER (linger after writing),
 #     STUB_CLAUDE_PRINT (text printed on stdout); modes handoff-modify (edits base.txt), handoff-secret-third.
+#     STUB_DELETE_FILE (path the handoff-* child removes while it runs).
 #     STUB_CLAUDE_MODE         unset = the behaviour above. handoff-logs | handoff-fallback | handoff-target |
 #                              handoff-extra | handoff-stray act like the auto-handoff child: write
 #                              2026-01-01-testhost-stub-{handoff,context}.md (body ${STUB_HANDOFF_BODY:-stub}) into
@@ -194,6 +195,8 @@ case "${STUB_CLAUDE_MODE:-}" in
     if [ "${STUB_CLAUDE_IGNORE_TERM:-0}" = 1 ]; then trap '' TERM; while :; do sleep 1; done; fi
     # STUB_SIDE_FILE: another process writes this file while the child runs (simulates a sibling session).
     if [ -n "${STUB_SIDE_FILE:-}" ]; then mkdir -p "$(dirname "$STUB_SIDE_FILE")"; echo "from another agent" > "$STUB_SIDE_FILE"; fi
+    # STUB_DELETE_FILE: the child removes this file (hardening H-02: a deletion must be reported).
+    if [ -n "${STUB_DELETE_FILE:-}" ]; then rm -f "$STUB_DELETE_FILE"; fi
     if [ -n "${STUB_CLAUDE_SLEEP:-}" ]; then sleep "$STUB_CLAUDE_SLEEP"; fi
     # STUB_HANDOFF_PREFIX makes the pair's names distinct, so two sessions in one cwd (WP-017) can be told apart.
     hf="${STUB_HANDOFF_PREFIX:-}2026-01-01-testhost-stub-handoff.md"
