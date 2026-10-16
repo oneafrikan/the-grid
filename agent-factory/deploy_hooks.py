@@ -212,7 +212,8 @@ def user_desired(hooks: list[dict], ids: list[str], grid: Path) -> list[tuple]:
                   f"(project hooks come from a project profile)", file=sys.stderr)
             sys.exit(2)
         grid_s = str(grid)
-        if re.search(r'["$`\\\n]', grid_s):
+        # (any control character too: OWNED_RE would not recognise the command as ours next run)
+        if re.search(r'["$`\\\x00-\x1f\x7f]', grid_s):
             die(f"grid path {grid_s!r} contains a character that cannot be written safely into a hook command")
         # GRID_DIR wins over this script's own repo, so a stray value would persist a
         # dangling (or foreign) machine-wide SessionEnd command. Refuse a grid with no
