@@ -1798,11 +1798,15 @@ expect_plain() {
   expect_strict assigned-secret 'name = x; secret=abcdefghijklmnopqrstuvwxyz'
 }
 
-@test "strict: the old value boundaries hold (15 chars passes, template marker first passes)" {
+@test "strict: the value boundaries hold (15 chars passes; a template marker first no longer exempts, H-01)" {
   expect_strict clean 'api_key = abcdefghijklmno'
-  expect_strict clean 'token = $abcdefghijklmnopqrstuv'
-  expect_strict clean 'token = <abcdefghijklmnopqrstuv>'
-  expect_strict clean 'secret: {abcdefghijklmnopqrstuv}'
+  # H-01 (d): a model can put $ < { in front of any value, so strict mode reads those as
+  # values too (the commit guard still skips them, see the default-mode test below)
+  expect_strict assigned-secret 'token = $abcdefghijklmnopqrstuv'
+  expect_strict assigned-secret 'token = <abcdefghijklmnopqrstuv>'
+  expect_strict assigned-secret 'secret: {abcdefghijklmnopqrstuv}'
+  # 15 characters in all is still short
+  expect_strict clean 'token = $abcdefghijklmn'
 }
 
 @test "default mode keeps the false-block rules: letters-only and parenthesised unquoted values still pass" {
@@ -1940,7 +1944,7 @@ _padded_line() {
   expect_plain  assigned-secret '{"token":"'$h32'"}'
   expect_plain  clean '{\"token\":\"short\"}'
   expect_plain  clean '{\"token\":\"$'$h32'\"}'
-  expect_strict clean '{\"token\":\"$'$h32'\"}'
+  expect_strict assigned-secret '{\"token\":\"$'$h32'\"}'   # H-01 (d): strict reads a $-first value
   # the placeholder exemption keeps working inside the escaped value (default mode only)
   expect_plain  clean '{\"token\":\"exampleAb3dEAb3dEAb3dE\"}'
   expect_strict assigned-secret '{\"token\":\"exampleAb3dEAb3dEAb3dE\"}'
@@ -2045,17 +2049,308 @@ _identrun_line() {   # <pad before> <run length> <pad after> [<run char> [<key w
   expect_strict clean "$(head -c 7000 /dev/zero | tr '\0' ' ')"
 }
 
-@test "strict: a quoted value whose first character is a template marker is skipped, like an unquoted one" {
-  expect_strict clean 'token = "$abcdefghijklmnopqrstuv"'
-  expect_strict clean "token = '<abcdefghijklmnopqrstuv>'"
-  expect_strict clean 'secret: "{abcdefghijklmnopqrstuv}"'
+@test "a quoted value whose first character is a template marker: skipped by the commit guard, a finding in strict (H-01 d)" {
+  expect_plain clean 'token = "$abcdefghijklmnopqrstuv"'
+  expect_plain clean "token = '<abcdefghijklmnopqrstuv>'"
+  expect_plain clean 'secret: "{abcdefghijklmnopqrstuv}"'
+  expect_plain clean 'token = $abcdefghijklmnopqrstuv1'
+  expect_strict assigned-secret 'token = "$abcdefghijklmnopqrstuv"'
+  expect_strict assigned-secret "token = '<abcdefghijklmnopqrstuv>'"
+  expect_strict assigned-secret 'secret: "{abcdefghijklmnopqrstuv}"'
   expect_strict assigned-secret 'token = "abcdefghijklmnopqrstuv"'
+  # a quoted marker-first value of 15 characters in all is still short
+  expect_strict clean 'token = "$abcdefghijklmn"'
 }
 
 @test "README: the strict-scan paragraph does not name the allow pragma and states the 6-character and first-character rules" {
   ! grep -qi 'pragma' "$REPO_ROOT/hooks/README.md" || false
   grep -qF 'URL password of 6 or more characters' "$REPO_ROOT/hooks/README.md"
+  # the commit guard skips a $ < { first character; the strict scan (H-01) does not
   grep -qF 'first character is `$`, `<` or `{`' "$REPO_ROOT/hooks/README.md"
+  grep -qF 'strict scan does not skip' "$REPO_ROOT/hooks/README.md"
   # lengths are characters in a UTF-8 locale, not bytes
   grep -qF '262144 characters' "$REPO_ROOT/hooks/README.md"
+}
+
+# ===========================================================================
+# H-01 (hardening, refs private H-01): shapes of a key, a filler run and a value that
+# straddle a piece cut of a line over 6,000 characters, and the strict-only shapes the
+# NF-057 review deferred. Every value is plainly fake.
+# ===========================================================================
+
+# _fill <n> <char>: <n> copies of one character (fast for thousands, unlike rep).
+_fill() { head -c "$1" /dev/zero | tr '\0' "$2"; }
+
+# _straddle <dots before> <key word> <run length> <run char> <text after the run> [<dots after>]
+# The key word starts at offset <dots before>; the cut of the first piece is at 4352 and
+# the next piece starts at 4096.
+_straddle() {
+  printf '%s%s%s%s%s' "$(_fill "$1" .)" "$2" "$(_fill "$3" "$4")" "$5" "$(_fill "${6:-3000}" .)"
+}
+
+# _name_in <locale> <strict|plain> <line>: like _name_of, in a fixed locale.
+_name_in() {
+  printf '%s' "$3" > "$BATS_TEST_TMPDIR/line.txt"
+  run env LC_ALL="$1" bash -c '. "$1/hooks/lib/secret-patterns.sh"
+    if [ "$2" = strict ]; then SECRET_STRICT=1; fi
+    line="$(cat "$3")"
+    if secret_match_long "$line"; then printf "%s" "$SECRET_MATCH_NAME"; else printf clean; fi' \
+    _ "$REPO_ROOT" "$2" "$BATS_TEST_TMPDIR/line.txt"
+}
+# expect_in <locale> <strict|plain> <expected> <line>
+expect_in() {
+  _name_in "$1" "$2" "$4"
+  { [ "$status" -eq 0 ] && [ "$output" = "$3" ]; } || { echo "$1/$2: want '$3' got '$output' for (len ${#4}): ${4:0:100}" >&2; false; }
+}
+
+# VH1: a long identifier run, then = and a value; the cut falls inside the value, so the
+# key word is in one piece and the value is not (and the 256-character overlap is shorter
+# than key + run + value).
+@test "long line: a key word, a long filler run and a value cut in two are found (VH1)" {
+  local v='AbCdEf0123456789ZZxx' pad run ar
+  ar="$(rep a_ 120)"
+  expect_plain  assigned-secret "$(_fill 4092 .)secret${ar}=${v}$(_fill 6000 .)"
+  expect_strict assigned-secret "$(_fill 4092 .)secret${ar}=${v}$(_fill 6000 .)"
+  for pad in 4040 4086 4092 4095 4096 4097; do
+    for run in 200 240 300 1500; do
+      expect_plain  assigned-secret "$(_straddle "$pad" secret "$run" _ "=$v")"
+      expect_strict assigned-secret "$(_straddle "$pad" secret "$run" _ "=$v")"
+    done
+  done
+}
+
+@test "long line: the same with a quoted value and every spelling of the key word (VH1, addendum)" {
+  local v='"Ab3dEf9Gh2Jk4Lm6Np8Q"' pad kw
+  for kw in token api-key api_key password PASSWD access-key private-key; do
+    for pad in 4036 4040 4044 4048; do
+      expect_plain  assigned-secret "$(_straddle "$pad" "$kw" 300 _ "=$v")"
+      # strict mode has a row of its own for pass/pwd/password keys: either row is a finding
+      _name_of strict "$(_straddle "$pad" "$kw" 300 _ "=$v")"
+      case "$output" in assigned-secret|password-assigned) ;; *) echo "strict $kw@$pad: got '$output'" >&2; false ;; esac
+    done
+  done
+  # strict mode ignores the placeholder word in the value
+  expect_strict assigned-secret "$(_straddle 4040 token 300 _ '="exampleAb3dEAb3dEAb3dE"')"
+}
+
+@test "long line: a filler run of letters and digits, a value with + and / in it, a blank around the = (VH1 variants)" {
+  local v='Ab3dEf9+Gh2Jk4/Lm6Np8Q'
+  expect_plain  assigned-secret "$(_straddle 4060 secret 280 a "=$v")"
+  expect_plain  assigned-secret "$(_straddle 4060 secret 280 7 " = \"$v\"")"
+  # the cut falls after a + and a / in the value: only the filler run, not the value, tells
+  # the next piece where to start
+  expect_plain  assigned-secret "$(_straddle 4060 secret 280 a '=A+b3dEf9/Gh2Jk4Lm6Np8Q')"
+  expect_plain  assigned-secret "$(_straddle 4062 token 280 a '=A+b3/dEf9Gh2Jk4Lm6Np8Q')"
+  expect_strict assigned-secret "$(_straddle 4060 secret 280 _ " : $v")"   # letters would be a base64-run first
+  # a C-run that does not reach the = is not a key: the dot ends the run
+  expect_plain  clean "$(_straddle 4060 secret 280 _ ".=\"$v\"")"
+}
+
+# VH2: the closing quote of an escaped JSON key and the backslashes in front of it are an
+# unbounded run too, on either side of the :
+@test "long line: a backslash run between the key and the = or in front of the value, cut inside the run (VH2)" {
+  local v='Ab3dEf9Gh2Jk4Lm6Np8Q' pad bs
+  bs="$(_fill 300 '\\')"
+  for pad in 3900 4040 4090 4100; do
+    expect_plain  assigned-secret "$(_fill "$pad" .)secretX${bs}\"=\"$v\"$(_fill 3000 .)"
+    expect_strict assigned-secret "$(_fill "$pad" .)secretX${bs}\"=\"$v\"$(_fill 3000 .)"
+    expect_plain  assigned-secret "$(_fill "$pad" .)token=${bs}\"$v\"$(_fill 3000 .)"
+    expect_strict assigned-secret "$(_fill "$pad" .)token=${bs}\"$v\"$(_fill 3000 .)"
+  done
+}
+
+@test "long line: blanks around the =, a filler run behind it, a value judged on its whole run (H-01)" {
+  local v='"Ab3dEf9Gh2Jk4Lm6Np8Q"' pad bs
+  bs="$(_fill 300 '\\')"
+  for pad in 3990 4040 4090; do
+    expect_plain  assigned-secret "$(_fill "$pad" .)secret = ${bs}${v}$(_fill 3000 .)"
+    expect_strict assigned-secret "$(_fill "$pad" .)secret = ${bs}${v}$(_fill 3000 .)"
+    expect_plain  assigned-secret "$(_fill "$pad" .)secret$(_fill 300 _) : ${bs}${v}$(_fill 3000 .)"
+  done
+  # default mode reads an unquoted value on its whole run: 17 letters, then a digit. The
+  # cut falls after the 17th letter, so the piece with the key word holds no digit.
+  expect_plain assigned-secret "$(_straddle 4028 secret 300 _ '=abcdefghijklmnopq9rstuv ')"
+  expect_plain assigned-secret "$(_straddle 4028 secret 300 _ '=abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz9 ')"
+}
+
+# An assignment whose filler fills a whole piece cannot be shown to be complete: it blocks.
+@test "long line: a key word with a backslash run longer than a piece fails closed (oversize-line)" {
+  expect_plain  oversize-line "token$(_fill 5000 '\\')\"=\"Ab3dEf9Gh2Jk4Lm6Np8Q\"$(_fill 3000 .)"
+  expect_strict oversize-line "token$(_fill 5000 '\\')\"=\"Ab3dEf9Gh2Jk4Lm6Np8Q\"$(_fill 3000 .)"
+  expect_plain  oversize-line "$(_fill 100 .)secret$(_fill 5000 '\\')$(_fill 3000 .)"
+  # ... but a long backslash run with no key word in front of it is not refused
+  expect_plain  clean "$(_fill 100 .)$(_fill 5000 '\\')$(_fill 3000 .)"
+}
+
+# VH3: in strict mode a run of 16 or more backslashes after the = is a value of its own
+# (the commit guard never read it as one), even when a short quoted value follows.
+@test "strict: secret= and 16 or more backslashes is a value, with or without a short quoted value after it (VH3)" {
+  local n
+  for n in 16 17 20 300; do
+    expect_strict assigned-secret "secret=$(_fill "$n" '\\')\"ab\""
+    expect_strict assigned-secret "secret=$(_fill "$n" '\\')"
+  done
+  expect_strict assigned-secret "$(_fill 100 .)secret=$(_fill 300 '\\')\"ab\"$(_fill 6000 .)"
+  # 15 backslashes and a short value stay clean, and the commit guard is unchanged
+  expect_strict clean "secret=$(_fill 15 '\\')\"ab\""
+  expect_plain  clean "secret=$(_fill 20 '\\')\"ab\""
+}
+
+# --- negative controls: nothing here may start to block -------------------------------
+@test "long line: filler runs with no value, a short value or a placeholder stay clean" {
+  expect_plain  clean "$(_straddle 4092 secret 240 _ '=short ')"
+  expect_strict clean "$(_straddle 4092 secret 240 _ '=short ')"
+  expect_plain  clean "$(_straddle 4092 secret 240 _ '')"
+  expect_plain  clean "$(_straddle 4040 token 300 _ '="exampleAb3dEAb3dEAb3dE"')"
+  # a long line of words that mention the key words is not a finding
+  expect_plain  clean "$(rep 'the token is in the secret store, ask for the password. ' 200)"
+  expect_strict clean "$(rep 'the token is in the secret store, ask for the password. ' 200)"
+}
+
+# --- VH5 test gaps: the key-count bound, exactly at its edge, and its per-line reset -----
+@test "key bound: exactly 200 key= candidates on a line is clean, 201 is key-dense-line" {
+  expect_plain  clean         "$(rep 'token=1 ' 200)"
+  expect_plain  key-dense-line "$(rep 'token=1 ' 201)"
+  expect_strict clean         "$(rep 'token=1 ' 200)"
+  expect_strict key-dense-line "$(rep 'token=1 ' 201)"
+  # the same count on a line long enough to be cut in pieces
+  expect_plain  clean         "$(rep 'token=1 ' 200)$(_fill 7000 .)"
+  expect_plain  key-dense-line "$(rep 'token=1 ' 201)$(_fill 7000 .)"
+}
+
+@test "key bound: the count restarts for every line, but is shared by the pieces of one line" {
+  local few
+  few="$(rep 'token=1 ' 150)"
+  # three 150-key lines in one process: each is clean, whichever entry point
+  run bash -c '. "$1/hooks/lib/secret-patterns.sh"; n=0
+    for n in 1 2 3; do secret_match_long "$2" && { echo "long $n: $SECRET_MATCH_NAME"; exit 1; }; done
+    for n in 1 2 3; do secret_match_line "$2" && { echo "line $n"; exit 1; }; done
+    echo ok' _ "$REPO_ROOT" "$few"
+  [ "$output" = ok ] || { echo "$output" >&2; false; }
+  # ... and so is a file of such lines, and a masked stream of them
+  printf '%s\n%s\n%s\n' "$few" "$few" "$few" > "$BATS_TEST_TMPDIR/keys.txt"
+  run bash -c '. "$1/hooks/lib/secret-patterns.sh"; secret_scan_file "$2" && echo clean' _ "$REPO_ROOT" "$BATS_TEST_TMPDIR/keys.txt"
+  [ "$output" = clean ] || { echo "$output" >&2; false; }
+  # 150 keys in the first piece and 150 in a later one: 300 on one line is key-dense-line
+  expect_plain key-dense-line "${few}$(_fill 5000 .)${few}"
+}
+
+# --- (b) and (d) from NF-057, strict mode only ---------------------------------------
+@test "strict: a quoted value that begins with blanks is a value (H-01 b); the commit guard is unchanged" {
+  local v='Ab3dEf9Gh2Jk4Lm6Np8Q'
+  expect_strict assigned-secret "api_key = \" $v\""
+  expect_strict assigned-secret "api_key = '   $v'"
+  expect_strict assigned-secret "{\\\"token\\\": \\\" $v\\\"}"
+  expect_plain  clean "api_key = \" $v\""
+  # nothing after the blanks, or a short value: still clean
+  expect_strict clean 'api_key = "      "'
+  expect_strict clean 'api_key = " short"'
+  expect_strict clean "api_key = \"two words $v\""
+}
+
+@test "strict: a value that begins with \$, < or { is a value (H-01 d); the commit guard is unchanged" {
+  local v='Ab3dEf9Gh2Jk4Lm6Np8Q'
+  expect_strict assigned-secret "token=\$$v"
+  expect_strict assigned-secret "token=<$v"
+  expect_strict assigned-secret "token={$v"
+  expect_strict assigned-secret "token=\"\$$v\""
+  expect_plain  clean "token=\$$v"
+  expect_plain  clean "token=\"\$$v\""
+  expect_plain  clean "token=<$v>"
+}
+
+# --- N6: blank characters that are only blanks in a UTF-8 locale -----------------------
+# In the C locale [[:space:]] knows no multibyte blank, so a U+3000 or U+2003 between the
+# key and the = (or after it) hid the assignment. Strict mode turns those into one blank
+# first. The commit guard is unchanged.
+@test "strict: a multibyte blank (U+3000, U+2003, U+00A0) around the = is a blank in every locale (N6)" {
+  local v='Ab3dEf9Gh2Jk4Lm6Np8Q' loc sp
+  for loc in C C.UTF-8; do
+    for sp in $'\xe3\x80\x80' $'\xe2\x80\x83' $'\xc2\xa0' $'\xe2\x80\xaf'; do
+      expect_in "$loc" strict assigned-secret "token${sp}=${v}"
+      expect_in "$loc" strict assigned-secret "token=${sp}\"${v}\""
+      expect_in "$loc" strict assigned-secret "token${sp}${sp}:${sp}${v}"
+      expect_in "$loc" strict assigned-secret "$(_fill 5000 .)token${sp}=${v}$(_fill 3000 .)"
+    done
+  done
+}
+
+@test "strict: thousands of multibyte blanks in the C locale cannot straddle a cut either (N6)" {
+  local v='Ab3dEf9Gh2Jk4Lm6Np8Q' pad
+  pad="$(yes $'\xe3\x80\x80' | head -n 7000 | tr -d '\n')"
+  expect_in C strict assigned-secret "token${pad}=${v}"
+  expect_in C strict assigned-secret "token=${pad}\"${v}\""
+  expect_in C.UTF-8 strict assigned-secret "token=${pad}\"${v}\""
+}
+
+@test "strict: the one-line entry point reads multibyte blanks as blanks too (N6)" {
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/secret-patterns.sh"
+    line="token$(printf "\xe3\x80\x80")=Ab3dEf9Gh2Jk4Lm6Np8Q"
+    secret_match_line "$line" || echo "plain: clean"
+    SECRET_STRICT=1 secret_match_line "$line" || echo "strict: clean"' _ "$REPO_ROOT"
+  [ "${lines[0]}" = "plain: clean" ] && [ "${lines[1]}" = "assigned-secret" ] || { echo "$output" >&2; false; }
+}
+
+# Fix round 1 (VS1): the unblanked text is scanned IN ADDITION to the original, never instead
+# of it. In the C locale the bytes of a multibyte blank inside a value are value characters,
+# so `token=Abcdefgh<U+3000>ijklmnop12` is a 16+ character value as it stands; turning the
+# blank into a space made it two short words and the line passed. Without that scan a finding
+# of the original text is lost.
+@test "strict: a multibyte blank inside a value keeps the finding the original text has (VS1)" {
+  local loc sp pad
+  for sp in $'\xe3\x80\x80' $'\xc2\xa0' $'\xe2\x80\x83' $'\xc2\x85' $'\xe2\x80\xa8'; do
+    for pad in 0 4335 4340 4345; do
+      expect_in C strict assigned-secret "$(_fill "$pad" .)token=Abcdefgh${sp}ijklmnop12$(_fill 3000 .)"
+      expect_in C strict password-assigned "$(_fill "$pad" .)password=Ab3${sp}xY $(_fill 3000 .)"
+    done
+  done
+  # in a UTF-8 locale the no-break space is not a blank to the matcher: still a finding
+  sp=$'\xc2\xa0'
+  for pad in 0 4335 4340; do
+    expect_in C.UTF-8 strict assigned-secret "$(_fill "$pad" .)token=Abcdefgh${sp}ijklmnop12$(_fill 3000 .)"
+    expect_in C.UTF-8 strict password-assigned "$(_fill "$pad" .)password=Ab3${sp}xY $(_fill 3000 .)"
+  done
+  # the one-line entry point as well
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/secret-patterns.sh"; SECRET_STRICT=1
+    secret_match_line "token=Abcdefgh$(printf "\xe3\x80\x80")ijklmnop12"' _ "$REPO_ROOT"
+  [ "$output" = assigned-secret ] || { echo "got: $output" >&2; false; }
+}
+
+# Fix round 1 (VS2): the multibyte-blank rewrite must not cost more than the scan. A line over
+# the 262144 limit is judged oversize before any rewrite, and the rewrite of a shorter line is
+# one pass.
+_mbpad() { yes $'\xe3\x80\x80' | head -n "$1" | tr -d '\n'; }
+
+@test "strict: a 1.6 MB line of multibyte blanks is oversize-line in a few seconds, not tens (VS2)" {
+  local line t0 ms
+  line="$(_mbpad 533334)"
+  t0=$(date +%s%N)
+  expect_in C strict oversize-line "$line"
+  ms=$((($(date +%s%N) - t0) / 1000000))
+  [ "$ms" -lt 5000 ] || { echo "took $ms ms" >&2; false; }
+}
+
+@test "strict: a 200 KB line of multibyte blanks is still scanned, in linear time (VS2)" {
+  local v='Ab3dEf9Gh2Jk4Lm6Np8Q' line t0 ms
+  line="token=$(_mbpad 66000)${v}"
+  t0=$(date +%s%N)
+  expect_in C strict assigned-secret "$line"
+  ms=$((($(date +%s%N) - t0) / 1000000))
+  [ "$ms" -lt 5000 ] || { echo "200 KB took $ms ms" >&2; false; }
+}
+
+@test "strict: a multibyte blank inside a value does not split it into a short one, and clean text stays clean (N6)" {
+  expect_in C strict clean "token = short$(printf '\xe3\x80\x80')more"
+  expect_in C strict clean "the token$(printf '\xe3\x80\x80')was rotated"
+}
+
+# --- timing: the new cut handling must not be quadratic (acceptance 4) -----------------
+@test "long line: many pieces that each end inside a key word's filler run are scanned in linear time (H-01)" {
+  local unit line t0 ms
+  unit="secret$(_fill 3000 _)."
+  line="$(rep "$unit" 19)"   # about 57 KB; every piece ends in the middle of a run
+  t0=$(date +%s%N)
+  expect_plain clean "$line"
+  ms=$((($(date +%s%N) - t0) / 1000000))
+  [ "$ms" -lt 3000 ] || { echo "took $ms ms" >&2; false; }
 }
