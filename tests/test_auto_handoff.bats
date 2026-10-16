@@ -1848,12 +1848,14 @@ inc_conf() { printf '[core]\n\tpager = cat\n' > "$1"; touch -t 202001010000 "$1"
 @test "H-02: ssh Include spellings: lower case, =, quotes, several paths per line, ~, nested" {
   mkdir -p "$HOME/sshinc" "$HOME/.ssh"
   inc_conf "$HOME/sshinc/one.conf"; inc_conf "$HOME/sshinc/two.conf"; inc_conf "$HOME/sshinc/deep.conf"
+  inc_conf "$HOME/sshinc/three.conf"; inc_conf "$HOME/sshinc/four.conf"
   printf 'include = "~/sshinc/one.conf" %s/sshinc/two.conf\nInclude sshinc-nested.conf\n' "$HOME" > "$HOME/.ssh/config"
+  printf 'Include ${HOME}/sshinc/three.conf $HOME/sshinc/four.conf\n' >> "$HOME/.ssh/config"
   printf 'Include %s/sshinc/deep.conf\n' "$HOME" > "$HOME/.ssh/sshinc-nested.conf"
   touch -t 202001010000 "$HOME/.ssh/config" "$HOME/.ssh/sshinc-nested.conf"
   local f n=0
   export STUB_CLAUDE_MODE=handoff-outside
-  for f in one two deep; do
+  for f in one two deep three four; do
     n=$((n + 1)); mk_tx 6
     export STUB_OUTSIDE_FILE="$HOME/sshinc/$f.conf"
     SID="11111111-1111-4111-8111-77777777777$n"
