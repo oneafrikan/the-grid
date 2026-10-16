@@ -2137,6 +2137,10 @@ expect_in() {
   local v='Ab3dEf9+Gh2Jk4/Lm6Np8Q'
   expect_plain  assigned-secret "$(_straddle 4060 secret 280 a "=$v")"
   expect_plain  assigned-secret "$(_straddle 4060 secret 280 7 " = \"$v\"")"
+  # the cut falls after a + and a / in the value: only the filler run, not the value, tells
+  # the next piece where to start
+  expect_plain  assigned-secret "$(_straddle 4060 secret 280 a '=A+b3dEf9/Gh2Jk4Lm6Np8Q')"
+  expect_plain  assigned-secret "$(_straddle 4062 token 280 a '=A+b3/dEf9Gh2Jk4Lm6Np8Q')"
   expect_strict assigned-secret "$(_straddle 4060 secret 280 _ " : $v")"   # letters would be a base64-run first
   # a C-run that does not reach the = is not a key: the dot ends the run
   expect_plain  clean "$(_straddle 4060 secret 280 _ ".=\"$v\"")"
@@ -2277,6 +2281,14 @@ expect_in() {
   expect_in C strict assigned-secret "token${pad}=${v}"
   expect_in C strict assigned-secret "token=${pad}\"${v}\""
   expect_in C.UTF-8 strict assigned-secret "token=${pad}\"${v}\""
+}
+
+@test "strict: the one-line entry point reads multibyte blanks as blanks too (N6)" {
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/secret-patterns.sh"
+    line="token$(printf "\xe3\x80\x80")=Ab3dEf9Gh2Jk4Lm6Np8Q"
+    secret_match_line "$line" || echo "plain: clean"
+    SECRET_STRICT=1 secret_match_line "$line" || echo "strict: clean"' _ "$REPO_ROOT"
+  [ "${lines[0]}" = "plain: clean" ] && [ "${lines[1]}" = "assigned-secret" ] || { echo "$output" >&2; false; }
 }
 
 @test "strict: a multibyte blank inside a value does not split it into a short one, and clean text stays clean (N6)" {
