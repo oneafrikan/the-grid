@@ -149,7 +149,7 @@ path to this checkout's `hooks/run.sh`), leaving every hand-written hook and key
 (values and key order are kept, but the first write reformats the whole file as
 2-space-indented JSON: tabs, `\uXXXX` escapes and spellings like `1e5` are normalised).
 A settings file it cannot rewrite faithfully (duplicate keys, `NaN`/`Infinity`, empty,
-read-only, not a regular file) is refused with a warning and left untouched; delete an
+read-only, not a regular file, larger than 1 MiB) is refused with a warning and left untouched; delete an
 empty file or write `{}` to it.
 Running `wire.sh` again changes nothing; `wire.sh --check` reports a missing entry and
 exits 1. A symlinked settings file or config dir is refused (a warning from `wire.sh`),
@@ -207,7 +207,11 @@ tells it to write only the two files and run no git. The target directory is res
 the way the handoff skill resolves it: the first matching row of `handoff-locations.md`
 in the private dir (`$GRID_PRIVATE_DIR`, else `~/.the-grid-private/`), else an existing
 `logs` directory of the session's directory in any casing. If it does not exist the
-child writes to the fallback directory instead.
+child writes to the fallback directory instead. A row's directory is matched ignoring
+case at every component (`Docs/Handoffs` finds `docs/handoffs`). When two directories
+match (`Logs` and `LOGS`, or an exact-case row plus another casing) nothing is granted:
+the spawn line says `target-refused=ambiguous-case` and the child writes to the
+fallback directory.
 
 **Confinement.** Whether Claude Code honours the `Edit(//<abs>/**)` rule form was not
 proven live (operator check B1), so the rules are not the only barrier:
@@ -233,6 +237,14 @@ proven live (operator check B1), so the rules are not the only barrier:
   variables named in `GRID_AUTOHANDOFF_KEEP_ENV` (comma list of names or `PREFIX*`).
   `GH_TOKEN`, `ANTHROPIC_API_KEY`, cloud credentials and `SSH_AUTH_SOCK` are not passed;
   if `claude` authenticates through an API key variable, list it there.
+  **Widening risk (operator item, not yet probed):** `GRID_AUTOHANDOFF_KEEP_ENV` is read
+  from the environment of the hook, and whether a project's `env` block (settings
+  `env`) can reach that environment has not been checked. If it can, a repository could
+  name a variable here and have it passed into the child (an API key, or a variable
+  that changes how a tool the child runs behaves), so treat the variable as machine
+  configuration: set it in your own shell profile, never from a project, and keep the
+  list to the authentication variables `claude` needs. The worker does not restrict
+  it to an allowlist yet; that is the follow-up if the probe shows propagation.
 - The worker's own git calls after the child run with `core.fsmonitor=false`,
   `core.hooksPath=/dev/null` and the `ext::` transport off (your own configuration for
   remote access is left alone, so a push to a `git@host:` remote works), and only in a git dir that existed
@@ -255,8 +267,17 @@ proven live (operator check B1), so the rules are not the only barrier:
    `settings*.json`, `.credentials.json`, `CLAUDE.md`, `hooks/` and `commands/`, is
    `unexpected-file`: no commit, changed paths logged, nothing moved. (Not watched:
    a repo's `refs`, `packed-refs` and `index`, which change legitimately while you
-   work.) A `.git` entry that did not exist before the run, anywhere under the scanned
-   directories, is `unexpected-git-dir`.
+   work.) The files your own config pulls in are watched too: those named by a
+   `~/.gitconfig` or `~/.config/git/config` `include.path` / `includeIf.*.path`, and by
+   an `Include` line of `~/.ssh/config`, followed through nested includes (five levels)
+   and found once before the run. Bounds: only paths under `$HOME`; a glob (or a `%`/`$`
+   token) watches the files it matches today plus the directory in front of its first
+   special character, so a new file there is seen, except directly in `~/.ssh` or `$HOME`
+   (matches only; `known_hosts` changes under any ssh) and for directories of more than
+   500 entries; at most 64 paths; a path holding a newline is skipped; a symlink is
+   watched as itself and where it points (when that is under `$HOME`). A `.git` entry
+   that did not exist before the run, anywhere under the scanned directories, is
+   `unexpected-git-dir`.
 2. Every file or symlink (symlinks are not followed) that is new or changed during the run,
    under the session's directory (any depth, `.git/` excluded), the fallback directory
    and the target directory is collected (NOT the rest of the repo the commit lands in:
@@ -266,7 +287,10 @@ proven live (operator check B1), so the rules are not the only barrier:
    `<p>-handoff.md` and at most one `<p>-context.md` with the same prefix, in the target
    or fallback directory, are expected. Anything else is `unexpected-file` (no commit,
    every path logged, nothing moved or deleted); no handoff file at all is
-   `no-handoff-file`.
+   `no-handoff-file`. A file or symlink that was there before the run and is gone after
+   it is `unexpected-file` too, logged as `deleted=<paths>` (the child only creates
+   files; a build or a person removing files in the directory mid-run is reported the
+   same way as one adding them).
 3. Both files are scanned with the secret table (`lib/secret-patterns.sh`), whatever the
    project profile says, in strict mode: the "example"/placeholder exemptions do not
    apply (a model can add the word to any line), and
@@ -344,7 +368,7 @@ ts=<UTC time> session=<id> action=<skip|spawn|done|error> reason=<token> [turns=
   short sha.
 - `action=error`: `terminated` (the worker got TERM, HUP or the hook's outer alarm; a
   half-made commit was unstaged), `timeout`, `claude-exit-<n>` (127 means the binary could not be run),
-  `no-handoff-file`, `unexpected-file` and `unexpected-git-dir` (see `paths=`), `repo-busy`, `secret`, `commit-failed`,
+  `no-handoff-file`, `unexpected-file` and `unexpected-git-dir` (see `paths=` and `deleted=`), `repo-busy`, `secret`, `commit-failed`,
   `digest-failed`.
 - `push=`: `yes`; `no-not-private` (not the private repo); `no-upstream`;
   `no-other-commits` (an earlier unpushed commit exists, so nothing was sent); `failed`
