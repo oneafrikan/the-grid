@@ -142,6 +142,56 @@ _IDRUN_RE='[[:alnum:]_]{200}[^[:alnum:]_]{0,16}$'
 # so only its `key` is part of the run. A superset on purpose (any run holding "key"
 # counts); case-insensitive, see _has_keyword_tail.
 _KEYWORD_TAIL_RE='secret|token|passw|key'
+# H-01: the open-key check of secret_match_long (see _open_key_pos). A glob that finds the
+# last character that cannot belong to the unbounded middle of an assignment. That middle is
+# identifier characters, backslashes, quotes, : and = (and, with up to three single blanks
+# around them, the blanks of `key = "value"`).
+_OPEN_BREAK='[![:alnum:]_\\"'"'"':=]*'
+# The last characters of a piece that may be a value still being read: a value is judged on
+# its first 16 characters (64 here, because a letters-only value without a digit is judged on
+# the whole run in default mode), and in front of it come at most a blank, a quote and a :
+# or =.
+_OPEN_TAIL=80
+# A key word that still reads like an assignment when the piece ends: key word, identifier
+# characters, backslashes, a quote, then optionally the : or = and a value of up to 64
+# characters. A superset of the key side of the assigned-secret row plus the start of its value.
+_OPEN_RE='^('"$_SECRET_KEYWORDS"')[[:alnum:]_]*\\*["'"'"']?[[:space:]]*([:=][[:space:]]*\\*["'"'"']?[[:space:]]*[^"'"'"'[:space:]]{0,64})?$'
+_OPEN_KW='('"$_SECRET_KEYWORDS"')'
+_OPEN_POS=-1
+
+# H-01 (N6), strict mode only. The blanks that [[:space:]] knows only in a UTF-8 locale (and
+# the no-break ones it never knows): NEL, NBSP, U+1680, U+2000 to U+200A, U+2028, U+2029,
+# U+202F, U+205F, U+3000. In the C locale `token<U+3000>=value` hid the assignment from the
+# key regex. Strict callers turn each into one ASCII blank first (see _unblank); the commit
+# guard keeps its behaviour. Zero-width characters (U+200B and the like) are not blanks and
+# are not touched.
+_MB_BLANKS=(
+  $'\xc2\x85' $'\xc2\xa0' $'\xe1\x9a\x80'
+  $'\xe2\x80\x80' $'\xe2\x80\x81' $'\xe2\x80\x82' $'\xe2\x80\x83' $'\xe2\x80\x84' $'\xe2\x80\x85'
+  $'\xe2\x80\x86' $'\xe2\x80\x87' $'\xe2\x80\x88' $'\xe2\x80\x89' $'\xe2\x80\x8a'
+  $'\xe2\x80\xa8' $'\xe2\x80\xa9' $'\xe2\x80\xaf' $'\xe2\x81\x9f' $'\xe3\x80\x80'
+)
+_UB=""
+# The same list as one sed script, for long lines: bash's ${x//pat/ } copies the whole text
+# once per pattern and a long line made of such blanks cost seconds (about 4x per doubling).
+_MB_SED=()
+for _b in "${_MB_BLANKS[@]}"; do _MB_SED+=(-e "s/$_b/ /g"); done
+unset _b
+# _unblank <text>: sets _UB to the text, with the blanks above replaced by a space when the
+# scan is strict. Callers scan the ORIGINAL text first and this one second (see
+# secret_match_long): in the C locale the bytes of a multibyte blank inside a value are value
+# characters, and replacing them can only shorten a value.
+_unblank() {
+  local b out
+  _UB="$1"
+  [ "${SECRET_STRICT:-0}" = 1 ] || return 0
+  if [ "${#1}" -gt 6000 ]; then
+    # one linear pass; if sed fails the text is left as it is (the original was scanned)
+    if out="$(printf '%s' "$1" | sed "${_MB_SED[@]}")"; then _UB="$out"; fi
+    return 0
+  fi
+  for b in "${_MB_BLANKS[@]}"; do _UB="${_UB//"$b"/ }"; done
+}
 
 # Set by _secret_match: the matched pattern name and the matched text without its
 # boundary character (callers show only its first four characters).
@@ -163,17 +213,35 @@ SECRET_MATCH_TEXT=""
 #   seen each fail one rule. Strict mode has no commit to block: a false positive there only
 #   quarantines a handoff for review, so it takes the miss out (the pre-merge strict scan
 #   did the same).
+#   Strict mode (H-01, the auto-handoff worker only; the commit guard keeps the rules above):
+#     (d) a first character of $ < { does not exempt a value, quoted or not: a model can put
+#         one in front of any value, and a real password may start with one;
+#     (b) a quote may be followed by blanks before the value (`api_key = " value"`);
+#     VH3 a run of 16 or more backslashes is a value of its own even when a quote follows
+#         it (the escaped-quote rule above would otherwise swallow the run).
 _AV_RE_Q="^[\"']([^\"'[:space:]\$<{][^\"'[:space:]]{15,})"
 _AV_RE_U="^([^\"'[:space:]\$<{][^\"'[:space:]]{15,})"
+_AV_RE_QS="^[\"'][[:space:]]*([^\"'[:space:]][^\"'[:space:]]{15,})"
+_AV_RE_US="^([^\"'[:space:]][^\"'[:space:]]{15,})"
 _AV_TOKEN=""
 _assigned_value() {
-  local rest="$1" v lead
+  local rest="$1" v lead whole
   rest="${rest#"${rest%%[![:space:]]*}"}"          # drop leading blanks
+  whole="$rest"
   # JSON inside a string literal escapes its quotes ({\"k\":\"v\"}): drop the backslashes
   # in front of an opening quote so the quoted-value rule below sees the quote
   lead="${rest%%[!\\]*}"
   if [ -n "$lead" ]; then
     case "${rest#"$lead"}" in \"*|\'*) rest="${rest#"$lead"}" ;; esac
+  fi
+  if [ "${SECRET_STRICT:-0}" = 1 ]; then
+    # strict: a quoted value (blanks after the quote allowed), else any run of 16 or more
+    # characters, read from the text as it stood before the backslashes were dropped
+    case "$rest" in
+      \"*|\'*) if [[ "$rest" =~ $_AV_RE_QS ]]; then _AV_TOKEN="${BASH_REMATCH[1]}"; return 0; fi ;;
+    esac
+    if [[ "$whole" =~ $_AV_RE_US ]]; then _AV_TOKEN="${BASH_REMATCH[1]}"; return 0; fi
+    return 1
   fi
   case "$rest" in
     \"*|\'*)
@@ -181,7 +249,6 @@ _assigned_value() {
     *)
       if [[ "$rest" =~ $_AV_RE_U ]]; then
         v="${BASH_REMATCH[1]}"
-        if [ "${SECRET_STRICT:-0}" = 1 ]; then _AV_TOKEN="$v"; return 0; fi
         case "$v" in *\(*|*\)*) return 1 ;; esac
         case "$v" in *[0-9]*) _AV_TOKEN="$v"; return 0 ;; esac
       fi ;;
@@ -277,6 +344,53 @@ _has_keyword_tail() {
   return "$rc"
 }
 
+# _open_key_pos <piece> <limit>
+#   H-01. Sets _OPEN_POS to the offset (below <limit>) of the first key word in <piece> that
+#   still reads like an assignment when the piece ends, or -1. An assignment is a key word,
+#   any number of identifier characters or backslashes, a quote, a : or =, any number of
+#   backslashes, a quote, and the value: the filler runs have no length limit, so such an
+#   assignment can be longer than the overlap of two pieces, and the next piece must then
+#   start at the key word, not 4096 characters on. Cheap by construction: the run that ends
+#   the piece is found with a linear parameter expansion (as in secret_match_long), and only
+#   key words inside it are tested, with a regex anchored at both ends. At most 32 key words
+#   are tried; the 32nd counts as open, because a scan that cannot finish must block.
+_open_key_pos() {
+  local p="$1" lim="$2" n=${#1} w lead start ks base rest kw pre k tries=0 blanks=0 was=0
+  _OPEN_POS=-1
+  [ "$n" -gt "$_OPEN_TAIL" ] || return 0
+  w="${p:0:$((n - _OPEN_TAIL))}"
+  # the run that ends the piece: walk left over the class characters, and over up to two
+  # blanks (one in front of the : or =, one behind it; the third, behind a quote, is in the
+  # last _OPEN_TAIL characters) which are the only blanks an assignment can hold once a long
+  # line is squeezed
+  while :; do
+    lead="${w%$_OPEN_BREAK}"
+    if [ "$lead" = "$w" ]; then start=0; break; fi
+    start=$((${#lead} + 1))
+    if [ "$blanks" -lt 2 ] && [[ "${w:${#lead}:1}" == [[:space:]] ]]; then
+      blanks=$((blanks + 1)); w="$lead"; continue
+    fi
+    break
+  done
+  # `api-key`: the - ends the run, so look 11 characters (the longest key word) further left
+  ks=$((start > 11 ? start - 11 : 0))
+  shopt -q nocasematch && was=1
+  shopt -s nocasematch
+  base=$ks
+  while [ "$base" -lt "$lim" ] && [ "$base" -lt "$n" ]; do
+    rest="${p:$base:$((lim + 11 - base))}"   # 11 more: a key word that starts below the limit
+    [[ "$rest" =~ $_OPEN_KW ]] || break
+    kw="${BASH_REMATCH[0]}"
+    pre="${rest%%"$kw"*}"
+    k=$((base + ${#pre}))
+    [ "$k" -lt "$lim" ] || break
+    tries=$((tries + 1))
+    if [[ "${p:$k}" =~ $_OPEN_RE ]] || [ "$tries" -ge 32 ]; then _OPEN_POS=$k; break; fi
+    base=$((k + 1))
+  done
+  if [ "$was" = 1 ]; then shopt -s nocasematch; else shopt -u nocasematch; fi
+}
+
 # secret_match_long <text>
 #   _secret_match for text of any length. The bash matcher is superlinear on long input,
 #   so text over 6,000 characters is matched in 4,352-character pieces that overlap by 256
@@ -291,6 +405,11 @@ _has_keyword_tail() {
 #   more than 4096 extra characters is reported as oversize-line, like any scan that cannot
 #   be shown to be complete. Only a run that holds a key word is treated so: a long hex or
 #   base64 word with none cannot hide a key and is cut as before.
+#   The other half of that: the same run can be longer than the overlap even when it is
+#   not 200 characters long (`secret<240 characters>=<value>`, or a value of 100 characters
+#   after a 150-character run), and a backslash run is as unbounded as an identifier run. So
+#   after every piece _open_key_pos asks whether a key word's assignment is still open at the
+#   piece's end; if so the next piece starts at that key word (H-01) instead of 4096 on.
 #   Blanks are the one unbounded part of a match (`key =<any number of blanks>value`), so
 #   a long line first has every run of whitespace squeezed to one space: a pad of any
 #   width can then no longer straddle a piece boundary. No row needs more than one blank
@@ -299,7 +418,20 @@ _has_keyword_tail() {
 #   on the ORIGINAL length: squeezing must not turn a line the scan could not have
 #   finished into a clean one.
 secret_match_long() {
-  local t="$1" len=${#1} off=0 pieces=0 tlen sq end w rest run piece core lead runl
+  # strict mode (H-01): the original text first, so nothing origin/next found is lost, then
+  # the text with multibyte blanks turned into spaces, which only changes the verdict for a
+  # line that has such a blank. A line too long for the first scan never reaches the second:
+  # it is a finding (oversize-line) before any rewrite.
+  _match_pieces "$1" && return 0
+  [ "${SECRET_STRICT:-0}" = 1 ] || return 1
+  _unblank "$1"
+  [ "$_UB" != "$1" ] || return 1
+  _match_pieces "$_UB"
+}
+
+# _match_pieces <text>: the piece-wise matcher behind secret_match_long (see above).
+_match_pieces() {
+  local t="$1" len=${#1} off=0 pieces=0 tlen sq end w rest run piece core lead runl cur next
   _SM_KEYS_LEFT=$SECRET_MAX_KEYS   # the key bound is per line, not per piece
   if [ "$len" -le 6000 ]; then _secret_match "$t"; return; fi
   # if sed fails the unsqueezed text is scanned (fail closed on size, never on emptiness)
@@ -335,8 +467,19 @@ secret_match_long() {
         fi
       fi
     fi
-    _secret_match "${t:$off:$((end - off))}" && return 0
-    off=$((off + 4096))
+    cur="${t:$off:$((end - off))}"
+    _secret_match "$cur" && return 0
+    next=$((off + 4096))
+    if [ "$end" -lt "$tlen" ]; then
+      # H-01: a key word whose filler run, = and value are still open when the piece ends
+      # may be longer than the overlap. The next piece then starts at the key word, so it
+      # holds the whole assignment. A key word at the very start of the piece with the
+      # assignment still open at its end cannot be shown to be complete: fail closed.
+      _open_key_pos "$cur" 4096
+      if [ "$_OPEN_POS" -eq 0 ]; then SECRET_MATCH_NAME="oversize-line"; SECRET_MATCH_TEXT=""; return 0; fi
+      if [ "$_OPEN_POS" -gt 0 ]; then next=$((off + _OPEN_POS)); fi
+    fi
+    off=$next
   done
   if [ "$len" -gt 262144 ]; then SECRET_MATCH_NAME="oversize-line"; SECRET_MATCH_TEXT=""; return 0; fi
   return 1
@@ -347,7 +490,14 @@ secret_match_long() {
 #   match or an exempt line. (Use _secret_match directly to also get the text.)
 secret_match_line() {
   _SM_KEYS_LEFT=$SECRET_MAX_KEYS
-  _secret_match "$1" || return 1
+  if ! _secret_match "$1"; then
+    # strict: then the text with multibyte blanks turned into spaces (see secret_match_long)
+    [ "${SECRET_STRICT:-0}" = 1 ] || return 1
+    _unblank "$1"
+    [ "$_UB" != "$1" ] || return 1
+    _SM_KEYS_LEFT=$SECRET_MAX_KEYS
+    _secret_match "$_UB" || return 1
+  fi
   printf '%s\n' "$SECRET_MATCH_NAME"
 }
 
