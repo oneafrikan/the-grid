@@ -2291,6 +2291,54 @@ expect_in() {
   [ "${lines[0]}" = "plain: clean" ] && [ "${lines[1]}" = "assigned-secret" ] || { echo "$output" >&2; false; }
 }
 
+# Fix round 1 (VS1): the unblanked text is scanned IN ADDITION to the original, never instead
+# of it. In the C locale the bytes of a multibyte blank inside a value are value characters,
+# so `token=Abcdefgh<U+3000>ijklmnop12` is a 16+ character value as it stands; turning the
+# blank into a space made it two short words and the line passed. Without that scan a finding
+# of the original text is lost.
+@test "strict: a multibyte blank inside a value keeps the finding the original text has (VS1)" {
+  local loc sp pad
+  for sp in $'\xe3\x80\x80' $'\xc2\xa0' $'\xe2\x80\x83' $'\xc2\x85' $'\xe2\x80\xa8'; do
+    for pad in 0 4335 4340 4345; do
+      expect_in C strict assigned-secret "$(_fill "$pad" .)token=Abcdefgh${sp}ijklmnop12$(_fill 3000 .)"
+      expect_in C strict password-assigned "$(_fill "$pad" .)password=Ab3${sp}xY $(_fill 3000 .)"
+    done
+  done
+  # in a UTF-8 locale the no-break space is not a blank to the matcher: still a finding
+  sp=$'\xc2\xa0'
+  for pad in 0 4335 4340; do
+    expect_in C.UTF-8 strict assigned-secret "$(_fill "$pad" .)token=Abcdefgh${sp}ijklmnop12$(_fill 3000 .)"
+    expect_in C.UTF-8 strict password-assigned "$(_fill "$pad" .)password=Ab3${sp}xY $(_fill 3000 .)"
+  done
+  # the one-line entry point as well
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/secret-patterns.sh"; SECRET_STRICT=1
+    secret_match_line "token=Abcdefgh$(printf "\xe3\x80\x80")ijklmnop12"' _ "$REPO_ROOT"
+  [ "$output" = assigned-secret ] || { echo "got: $output" >&2; false; }
+}
+
+# Fix round 1 (VS2): the multibyte-blank rewrite must not cost more than the scan. A line over
+# the 262144 limit is judged oversize before any rewrite, and the rewrite of a shorter line is
+# one pass.
+_mbpad() { yes $'\xe3\x80\x80' | head -n "$1" | tr -d '\n'; }
+
+@test "strict: a 1.6 MB line of multibyte blanks is oversize-line in a few seconds, not tens (VS2)" {
+  local line t0 ms
+  line="$(_mbpad 533334)"
+  t0=$(date +%s%N)
+  expect_in C strict oversize-line "$line"
+  ms=$((($(date +%s%N) - t0) / 1000000))
+  [ "$ms" -lt 5000 ] || { echo "took $ms ms" >&2; false; }
+}
+
+@test "strict: a 200 KB line of multibyte blanks is still scanned, in linear time (VS2)" {
+  local v='Ab3dEf9Gh2Jk4Lm6Np8Q' line t0 ms
+  line="token=$(_mbpad 66000)${v}"
+  t0=$(date +%s%N)
+  expect_in C strict assigned-secret "$line"
+  ms=$((($(date +%s%N) - t0) / 1000000))
+  [ "$ms" -lt 5000 ] || { echo "200 KB took $ms ms" >&2; false; }
+}
+
 @test "strict: a multibyte blank inside a value does not split it into a short one, and clean text stays clean (N6)" {
   expect_in C strict clean "token = short$(printf '\xe3\x80\x80')more"
   expect_in C strict clean "the token$(printf '\xe3\x80\x80')was rotated"

@@ -172,12 +172,24 @@ _MB_BLANKS=(
   $'\xe2\x80\xa8' $'\xe2\x80\xa9' $'\xe2\x80\xaf' $'\xe2\x81\x9f' $'\xe3\x80\x80'
 )
 _UB=""
+# The same list as one sed script, for long lines: bash's ${x//pat/ } copies the whole text
+# once per pattern and a long line made of such blanks cost seconds (about 4x per doubling).
+_MB_SED=()
+for _b in "${_MB_BLANKS[@]}"; do _MB_SED+=(-e "s/$_b/ /g"); done
+unset _b
 # _unblank <text>: sets _UB to the text, with the blanks above replaced by a space when the
-# scan is strict.
+# scan is strict. Callers scan the ORIGINAL text first and this one second (see
+# secret_match_long): in the C locale the bytes of a multibyte blank inside a value are value
+# characters, and replacing them can only shorten a value.
 _unblank() {
-  local b
+  local b out
   _UB="$1"
   [ "${SECRET_STRICT:-0}" = 1 ] || return 0
+  if [ "${#1}" -gt 6000 ]; then
+    # one linear pass; if sed fails the text is left as it is (the original was scanned)
+    if out="$(printf '%s' "$1" | sed "${_MB_SED[@]}")"; then _UB="$out"; fi
+    return 0
+  fi
   for b in "${_MB_BLANKS[@]}"; do _UB="${_UB//"$b"/ }"; done
 }
 
@@ -406,10 +418,21 @@ _open_key_pos() {
 #   on the ORIGINAL length: squeezing must not turn a line the scan could not have
 #   finished into a clean one.
 secret_match_long() {
+  # strict mode (H-01): the original text first, so nothing origin/next found is lost, then
+  # the text with multibyte blanks turned into spaces, which only changes the verdict for a
+  # line that has such a blank. A line too long for the first scan never reaches the second:
+  # it is a finding (oversize-line) before any rewrite.
+  _match_pieces "$1" && return 0
+  [ "${SECRET_STRICT:-0}" = 1 ] || return 1
+  _unblank "$1"
+  [ "$_UB" != "$1" ] || return 1
+  _match_pieces "$_UB"
+}
+
+# _match_pieces <text>: the piece-wise matcher behind secret_match_long (see above).
+_match_pieces() {
   local t="$1" len=${#1} off=0 pieces=0 tlen sq end w rest run piece core lead runl cur next
   _SM_KEYS_LEFT=$SECRET_MAX_KEYS   # the key bound is per line, not per piece
-  # (len above is the original length: oversize is judged on it, not on the unblanked text)
-  _unblank "$t"; t="$_UB"
   if [ "$len" -le 6000 ]; then _secret_match "$t"; return; fi
   # if sed fails the unsqueezed text is scanned (fail closed on size, never on emptiness)
   if sq="$(printf '%s' "$t" | sed 's/[[:space:]][[:space:]]*/ /g')"; then t="$sq"; fi
@@ -467,8 +490,14 @@ secret_match_long() {
 #   match or an exempt line. (Use _secret_match directly to also get the text.)
 secret_match_line() {
   _SM_KEYS_LEFT=$SECRET_MAX_KEYS
-  _unblank "$1"
-  _secret_match "$_UB" || return 1
+  if ! _secret_match "$1"; then
+    # strict: then the text with multibyte blanks turned into spaces (see secret_match_long)
+    [ "${SECRET_STRICT:-0}" = 1 ] || return 1
+    _unblank "$1"
+    [ "$_UB" != "$1" ] || return 1
+    _SM_KEYS_LEFT=$SECRET_MAX_KEYS
+    _secret_match "$_UB" || return 1
+  fi
   printf '%s\n' "$SECRET_MATCH_NAME"
 }
 
