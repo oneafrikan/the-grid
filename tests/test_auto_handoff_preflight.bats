@@ -170,7 +170,8 @@ overlay() { cat "$PF_GRID/machines/testhost.txt"; }
   local cap_line first_check
   cap_line="$(printf '%s\n' "$output" | grep -n 'spend cap' | head -1 | cut -d: -f1)"
   first_check="$(printf '%s\n' "$output" | grep -n -E '^(PASS|FAIL) ' | head -1 | cut -d: -f1)"
-  [ -n "$cap_line" ] && [ "$cap_line" -lt "$first_check" ]
+  [ -n "$cap_line" ]
+  [ "$cap_line" -lt "$first_check" ]
   [[ "$output" =~ USD\ 0\.50 ]]
   # five live calls, each hard-capped and on the cheapest model
   [ "$(n_calls)" -eq 5 ]
@@ -181,7 +182,7 @@ overlay() { cat "$PF_GRID/machines/testhost.txt"; }
 @test "scratch dirs are removed on exit" {
   pf
   [ "$status" -eq 0 ]
-  ! ls "$TMPDIR" | grep -q '^grid-preflight\.'
+  ! ls "$TMPDIR" | grep -q '^grid-preflight\.' || false
 }
 
 @test "env-propagation PROPAGATES: warns loudly, names the variables, does not fail --check" {
@@ -336,7 +337,7 @@ overlay() { cat "$PF_GRID/machines/testhost.txt"; }
   [[ "$output" =~ max-budget-usd ]]
   [[ "$output" =~ USD\ 0\.50 ]]
   [ "$(overlay)" = "$before" ]
-  ! ls "$TMPDIR" | grep -q '^grid-preflight\.'
+  ! ls "$TMPDIR" | grep -q '^grid-preflight\.' || false
 }
 
 @test "--enable --dry-run: no claude call, no overlay change, no backup, no wire" {
@@ -387,7 +388,7 @@ overlay() { cat "$PF_GRID/machines/testhost.txt"; }
 @test "--enable: removes only the -hook line, backs up first, rewires, says how to undo" {
   pf --enable
   [ "$status" -eq 0 ]
-  ! overlay | grep -q 'hook:auto-handoff'
+  ! overlay | grep -q 'hook:auto-handoff' || false
   # the rest of the overlay is intact
   overlay | grep -q '^project:foo$'
   overlay | grep -q '^repo/skill$'
