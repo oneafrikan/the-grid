@@ -165,6 +165,41 @@ through a float).
 (re-enable with `hook:auto-handoff`). Per session: start `claude` with
 `GRID_DISABLED_HOOKS=auto-handoff` (or `GRID_HOOKS=off` for every hook).
 
+**Turning it on safely (preflight).** Four facts about the real `claude` cannot be seen
+from the stub-based tests, so one script checks them live and only then flips the switch:
+
+```bash
+bash scripts/auto-handoff-preflight.sh --dry-run     # print the commands, call nothing
+bash scripts/auto-handoff-preflight.sh               # --check: run the four checks, read-only
+bash scripts/auto-handoff-preflight.sh --enable      # checks must pass in the same run, then enable
+bash scripts/auto-handoff-preflight.sh --disable     # undo (no live check needed)
+```
+
+It prints its spend cap first: five `claude` calls, each `--max-budget-usd 0.10` on haiku,
+so at most USD 0.50 (a subscription plan may not enforce the cap). One line per check,
+then a verdict; exit 0 only if all four pass.
+
+| Check | What it asserts |
+|---|---|
+| `env-propagation` | Whether a project `.claude/settings.json` `env` block reaches hook subprocesses (reported as `PROPAGATES` or `DOES-NOT-PROPAGATE`). `PROPAGATES` does not fail the check but prints a warning: a cloned repo could then set `GRID_HOOKS`, `GRID_PRIVATE_DIR`, `GRID_CLAUDE` or `GRID_AUTOHANDOFF_KEEP_ENV` for the hook, so run auto-handoff only in repos you trust, and `--enable` then needs `--accept-env-risk`. A hook that never fired is `INCONCLUSIVE`, which fails. |
+| `b1-rule-form` | The write rules the worker relies on are enforced: an `Edit(//abs/**)` allow is honoured for Write (`inside.txt` present), a write outside it is not made (`outside.txt` absent), the `Edit(**/.git/**)` deny holds, and a `Bash(ls:*)` allow does not accept a `>` redirect. A positive-control file guards the "absent" results. |
+| `wp016-parity` | `claude --help` names `--permission-mode`, `--setting-sources`, `--strict-mcp-config`, and one tiny capped call with them succeeds. |
+| `env-i-auth` | The worker's invocation authenticates under `env -i`. If claude works normally but not under `env -i`, the check fails and prints the remedy: `export GRID_AUTOHANDOFF_KEEP_ENV=ANTHROPIC_API_KEY` in the shell that starts claude. |
+
+It also reports, without failing: the hook's manifest state (baseline, `machines/<host>.txt`
+and `machines/<host>.local.txt`), a symlinked watched dotfile (`~/.gitconfig`, `~/.zshrc`,
+`~/.bashrc`, `~/.config/git/config`, `~/.ssh/config`), a writable `~/.bash_aliases`, and the
+`permissions` defaults in your user settings.
+
+`--enable` removes the `-hook:auto-handoff` line from `machines/<host>.txt` (a copy of the
+file goes to `${GRID_STATE_DIR:-~/.grid}/preflight-backups/` first) and runs `scripts/wire.sh`;
+it never writes under `~/.claude` itself. It refuses if a check failed, if env `PROPAGATES`
+without `--accept-env-risk`, or if the baseline or the `.local` overlay also says
+`-hook:auto-handoff` (it does not edit those). A second run changes no file; `wire.sh`
+is rerun because it is idempotent and a manifest that says ON does not prove the entry is
+wired. `--disable` appends `-hook:auto-handoff` again and rewires. The probes call the
+model, so they cannot run in CI: the tests use a stub (`GRID_PREFLIGHT_CLAUDE`).
+
 **When it runs.** It skips, and logs why, when:
 
 - the transcript is unreadable (`no-transcript`);
