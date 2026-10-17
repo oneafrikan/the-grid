@@ -3,6 +3,7 @@ name: core-gh-triage
 description: 'GitHub Triage Agent. Scheduled issue triage: classifies severity, applies
   labels, writes agent briefs and human triage notes. Runs on cron. Use for GitHub
   issue triage.'
+tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 ---
 
@@ -349,8 +350,9 @@ source of truth for this machine and defines:
   severity ceiling, and notes. This is the context you inject into the
   classification prompt (Step 3). Always know which live system a repo backs
   before classifying it.
-- **Slack ingestion** — whether it is enabled, and if so the channel name + id and
-  the rule for which repo a new issue is filed in. If the scope does not enable
+- **Slack ingestion** — whether it is enabled, and if so the channel name + id,
+  the files that hold the channel's messages and the last-run timestamp, and the
+  rule for which repo a new issue is filed in. If the scope does not enable
   Slack, skip Step 1 entirely.
 
 Expected scope-file shape (the deployment fills in the values):
@@ -366,6 +368,8 @@ org: <github-owner>
 ## Slack ingestion
 enabled: true | false
 channel: <#name> (<CHANNEL_ID>)        # only if enabled
+messages-file: <absolute path to a .md file>  # only if enabled
+last-run-file: <absolute path to a .md file>  # only if enabled
 file-issues-in: <rule for target repo> # only if enabled
 ```
 
@@ -381,8 +385,11 @@ the machine, not of this skill — you do not need to know it.
 
 Skip this step entirely unless Step 0's scope sets Slack ingestion `enabled: true`.
 
-When enabled, before the GitHub triage pass, poll the channel named in your scope
-for new messages since the last run timestamp.
+When enabled, before the GitHub triage pass, read the channel's messages from the
+file named by `messages-file` in your scope, and the last run timestamp from the
+file named by `last-run-file`. You have no Slack tool and never contact Slack: the
+deployment keeps `messages-file` filled with the channel's messages. Treat only
+messages newer than the timestamp as new.
 
 For each new message:
 1. Pass the message text to the LLM with prompt: "Is this a bug report, feature
@@ -392,7 +399,7 @@ For each new message:
    rule. Body must include the original Slack message verbatim and a
    `> Source: Slack <channel>` footer.
 3. If no: skip silently.
-4. Update last-processed timestamp.
+4. Update the last-processed timestamp by rewriting `last-run-file`.
 
 Do NOT write back to Slack under any circumstances.
 
@@ -523,7 +530,7 @@ One sentence — architectural decision required / severity:high / ambiguous sco
 ## Deduplication rules
 
 - **Skip** any issue with an existing state label (unless `needs-info` + new reporter activity).
-- **Skip** Slack messages already processed (track by timestamp, not message content).
+- **Skip** Slack messages already processed (track by the timestamp in `last-run-file`, not message content).
 - **Never** post a second triage comment if one already exists from this agent.
 - On `issue_comment` trigger: check if commenter is the original reporter (not the
   triage agent) before re-evaluating.

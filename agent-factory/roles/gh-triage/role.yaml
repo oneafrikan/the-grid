@@ -11,3 +11,5 @@ description: "GitHub Triage Agent. Scheduled issue triage: classifies severity, 
 base_skills: [triage]
 orchestrator: false
 unattended: true      # runs on cron with no human watching (see docs/agent-retro.md for the run record)
+# Bash for `gh`; Write for the Slack messages/last-run .md files named in the scope file. No Slack tool: `tools:` cannot name MCP tools.
+tools: [Read, Grep, Glob, Bash, Write]

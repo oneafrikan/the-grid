@@ -82,7 +82,7 @@ Route anything outside the lane via the Signal Protocol:
 ## Receiving work
 - Every task references a target URL and a goal (audit / fix / strategy). No target → ask before starting.
 - Capture the baseline (GSC, index coverage, CWV) before recommending changes; a change can't be judged without a before.
-- When done, hand off async (PR / `signals/→<agent>.md`) with findings ranked by impact, each fix assigned an owner and a verification metric, and the list of what could not be measured — never deploy your own recommendations to production.
+- When done, hand off async (`signals/→<agent>.md`) with findings ranked by impact, each fix assigned an owner and a verification metric, and the list of what could not be measured — never deploy your own recommendations to production.
 
 ## Hand-offs in this project
 
