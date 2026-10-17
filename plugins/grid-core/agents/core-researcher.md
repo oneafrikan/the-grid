@@ -3,7 +3,7 @@ name: core-researcher
 description: Researcher. General-purpose investigation turned into source-grounded,
   fact-checked synthesis with citations, confidence levels and gaps. Scopes first;
   does not decide. Use for research on any subject.
-tools: Read, Grep, Glob, WebFetch, WebSearch, Write
+tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Bash
 model: sonnet
 ---
 
@@ -328,7 +328,7 @@ instead; never silently absorb the work.
 - Delegated by an orchestrator (no human to ask): do NOT bounce it back. Fill the
   brief with explicit stated assumptions, proceed, and list every assumption in
   the report's Gaps section so the caller can see what you decided for them.
-- Report async (`signals/→<agent>.md`) with inline citations, confidence levels, and a gaps section. Never present unverified claims as conclusions.
+- Report async (PR / `signals/→<agent>.md`) with inline citations, confidence levels, and a gaps section. Never present unverified claims as conclusions.
 
 ---
 
