@@ -78,20 +78,29 @@ tools_of() {
 # either direction (a tool added back, or one dropped that the docs still rely on) fails.
 @test "H-04: each narrowed role carries exactly its approved tools allowlist" {
   [ "$(tools_of gh-triage)"       = "tools: [Read, Grep, Glob, Bash, Write]" ]
-  [ "$(tools_of researcher)"      = "tools: [Read, Grep, Glob, WebFetch, WebSearch, Write]" ]
-  [ "$(tools_of seo)"             = "tools: [Read, Grep, Glob, WebFetch, WebSearch, Write]" ]
+  [ "$(tools_of researcher)"      = "tools: [Read, Grep, Glob, WebFetch, WebSearch, Write, Bash]" ]
+  [ "$(tools_of seo)"             = "tools: [Read, Grep, Glob, WebFetch, WebSearch, Write, Bash]" ]
   [ "$(tools_of librarian)"       = "tools: [Read, Grep, Glob, Write, Edit, Bash]" ]
-  [ "$(tools_of paid-search)"     = "tools: [Read, Grep, Glob, WebFetch, WebSearch, Write]" ]
-  [ "$(tools_of paid-social)"     = "tools: [Read, Grep, Glob, WebFetch, WebSearch, Write]" ]
+  [ "$(tools_of paid-search)"     = "tools: [Read, Grep, Glob, WebFetch, WebSearch, Write, Bash]" ]
+  [ "$(tools_of paid-social)"     = "tools: [Read, Grep, Glob, WebFetch, WebSearch, Write, Bash]" ]
   [ "$(tools_of finance-analyst)" = "tools: [Read, Grep, Glob, WebFetch, WebSearch, Write]" ]
 }
 
-@test "H-04: roles that read untrusted web content never get Bash or Edit" {
+# H-04b: researcher, seo, paid-search and paid-social must be able to open a PR, which needs Bash.
+# finance-analyst has no PR step, so it stays Bash-free. Edit is withheld from all five.
+@test "H-04b: finance-analyst (web-reading, no PR step) never gets Bash or Edit" {
+  local t; t="$(tools_of finance-analyst)"
+  [[ "$t" == *"WebFetch"* ]]
+  [[ "$t" != *"Bash"* ]]
+  [[ "$t" != *"Edit"* ]]
+}
+
+@test "H-04b: the four PR-capable web roles have Bash (last) and never Edit" {
   local r t
-  for r in researcher seo paid-search paid-social finance-analyst; do
+  for r in researcher seo paid-search paid-social; do
     t="$(tools_of "$r")"
     [[ "$t" == *"WebFetch"* ]]
-    [[ "$t" != *"Bash"* ]]
+    [[ "$t" == *", Bash]" ]]
     [[ "$t" != *"Edit"* ]]
   done
 }
@@ -118,19 +127,24 @@ tools_of() {
   grep -q 'last-run-file' "$tmpl"
 }
 
-@test "H-04: the narrowed roles' docs do not tell them to open a PR (no Bash) where Bash is withheld" {
+# A role may offer a PR hand-off only if it holds Bash (opening a PR needs it).
+@test "H-04b: PR hand-off wording is present exactly where Bash is held" {
   local r
   for r in researcher seo paid-search paid-social; do
-    if grep -qE 'PR / `signals' "$ROLES/$r/AGENTS.md"; then echo "$r still offers a PR hand-off"; false; fi
+    grep -qF 'async (PR / `signals/→<agent>.md`)' "$ROLES/$r/AGENTS.md" || { echo "$r lost its PR hand-off"; false; }
+    grep -qF 'Bash' <<<"$(tools_of "$r")"
   done
+  # finance-analyst has no Bash, so its docs must not offer a PR.
+  if grep -qE 'PR / `signals' "$ROLES/finance-analyst/AGENTS.md"; then echo "finance-analyst offers a PR hand-off without Bash"; false; fi
+  if grep -qF 'Bash' <<<"$(tools_of finance-analyst)"; then echo "finance-analyst gained Bash"; false; fi
 }
 
 @test "H-04: shipped plugin agents for the narrowed roles carry the matching tools line" {
   grep -qx 'tools: Read, Grep, Glob, Bash, Write' "$REPO_ROOT/plugins/grid-core/agents/core-gh-triage.md"
-  grep -qx 'tools: Read, Grep, Glob, WebFetch, WebSearch, Write' "$REPO_ROOT/plugins/grid-core/agents/core-researcher.md"
+  grep -qx 'tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Bash' "$REPO_ROOT/plugins/grid-core/agents/core-researcher.md"
   grep -qx 'tools: Read, Grep, Glob, Write, Edit, Bash' "$REPO_ROOT/plugins/grid-core/agents/core-librarian.md"
   local a
   for a in grid-seo grid-paid-search grid-paid-social; do
-    grep -qx 'tools: Read, Grep, Glob, WebFetch, WebSearch, Write' "$REPO_ROOT/plugins/grid-agents/agents/$a.md"
+    grep -qx 'tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Bash' "$REPO_ROOT/plugins/grid-agents/agents/$a.md"
   done
 }
