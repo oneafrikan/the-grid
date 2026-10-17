@@ -176,29 +176,39 @@ bash scripts/auto-handoff-preflight.sh --disable     # undo (no live check neede
 ```
 
 It prints its spend cap first: five `claude` calls, each `--max-budget-usd 0.10` on haiku,
-so at most USD 0.50 (a subscription plan may not enforce the cap). One line per check,
-then a verdict; exit 0 only if all four pass.
+so at most USD 0.50 (a subscription plan may not enforce the cap). Every call, `claude
+--help` included, runs under `timeout` (`GRID_PREFLIGHT_TIMEOUT`, default 180 s); without
+`timeout` the checks still run with a warning but `--enable` refuses. Ctrl-C or SIGTERM
+stops only the probe the script started and removes its scratch dir. One line per check,
+then a verdict; exit 0 only if all four pass. Each probe prints the flags it ran with.
 
 | Check | What it asserts |
 |---|---|
-| `env-propagation` | Whether a project `.claude/settings.json` `env` block reaches hook subprocesses (reported as `PROPAGATES` or `DOES-NOT-PROPAGATE`). `PROPAGATES` does not fail the check but prints a warning: a cloned repo could then set `GRID_HOOKS`, `GRID_PRIVATE_DIR`, `GRID_CLAUDE` or `GRID_AUTOHANDOFF_KEEP_ENV` for the hook, so run auto-handoff only in repos you trust, and `--enable` then needs `--accept-env-risk`. A hook that never fired is `INCONCLUSIVE`, which fails. |
-| `b1-rule-form` | The write rules the worker relies on are enforced: an `Edit(//abs/**)` allow is honoured for Write (`inside.txt` present), a write outside it is not made (`outside.txt` absent), the `Edit(**/.git/**)` deny holds, and a `Bash(ls:*)` allow does not accept a `>` redirect. A positive-control file guards the "absent" results. |
+| `env-propagation` | Whether a project `.claude/settings.json` `env` block reaches hook subprocesses (reported as `PROPAGATES` or `DOES-NOT-PROPAGATE`). `PROPAGATES` does not fail the check but prints a warning: a cloned repo could then set `GRID_HOOKS`, `GRID_PRIVATE_DIR`, `GRID_CLAUDE` or `GRID_AUTOHANDOFF_KEEP_ENV` for the hook, so run auto-handoff only in repos you trust, and `--enable` then needs `--accept-env-risk`. The answer comes from the SessionEnd hook (the event auto-handoff uses), waited for up to `GRID_PREFLIGHT_HOOK_WAIT` seconds (default 10); if it never fires the result is `INCONCLUSIVE`, which fails. This probe runs with `--permission-mode default --strict-mcp-config` but not `--setting-sources user`: its whole point is to load the project's `settings.json`. |
+| `b1-rule-form` | The write rules the worker relies on are enforced: an `Edit(//abs/**)` allow is honoured for Write (`inside.txt` present), a write outside it is blocked, the `Edit(**/.git/**)` deny holds, and a `Bash(ls:*)` allow does not accept a `>` redirect. A file being absent only counts when the model's `--output-format stream-json` output shows it tried the action (a `tool_use` event naming the path); if it did not, the result is `INCONCLUSIVE`, which fails, and you rerun. A positive-control file (`ok.txt`) guards the second probe. Runs with all three worker flags. |
 | `wp016-parity` | `claude --help` names `--permission-mode`, `--setting-sources`, `--strict-mcp-config`, and one tiny capped call with them succeeds. |
 | `env-i-auth` | The worker's invocation authenticates under `env -i`. If claude works normally but not under `env -i`, the check fails and prints the remedy: `export GRID_AUTOHANDOFF_KEEP_ENV=ANTHROPIC_API_KEY` in the shell that starts claude. |
 
 It also reports, without failing: the hook's manifest state (baseline, `machines/<host>.txt`
 and `machines/<host>.local.txt`), a symlinked watched dotfile (`~/.gitconfig`, `~/.zshrc`,
 `~/.bashrc`, `~/.config/git/config`, `~/.ssh/config`), a writable `~/.bash_aliases`, and the
-`permissions` defaults in your user settings.
+`permissions` defaults in your user settings (a count and the shape of each allow rule,
+`Bash(***)`: the text inside the parentheses is never printed, because an "always allow"
+rule can embed a token).
 
 `--enable` removes the `-hook:auto-handoff` line from `machines/<host>.txt` (a copy of the
-file goes to `${GRID_STATE_DIR:-~/.grid}/preflight-backups/` first) and runs `scripts/wire.sh`;
-it never writes under `~/.claude` itself. It refuses if a check failed, if env `PROPAGATES`
-without `--accept-env-risk`, or if the baseline or the `.local` overlay also says
-`-hook:auto-handoff` (it does not edit those). A second run changes no file; `wire.sh`
-is rerun because it is idempotent and a manifest that says ON does not prove the entry is
-wired. `--disable` appends `-hook:auto-handoff` again and rewires. The probes call the
-model, so they cannot run in CI: the tests use a stub (`GRID_PREFLIGHT_CLAUDE`).
+file goes to `${GRID_STATE_DIR:-~/.grid}/preflight-backups/` first; the new file is written
+to a temp file in `machines/` and renamed over it) and runs `scripts/wire.sh`; it never
+writes under `~/.claude` itself. Lines are read the way `wire.sh` reads them (comment cut,
+all whitespace dropped, an unterminated last line ignored). It refuses, changing nothing, if:
+a check failed; env `PROPAGATES` without `--accept-env-risk`; a watched dotfile is a symlink
+or `~/.bash_aliases` is writable without `--accept-dotfile-risk` (H-02); there is no
+`timeout`; the overlay is a symlink or not writable; or the baseline or the `.local` overlay
+also says `-hook:auto-handoff` (it does not edit those). A failed write or backup is an error
+and a non-zero exit, never "enabled". A second run changes no file; `wire.sh` is rerun because
+it is idempotent and a manifest that says ON does not prove the entry is wired. `--disable`
+appends `-hook:auto-handoff` again and rewires; the dotfile conditions do not block it. The
+probes call the model, so they cannot run in CI: the tests use a stub (`GRID_PREFLIGHT_CLAUDE`).
 
 **When it runs.** It skips, and logs why, when:
 

@@ -55,9 +55,12 @@ EOF
   make_claude_stub
   export GRID_PREFLIGHT_CLAUDE="$BATS_TEST_TMPDIR/stub/claude"
   export STUB_LOG="$BATS_TEST_TMPDIR/claude.log"
+  export STUB_HANG_PID="$BATS_TEST_TMPDIR/hang.pid"
+  # Default hook wait is 10 s; the tests that never see SessionEnd shorten it.
+  export GRID_PREFLIGHT_HOOK_WAIT=3
   # The auth probe runs under `env -i`; the stub reads its STUB_* knobs from the environment.
   export GRID_AUTOHANDOFF_KEEP_ENV='STUB_*'
-  unset ANTHROPIC_API_KEY GRID_PREFLIGHT_TIMEOUT
+  unset ANTHROPIC_API_KEY GRID_PREFLIGHT_TIMEOUT GRID_PREFLIGHT_TIMEOUT_BIN
 }
 
 teardown() {
@@ -75,7 +78,16 @@ make_claude_stub() {
   mkdir -p "$BATS_TEST_TMPDIR/stub"
   cat > "$BATS_TEST_TMPDIR/stub/claude" <<'EOF'
 #!/usr/bin/env bash
+# tool_use <tool> <input key> <value>: one stream-json line like the real CLI's tool_use event.
+tool_use() {
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"%s","input":{"%s":"%s"}}]}}\n' "$1" "$2" "$3"
+}
+# hang_if <name>: STUB_HANG_ON=<name> makes that call record its pid and sleep (a hung claude).
+hang_if() {
+  if [ "${STUB_HANG_ON:-}" = "$1" ]; then echo $$ > "$STUB_HANG_PID"; exec sleep 20; fi
+}
 if [ "${1:-}" = "--help" ]; then
+  hang_if HELP
   # STUB_HELP_DROP removes the line naming one flag (the flag-parity check reads --help).
   printf '%s\n' "Usage: claude [options]" "  --permission-mode <mode>" \
     "  --setting-sources <sources>" "  --strict-mcp-config" "  --max-budget-usd <amount>" \
@@ -86,30 +98,47 @@ prompt="${2:-}"
 echo "cwd=$PWD key=${ANTHROPIC_API_KEY-unset} argv=$*" >> "$STUB_LOG"
 case "$prompt" in
   PREFLIGHT-ENV*)
+    hang_if PREFLIGHT-ENV
     # Model Claude Code's hook runner: run every hook command the project's settings.json
-    # declares, with the project env block applied (propagate), not applied (isolate), or no
-    # hook run at all (nohook).
+    # declares. STUB_ENV_MODE: propagate (project env block applied), isolate (not applied),
+    # nohook (no hook runs), start-only (SessionEnd never fires), delayed-end (SessionEnd
+    # fires 1 s after claude exits, with the env applied per STUB_END_ENV=propagate|isolate).
     marker="$(sed -n 's/^ *"GRID_PREFLIGHT_MARKER": "\([^"]*\)" *$/\1/p' .claude/settings.json)"
-    case "${STUB_ENV_MODE:-isolate}" in
-      propagate) sed -n 's/^ *"command": "\(.*\)" *$/\1/p' .claude/settings.json |
-                   while IFS= read -r c; do GRID_PREFLIGHT_MARKER="$marker" sh -c "$c"; done ;;
-      isolate)   sed -n 's/^ *"command": "\(.*\)" *$/\1/p' .claude/settings.json |
-                   while IFS= read -r c; do env -u GRID_PREFLIGHT_MARKER sh -c "$c"; done ;;
-      nohook)    ;;
-    esac
+    mode="${STUB_ENV_MODE:-isolate}"
+    sed -n 's/^ *"command": "\(.*\)" *$/\1/p' .claude/settings.json | while IFS= read -r c; do
+      case "$mode:$c" in
+        nohook:*) ;;
+        start-only:*end.out*) ;;
+        delayed-end:*end.out*)
+          ( sleep 1
+            if [ "${STUB_END_ENV:-isolate}" = propagate ]; then GRID_PREFLIGHT_MARKER="$marker" sh -c "$c"
+            else env -u GRID_PREFLIGHT_MARKER sh -c "$c"; fi ) > /dev/null 2>&1 < /dev/null &
+          ;;
+        propagate:*) GRID_PREFLIGHT_MARKER="$marker" sh -c "$c" ;;
+        *)           env -u GRID_PREFLIGHT_MARKER sh -c "$c" ;;
+      esac
+    done
     echo ok; exit 0 ;;
   *outside.txt*)
-    # B1 rule-form probe: cwd is the scratch repo.
+    # B1 rule-form probe: cwd is the scratch repo. Like the real CLI in stream-json mode, the
+    # stub prints a tool_use line for every action it ATTEMPTS (blocked or not); "lazy" modes
+    # skip attempts, which the script must call INCONCLUSIVE, not a pass.
+    hang_if PREFLIGHT-B1A
+    [ "${STUB_B1_MODE:-good}" = skip-outside ] || tool_use Write file_path "$PWD/outside.txt"
+    tool_use Write file_path "$PWD/LOGS/inside.txt"
     case "${STUB_B1_MODE:-good}" in
-      good)         echo x > LOGS/inside.txt ;;
-      bad-outside)  echo x > LOGS/inside.txt; echo x > outside.txt ;;
-      bad-inside)   : ;;
+      good|skip-outside) echo x > LOGS/inside.txt ;;
+      bad-outside)       echo x > LOGS/inside.txt; echo x > outside.txt ;;
+      bad-inside)        : ;;
     esac
     exit 0 ;;
   *ok.txt*)
     # B1 second probe: .git deny and the Bash(ls:*) redirect question.
+    tool_use Write file_path "$PWD/ok.txt"
+    case "${STUB_B1B_MODE:-good}" in skip-git|lazy) ;; *) tool_use Write file_path "$PWD/.git/probe.txt" ;; esac
+    case "${STUB_B1B_MODE:-good}" in skip-redirect|lazy) ;; *) tool_use Bash command "ls $PWD > $PWD/redirect.txt" ;; esac
     case "${STUB_B1B_MODE:-good}" in
-      good)         echo x > ok.txt ;;
+      good|skip-git|skip-redirect|lazy) echo x > ok.txt ;;
       bad-git)      echo x > ok.txt; echo x > .git/probe.txt ;;
       bad-redirect) echo x > ok.txt; ls > redirect.txt ;;
       bad-nothing)  : ;;
@@ -137,6 +166,18 @@ n_calls() { if [ -f "$STUB_LOG" ]; then wc -l < "$STUB_LOG" | tr -d ' '; else ec
 n_wire() { if [ -f "$PF_GRID/wire.calls" ]; then wc -l < "$PF_GRID/wire.calls" | tr -d ' '; else echo 0; fi; }
 n_backups() { if [ -d "$BACKUPS" ]; then find "$BACKUPS" -type f | wc -l | tr -d ' '; else echo 0; fi; }
 overlay() { cat "$PF_GRID/machines/testhost.txt"; }
+# scratch_left: is a script scratch dir still under TMPDIR? (glob, not ls | grep: SC2010)
+scratch_left() { compgen -G "$TMPDIR/grid-preflight.*" > /dev/null; }
+# file mode, GNU or BSD stat
+mode_of() { stat -c '%a' "$1" 2> /dev/null || stat -f '%Lp' "$1"; }
+need_nonroot() { [ "$(id -u)" -ne 0 ] || skip "permission tests need a non-root user"; }
+# a settings.json whose allow rules carry fake secrets (assembled so no scanner flags this file)
+fake_settings() {
+  local bearer="Bear""er" tok="FAKE-SECRET-TOKEN-1234567890" gh="GH_""TOKEN=FAKE-GHP-0000"
+  mkdir -p "$CLAUDE_CONFIG_DIR"
+  printf '{"permissions":{"defaultMode":"default","allow":["Bash(curl -H \\"Authorization: %s %s\\" https://x.example:*)","Bash(export %s && gh:*)","Read"]}}\n' \
+    "$bearer" "$tok" "$gh" > "$CLAUDE_CONFIG_DIR/settings.json"
+}
 
 # ---------------------------------------------------------------------------
 # --check (default): read-only
@@ -182,7 +223,7 @@ overlay() { cat "$PF_GRID/machines/testhost.txt"; }
 @test "scratch dirs are removed on exit" {
   pf
   [ "$status" -eq 0 ]
-  ! ls "$TMPDIR" | grep -q '^grid-preflight\.' || false
+  ! scratch_left || false
 }
 
 @test "env-propagation PROPAGATES: warns loudly, names the variables, does not fail --check" {
@@ -337,7 +378,7 @@ overlay() { cat "$PF_GRID/machines/testhost.txt"; }
   [[ "$output" =~ max-budget-usd ]]
   [[ "$output" =~ USD\ 0\.50 ]]
   [ "$(overlay)" = "$before" ]
-  ! ls "$TMPDIR" | grep -q '^grid-preflight\.' || false
+  ! scratch_left || false
 }
 
 @test "--enable --dry-run: no claude call, no overlay change, no backup, no wire" {
@@ -474,4 +515,303 @@ overlay() { cat "$PF_GRID/machines/testhost.txt"; }
   GRID_HOST='../evil' pf --disable
   [ "$status" -eq 2 ]
   [ "$(n_wire)" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# review round (PR #272 SEC VS1-VS8, QA VF1-VF6)
+# ---------------------------------------------------------------------------
+
+# --- QA VF1 / SEC VS7: the overlay write is checked, atomic, and refuses a symlink -------
+
+@test "VF1: a read-only overlay -> --enable refuses, changes nothing, never says removed/enabled" {
+  need_nonroot
+  chmod 444 "$PF_GRID/machines/testhost.txt"
+  local before; before="$(overlay)"
+  pf --enable
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ not\ writable ]]
+  [[ ! "$output" =~ removed\ [0-9] ]]
+  [[ ! "$output" =~ is\ enabled ]]
+  [ "$(overlay)" = "$before" ]
+  [ "$(n_wire)" -eq 0 ]
+  [ "$(n_backups)" -eq 0 ]
+}
+
+@test "VF1: a read-only overlay -> --disable refuses too" {
+  need_nonroot
+  printf 'repo/skill\n' > "$PF_GRID/machines/testhost.txt"
+  chmod 444 "$PF_GRID/machines/testhost.txt"
+  pf --disable
+  [ "$status" -ne 0 ]
+  [[ ! "$output" =~ is\ disabled ]]
+  [ "$(overlay)" = "repo/skill" ]
+  [ "$(n_wire)" -eq 0 ]
+}
+
+@test "VF1: an unwritable machines/ dir -> the write fails loudly, nothing is claimed" {
+  need_nonroot
+  local before; before="$(overlay)"
+  chmod 555 "$PF_GRID/machines"
+  pf --enable
+  chmod 755 "$PF_GRID/machines"
+  [ "$status" -ne 0 ]
+  [[ ! "$output" =~ is\ enabled ]]
+  [ "$(overlay)" = "$before" ]
+  [ "$(n_wire)" -eq 0 ]
+  [ "$(n_backups)" -eq 0 ]
+}
+
+@test "VS7: a symlinked overlay is refused (not edited through the link), enable and disable" {
+  mv "$PF_GRID/machines/testhost.txt" "$BATS_TEST_TMPDIR/real-overlay.txt"
+  ln -s "$BATS_TEST_TMPDIR/real-overlay.txt" "$PF_GRID/machines/testhost.txt"
+  local before; before="$(cat "$BATS_TEST_TMPDIR/real-overlay.txt")"
+  pf --enable
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ symlink ]]
+  pf --disable
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ symlink ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/real-overlay.txt")" = "$before" ]
+  [ -L "$PF_GRID/machines/testhost.txt" ]
+  [ "$(n_wire)" -eq 0 ]
+}
+
+@test "VS7: the write is a rename in the same dir: no temp file left, mode kept, backup holds the original" {
+  chmod 640 "$PF_GRID/machines/testhost.txt"
+  pf --enable
+  [ "$status" -eq 0 ]
+  [ "$(mode_of "$PF_GRID/machines/testhost.txt")" = 640 ]
+  ! compgen -G "$PF_GRID/machines/*preflight*" > /dev/null || false
+  [ "$(n_backups)" -eq 1 ]
+}
+
+@test "VF3: an unusable GRID_STATE_DIR (backup cannot be made) -> refuse, overlay unchanged, no wire" {
+  : > "$BATS_TEST_TMPDIR/not-a-dir"
+  local before; before="$(overlay)"
+  GRID_STATE_DIR="$BATS_TEST_TMPDIR/not-a-dir" pf --enable
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ could\ not\ back\ up ]]
+  [[ ! "$output" =~ is\ enabled ]]
+  [ "$(overlay)" = "$before" ]
+  [ "$(n_wire)" -eq 0 ]
+}
+
+@test "VF3: CRLF and commented overlay lines: only the -hook lines go, every other byte stays" {
+  printf '# c1\r\nproject:foo\r\n  -hook:auto-handoff  # why\r\n-hook:auto-handoff-x\r\nrepo/skill   # keep\r\n' \
+    > "$PF_GRID/machines/testhost.txt"
+  pf --enable
+  [ "$status" -eq 0 ]
+  [ "$(cat "$PF_GRID/machines/testhost.txt")" = "$(printf '# c1\r\nproject:foo\r\n-hook:auto-handoff-x\r\nrepo/skill   # keep\r')" ]
+  [[ "$output" =~ removed\ 1 ]]
+}
+
+# --- SEC VS8 / QA VF6: same line grammar as wire.sh -------------------------------------
+
+@test "VS8: a -hook line with a trailing form feed is still read as OFF and removed" {
+  printf 'project:foo\n-hook:auto-handoff\f\n' > "$PF_GRID/machines/testhost.txt"
+  pf
+  [[ "$output" =~ auto-handoff\ manifest\ state:\ OFF ]]
+  pf --enable
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ removed\ 1 ]]
+  [ "$(overlay)" = "project:foo" ]
+}
+
+@test "VS8: whitespace inside the entry is ignored like wire.sh (tr -d [:space:])" {
+  printf -- '- hook :\tauto-handoff\n' > "$PF_GRID/machines/testhost.txt"
+  pf
+  [[ "$output" =~ auto-handoff\ manifest\ state:\ OFF ]]
+}
+
+@test "VF6: an unterminated last line is not read (wire.sh's read loop skips it); --disable still adds a clean line" {
+  printf 'repo/skill\n-hook:auto-handoff' > "$PF_GRID/machines/testhost.txt"
+  pf
+  [[ "$output" =~ auto-handoff\ manifest\ state:\ ON ]]
+  pf --disable
+  [ "$status" -eq 0 ]
+  overlay | grep -q '^repo/skill$'
+  overlay | grep -q '^-hook:auto-handoff$'
+  overlay | grep -q '^-hook:auto-handoff   # added by'
+}
+
+# --- SEC VS1 / QA VF2: absent files only count when the attempt is evidenced -------------
+
+@test "VS1: a model that never attempts the outside write -> INCONCLUSIVE, FAIL, with a rerun hint" {
+  STUB_B1_MODE=skip-outside pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
+  [[ "$output" =~ rerun ]]
+}
+
+@test "VS1: no .git write attempted -> INCONCLUSIVE" {
+  STUB_B1B_MODE=skip-git pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*\.git ]]
+}
+
+@test "VS1: no redirect attempted -> INCONCLUSIVE" {
+  STUB_B1B_MODE=skip-redirect pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*redirect ]]
+}
+
+@test "VS1: the lazy stub (writes only inside.txt and ok.txt) can no longer PASS or enable" {
+  local before; before="$(overlay)"
+  STUB_B1_MODE=skip-outside STUB_B1B_MODE=lazy pf --enable
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE ]]
+  [[ "$output" =~ enable\ refused ]]
+  [ "$(overlay)" = "$before" ]
+  [ "$(n_wire)" -eq 0 ]
+}
+
+@test "VS1: the b1 probes ask for stream-json so attempts are visible" {
+  pf
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- '--output-format stream-json --verbose' "$STUB_LOG")" -eq 2 ]
+}
+
+# --- SEC VS5: wait for SessionEnd before concluding ----------------------------------------
+
+@test "VS5: SessionEnd never fires (SessionStart only) -> INCONCLUSIVE, not DOES-NOT-PROPAGATE" {
+  GRID_PREFLIGHT_HOOK_WAIT=2 STUB_ENV_MODE=start-only pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +env-propagation.*INCONCLUSIVE.*SessionEnd ]]
+  [[ ! "$output" =~ DOES-NOT-PROPAGATE ]]
+}
+
+@test "VS5: a delayed SessionEnd is waited for: DOES-NOT-PROPAGATE only once it has run" {
+  STUB_ENV_MODE=delayed-end STUB_END_ENV=isolate pf
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ PASS\ +env-propagation\ +DOES-NOT-PROPAGATE ]]
+}
+
+@test "VS5: SessionStart sees no env but the delayed SessionEnd does -> PROPAGATES" {
+  STUB_ENV_MODE=delayed-end STUB_END_ENV=propagate pf
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ PASS\ +env-propagation\ +PROPAGATES ]]
+  [[ "$output" =~ WARN ]]
+}
+
+# --- SEC VS3: no raw allow rules in the output ---------------------------------------------
+
+@test "VS3: allow rules are shown as shapes with values masked, in --check" {
+  fake_settings
+  pf
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ FAKE-SECRET ]]
+  [[ ! "$output" =~ FAKE-GHP ]]
+  [[ ! "$output" =~ Bearer ]]
+  [[ ! "$output" =~ GH_TOKEN ]]
+  [[ "$output" =~ 3\ allow\ rule ]]
+  [[ "$output" == *'Bash(***)'* ]]
+}
+
+@test "VS3: and in --dry-run" {
+  fake_settings
+  pf --dry-run
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ FAKE-SECRET ]]
+  [[ ! "$output" =~ FAKE-GHP ]]
+  [[ "$output" == *'Bash(***)'* ]]
+}
+
+# --- SEC VS6 / QA VF3,VF4: wall-clock limit on every call; signals kill only our probe ------
+
+@test "VS6: a hung probe is killed at GRID_PREFLIGHT_TIMEOUT and reported as timed out" {
+  GRID_PREFLIGHT_TIMEOUT=2 STUB_HANG_ON=PREFLIGHT-ENV pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +env-propagation.*timed\ out\ after\ 2s ]]
+  [[ "$output" =~ PASS\ +wp016-parity ]]
+  ! kill -0 "$(cat "$STUB_HANG_PID")" 2> /dev/null || false
+}
+
+@test "VF4: claude --help is under the timeout too" {
+  GRID_PREFLIGHT_TIMEOUT=2 STUB_HANG_ON=HELP pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +wp016-parity.*timed\ out\ after\ 2s ]]
+}
+
+@test "VS6: no timeout(1): said up front, checks still run, --enable refuses" {
+  local before; before="$(overlay)"
+  GRID_PREFLIGHT_TIMEOUT_BIN=/nonexistent/timeout pf
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ WARN.*timeout ]]
+  GRID_PREFLIGHT_TIMEOUT_BIN=/nonexistent/timeout pf --enable
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ enable\ refused.*timeout ]]
+  [ "$(overlay)" = "$before" ]
+  [ "$(n_wire)" -eq 0 ]
+}
+
+@test "VS6: SIGTERM stops the running probe (only it), removes the scratch dir and exits" {
+  STUB_HANG_ON=PREFLIGHT-ENV GRID_PREFLIGHT_TIMEOUT=60 bash "$PF" > "$BATS_TEST_TMPDIR/sig.out" 2>&1 &
+  local pfpid=$! i
+  for ((i = 0; i < 100; i++)); do [ -s "$STUB_HANG_PID" ] && break; sleep 0.1; done
+  [ -s "$STUB_HANG_PID" ]
+  local stubpid; stubpid="$(cat "$STUB_HANG_PID")"
+  kill -TERM "$pfpid"
+  for ((i = 0; i < 100; i++)); do kill -0 "$pfpid" 2> /dev/null || break; sleep 0.1; done
+  ! kill -0 "$pfpid" 2> /dev/null || { kill -9 "$pfpid" "$stubpid" 2> /dev/null; false; }
+  for ((i = 0; i < 50; i++)); do kill -0 "$stubpid" 2> /dev/null || break; sleep 0.1; done
+  ! kill -0 "$stubpid" 2> /dev/null || { kill -9 "$stubpid"; false; }
+  ! scratch_left || false
+}
+
+# --- SEC VS2: worker flags on the probes where the semantics allow it ------------------------
+
+@test "VS2: b1 probes run with the worker's three flags; the env probe with all but --setting-sources" {
+  pf
+  [ "$status" -eq 0 ]
+  local b1 envline
+  b1="$(grep -- 'outside.txt' "$STUB_LOG")"
+  [[ "$b1" =~ --permission-mode\ default ]]
+  [[ "$b1" =~ --setting-sources\ user ]]
+  [[ "$b1" =~ --strict-mcp-config ]]
+  b1="$(grep -- 'ok.txt' "$STUB_LOG")"
+  [[ "$b1" =~ --setting-sources\ user ]]
+  envline="$(grep -- 'PREFLIGHT-ENV' "$STUB_LOG")"
+  [[ "$envline" =~ --permission-mode\ default ]]
+  [[ "$envline" =~ --strict-mcp-config ]]
+  # the env probe MUST load project settings: that is what it tests
+  [[ ! "$envline" =~ --setting-sources ]]
+  # and the output says which flags each probe used and why the env probe differs
+  [[ "$output" =~ probe\ flags\ \(env-propagation\).*without\ --setting-sources ]]
+  [[ "$output" =~ probe\ flags\ \(b1-rule-form\).*--setting-sources\ user ]]
+}
+
+# --- SEC VS4: the H-02 conditions gate --enable --------------------------------------------
+
+@test "VS4: a symlinked watched dotfile: --check warns and passes, --enable refuses without --accept-dotfile-risk" {
+  echo real > "$HOME/zshrc.real"
+  ln -s "$HOME/zshrc.real" "$HOME/.zshrc"
+  local before; before="$(overlay)"
+  pf
+  [ "$status" -eq 0 ]
+  pf --enable
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ --accept-dotfile-risk ]]
+  [ "$(overlay)" = "$before" ]
+  [ "$(n_wire)" -eq 0 ]
+  pf --enable --accept-dotfile-risk
+  [ "$status" -eq 0 ]
+  [ "$(n_wire)" -eq 1 ]
+}
+
+@test "VS4: a writable ~/.bash_aliases: --enable refuses without --accept-dotfile-risk" {
+  : > "$HOME/.bash_aliases"
+  local before; before="$(overlay)"
+  pf --enable
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ --accept-dotfile-risk ]]
+  [ "$(overlay)" = "$before" ]
+  pf --enable --accept-dotfile-risk
+  [ "$status" -eq 0 ]
+}
+
+@test "VS4: --disable is never blocked by the dotfile conditions" {
+  : > "$HOME/.bash_aliases"
+  printf 'repo/skill\n' > "$PF_GRID/machines/testhost.txt"
+  pf --disable
+  [ "$status" -eq 0 ]
 }
