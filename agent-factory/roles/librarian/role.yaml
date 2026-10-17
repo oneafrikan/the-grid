@@ -12,3 +12,5 @@ summary: >-
 description: "Librarian. Maintains cross-linked markdown wikis compiled from other agents' research, one per domain, via ingest, query and lint; keeps evidence tiers. Use for research wikis."
 base_skills: []
 orchestrator: false
+# Bash for the idempotent inbox -> sources move; Edit for page updates
+tools: [Read, Grep, Glob, Write, Edit, Bash]
