@@ -86,6 +86,9 @@ Kind is read from `role.yaml`. A role can be both an orchestrator and unattended
 absent from `Hard rules`) and `E_UNATTENDED_RULE_MISSING` (no safe-target / run-record rule). It checks
 that a rule exists, not that it is well worded; the golden cases in `evals/` check behaviour.
 
+The `tools:` allowlist and what it does and does not protect: see
+[Tool allowlists and residual risk](../README.md#tool-allowlists-and-residual-risk).
+
 ## Description
 
 Every new role's `role.yaml` has a `description:`: one line, at most 250 characters, in the
