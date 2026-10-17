@@ -1,0 +1,522 @@
+#!/usr/bin/env bash
+# auto-handoff-preflight.sh — run the live checks that gate the auto-handoff hook, report
+# PASS/FAIL per check, and (only when every check passes and you ask) switch the hook on.
+#
+# Why: the hook runs `claude -p` unattended at the end of every qualifying session. The code
+# side is tested with a stub claude; four facts about the REAL claude can only be observed
+# live. This script runs those probes in one go instead of by hand.
+#
+# Usage:
+#   bash scripts/auto-handoff-preflight.sh [--check]     run the checks (default); read-only
+#   bash scripts/auto-handoff-preflight.sh --enable      checks must pass in the same run, then
+#                                                        drop `-hook:auto-handoff` from this
+#                                                        machine's overlay and run wire.sh
+#   bash scripts/auto-handoff-preflight.sh --disable     put the line back and run wire.sh
+#                                                        (no live check; the safe direction)
+#   --accept-env-risk   --enable only: needed when the env probe says PROPAGATES
+#   --dry-run           print the commands and planned edits; no claude call, no file change
+#   --help
+#
+# The checks (one result line each, then a verdict; exit 0 only if all pass):
+#   env-propagation  (R02.sec.F1) does a project .claude/settings.json `env` block reach hook
+#                    subprocesses? Reported as PROPAGATES / DOES-NOT-PROPAGATE; neither fails
+#                    the check, but PROPAGATES prints a WARN and makes --enable demand
+#                    --accept-env-risk. A hook that never ran is INCONCLUSIVE = FAIL.
+#   b1-rule-form     the path-scoped write rules the worker relies on are enforced: an
+#                    `Edit(//abs/**)` allow is honoured for Write, a write outside it is not
+#                    done, `Edit(**/.git/**)` deny holds, and `Bash(ls:*)` does not accept `>`.
+#   wp016-parity     the real claude accepts `--permission-mode default --setting-sources user
+#                    --strict-mcp-config` (named in --help, and one tiny capped call works).
+#   env-i-auth       the worker's minimal invocation authenticates under `env -i`. If it
+#                    fails while the plain run works, the remedy is
+#                    GRID_AUTOHANDOFF_KEEP_ENV=ANTHROPIC_API_KEY.
+# Also reported, never failing: the manifest state of the hook, symlinked watched dotfiles
+# (H-02 VS1), a writable ~/.bash_aliases (H-02 VS2), and the user's permission defaults.
+#
+# Cost guard: 5 live claude calls, each `--max-budget-usd 0.10 --model haiku`, so at most
+# USD 0.50 (the cap may not bind on a subscription plan). The cap is printed first.
+#
+# Safety: probes run in scratch dirs under $TMPDIR, removed on exit. Nothing under
+# ~/.claude is written by this script; --enable/--disable edit machines/<host>.txt only
+# (a backup goes to ${GRID_STATE_DIR:-~/.grid}/preflight-backups first) and then call
+# wire.sh, which does the wiring.
+#
+# Env:
+#   GRID_DIR                repo root (default: parent of scripts/)
+#   GRID_HOST               machine key for the overlay (default: hostname -s)
+#   GRID_BASELINE           baseline manifest (default: $GRID_DIR/baseline-submodules.txt)
+#   GRID_STATE_DIR          where overlay backups go (default: ~/.grid)
+#   GRID_PREFLIGHT_CLAUDE   claude binary to probe (default: claude on PATH); used by tests
+#   GRID_PREFLIGHT_TIMEOUT  wall-clock seconds per claude call (default 180)
+#   GRID_AUTOHANDOFF_KEEP_ENV  honoured by the env -i probe exactly as the worker honours it
+set -uo pipefail
+
+GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+GRID_HOST="${GRID_HOST:-$(hostname -s 2>/dev/null || uname -n 2>/dev/null | cut -d. -f1 || echo unknown)}"
+# GRID_HOST names a file (machines/<host>.txt): one safe path component, same rule as wire.sh.
+if ! [[ "$GRID_HOST" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*$ ]]; then
+  echo "preflight: GRID_HOST is not a valid machine key (letters, digits, _ . -; not starting with . or -)" >&2
+  exit 2
+fi
+BASELINE="${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}"
+export GRID_DIR GRID_HOST
+export GRID_BASELINE="$BASELINE"
+HOST_FILE="$GRID_DIR/machines/$GRID_HOST.txt"
+LOCAL_FILE="$GRID_DIR/machines/$GRID_HOST.local.txt"
+BACKUP_DIR="${GRID_STATE_DIR:-$HOME/.grid}/preflight-backups"
+
+PROBE_USD=0.10        # per-call budget cap, passed as --max-budget-usd to every probe
+N_LIVE=5              # live claude calls in a full run: env, b1 x2, flags, auth
+TIMEOUT_S="${GRID_PREFLIGHT_TIMEOUT:-180}"
+case "$TIMEOUT_S" in ''|*[!0-9]*) echo "preflight: GRID_PREFLIGHT_TIMEOUT must be whole seconds" >&2; exit 2 ;; esac
+HOOK="auto-handoff"
+
+MODE=check; DRY=0; ACCEPT_ENV_RISK=0; MODE_SET=0
+usage() { sed -n '2,/^set -uo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
+for a in "$@"; do
+  case "$a" in
+    --check|--enable|--disable)
+      [ "$MODE_SET" = 0 ] || { echo "preflight: pick one of --check, --enable, --disable" >&2; exit 2; }
+      MODE="${a#--}"; MODE_SET=1 ;;
+    --dry-run) DRY=1 ;;
+    --accept-env-risk) ACCEPT_ENV_RISK=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "preflight: unknown argument: $a (see --help)" >&2; exit 2 ;;
+  esac
+done
+
+# ---- output helpers -------------------------------------------------------------------
+FAILS=0
+pass() { printf 'PASS  %-16s %s\n' "$1" "$2"; }
+fail() { printf 'FAIL  %-16s %s\n' "$1" "$2"; FAILS=$((FAILS + 1)); }
+skip() { printf 'SKIP  %-16s %s\n' "$1" "$2"; }
+warn() { printf 'WARN  %s\n' "$*"; }
+info() { printf 'INFO  %s\n' "$*"; }
+more() { printf '        %s\n' "$*"; }
+# indented tail of a probe's captured output (last lines only, cut to a sane width)
+show_tail() { [ -s "$1" ] && tail -n 5 "$1" | cut -c1-200 | sed 's/^/        | /'; return 0; }
+
+# ---- scratch space --------------------------------------------------------------------
+SCRATCH_ROOT=""
+cleanup() { [ -z "$SCRATCH_ROOT" ] || rm -rf "$SCRATCH_ROOT"; }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# init_scratch: the one temp root for this run. Called from main, NOT from scratch(): scratch
+# runs inside $(...), and a variable set in that subshell would never reach the EXIT trap.
+init_scratch() {
+  SCRATCH_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/grid-preflight.XXXXXX")" || exit 1
+  SCRATCH_ROOT="$(cd "$SCRATCH_ROOT" && pwd -P)"   # physical path: rules must name the real dir
+}
+# scratch <name>: a fresh dir for one probe (a placeholder path in --dry-run: nothing is created).
+scratch() {
+  if [ "$DRY" = 1 ]; then printf '<scratch>/%s' "$1"; return 0; fi
+  mkdir -p "$SCRATCH_ROOT/$1" && printf '%s' "$SCRATCH_ROOT/$1"
+}
+# The probe settings.json and the rule strings embed the path unescaped, so keep it boring.
+safe_path() { [[ "$1" =~ ^[A-Za-z0-9_./+-]+$ ]]; }
+
+# ---- running claude -------------------------------------------------------------------
+CLAUDE_NAME="${GRID_PREFLIGHT_CLAUDE:-claude}"
+CLAUDE_BIN="$(command -v "$CLAUDE_NAME" 2>/dev/null || true)"
+TIMEOUT_BIN="$(command -v timeout 2>/dev/null || true)"
+have_claude() { [ "$DRY" = 1 ] || [ -n "$CLAUDE_BIN" ]; }
+no_claude() { fail "$1" "claude not found ($CLAUDE_NAME): install it or set GRID_PREFLIGHT_CLAUDE"; }
+
+PROBE_RC=0
+# probe <env-i 0|1> <cwd> <out file> <claude args...>: one capped claude call; exit status in
+# PROBE_RC, stdout+stderr in the out file. GRID_AUTOHANDOFF_CHILD=1 makes any auto-handoff
+# hook that is already wired return at once, so a probe never spawns a handoff of its own.
+probe() {
+  local envi="$1" cwd="$2" out="$3"; shift 3
+  PROBE_RC=0
+  local to=()
+  [ -z "$TIMEOUT_BIN" ] || to=("$TIMEOUT_BIN" --kill-after=5 "$TIMEOUT_S")
+  if [ "$DRY" = 1 ]; then
+    printf '  would run: (cd %s &&' "$cwd"
+    [ "$envi" = 1 ] && printf ' env -i <worker child env>' || printf ' GRID_AUTOHANDOFF_CHILD=1'
+    printf ' %q' "${to[@]+"${to[@]}"}" "$CLAUDE_NAME" "$@"; printf ')\n'
+    return 0
+  fi
+  if [ "$envi" = 1 ]; then
+    ( cd "$cwd" && env -i "${CHILD_ENV[@]}" "${to[@]+"${to[@]}"}" "$CLAUDE_BIN" "$@" ) < /dev/null > "$out" 2>&1 || PROBE_RC=$?
+  else
+    ( cd "$cwd" && GRID_AUTOHANDOFF_CHILD=1 "${to[@]+"${to[@]}"}" "$CLAUDE_BIN" "$@" ) < /dev/null > "$out" 2>&1 || PROBE_RC=$?
+  fi
+  [ "$PROBE_RC" -ne 124 ] || echo "(preflight: timed out after ${TIMEOUT_S}s)" >> "$out"
+  return 0
+}
+
+# ---- check a: env propagation (R02.sec.F1) --------------------------------------------
+ENV_RESULT=""   # PROPAGATES | DOES-NOT-PROPAGATE | (empty: not determined)
+check_env() {
+  local n=env-propagation d nonce got f
+  have_claude || { no_claude $n; return; }
+  d="$(scratch env)" || { fail $n "cannot create a scratch dir"; return; }
+  if [ "$DRY" = 0 ]; then
+    safe_path "$d" || { fail $n "scratch path has unsupported characters: $d"; return; }
+    mkdir -p "$d/.claude"
+    nonce="pf$$-$(date +%s)-$RANDOM"
+    # A project settings.json whose env block sets a marker, and hooks that write what they
+    # see. Two events: if one does not fire under -p the other still answers. The stub in
+    # the tests parses this layout (one key per line), so keep it that way.
+    cat > "$d/.claude/settings.json" <<EOF
+{
+  "env": {
+    "GRID_PREFLIGHT_MARKER": "$nonce"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo ran:\${GRID_PREFLIGHT_MARKER-UNSET} > '$d/start.out'"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo ran:\${GRID_PREFLIGHT_MARKER-UNSET} > '$d/end.out'"
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+  fi
+  probe 0 "$d" "$d/out.txt" -p "PREFLIGHT-ENV: reply with the single word ok." \
+    --model haiku --max-budget-usd "$PROBE_USD" --max-turns 2 --tools ""
+  [ "$DRY" = 1 ] && { skip $n "dry-run: would build a scratch project with an env block and two hooks, then read what the hooks saw"; return; }
+  if [ "$PROBE_RC" -ne 0 ]; then
+    fail $n "claude exited $PROBE_RC; cannot tell whether env reaches hooks"; show_tail "$d/out.txt"; return
+  fi
+  # SessionEnd can land just after claude exits: give it a moment before calling it absent.
+  local i
+  for ((i = 0; i < 12; i++)); do
+    [ -f "$d/start.out" ] || [ -f "$d/end.out" ] && break
+    sleep 0.25
+  done
+  got=""
+  for f in start.out end.out; do [ -f "$d/$f" ] && got="$got$(cat "$d/$f")"; done
+  case "$got" in
+    *"ran:$nonce"*)
+      ENV_RESULT=PROPAGATES
+      pass $n "PROPAGATES: a project settings.json env block reaches hook subprocesses"
+      warn "auto-handoff must only run in repos you trust: a cloned repo's .claude/settings.json can"
+      warn "  set GRID_HOOKS, GRID_PRIVATE_DIR, GRID_CLAUDE and GRID_AUTOHANDOFF_KEEP_ENV for the hook"
+      warn "  (R02.sec.F1). --enable will require --accept-env-risk." ;;
+    *"ran:UNSET"*)
+      ENV_RESULT=DOES-NOT-PROPAGATE
+      pass $n "DOES-NOT-PROPAGATE: hooks ran and did not see the project env block" ;;
+    "") fail $n "INCONCLUSIVE: claude ran but neither hook fired, so the question is unanswered" ;;
+    *)  fail $n "INCONCLUSIVE: unexpected hook output: $(printf '%s' "$got" | head -c 120)" ;;
+  esac
+}
+
+# ---- check b: B1 rule form ------------------------------------------------------------
+# Probe 1 is the operator's command (OPERATOR-TASKS B1) with the same allow/deny shape the
+# worker uses. Probe 2 asks the other mechanical questions: the .git deny and whether a
+# `Bash(ls:*)` allow accepts a `>` redirect. A file that is absent only proves the rule if
+# the model tried, so probe 2 also asks for a file the rules DO allow (ok.txt): it is the
+# positive control.
+check_b1() {
+  local n=b1-rule-form d d2 problems=()
+  have_claude || { no_claude $n; return; }
+  command -v git >/dev/null 2>&1 || { fail $n "git not found (the probes need a scratch repo)"; return; }
+  d="$(scratch b1a)" && d2="$(scratch b1b)" || { fail $n "cannot create a scratch dir"; return; }
+  if [ "$DRY" = 0 ]; then
+    safe_path "$d" && safe_path "$d2" || { fail $n "scratch path has unsupported characters"; return; }
+    mkdir -p "$d/LOGS" && git -C "$d" init -q && git -C "$d2" init -q || { fail $n "git init failed in the scratch dir"; return; }
+  fi
+  probe 0 "$d" "$d/out.txt" -p "write x to $d/outside.txt, then to $d/LOGS/inside.txt" \
+    --model haiku --max-budget-usd "$PROBE_USD" --max-turns 6 --tools "Read,Write,Bash" \
+    --allowedTools "Read" "Edit(/$d/LOGS/**)" --disallowedTools "Edit" "Bash(git:*)"
+  local rc1=$PROBE_RC
+  probe 0 "$d2" "$d2/out.txt" -p "write x to $d2/ok.txt, then write x to $d2/.git/probe.txt, then run the Bash command: ls $d2 > $d2/redirect.txt" \
+    --model haiku --max-budget-usd "$PROBE_USD" --max-turns 6 --tools "Read,Write,Bash" \
+    --allowedTools "Read" "Edit(/$d2/**)" "Bash(ls:*)" --disallowedTools "Edit(**/.git/**)" "Bash(git:*)"
+  local rc2=$PROBE_RC
+  [ "$DRY" = 1 ] && { skip $n "dry-run: would run two capped probes and assert on the files they leave"; return; }
+  if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ]; then
+    fail $n "claude exited $rc1/$rc2 (probe 1/probe 2); cannot judge the rules"
+    show_tail "$d/out.txt"; show_tail "$d2/out.txt"; return
+  fi
+  [ -f "$d/LOGS/inside.txt" ] || problems+=("inside.txt missing: Edit(//abs/**) allow was not honoured for Write")
+  [ ! -e "$d/outside.txt" ] || problems+=("outside.txt written: a write outside the allowed dir was not blocked")
+  if [ ! -f "$d2/ok.txt" ]; then
+    problems+=("ok.txt missing: positive control failed, so the .git and redirect results prove nothing")
+  else
+    [ ! -e "$d2/.git/probe.txt" ] || problems+=(".git/probe.txt written: Edit(**/.git/**) deny not enforced")
+    [ ! -e "$d2/redirect.txt" ] || problems+=("redirect.txt written: Bash(ls:*) accepted a '>' redirect")
+  fi
+  if [ "${#problems[@]}" -eq 0 ]; then
+    pass $n "inside.txt present, outside.txt absent, .git write denied, 'ls >' redirect refused"
+  else
+    fail $n "${problems[0]}"
+    local p; for p in "${problems[@]:1}"; do more "$p"; done
+  fi
+}
+
+# ---- check c: WP-016 flag parity ------------------------------------------------------
+WP016_OK=0
+check_flags() {
+  local n=wp016-parity d help flag missing=()
+  have_claude || { no_claude $n; return; }
+  if [ "$DRY" = 1 ]; then
+    printf '  would run: %q --help | grep for --permission-mode --setting-sources --strict-mcp-config\n' "$CLAUDE_NAME"
+  else
+    help="$("$CLAUDE_BIN" --help 2>&1 < /dev/null)" || true
+    for flag in --permission-mode --setting-sources --strict-mcp-config; do
+      # here-string, not a pipe: under pipefail a grep -q that exits early can SIGPIPE the printf
+      grep -q -F -- "$flag" <<< "$help" || missing+=("$flag")
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+      fail $n "claude --help does not name: ${missing[*]}"; return
+    fi
+  fi
+  d="$(scratch flags)" || { fail $n "cannot create a scratch dir"; return; }
+  probe 0 "$d" "$d/out.txt" -p "PREFLIGHT-FLAGS: reply with the single word ok." \
+    --model haiku --max-budget-usd "$PROBE_USD" --max-turns 2 \
+    --permission-mode default --setting-sources user --strict-mcp-config --tools "Read,Write,Bash"
+  [ "$DRY" = 1 ] && { skip $n "dry-run: would also run one capped call with the worker's flags"; return; }
+  if [ "$PROBE_RC" -ne 0 ]; then
+    fail $n "claude exited $PROBE_RC with --permission-mode default --setting-sources user --strict-mcp-config"
+    show_tail "$d/out.txt"; return
+  fi
+  WP016_OK=1
+  pass $n "--permission-mode default --setting-sources user --strict-mcp-config accepted"
+}
+
+# ---- check d: env -i auth -------------------------------------------------------------
+# CHILD_ENV mirrors the worker's: the same variables, and KEEP_ENV (NAME or PREFIX*) read the
+# same way, so a pass here means the worker's child will authenticate.
+CHILD_ENV=()
+build_child_env() {
+  local pats=() pat pfx nm
+  CHILD_ENV=()
+  IFS=, read -r -a pats <<< "${GRID_AUTOHANDOFF_KEEP_ENV:-}"
+  for pat in "${pats[@]+"${pats[@]}"}"; do
+    [[ "$pat" =~ ^[A-Za-z_][A-Za-z0-9_]*\*?$ ]] || continue
+    case "$pat" in
+      *'*')
+        pfx="${pat%\*}"
+        while IFS= read -r nm; do
+          [[ "$nm" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+          case "$nm" in "$pfx"*) CHILD_ENV+=("$nm=${!nm}") ;; esac
+        done < <(compgen -e) ;;
+      *) [ -n "${!pat+x}" ] && CHILD_ENV+=("$pat=${!pat}") ;;
+    esac
+  done
+  for nm in LANG LC_ALL TMPDIR CLAUDE_CONFIG_DIR CLAUDE_CODE_OAUTH_TOKEN; do
+    [ -n "${!nm+x}" ] && CHILD_ENV+=("$nm=${!nm}")
+  done
+  CHILD_ENV+=("PATH=$PATH" "HOME=$HOME" "GRID_AUTOHANDOFF_CHILD=1")
+}
+check_auth() {
+  local n=env-i-auth d
+  have_claude || { no_claude $n; return; }
+  build_child_env
+  d="$(scratch auth)" || { fail $n "cannot create a scratch dir"; return; }
+  probe 1 "$d" "$d/out.txt" -p "PREFLIGHT-AUTH: reply with the single word ok." \
+    --model haiku --max-budget-usd "$PROBE_USD" --max-turns 2 \
+    --permission-mode default --setting-sources user --strict-mcp-config --tools "Read,Write,Bash"
+  [ "$DRY" = 1 ] && { skip $n "dry-run: would run the worker's invocation under env -i"; return; }
+  if [ "$PROBE_RC" -eq 0 ]; then
+    if [ -n "${GRID_AUTOHANDOFF_KEEP_ENV:-}" ]; then
+      pass $n "authenticates under env -i (with GRID_AUTOHANDOFF_KEEP_ENV=$GRID_AUTOHANDOFF_KEEP_ENV)"
+    else
+      pass $n "authenticates under env -i (login/OAuth; no API-key variable needed)"
+    fi
+    return
+  fi
+  fail $n "claude exited $PROBE_RC under env -i"
+  show_tail "$d/out.txt"
+  if [ "$WP016_OK" = 1 ] && grep -q -i -E 'auth|log ?in|api[ _-]?key|credential|unauthori[sz]ed|401|oauth|token' "$d/out.txt"; then
+    more "remedy: claude works with your normal environment but not under env -i, so it"
+    more "authenticates through an environment variable. In the shell that starts claude (the"
+    more "hook inherits it), set:"
+    more "  export GRID_AUTOHANDOFF_KEEP_ENV=ANTHROPIC_API_KEY"
+    more "then rerun this script. (Note: KEEP_ENV is itself settable by a repo env block; see"
+    more "the env-propagation result.)"
+  fi
+}
+
+# ---- read-only reports ----------------------------------------------------------------
+# layer_last <file>: "on" or "off" for the LAST hook:/-hook:auto-handoff line, empty if none.
+# Same grammar as wire.sh: trailing # comments and all whitespace are dropped first.
+layer_last() {
+  [ -f "$1" ] || return 0
+  awk -v h="$HOOK" '{ s=$0; sub(/#.*/,"",s); gsub(/[ \t\r]/,"",s)
+         if (s == "hook:" h) v="on"; else if (s == "-hook:" h) v="off" }
+       END { if (v != "") print v }' "$1"
+}
+# effective_state <host file to use>: sets EFF (on|off) and EFF_SRC (the file that decided).
+# Layers load baseline, host, host.local; the last one with an opinion wins; default is on.
+effective_state() {
+  local f v
+  EFF=on; EFF_SRC="default: no manifest file says -hook:$HOOK"
+  for f in "$BASELINE" "$1" "$LOCAL_FILE"; do
+    v="$(layer_last "$f")"
+    [ -z "$v" ] || { EFF="$v"; EFF_SRC="$f"; }
+  done
+}
+report_state() {
+  effective_state "$HOST_FILE"
+  info "$HOOK manifest state: $(printf '%s' "$EFF" | tr '[:lower:]' '[:upper:]') (${EFF_SRC#"$GRID_DIR"/})"
+  [ "$EFF" != off ] || info "  ($HOOK is OFF on this machine; --enable removes -hook:$HOOK from machines/$GRID_HOST.txt)"
+}
+report_dotfiles() {
+  local f
+  for f in "$HOME/.gitconfig" "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.config/git/config" "$HOME/.ssh/config"; do
+    [ ! -L "$f" ] || warn "${f/#$HOME/\~} is a symlink: the worker watches these files and a link makes its before/after comparison unreliable (H-02 VS1)"
+  done
+  if [ -e "$HOME/.bash_aliases" ] && [ -w "$HOME/.bash_aliases" ]; then
+    warn "\$HOME/.bash_aliases exists and is writable: .bashrc may source it, so a write there would run in every shell and the worker does not watch it (H-02 VS2). Keep it absent or read-only."
+  fi
+}
+report_user_permissions() {
+  local s="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+  if [ ! -r "$s" ] || ! command -v python3 >/dev/null 2>&1; then
+    info "user permissions: not read (no readable settings.json or no python3)"; return
+  fi
+  python3 -I - "$s" <<'PY' 2>/dev/null || info "user permissions: settings.json not readable as JSON"
+import json, sys
+p = (json.load(open(sys.argv[1])).get("permissions") or {})
+print("INFO  user permissions: defaultMode=%s, %d allow rule(s)" % (p.get("defaultMode", "(unset)"), len(p.get("allow") or [])))
+for r in (p.get("allow") or [])[:20]:
+    print("        allow: %s" % str(r)[:120])
+print("INFO  not asserted here: whether --setting-sources user inherits those allow rules (the worker passes its own)")
+PY
+}
+
+run_checks() {
+  report_state
+  report_dotfiles
+  report_user_permissions
+  check_env
+  check_b1
+  check_flags
+  check_auth
+}
+
+# ---- overlay edits (--enable / --disable) ---------------------------------------------
+backup_overlay() { # $1 = what changed
+  [ -f "$HOST_FILE" ] || return 0
+  mkdir -p "$BACKUP_DIR" || return 1
+  BACKUP_FILE="$BACKUP_DIR/$GRID_HOST.txt.$(date -u +%Y%m%dT%H%M%SZ).$$"
+  cp -p "$HOST_FILE" "$BACKUP_FILE" || return 1
+}
+# without_off_lines <file>: the file minus every -hook:auto-handoff line.
+without_off_lines() {
+  awk -v h="$HOOK" '{ s=$0; sub(/#.*/,"",s); gsub(/[ \t\r]/,"",s); if (s != "-hook:" h) print }' "$1"
+}
+run_wire() {
+  echo "running: bash $GRID_DIR/scripts/wire.sh"
+  # GRID_DIR, GRID_HOST and GRID_BASELINE are exported above, so wire.sh reads the same
+  # overlay files this script just edited.
+  if ! bash "$GRID_DIR/scripts/wire.sh"; then
+    echo "preflight: wire.sh failed (the overlay edit above is already in place)." >&2
+    return 1
+  fi
+}
+undo_hint() {
+  echo "To undo: bash scripts/auto-handoff-preflight.sh --disable (re-adds -hook:$HOOK to machines/$GRID_HOST.txt and runs wire.sh)."
+  [ -z "${BACKUP_FILE:-}" ] || echo "The overlay as it was before: $BACKUP_FILE"
+}
+
+do_enable() {
+  local tmp removed
+  if [ "$DRY" = 1 ]; then
+    echo "dry-run: after all checks pass (and --accept-env-risk if env PROPAGATES) --enable would:"
+    echo "  - copy $HOST_FILE to $BACKUP_DIR/ (only if a -hook:$HOOK line has to go)"
+    echo "  - remove every -hook:$HOOK line from $HOST_FILE"
+    echo "  - run: bash $GRID_DIR/scripts/wire.sh"
+    return 0
+  fi
+  if [ "$FAILS" -gt 0 ]; then
+    echo "enable refused: $FAILS check(s) failed. Nothing was changed."; return 1
+  fi
+  if [ "$ENV_RESULT" = PROPAGATES ] && [ "$ACCEPT_ENV_RISK" = 0 ]; then
+    echo "enable refused: project env blocks reach hooks (see the WARN above). If you only run"
+    echo "claude in repos you trust, rerun with --accept-env-risk. Nothing was changed."; return 1
+  fi
+  tmp="$(mktemp "${TMPDIR:-/tmp}/grid-preflight-overlay.XXXXXX")" || return 1
+  [ ! -f "$HOST_FILE" ] || without_off_lines "$HOST_FILE" > "$tmp"
+  # The edit must actually turn the hook on: a -hook line in the baseline or the .local
+  # overlay would still win, and this script does not edit those files.
+  effective_state "$tmp"
+  if [ "$EFF" = off ]; then
+    rm -f "$tmp"
+    echo "enable refused: -hook:$HOOK is also set in ${EFF_SRC#"$GRID_DIR"/}, which this script does not edit."
+    echo "Remove it there first. Nothing was changed."; return 1
+  fi
+  if [ -f "$HOST_FILE" ] && ! cmp -s "$HOST_FILE" "$tmp"; then
+    removed="$(awk -v h="$HOOK" '{ s=$0; sub(/#.*/,"",s); gsub(/[ \t\r]/,"",s); if (s == "-hook:" h) n++ } END { print n + 0 }' "$HOST_FILE")"
+    backup_overlay || { rm -f "$tmp"; echo "preflight: could not back up $HOST_FILE; nothing changed" >&2; return 1; }
+    cat "$tmp" > "$HOST_FILE"
+    echo "removed $removed -hook:$HOOK line(s) from machines/$GRID_HOST.txt"
+  else
+    echo "nothing to change in machines/$GRID_HOST.txt (no -hook:$HOOK line)"
+  fi
+  rm -f "$tmp"
+  # wire.sh is idempotent and rerun even when the overlay needed no edit: the manifest
+  # saying ON does not prove the hook entry is in settings.json.
+  if ! run_wire; then undo_hint; return 1; fi
+  echo "$HOOK is enabled on $GRID_HOST. Watch the first handoffs: tail \${GRID_HOOK_LOG_DIR:-\$HOME/.grid/hook-logs}/auto-handoff.log"
+  undo_hint
+}
+
+do_disable() {
+  if [ "$DRY" = 1 ]; then
+    echo "dry-run: --disable would append -hook:$HOOK to $HOST_FILE (backup first, only if it changes) and run: bash $GRID_DIR/scripts/wire.sh"
+    return 0
+  fi
+  if [ "$(layer_last "$HOST_FILE")" = off ]; then
+    echo "nothing to change in machines/$GRID_HOST.txt (already ends with -hook:$HOOK)"
+  else
+    backup_overlay || { echo "preflight: could not back up $HOST_FILE; nothing changed" >&2; return 1; }
+    mkdir -p "$(dirname "$HOST_FILE")"
+    # A file that does not end in a newline would glue the new line onto its last entry.
+    if [ -s "$HOST_FILE" ] && [ "$(tail -c1 "$HOST_FILE" | wc -l | tr -d ' ')" -eq 0 ]; then printf '\n' >> "$HOST_FILE"; fi
+    printf -- '-hook:%s   # added by auto-handoff-preflight.sh --disable\n' "$HOOK" >> "$HOST_FILE"
+    echo "added -hook:$HOOK to machines/$GRID_HOST.txt"
+  fi
+  run_wire || return 1
+  echo "$HOOK is disabled on $GRID_HOST. Re-enable: bash scripts/auto-handoff-preflight.sh --enable"
+  [ -z "${BACKUP_FILE:-}" ] || echo "The overlay as it was before: $BACKUP_FILE"
+}
+
+# ---- main -----------------------------------------------------------------------------
+cap_total="$(awk -v n="$N_LIVE" -v u="$PROBE_USD" 'BEGIN { printf "%.2f", n * u }')"
+dry_note=""; [ "$DRY" = 0 ] || dry_note=" (dry-run)"
+echo "auto-handoff preflight: mode=$MODE$dry_note host=$GRID_HOST"
+[ "$MODE" = disable ] || \
+  echo "live spend cap: $N_LIVE claude calls, each --max-budget-usd $PROBE_USD on the cheapest model = at most USD $cap_total (a subscription plan may not enforce the cap)"
+
+case "$MODE" in
+  disable) do_disable; exit $? ;;
+esac
+
+[ "$DRY" = 1 ] || init_scratch
+run_checks
+echo
+if [ "$DRY" = 1 ]; then
+  echo "VERDICT: not run (dry-run)"
+elif [ "$FAILS" -eq 0 ]; then
+  echo "VERDICT: PASS (4/4 checks)"
+else
+  echo "VERDICT: FAIL ($FAILS of 4 checks failed)"
+fi
+
+if [ "$MODE" = enable ]; then
+  echo
+  do_enable; exit $?
+fi
+[ "$DRY" = 1 ] && exit 0
+[ "$FAILS" -eq 0 ]
