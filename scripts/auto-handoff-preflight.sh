@@ -311,21 +311,21 @@ check_b1() {
   [ -f "$d/LOGS/inside.txt" ] || problems+=("inside.txt missing: Edit(//abs/**) allow was not honoured for Write")
   if [ -e "$d/outside.txt" ]; then
     problems+=("outside.txt written: a write outside the allowed dir was not blocked")
-  elif ! attempted "$d/out.txt" "outside.txt"; then
-    unproven+=("no evidence the model attempted the write to outside.txt, so its absence proves nothing")
+  elif ! attempted "$d/out.txt" write "$d/outside.txt"; then
+    unproven+=("$(no_evidence "the write to outside.txt" "so its absence proves nothing")")
   fi
   if [ ! -f "$d2/ok.txt" ]; then
     problems+=("ok.txt missing: positive control failed, so the .git and redirect results prove nothing")
   else
     if [ -e "$d2/.git/probe.txt" ]; then
       problems+=(".git/probe.txt written: Edit(**/.git/**) deny not enforced")
-    elif ! attempted "$d2/out.txt" ".git/probe.txt"; then
-      unproven+=("no evidence the model attempted the .git/probe.txt write, so the .git deny is unproven")
+    elif ! attempted "$d2/out.txt" write "$d2/.git/probe.txt"; then
+      unproven+=("$(no_evidence "the .git/probe.txt write" "so the .git deny is unproven")")
     fi
     if [ -e "$d2/redirect.txt" ]; then
       problems+=("redirect.txt written: Bash(ls:*) accepted a '>' redirect")
-    elif ! attempted "$d2/out.txt" "redirect.txt"; then
-      unproven+=("no evidence the model attempted the 'ls >' redirect (redirect.txt), so Bash(ls:*) is unproven")
+    elif ! attempted "$d2/out.txt" redirect "$d2/redirect.txt"; then
+      unproven+=("$(no_evidence "the 'ls >' redirect (redirect.txt)" "so Bash(ls:*) is unproven")")
     fi
   fi
   if [ "${#problems[@]}" -eq 0 ] && [ "${#unproven[@]}" -eq 0 ]; then
@@ -340,12 +340,66 @@ check_b1() {
   done
   [ "${#unproven[@]}" -eq 0 ] || more "rerun the script (model behaviour varies); a rule is only proven when the model tried the action and it was blocked"
 }
-# attempted <stream-json out file> <needle>: does a tool_use event name the path/command?
-# (A here-string, not a pipe: under pipefail an early-exiting grep -q can fail the pipeline.)
+# attempted <stream-json out file> <write|redirect> <absolute path>: did the model ATTEMPT
+# the denied action? Yes only when ONE tool_use block of an assistant event is
+#   - write mode:    a Write/Edit/MultiEdit/NotebookEdit whose input file_path/path/notebook_path
+#                    is exactly the path (normalised; not the bare file name), or
+#   - redirect mode: a Bash whose input command redirects (> or >>, optionally quoted) to
+#                    exactly the path.
+# Text blocks, Read/Grep/Glob/other tools, tool_result echoes, a path in a different block
+# and unparseable lines never count. The real CLI's stream shape is unverified, so any
+# doubt means "no": the caller then reports INCONCLUSIVE, never a pass.
+# Returns 1 for "no evidence" and, with ATT_NOPY=1, when python3 is missing.
+ATT_NOPY=0
+PYTHON_BIN="${GRID_PREFLIGHT_PYTHON:-python3}"
 attempted() {
-  local lines
-  lines="$(grep -E '"type": ?"tool_use"' "$1" 2> /dev/null)" || return 1
-  grep -q -F -- "$2" <<< "$lines"
+  ATT_NOPY=0
+  if ! command -v "$PYTHON_BIN" > /dev/null 2>&1; then ATT_NOPY=1; return 1; fi
+  "$PYTHON_BIN" -I - "$1" "$2" "$3" <<'PY' 2> /dev/null
+import json, os, re, sys
+out, mode, target = sys.argv[1:4]
+WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+KEYS = ("file_path", "path", "notebook_path")
+def same(p):
+    if not isinstance(p, str) or not os.path.isabs(p):
+        return False   # a relative path is not provably the target
+    return os.path.normpath(p) == os.path.normpath(target) or os.path.realpath(p) == os.path.realpath(target)
+def hit(block):
+    if not isinstance(block, dict) or block.get("type") != "tool_use":
+        return False
+    inp = block.get("input")
+    if not isinstance(inp, dict):
+        return False
+    if mode == "write":
+        return block.get("name") in WRITE_TOOLS and any(same(inp.get(k)) for k in KEYS)
+    cmd = inp.get("command")
+    return (block.get("name") == "Bash" and isinstance(cmd, str)
+            and re.search(r">{1,2}\s*[\"']?" + re.escape(target) + r"(?![A-Za-z0-9_./-])", cmd) is not None)
+try:
+    fh = open(out, errors="replace")
+except OSError:
+    sys.exit(1)
+for line in fh:
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        continue
+    if not isinstance(ev, dict) or ev.get("type") != "assistant":
+        continue
+    msg = ev.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if isinstance(content, list) and any(hit(b) for b in content):
+        sys.exit(0)
+sys.exit(1)
+PY
+}
+# no_evidence <what> <consequence>: the INCONCLUSIVE reason for an unproven denied action.
+no_evidence() {
+  if [ "$ATT_NOPY" = 1 ]; then
+    printf 'cannot check whether the model attempted %s: python3 not found (or set GRID_PREFLIGHT_PYTHON) to read the stream-json output, %s' "$1" "$2"
+  else
+    printf 'no evidence the model attempted %s (a write-capable tool_use on that exact path), %s' "$1" "$2"
+  fi
 }
 
 # ---- check c: WP-016 flag parity ------------------------------------------------------
@@ -548,6 +602,13 @@ strip_off_lines() {
 # A symlink is refused rather than followed: the edit would land somewhere other than
 # machines/<host>.txt. A read-only file is the operator's lock; a rename would bypass it.
 overlay_editable() {
+  # An earlier run killed with SIGKILL (which cannot be trapped) can leave its temp file in
+  # machines/, where it would show up as an untracked file. Only an edit run clears it.
+  local stale
+  for stale in "$HOST_FILE".preflight.*; do
+    [ -e "$stale" ] || [ -L "$stale" ] || continue
+    rm -f "$stale" && echo "removed leftover temp file from an interrupted run: $stale"
+  done
   if [ -L "$HOST_FILE" ]; then
     echo "refused: machines/$GRID_HOST.txt is a symlink; edit its target by hand. Nothing was changed."; return 1
   fi
@@ -679,6 +740,16 @@ dry_note=""; [ "$DRY" = 0 ] || dry_note=" (dry-run)"
 echo "auto-handoff preflight: mode=$MODE$dry_note host=$GRID_HOST"
 [ "$MODE" = disable ] || \
   echo "live spend cap: $N_LIVE claude calls, each --max-budget-usd $PROBE_USD on the cheapest model = at most USD $cap_total (a subscription plan may not enforce the cap)"
+
+# The manifest readers are bash loops, quadratic in line length (a 300 KB line takes ~10 s):
+# refuse a pathological file now, before any claude call is paid for.
+for f in "$BASELINE" "$HOST_FILE" "$LOCAL_FILE"; do
+  [ -f "$f" ] || continue
+  if awk 'length($0) > 65536 { found = 1; exit } END { exit !found }' "$f"; then
+    echo "preflight: $f has a line over 64 KB; refusing to read it" >&2
+    exit 2
+  fi
+done
 
 case "$MODE" in
   disable) do_disable; exit $? ;;
