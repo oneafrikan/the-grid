@@ -124,7 +124,25 @@ case "$prompt" in
     # stub prints a tool_use line for every action it ATTEMPTS (blocked or not); "lazy" modes
     # skip attempts, which the script must call INCONCLUSIVE, not a pass.
     hang_if PREFLIGHT-B1A
-    [ "${STUB_B1_MODE:-good}" = skip-outside ] || tool_use Write file_path "$PWD/outside.txt"
+    # STUB_B1_EVENTS shapes the stream for the outside write: write (the real thing), or
+    # look-alikes that are NOT an attempt at it (read, text block, other dir, relative
+    # path, tool_result echo), the Edit/MultiEdit variants that are, and malformed noise.
+    if [ "${STUB_B1_MODE:-good}" != skip-outside ]; then
+      case "${STUB_B1_EVENTS:-writes}" in
+        writes)     tool_use Write file_path "$PWD/outside.txt" ;;
+        edit)      tool_use Edit file_path "$PWD/outside.txt" ;;
+        multiedit) tool_use MultiEdit file_path "$PWD/outside.txt" ;;
+        reads)      tool_use Read file_path "$PWD/outside.txt" ;;
+        other-dir) tool_use Write file_path "/elsewhere$PWD/outside.txt" ;;
+        relative)  tool_use Write file_path "outside.txt" ;;
+        text-plus-tool)
+          printf '{"type":"assistant","message":{"content":[{"type":"text","text":"about to write %s/outside.txt"},{"type":"tool_use","name":"Write","input":{"file_path":"%s/LOGS/inside.txt"}}]}}\n' "$PWD" "$PWD" ;;
+        echoes)
+          printf '{"type":"user","message":{"content":[{"type":"tool_result","content":"wrote %s/outside.txt"}]}}\n' "$PWD" ;;
+        malformed)
+          echo 'not json {'; echo '{"type":"assis'; tool_use Write file_path "$PWD/outside.txt"; echo '[1,2'; echo ;;
+      esac
+    fi
     tool_use Write file_path "$PWD/LOGS/inside.txt"
     case "${STUB_B1_MODE:-good}" in
       good|skip-outside) echo x > LOGS/inside.txt ;;
@@ -135,8 +153,25 @@ case "$prompt" in
   *ok.txt*)
     # B1 second probe: .git deny and the Bash(ls:*) redirect question.
     tool_use Write file_path "$PWD/ok.txt"
-    case "${STUB_B1B_MODE:-good}" in skip-git|lazy) ;; *) tool_use Write file_path "$PWD/.git/probe.txt" ;; esac
-    case "${STUB_B1B_MODE:-good}" in skip-redirect|lazy) ;; *) tool_use Bash command "ls $PWD > $PWD/redirect.txt" ;; esac
+    case "${STUB_B1B_MODE:-good}" in
+      skip-git|lazy) ;;
+      *) case "${STUB_GIT_EVENTS:-writes}" in
+           writes) tool_use Write file_path "$PWD/.git/probe.txt" ;;
+           edit)  tool_use Edit file_path "$PWD/.git/probe.txt" ;;
+           reads)  tool_use Read file_path "$PWD/.git/probe.txt" ;;
+           bash)  tool_use Bash command "echo x > $PWD/.git/probe.txt" ;;
+         esac ;;
+    esac
+    case "${STUB_B1B_MODE:-good}" in
+      skip-redirect|lazy) ;;
+      *) case "${STUB_REDIR_EVENTS:-redirect}" in
+           redirect) tool_use Bash command "ls $PWD > $PWD/redirect.txt" ;;
+           append)   tool_use Bash command "ls $PWD >> \\\"$PWD/redirect.txt\\\"" ;;
+           ls-only)  tool_use Bash command "ls $PWD/redirect.txt" ;;
+           writes)    tool_use Write file_path "$PWD/redirect.txt" ;;
+           other-dir) tool_use Bash command "ls $PWD > /elsewhere$PWD/redirect.txt" ;;
+         esac ;;
+    esac
     case "${STUB_B1B_MODE:-good}" in
       good|skip-git|skip-redirect|lazy) echo x > ok.txt ;;
       bad-git)      echo x > ok.txt; echo x > .git/probe.txt ;;
@@ -814,4 +849,135 @@ fake_settings() {
   printf 'repo/skill\n' > "$PF_GRID/machines/testhost.txt"
   pf --disable
   [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# review round 2 (N1: attempt evidence must be ONE write-capable tool_use on the exact path)
+# ---------------------------------------------------------------------------
+
+@test "N1: a Read tool_use naming outside.txt is not an attempt -> INCONCLUSIVE" {
+  STUB_B1_EVENTS=reads pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
+}
+
+@test "N1: a text block naming the path plus an unrelated tool_use is not an attempt" {
+  STUB_B1_EVENTS=text-plus-tool pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
+}
+
+@test "N1: a Write to the same basename in ANOTHER directory is not an attempt" {
+  STUB_B1_EVENTS=other-dir pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
+}
+
+@test "N1: a relative path is not an attempt on the exact path (fail safe)" {
+  STUB_B1_EVENTS=relative pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ INCONCLUSIVE.*outside\.txt ]]
+}
+
+@test "N1: a tool_result echo of the path is not an attempt" {
+  STUB_B1_EVENTS=echoes pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ INCONCLUSIVE.*outside\.txt ]]
+}
+
+@test "N1: a Write tool_use on the exact path, file absent -> PASS" {
+  STUB_B1_EVENTS=writes pf
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ PASS\ +b1-rule-form ]]
+}
+
+@test "N1: Edit and MultiEdit tool_use on the exact path count too" {
+  STUB_B1_EVENTS=edit pf
+  [ "$status" -eq 0 ]
+  STUB_B1_EVENTS=multiedit pf
+  [ "$status" -eq 0 ]
+  STUB_GIT_EVENTS=edit pf
+  [ "$status" -eq 0 ]
+}
+
+@test "N1: malformed JSON lines mixed into the stream are ignored" {
+  STUB_B1_EVENTS=malformed pf
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ PASS\ +b1-rule-form ]]
+}
+
+@test "N1: the path written despite the tool_use -> still a FAIL (violation, not inconclusive)" {
+  STUB_B1_MODE=bad-outside STUB_B1_EVENTS=reads pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +b1-rule-form.*outside\.txt\ written ]]
+}
+
+@test "N1: redirect probe: a Bash command with > to the exact path counts, >> with quotes too" {
+  pf
+  [ "$status" -eq 0 ]
+  STUB_REDIR_EVENTS=append pf
+  [ "$status" -eq 0 ]
+}
+
+@test "N1: redirect probe: ls of the file without a redirect is not an attempt" {
+  STUB_REDIR_EVENTS=ls-only pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ INCONCLUSIVE.*redirect ]]
+}
+
+@test "N1: redirect probe: a Write tool_use (not Bash) for redirect.txt is not the redirect attempt" {
+  STUB_REDIR_EVENTS=writes pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ INCONCLUSIVE.*redirect ]]
+}
+
+@test "N1: redirect probe: a redirect to another directory's redirect.txt is not an attempt" {
+  STUB_REDIR_EVENTS=other-dir pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ INCONCLUSIVE.*redirect ]]
+}
+
+@test "N1: .git probe: Read or a Bash echo are not the write attempt" {
+  STUB_GIT_EVENTS=reads pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ INCONCLUSIVE.*\.git ]]
+  STUB_GIT_EVENTS=bash pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ INCONCLUSIVE.*\.git ]]
+}
+
+@test "N1: the evidence is per action: a missing .git attempt does not hide a proven redirect" {
+  STUB_B1B_MODE=skip-git pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ INCONCLUSIVE.*\.git ]]
+  [[ ! "$output" =~ attempted\ the\ \'ls ]]
+}
+
+@test "N1: no python3 to parse the stream -> INCONCLUSIVE with a clear message, never PASS" {
+  GRID_PREFLIGHT_PYTHON=/nonexistent/python3 pf --enable
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*python3 ]]
+  [[ "$output" =~ enable\ refused ]]
+  [ "$(n_wire)" -eq 0 ]
+}
+
+# --- N3: refuse a pathological overlay line before any spend; N4: stale temp file ----------
+
+@test "N3: a manifest line over 64 KB is refused up front, before any claude call" {
+  head -c 70000 /dev/zero | tr '\0' 'a' > "$BATS_TEST_TMPDIR/long"
+  { cat "$BATS_TEST_TMPDIR/long"; echo; } >> "$PF_GRID/machines/testhost.txt"
+  pf
+  [ "$status" -eq 2 ]
+  [[ "$output" =~ 64\ KB ]]
+  [ "$(n_calls)" -eq 0 ]
+}
+
+@test "N4: a leftover overlay temp file from a killed run is removed by the next --enable, not by --check" {
+  : > "$PF_GRID/machines/testhost.txt.preflight.AbC123"
+  pf
+  [ -e "$PF_GRID/machines/testhost.txt.preflight.AbC123" ]
+  pf --enable
+  [ "$status" -eq 0 ]
+  [ ! -e "$PF_GRID/machines/testhost.txt.preflight.AbC123" ]
+  [[ "$output" =~ leftover ]]
 }

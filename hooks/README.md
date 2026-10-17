@@ -185,7 +185,7 @@ then a verdict; exit 0 only if all four pass. Each probe prints the flags it ran
 | Check | What it asserts |
 |---|---|
 | `env-propagation` | Whether a project `.claude/settings.json` `env` block reaches hook subprocesses (reported as `PROPAGATES` or `DOES-NOT-PROPAGATE`). `PROPAGATES` does not fail the check but prints a warning: a cloned repo could then set `GRID_HOOKS`, `GRID_PRIVATE_DIR`, `GRID_CLAUDE` or `GRID_AUTOHANDOFF_KEEP_ENV` for the hook, so run auto-handoff only in repos you trust, and `--enable` then needs `--accept-env-risk`. The answer comes from the SessionEnd hook (the event auto-handoff uses), waited for up to `GRID_PREFLIGHT_HOOK_WAIT` seconds (default 10); if it never fires the result is `INCONCLUSIVE`, which fails. This probe runs with `--permission-mode default --strict-mcp-config` but not `--setting-sources user`: its whole point is to load the project's `settings.json`. |
-| `b1-rule-form` | The write rules the worker relies on are enforced: an `Edit(//abs/**)` allow is honoured for Write (`inside.txt` present), a write outside it is blocked, the `Edit(**/.git/**)` deny holds, and a `Bash(ls:*)` allow does not accept a `>` redirect. A file being absent only counts when the model's `--output-format stream-json` output shows it tried the action (a `tool_use` event naming the path); if it did not, the result is `INCONCLUSIVE`, which fails, and you rerun. A positive-control file (`ok.txt`) guards the second probe. Runs with all three worker flags. |
+| `b1-rule-form` | The write rules the worker relies on are enforced: an `Edit(//abs/**)` allow is honoured for Write (`inside.txt` present), a write outside it is blocked, the `Edit(**/.git/**)` deny holds, and a `Bash(ls:*)` allow does not accept a `>` redirect. A file being absent only counts when the model's `--output-format stream-json` output shows it tried the action: one `tool_use` block of an assistant event, parsed as JSON with `python3`, that is a Write/Edit/MultiEdit/NotebookEdit whose `file_path`/`path`/`notebook_path` is exactly the full target path (or, for the redirect, a Bash command redirecting `>`/`>>` to exactly that path). Text blocks, Read/Grep/Glob, tool results, a relative path or the same file name in another directory do not count; neither does anything when `python3` is missing or the stream shape differs from this. Without evidence the result is `INCONCLUSIVE`, which fails, and you rerun. A positive-control file (`ok.txt`) guards the second probe. Runs with all three worker flags. |
 | `wp016-parity` | `claude --help` names `--permission-mode`, `--setting-sources`, `--strict-mcp-config`, and one tiny capped call with them succeeds. |
 | `env-i-auth` | The worker's invocation authenticates under `env -i`. If claude works normally but not under `env -i`, the check fails and prints the remedy: `export GRID_AUTOHANDOFF_KEEP_ENV=ANTHROPIC_API_KEY` in the shell that starts claude. |
 
@@ -207,7 +207,9 @@ or `~/.bash_aliases` is writable without `--accept-dotfile-risk` (H-02); there i
 also says `-hook:auto-handoff` (it does not edit those). A failed write or backup is an error
 and a non-zero exit, never "enabled". A second run changes no file; `wire.sh` is rerun because
 it is idempotent and a manifest that says ON does not prove the entry is wired. `--disable`
-appends `-hook:auto-handoff` again and rewires; the dotfile conditions do not block it. The
+appends `-hook:auto-handoff` again and rewires; the dotfile conditions do not block it. A
+manifest line over 64 KB is refused before any claude call, and an edit run first removes a
+`machines/<host>.txt.preflight.*` temp file left by a run that was killed with SIGKILL. The
 probes call the model, so they cannot run in CI: the tests use a stub (`GRID_PREFLIGHT_CLAUDE`).
 
 **When it runs.** It skips, and logs why, when:
