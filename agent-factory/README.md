@@ -216,9 +216,11 @@ narrowing aid, not a sandbox.
 **What it does**
 - Limits a Claude Code subagent to the named built-in tools (`Read`, `Grep`, `Glob`, `Bash`, `Edit`,
   `Write`, `WebFetch`, `WebSearch`). A tool not listed is not available to that subagent.
-- Is honoured on Claude Code and Gemini (Gemini maps each name to its own tool).
+- Is written into the generated agent files for Claude Code (`tools:`) and Gemini (each name mapped
+  to its own tool). Runtime enforcement by those vendors is not verified here.
 - This factory's `KNOWN_TOOLS` validation does not accept MCP tool names. Whether the vendor runtime
-  treats `tools:` as a strict allowlist for MCP tools is not verified here.
+  treats `tools:` as a strict allowlist for MCP tools is not verified here; assume unlisted MCP tools
+  may remain reachable until it is.
 
 **What it does not do**
 - It does not limit what a granted tool can reach: `Bash` can run anything the user can, `Write` is
@@ -226,8 +228,10 @@ narrowing aid, not a sandbox.
   `Bash` has an unscoped shell.
 - It does not stop a role from acting on injected instructions in the content it reads.
 - It is not applied on every runtime:
-  - OpenCode: these seven roles get no `permission` block at all, except finance-analyst, which gets
-    only `bash: deny`.
+  - OpenCode: compose emits only `edit`, `bash` and `webfetch` denials, and omits the block when
+    nothing is denied. The four PR roles (researcher, seo, paid-search, paid-social) get no
+    `permission` block; finance-analyst gets only `bash: deny`; gh-triage and librarian get only
+    `webfetch: deny`.
   - Codex: these roles get no sandbox setting. Compose gives a best-effort read-only sandbox only to
     roles with neither `Edit` nor `Write`; none of these seven qualify.
 
@@ -265,8 +269,8 @@ PR-capable web roles have it; `finance-analyst` has no PR step and stays without
    No role text scopes the target repo or branch, or forbids pushing to the default branch,
    force-pushing or merging.
 5. `Write` is unscoped on all seven roles: it can overwrite shell rc files, hook scripts and similar.
-6. `tools:` is not applied on every runtime (OpenCode, Codex; see above), so the lists give no
-   protection on those targets.
+6. `tools:` is not applied on every runtime (OpenCode, Codex; see above). On those targets the lists
+   give no protection beyond the few OpenCode denials named above.
 7. Roles outside this list. 17 of the 38 public roles (implementers and orchestrators) carry no
    `tools:` and inherit every tool. Roles outside this repo (private desks) that read untrusted web
    content may also lack `tools:`; this repo does not track them. `security-reviewer` already has
