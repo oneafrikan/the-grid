@@ -188,7 +188,8 @@ Stack overlays (when a stack is named) append to `AGENTS.md` as a trailing
   line. Absent means the subagent inherits every tool. Use it for roles whose prose says "advisory"
   or "does not implement" (security-reviewer, qa-engineer). It narrows a role; it does not sandbox it:
   `Bash` can still write files. Not allowed on orchestrators (they deploy as skills and would ignore it:
-  `E_TOOLS_ON_ORCHESTRATOR`).
+  `E_TOOLS_ON_ORCHESTRATOR`). What it does and does not protect: see
+  [Tool allowlists and residual risk](#tool-allowlists-and-residual-risk).
 - **`model_rationale: text`** — required when `default_model` is not `sonnet`: say why this role is on a
   different tier (`E_MODEL_RATIONALE_MISSING`). Keeps the "which tier and why" in one parsed place.
 - **`unattended: true`** — the role runs with no human watching (cron). Today it is a marker (gh-triage,
@@ -206,6 +207,89 @@ agrees with `role.yaml`).
 **Rollout:** composed output is git-ignored, so after pulling a change to these keys run
 `compose.py <cfg> --target claude-code` for each public project and `scripts/wire.sh`; per-project deploys
 pick it up on the next `deploy.py <project>` (its `--check` reports the drift).
+
+## Tool allowlists and residual risk
+
+`tools:` in `role.yaml` is the per-role tool control in the generated subagent files. It is a
+narrowing aid, not a sandbox.
+
+**What it does**
+- Limits a Claude Code subagent to the named built-in tools (`Read`, `Grep`, `Glob`, `Bash`, `Edit`,
+  `Write`, `WebFetch`, `WebSearch`). A tool not listed is not available to that subagent.
+- Is written into the generated agent files for Claude Code (`tools:`) and Gemini (each name mapped
+  to its own tool). Runtime enforcement by those vendors is not verified here.
+- This factory's `KNOWN_TOOLS` validation does not accept MCP tool names. Whether the vendor runtime
+  treats `tools:` as a strict allowlist for MCP tools is not verified here; assume unlisted MCP tools
+  may remain reachable until it is.
+
+**What it does not do**
+- It does not limit what a granted tool can reach: `Bash` can run anything the user can, `Write` is
+  unscoped, `Read` reads any local file the user can. `tools:` cannot scope `Bash`, so a role with
+  `Bash` has an unscoped shell.
+- It does not stop a role from acting on injected instructions in the content it reads.
+- It is not applied on every runtime:
+  - OpenCode: compose emits only `edit`, `bash` and `webfetch` denials, and omits the block when
+    nothing is denied. The four PR roles (researcher, seo, paid-search, paid-social) get no
+    `permission` block; finance-analyst gets only `bash: deny`; gh-triage and librarian get only
+    `webfetch: deny`.
+  - Codex: these roles get no sandbox setting. Compose gives a best-effort read-only sandbox only to
+    roles with neither `Edit` nor `Write`; none of these seven qualify.
+
+**Current allowlists** (seven roles narrowed in H-04, adjusted in H-04b)
+
+| Role | `tools:` | Why |
+|---|---|---|
+| researcher | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Reads the web; Write for the report; Bash is there to open PRs (intent only, the shell is unscoped) |
+| seo | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Audits from web data; Bash is there to open PRs (intent only, the shell is unscoped) |
+| paid-search | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Same as seo; reopen if an ads API is wired as an MCP tool |
+| paid-social | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Same as seo; reopen if an ads API is wired as an MCP tool |
+| finance-analyst | Read, Grep, Glob, WebFetch, WebSearch, Write | Reads the web, writes the evidence pack; no PR step, so no Bash |
+| gh-triage | Read, Grep, Glob, Bash, Write | Bash for `gh`; Write for the message and last-run files named in the scope file |
+| librarian | Read, Grep, Glob, Write, Edit, Bash | Edit for page updates; Bash for the idempotent inbox-to-sources move |
+
+`Edit` is withheld from every web-reading role, but only where the list is applied (see above), and
+`Write` plus `Bash` can still change files. Opening a PR needs `Bash`, which is why the four
+PR-capable web roles have it; `finance-analyst` has no PR step and stays without it.
+`tests/test_role_allowlists.bats` pins these exact lists.
+
+**Accepted residual risks** (2026-10-17, accepted by the operator; documented, not fixed)
+1. `Read` plus `WebFetch`: a prompt-injected role can send any readable local file to an
+   attacker-chosen URL.
+2. `Bash` on a role that reads untrusted content: gh-triage and librarian have it, and now researcher,
+   seo, paid-search and paid-social too. A prompt-injected role reading untrusted web or issue text
+   can run a shell. gh-triage and the four PR roles run `gh` and git with the host user's
+   credentials; the repo stores no token, but in effect the shell can use whatever the user is
+   logged in with.
+3. Remote paths opened by `Bash` on the four web roles (new in H-04b): injected web content can make
+   the role push a branch (for example one that edits a workflow file) that reaches CI with repo
+   secrets, or open a public PR as an outlet for data read locally. `github.com` must stay
+   reachable for the PR step, so a "no network except allowed hosts" sandbox would not stop this.
+4. The PR hand-off is an unscoped second-order injection outlet: text derived from untrusted web
+   content lands in a PR that reviewers, gh-triage and orchestrators then read as repo content.
+   No role text scopes the target repo or branch, or forbids pushing to the default branch,
+   force-pushing or merging.
+5. `Write` is unscoped on all seven roles: it can overwrite shell rc files, hook scripts and similar.
+6. `tools:` is not applied on every runtime (OpenCode, Codex; see above). On those targets the lists
+   give no protection beyond the few OpenCode denials named above.
+7. Roles outside this list. 17 of the 38 public roles (implementers and orchestrators) carry no
+   `tools:` and inherit every tool. Roles outside this repo (private desks) that read untrusted web
+   content may also lack `tools:`; this repo does not track them. `security-reviewer` already has
+   `Bash` plus the web tools, so these residuals are wider than the seven-role table.
+8. Public repos with untrusted content (issues, PRs, web pages) are explicitly not solved. Operator:
+   "that risk is not going to go away in the agentic world".
+
+**What would reduce them**
+- Scoped Bash rules (allow only `gh pr create`, a push of the role's own branch, and the like)
+  instead of a blanket `Bash`.
+- Claude Code `disallowedTools` and permission rules in the project's settings, and the repo's
+  opt-in guard hooks (`pre-bash-no-bypass`, `pre-bash-secret-scan`; off by default).
+- Scoping the PR hand-off in role text (target repo and branch; never push to the default branch,
+  force-push or merge) plus branch protection and no repo secrets on CI runs for branches from
+  these roles.
+- MCP-only tools: wrap the few outward actions as MCP tools with fixed arguments and drop `Bash`.
+- Sandboxing: run these roles in a container or worktree with no credentials beyond the task's and a
+  read-only view of everything outside the output directory. Network limits help against
+  exfiltration to arbitrary hosts, but not against pushing to `github.com`.
 
 ## Spec-driven repos (OpenSpec)
 
