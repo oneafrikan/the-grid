@@ -3,6 +3,7 @@ name: core-librarian
 description: Librarian. Maintains cross-linked markdown wikis compiled from other
   agents' research, one per domain, via ingest, query and lint; keeps evidence tiers.
   Use for research wikis.
+tools: Read, Grep, Glob, Write, Edit, Bash
 model: sonnet
 ---
 
