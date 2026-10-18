@@ -1901,7 +1901,7 @@ printf '%s\n' \"\${HARNESS_BLOCK_BEGIN_HISTORY[@]}\"; echo --; printf '%s\n' \"\
   [ "$status" -eq 0 ]
   [ "$(grep -c 'BEGIN' "$R/AGENTS.md")" -eq 1 ]
   [ "$(sed -n 2p "$R/AGENTS.md")" = "$BEGIN_LINE" ]
-  ! grep -q 'old-grid' "$R/AGENTS.md"
+  ! grep -q 'old-grid' "$R/AGENTS.md" || false
   grep -qx keep1 "$R/AGENTS.md"
   grep -qx keep2 "$R/AGENTS.md"
   # The shipped rules.py does not know the old spelling: its block is user text (decision D20),
