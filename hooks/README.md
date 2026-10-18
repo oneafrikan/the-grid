@@ -104,13 +104,14 @@ Tuning (read by the two guards; defaults are fine for normal use):
 
 | Variable | Default | Effect |
 |---|---|---|
-| `GRID_GUARD_MAX_CMD` | 20000 | bytes, counted on the text with quotes removed; a command over this size that mentions git is blocked ("command too long to inspect"), because a guard that cannot finish inside its 5 s timeout silently stops guarding |
+| `GRID_GUARD_MAX_CMD` | 20000 | bytes, counted on the text with quotes removed; a command over this size that mentions git (or holds a `$` or a backtick, or names `LEFTHOOK`, `HUSKY` or `PRE_COMMIT`: the guards tokenize those too) is blocked ("command too long to inspect"), because a guard that cannot finish inside its 5 s timeout silently stops guarding |
 | `GRID_GUARD_MAX_TOKENS` | 2500 | blanks and separators in the command (cost follows token count as much as size); the same block when over |
 | `GRID_GUARD_MAX_GIT_CALLS` | 40 | secret scan only: git calls that need a repository check (plain ones such as `git status` are free); more than this blocks with the same message |
 | `GRID_SCAN_MAX_LINES` | 1000 | secret scan only: more candidate lines (lines some pattern could match) than this blocks with "diff too large to scan; split the commit" |
-| `GRID_SCAN_MAX_MATCH_BYTES` | 1048576 | secret scan only: total bytes the exact matcher may read in one scan; past this, or past a 3 s time budget, the scan stops with a finding named `oversize-scan` |
+| `GRID_SCAN_MAX_MATCH_BYTES` | 1048576 | secret scan only: total bytes the exact matcher may read in one scan; past this the scan stops with a finding named `oversize-scan` |
+| `GRID_SCAN_MAX_SECONDS` | 3 | secret scan only: wall-clock budget of the diff scan, checked between lines and inside a line; past it the scan stops with a finding named `scan-budget`. The text of the commit command has a separate 2 s budget |
 | `GRID_SCAN_MAX_FILES` | 500 | secret scan only: a `git add ... && git commit` in one command that would stage more files than this blocks with "stage in a separate call so the scan can see it" |
-| `GRID_SCAN_MAX_BYTES` | 5242880 | secret scan only: the same block when the files the add would stage hold more bytes than this |
+| `GRID_SCAN_MAX_BYTES` | 5242880 | secret scan only: the same block when the files the add would stage hold more bytes than this (the hook reads at most this many bytes plus one to find out) |
 
 ## Timeouts
 
@@ -118,9 +119,16 @@ Claude Code treats a hook that times out as non-blocking, so a slow guard is an
 absent guard. Both guards therefore bound their work with caps rather than rely on the
 tokenizer being fast on every input: a command over the byte or token cap, or with
 substitutions nested deeper than 16, is refused instead of tokenized (the cost at the caps is about 1 to 2 s of CPU on a busy machine, not zero);
-the secret scan stops at its line cap, its 1 MB matcher-input cap or a 3 s time budget
-(`oversize-scan`), and a candidate line over 262144 characters (bytes in the C locale)
-blocks as `oversize-line`. A line over 6,000 characters is matched in overlapping pieces; a
+the secret scan stops at its line cap, its 1 MB matcher-input cap (`oversize-scan`) or a 3 s
+wall-clock budget (`scan-budget`). The budget is checked once per 32 units of work (a call of the matcher is 26, each
+`key =` candidate one more), so one hostile or dense line cannot run past it (reading it on every row would cost about 65% more per candidate line); a single regex call
+cannot be interrupted, so the scan can overshoot by the work between two reads, one or two pieces (under
+0.1 s on the worst lines tried, 23 to 47 ms measured). Ten crafted 258 KB lines took 4.1 s
+in the hook before the budget was checked inside a line and 3.3 s after; it is the budget,
+not the speed of the matcher, that keeps the hook inside its timeout, and a loaded machine
+reaches the budget sooner and blocks with `scan-budget` instead of timing out. The text of
+the commit command has a separate 2 s budget. A candidate line over 262144 characters (bytes
+in the C locale) blocks as `oversize-line`. A line over 6,000 characters is matched in overlapping pieces; a
 run of letters, digits and `_` that holds a key word (`secret`, `token`, ...) and is too
 long to keep whole in a piece (over 4096 characters past a cut) is also `oversize-line`. A
 key word followed by a long run of filler (identifier characters or backslashes) and then

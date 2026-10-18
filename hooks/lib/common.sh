@@ -49,7 +49,8 @@ grid_require_jq() {
 #   a bound chosen from measurements, not a proof. Both are counted on the text with quotes
 #   and backslashes removed (the way the shell reads it), so quoting `git` cannot dodge the
 #   check. Exits 2 when over a limit
-#   and the command mentions git (any case) or HUSKY; anything else passes. The caller's
+#   and the command mentions git (any case), HUSKY, LEFTHOOK or PRE_COMMIT, or holds a $ or a
+#   backtick (H-05: those are tokenized too); anything else passes. The caller's
 #   LC_ALL=C makes ${#} count bytes.
 grid_check_cmd_cap() {
   local max="${GRID_GUARD_MAX_CMD:-20000}" maxt="${GRID_GUARD_MAX_TOKENS:-2500}" st t
@@ -57,8 +58,12 @@ grid_check_cmd_cap() {
   [[ "$maxt" =~ ^[0-9]+$ ]] || maxt=2500
   st="${2//$'\\\n'/}"; st="${st//[\"\'\\]/}"
   case "$st" in
-    *[gG][iI][tT]*|*[hH][uU][sS][kK][yY]*) ;;
-    *) return 0 ;;
+    *[gG][iI][tT]*|*[hH][uU][sS][kK][yY]*|*[lL][eE][fF][tT][hH][oO][oO][kK]*|*[pP][rR][eE]_[cC][oO][mM][mM][iI][tT]*) ;;
+    *)
+      # H-05: a command with $ or a backtick reaches the tokenizer too (it may build a word the
+      # text test cannot see), and a 100 KB one cost 8 to 16 s there; so does one that names
+      # LEFTHOOK or PRE_COMMIT (no-bypass reads those). Whatever the guards tokenize is capped.
+      case "$2" in *'$'*|*'`'*) ;; *) return 0 ;; esac ;;
   esac
   t="${st//[^[:space:];&|()\`]/}"
   if [ "${#st}" -le "$max" ] && [ "${#t}" -le "$maxt" ]; then return 0; fi
