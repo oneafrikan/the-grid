@@ -9,6 +9,7 @@ summary: >-
   the operator names, finds what one agent learned or got wrong, and writes it up
   as a lesson in the private learning store plus a proposed change to the target
   role's guidance. Proposes only: the operator reviews and applies the change.
+description: "Tank. Agent-to-agent learning on request: reads the run log and named transcripts, writes a lesson and a proposed role-guidance change; proposes only. Use to learn from agent runs."
 base_skills: []
 orchestrator: false
 tools: [Read, Grep, Glob, Bash, Write]

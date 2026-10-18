@@ -25,16 +25,18 @@ submodules into two tiers:
 
 ## What lives where (ownership principle)
 
-- **Root-level dirs are for skills Gareth owns or has edited for his own purposes.**
-  Only put a skill at the repo root if it's original to the-grid, or if it's an
+- **`skills/<name>/` is for skills Gareth owns or has edited for his own purposes.**
+  Only put a skill there if it's original to the-grid, or if it's an
   upstream skill that's been deliberately forked/edited and must not track upstream.
+  (A skill dir at the repo root is not wired.)
 - **Everything else is managed upstream** in `repos/*` submodules and wired on
-  demand. Don't copy an upstream skill into the root just to use it — the submodule
+  demand. Don't copy an upstream skill into `skills/` just to use it — the submodule
   copy gets wired automatically.
-- If a root skill is byte-identical to (or merely an older snapshot of) a submodule
-  copy, it's redundant: delete the root dir and let the submodule own the slot.
-- When root and submodule both provide the same skill name, **the root copy wins**
-  (wire.sh wires repos first, root last). That's the escape hatch for an edited fork.
+- If a `skills/` copy is byte-identical to (or merely an older snapshot of) a submodule
+  copy, it's redundant: delete the `skills/` dir and let the submodule own the slot.
+- When `skills/` and a submodule both provide the same skill name, **the `skills/` copy
+  wins** (wire.sh wires repos first, `skills/` last). That's the escape hatch for an
+  edited fork.
 
 ## Key files
 
@@ -55,20 +57,59 @@ submodules into two tiers:
   not tracked** (#24/#39) — personal and not useful to a fork. On machines that want
   it, it's a symlink into a separate private repo; nothing in the-grid requires it
   to exist.
+- `scripts/budget.py` + `docs/budget-target.json` — measures the skill/role description listing (Claude Code shares one small description budget across all skills and drops the overflow silently) and gates it: `--check` runs in `gate.sh` against a committed ratchet (owned skills + roles always; the baseline scope against the tracked `baseline-submodules.example.txt` once submodules are initialised, else exit 3 = skipped). A target missing `per_entry_max_chars`, `owned.skill_body_max_bytes` or `schema: 1` fails. `--report` shows the numbers. Lowering a number is normal (`--update-target`); raising one needs `--allow-raise` and review.
+- `scripts/usage/weekly.sh` + `scripts/usage/install-schedule.sh` — the weekly usage job (extract, then commit `usage/<host>.json` to the private repo) and the installer that renders its launchd/systemd/cron schedule via `scripts/lib/render-schedule.sh`. The installer only writes files and PRINTS the activation commands; activating is a human step. See `docs/usage.md`.
+- `scripts/prune-report.sh` (wraps `scripts/usage/prune_report.py`; `scripts/usage/aggregate.py` is the importable per-host summer, no CLI) — read-only report that proposes what to drop from the baseline from the per-host usage files (demote a repo, `name-only` a skill, unused agents); `docs/prune-keep.txt` lists names never proposed. Never reads `tokens`/`hooks`. See `docs/usage.md`.
 - `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
-  repos as counts, reference (no-skill) repos in a footer. Deterministic output.
+  repos as counts, reference (no-skill) repos in a footer. Deterministic output. The committed
+  `SKILLS.md` is rendered from the tracked example baseline (`GRID_BASELINE=baseline-submodules.example.txt
+  bash scripts/catalog.sh`; `wire.sh` and the gate pin it), not a machine's personal one.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
+- `scripts/build-plugins.py` + `plugins/` + `docs/PLUGINS.md` — generates the two Claude Code plugin bundles (`grid-core`, `grid-agents`) and `.claude-plugin/marketplace.json` from `plugins/bundles.json`. `plugins/` is generated output: regenerate with `python3 scripts/build-plugins.py` (needs `agent-factory/.venv`), never hand-edit. `gate.sh` runs `--check` and `claude plugin validate --strict`; `audit.sh --owned` scans `plugins/`.
+- `site-files.txt` + `scripts/stage-site.sh` — define what GitHub Pages publishes:
+  the list names repo-relative paths (index.html, assets), the script copies exactly
+  those into `_site/` for `.github/workflows/pages.yml` (never `repos/`, `.git*`,
+  absolute or `..` paths). A new site asset must be added to `site-files.txt`.
 - `scripts/sources.sh` — regenerates `docs/SOURCES.md` (one upstream URL per
   submodule, tier from the baseline). `--check` HEADs every URL as a rot detector,
   non-zero exit on failure. Deterministic; never edit `SOURCES.md` by hand.
+- `rules/` + `scripts/rules.py` — path-scoped rule packs (`rules/<pack>/<topic>.md`, frontmatter
+  `paths:` only). Opt-in via `rules:<pack>` / `-rules:<pack>` manifest entries (symlinked to
+  `$RULES_DIR/grid/<pack>/` by wire.sh, see the wire.sh contract). `rules.py lint|list|emit`
+  (stdlib only): `lint` runs in the gate, `list` is the pack inventory, `emit` renders Cursor
+  `.mdc` or an `AGENTS.md`/`GEMINI.md` block. Authoring: `rules/README.md`; user docs: `docs/rules.md`.
+- `scripts/check-personal.sh` — scans the **tracked** tree for personal data (emails,
+  home paths, tokens, private IPs, tailnet hosts, blocked file types, oversized files).
+  Three rule sources, merged: `scripts/personal-patterns.txt` (public generic rules),
+  the **private denylist** (`~/.the-grid-private/denylist.txt`, or `GRID_PRIVATE_DENYLIST`;
+  findings print only `[private:N]`, never the term), and `scripts/personal-allow-paths.txt`
+  (paths skipped entirely: add one **only with a `# reason`**; prefer rewording the line).
+  Voice rule: text rendered into other people's agents, skills, hooks or rules says "the
+  operator", never the author's name; prose docs may name the author. `GRID_REQUIRE_DENYLIST=1`
+  makes a missing denylist a failure; set it for any unattended build so it cannot pass on
+  the generic half alone (the retired issue-loop set it in its `VERIFY_CMD`). CI has no denylist, so it runs the
+  generic half only (`GRID_PRIVATE_DENYLIST=` disables the private half on purpose).
 - `docs/model-selection.md` — which model for which job, with prices, independent
   benchmarks, worked cost maths, and a dated expiry watchlist. Refreshed on demand
   via the `core-researcher` subagent using the brief at the bottom of the file.
 - `evals/` + `agent-factory/run_evals.py` — golden cases for roles (opt-in, capped, tool-less runs; `--validate` runs in the gate). See `evals/README.md`.
+- **RETIRED, do not deploy:** the-grid's own issue-loop instance (`loop/`, `scripts/instantiate.sh`, `scripts/lib/gh-app-token.sh`, its four bats files) is quarantined under `_retired/issue-loop/` and excluded from the gate, CI and bats; see `_retired/issue-loop/RETIRED.md` (why, known defects, GitHub-side cleanup). Uplift is built by worktree agents and PRs to `next`. Not retired: the factory pattern `automation-factory/patterns/issue-loop/` and `scripts/lib/render-schedule.sh` (shared by the usage and instincts schedulers).
+- `scripts/instincts.sh` — habit learning from your own sessions (opt-in per project with `learning: on`): capture, weekly analysis, injection, `clusters` for tank `evolve`. Data stays in `${GRID_STATE_DIR:-~/.grid}` and the private repo. See `docs/instincts.md`.
 - `scripts/run-record.sh` — appends one JSON line per agent run to a local private log (`${GRID_RUN_LOG:-~/.the-grid-private/runs.jsonl}`); `docs/agent-retro.md` is the review loop that starts from it.
+- `policy.yaml` — vetting policy read by `scripts/audit.py`: rule regexes with severities (`high` blocks, `low` warns), file classes, `owned_roots`, and `sources.allowed_repos` (the single source allowlist; no other file carries one). Restricted-YAML subset read by `scripts/lib/miniyaml.py` (it rejects any bare scalar PyYAML would type differently, such as `True`, `010`, `1:30` or a date: quote it; an unknown top-level key is exit 2); every regex is a single-quoted scalar.
+- `CURATION.md` — the human-readable trust record: a `### repos/<name>` section per trusted wired repo, an `## Exclusions` table, and the fenced `audit-allow` block (rule + path glob + `contains` + mandatory `reason`) that `audit.py` reads as its allowlist. Only the headings and the allowlist block are machine-checked.
+- `scripts/audit.sh` / `scripts/audit.py` — the offline, deterministic scanner for wired content (`audit.py` scans; `audit.sh` chooses what). The D3 interface other changes build on: `python3 scripts/audit.py --format json --root <root> DIR...` and `bash scripts/audit.sh --owned|--wired|--gate [TARGET...]`. `wire.sh` runs `--wired` before touching any link; `gate.sh` runs `--gate` as the `audit` check. SKILL.md / agent frontmatter is vetted by shape (`scripts/lib/fmshape.py`: anything outside a tiny plain-YAML whitelist is a `frontmatter-complex` finding that an allowlist line must pin) and its `hooks` block by `scripts/lib/fmyaml.py` (deny by default). See `openspec/changes/vetting/design.md`.
 - `agent-factory/models.yaml` — the one tier-to-model map for generated Claude Code agents (default: tier maps to itself); `role.yaml` also takes `tools:` (subagent allowlist) and `unattended:`. See `agent-factory/README.md`.
+- `hooks/` + `agent-factory/deploy_hooks.py` — Claude Code guard hooks (launcher `hooks/run.sh`, `hooks/catalogue.json` as the one place scope, profile and token cost are defined) and the emitter that writes a project's chosen profile (`off|minimal|standard|strict`, from the `hooks:` key of `.grid/project.yaml`) into its `.claude/settings.local.json` (or `settings.json` with `target: shared`) without touching hand-written hooks. `--list` shows costs, `--check` reports drift. See `hooks/README.md` and `agent-factory/README.md`.
+- `scripts/compose-goldens.sh` — golden-output check for `compose.py` over a fixture project, every compose target (the `TARGETS` list in the script; `--check` default, `--update` to regenerate `tests/fixtures/compose/golden/`; run `--update` in any PR that changes compose output). See `agent-factory/README.md`.
+- `agent-factory/user.public.yaml` — tracked neutral identity (`machine: "your-machine"`); use via `GRID_USER_CONFIG` for anything composed into a tracked or shipped file.
+- `contexts/` — opt-in working-mode prompts (`dev.md`, `research.md`, `review.md`, each <=1200 bytes) and `aliases.sh`, a snippet a human sources from `~/.zshrc`/`~/.bashrc` to get `claude-dev`/`claude-research`/`claude-review` (`claude --append-system-prompt-file`). Not wired by `wire.sh`; Claude Code only.
 - `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
+- `scripts/grid` — the submodule-free install CLI (`install`, `lock`, `drift`, `schedule`, `doctor`, `repair`, `uninstall`, `audit` passthrough). One stdlib Python 3.8+ file; `python3 scripts/grid --help`. The install path for users is `BOOTSTRAP.md` "Install without submodules".
+- `grid.yaml` — where wired skills come from: one `url` per source (key = dir under `repos/`) plus the tracked baseline file that selects the default set. Read with `scripts/lib/miniyaml.py`.
+- `grid.lock` — generated by `python3 scripts/grid lock` from the submodule checkouts: per skill, the source commit, tree and content hash that `grid install` fetches and verifies. Never edit by hand. **A change that edits `baseline-submodules.example.txt` or a `repos/*` pointer re-runs `python3 scripts/grid lock` in the same PR**; `gate.sh` fails the `lock` check (`grid lock --check`) otherwise.
+- `~/.grid/installed.manifest` — machine-local ledger of the directories `grid install` placed (`${GRID_STATE_DIR:-~/.grid}`). Not in the repo. No ledger means maintainer mode: `grid repair` has nothing to repair; `grid doctor` still checks the links.
 - `TODO.md` — current outstanding work.
 
 ## Getting a machine up to date
@@ -131,7 +172,7 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 
    > ⚠ **Recompose every private project too, in the same pass.** A change to
    > `agent-factory/_core/` or `compose.py` affects *all* projects, but only the
-   > three public configs are listed above. `compose.py` **overwrites**
+   > four public configs are listed above. `compose.py` **overwrites**
    > `projects/<name>/` wholesale — so recomposing the public set while a
    > private project's roles are unreachable (repo not cloned,
    > `GRID_PRIVATE_ROLES_DIR` unset) silently destroys that project's composed
@@ -147,6 +188,15 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 - `scripts/gate.sh` — commit gate; `.githooks/pre-commit` delegates to it and it
   self-installs `core.hooksPath` on first run. `--pre-commit` aborts on unstaged
   changes. `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
+  `--strict` (CI) fails on any skip not named in `GRID_GATE_EXPECT_SKIPPED` (see `.github/workflows/tests.yml`).
+  `catalog`, `sources` (`sources.sh --check-drift`) and `budget` run against the TRACKED `baseline-submodules.example.txt` (`GRID_BASELINE` pin; `wire.sh` pins it for SKILLS.md too), so SKILLS.md, docs/SOURCES.md and the ratchet are machine-independent; a personal baseline is never gated.
+  It runs `check-personal.sh` as the `personal` check; with no private denylist on the
+  machine (CI, forks) it passes and prints `gate: PASS (skipped: personal-denylist)`.
+  It runs `audit.sh --gate --quiet` as the `audit` check (owned assets + the baseline's
+  wired set; skipped loudly if `python3` or `scripts/audit.sh` is absent). If a baseline
+  submodule is uninitialised, `audit.sh --gate` exits 2 ("wired set NOT scanned") unless
+  `--allow-partial` is given; `gate.sh` passes it only when `CI` is unset and then lists
+  `audit-wired` as skipped, so CI stays strict.
 - Read-only drift detectors (exit 1 on drift, write nothing): `catalog.sh --check`,
   `wire.sh --check`, `agent-factory/compose.py <cfg> --target claude-code --check`,
   `compose.py --lint-roles` (every role; stable `E_*` codes; `roles/_retired/` is an
@@ -171,7 +221,11 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 
 ## Adding a skill
 
-Create a directory at the repo root with a `SKILL.md` inside it. Frontmatter requires `name:` and `description:`. Then run `bash scripts/wire.sh`.
+Create `skills/<name>/SKILL.md` (a skill dir at the repo root is not wired). Frontmatter requires `name:` and `description:`. Then run `bash scripts/wire.sh`.
+
+A `SKILL.md` over 4,000 bytes is split: keep the purpose and step skeleton, move reference detail into `sections/<topic>.md` (plain markdown, no frontmatter, <= 6,000 bytes, kebab-case).
+Index each file in a `## Sections` block of `SKILL.md`, one `- sections/<file>: read when ...` line per file; `wire.sh` symlinks the whole skill dir, so `sections/` travels with it.
+`python3 scripts/budget.py --check` (part of the gate) fails on an unindexed or missing section, a section over 6,000 bytes, or a `SKILL.md` over `skill_body_max_bytes`.
 
 ## Regenerating the skill catalogue
 
@@ -212,12 +266,12 @@ Refresh one with `git submodule update --remote repos/<name>`.
 
 `wire.sh` won't clobber a *real* directory that shadows a grid skill (safety).
 On a fresh machine those shadows are often stale, root-owned copies. `reconcile.sh`
-removes them so the-grid owns the slot, then re-wires. It parses wire.sh's own
-`skip (real dir, not managed)` output, so it never hardcodes names.
+moves them aside so the-grid owns the slot, then re-wires. It learns the names from
+a dry wire into a throwaway home (`GRID_DRY_HOME`), so it never hardcodes names.
 
 ```bash
 bash scripts/reconcile.sh          # dry run — list shadowing dirs
-bash scripts/reconcile.sh --force  # remove them (sudo only where needed) + re-wire
+bash scripts/reconcile.sh --force  # move them to a dated backup dir (audit gate first, sudo only where needed) + re-wire
 ```
 
 Idempotent: a fully-wired machine reports "Nothing to reconcile".
@@ -228,7 +282,17 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint + `compose.py --check`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`.
+All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint (`compose.py --lint-roles`), `compose.py --check` per composed project (local only: composed output is gitignored, so CI runs the lint and lists the uncomposed projects as `compose-<name>` skips), `check-personal.sh`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`. Venv-gated tests (`agent-factory/.venv` with PyYAML) skip on a plain `bats` run, but FAIL when `GRID_REQUIRE_VENV=1` or `CI=true` (the gate sets the former). In a `@test`, write `! cmd || false` and one `[ ]` per line: a bare mid-test `! cmd` or `[ A ] && [ B ]` can never fail (`test_repo_health.bats` lints this).
+
+## Worktree hygiene
+
+Agents and sessions must not leave stale worktrees or local branches behind.
+
+- Remove what you created before finishing, once its PR is merged or abandoned: `git worktree remove <path>`.
+- Delete the branch with `git branch -D <branch>` only after confirming the PR is MERGED or the branch is fully contained in `origin/next`.
+- Never leave scratch worktrees under `.claude/worktrees` or `/tmp` registered in `git worktree list`; run `git worktree prune`.
+- Session start: run `git worktree list`, report and prune stale entries. Session end: list any worktree left open and why.
+- Untracked `__pycache__` is not a reason to keep a worktree.
 
 ## wire.sh contract
 
@@ -243,25 +307,108 @@ All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: 
   in a submodule that is its own git checkout it lists **tracked** files only, so
   gitignored generated copies (gstack writes ~54 per host into `.slate/`, `.kiro/`,
   ...) are never wired or counted; a non-git dir falls back to plain `find`.
+- **Exclusion rule (same helper):** even tracked paths are dropped when they are
+  translations (`docs/`, `i18n/`, `translations/`, `locales/` + a locale dir such as
+  `ja-JP`), live under a root-level dot-dir (`.kiro`, `.agents`, ... — per-harness
+  copies or upstream maintainer skills), or match a `repo | prefix/` row in
+  `scripts/lib/skill-excludes.txt` (currently `ecc | pi/`).
 - Only submodules in the manifest (`baseline-submodules.txt` + `machines/<host>.txt`
   overlay) are wired; the rest are library-only. If no manifest exists, all repos are
   wired (legacy fallback). `catalog.sh` reads the **baseline only** (machine-agnostic,
   deterministic `SKILLS.md`).
 - **Machine key:** `GRID_HOST` env var overrides the overlay host (default `hostname -s`).
+- **Audit before wiring (step 0):** before any teardown `wire.sh` runs `audit.sh --wired --quiet`.
+  A high-severity finding (or a broken policy) blocks with **exit 3** and changes nothing,
+  so existing links survive a bad upstream bump. A missing `policy.yaml` or `python3` blocks
+  the same way (fail closed). `GRID_AUDIT=warn` prints a warning and wires anyway.
+  `GRID_SKIP_AUDIT=1` is the only bypass (it prints a stderr notice; audit.sh's own dry run
+  sets it to avoid recursion), plus every dry run (`GRID_DRY_HOME`, so `--check`'s child
+  never audits). `GRID_SKIP_CATALOG` alone no longer skips the audit. A mock grid without a
+  `policy.yaml` must set `GRID_SKIP_AUDIT=1` (the bats `common_setup` does). The audit is
+  **point-in-time** (runs at wire time and in the gate, not between; `--check` does not
+  re-audit) and covers skill and agent link targets only: runtime-root `bin/` helpers
+  are not scanned (accepted, see `CURATION.md`).
+- **Manifest problems are announced:** a missing baseline file (default path, or
+  `GRID_BASELINE` set and absent) and a `repo`, `repo/skill`, `-repo` or `-repo/skill`
+  entry that names no dir under `repos/` print a stderr warning and add a
+  `manifest` row (`missing` / `unknown`) to `.wired.manifest`; the wire still runs. An
+  absent per-host overlay is normal and silent.
+- **Runtime map:** `scripts/lib/runtimes.txt` (`repo | link | marker | needs | setup`)
+  lists wired repos whose skills need more than files on disk (gstack: its browse
+  daemon). wire.sh keeps the runtime-root link `$SKILLS_DIR/<link> -> $GRID_DIR/repos/<repo>`
+  (rebuilt each run, since teardown removes every grid link), skips it with
+  `runtime root occupied` if a real dir or foreign link is there, and prints
+  `runtime MISSING: <repo>` (exit status unaffected) when the marker is absent.
+  The setup itself is human-run: `bash scripts/runtime-setup.sh <repo> [--dry-run]`
+  (exit 2 prerequisite/occupied link, 3 if the Claude settings file changed).
+- **Baseline override:** `GRID_BASELINE` env var replaces the path of the first
+  manifest layer (default `$GRID_DIR/baseline-submodules.txt`); machine overlays
+  still load from `$GRID_DIR/machines/`. Tests and CI use it to wire from
+  `baseline-submodules.example.txt` when there is no personal baseline.
+- **Teardown scope:** teardown removes only links whose target RESOLVES to a path under
+  `$GRID_DIR/` (`target_is_ours`: the target's parent is resolved physically, a missing
+  parent is normalised lexically; trailing slash, so a sibling dir like
+  `${GRID_DIR}-private` and `$GRID_DIR/../x` are never matched). `GRID_DIR` itself is
+  canonicalised (`pwd -P`) at start, so every link carries one spelling. It follows a
+  skills/agents dir that is itself a symlink (`find -H`) and tolerates newline names,
+  in both the wire and `--check` paths. The link steps never replace a real file, a
+  dangling link or a foreign link that shares a grid name (`skip (not managed)`).
+- **Failure safety (no lock):** registry dirs are resolved and every written dir is
+  checked writable BEFORE the first `rm`; an unresolvable dir of an active harness or an
+  unwritable dir is **exit 2, nothing changed**. Removed links are logged and an
+  EXIT/INT/TERM/HUP trap restores any that are still absent unless the run completed
+  (SIGKILL cannot be trapped: re-run wire). There is deliberately no lock: **one wire at a
+  time** is the supported use (cron plus a manual run can race, so don't).
+- **Machine hooks:** wire.sh keeps one generated `auto-handoff` SessionEnd entry in
+  `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json` via
+  `agent-factory/deploy_hooks.py --user` (stdlib only; hand-written hooks and keys are
+  never touched). On by default; `-hook:auto-handoff` in the baseline or a machine overlay
+  turns it off and removes the entry (`hook:auto-handoff` re-enables; the last file wins;
+  an unknown `hook:<x>` warns and is ignored). Skipped in every dry run and when the
+  emitter is absent; `python3` missing or an emitter failure is a warning, not a failed
+  wire. `--check` also reports drift in that file (exit 1) and writes nothing. Records a
+  `hook` row in `.wired.manifest`.
+- **Dry home:** `GRID_DRY_HOME=<dir>` forces every home-derived target under it
+  (`HOME`, `SKILLS_DIR`, `AGENTS_DIR`, `CLAUDE_CONFIG_DIR`, `RULES_DIR`,
+  `GRID_HARNESS_HOME`; inherited values are ignored) and skips the `SKILLS.md` /
+  `.wired.manifest` writes. Every dry-run caller must use it (and nothing else);
+  `--check` and `tests/helpers/wired.bash` do.
+- **Rule packs:** `rules:<pack>` / `-rules:<pack>` manifest entries (baseline or overlay)
+  symlink each `rules/<pack>/*.md` (never `README.md`) to `$RULES_DIR/grid/<pack>/`
+  (`RULES_DIR`, default `~/.claude/rules`; only `grid/` is grid-owned). Opt-in: no
+  `rules:` entry means nothing is wired. An unknown or unsafe pack name warns and is
+  skipped (`rule` row in `.wired.manifest`); `--check` also reports rules drift.
+- **Harnesses:** `harness:<name>` / `-harness:<name>` manifest entries (or
+  `GRID_HARNESS=a,b`, which replaces the manifest set for one run) also link the wired
+  skills, and composed `_<compose_target>/agents/*`, into other harnesses' dirs from the
+  registry `scripts/lib/harnesses.txt` (codex, opencode, gemini, antigravity, pi,
+  openclaw; `~/.agents/skills` is shared by five). Opt-in; an unknown name exits 2.
+  Never replaces an existing entry in those dirs; skip reasons land in
+  `.wired.manifest`. `rules:` packs are also delivered into an active harness's global
+  instruction file via `rules.py emit`, but only if the operator created that file
+  (never created, never written through a symlink). See `docs/harnesses.md`.
 - **Composed agents:** wire.sh also wires `agent-factory/projects/*/_claude-code/`
   output — orchestrator skills into `SKILLS_DIR`, specialist subagents into
   `AGENTS_DIR`. Gated per machine by `project:<name>` manifest entries; with no
-  `project:` entry anywhere, every composed project wires (legacy). The baseline
-  currently pins `project:core`, `project:grid`, and `project:finance-desk` (see
-  `agent-factory/` and issue #1) — a task-specific machine can subtract
-  `-project:grid` or `-project:finance-desk` via its overlay to trim clutter,
-  but `project:core` (gh-triage, librarian, researcher, platform-engineer) is meant to stay on
+  `project:` entry anywhere, every composed project wires (legacy). The example
+  baseline pins `project:core`, `project:grid`, `project:finance-desk` and
+  `project:learning-desk` (see `agent-factory/` and issue #1) — a task-specific
+  machine can subtract `-project:grid`, `-project:finance-desk` or
+  `-project:learning-desk` via its overlay to trim clutter, but `project:core`
+  (gh-triage, librarian, researcher, platform-engineer, tron) is meant to stay on
   every machine.
 - **Root-owned agents:** `agents/*.md` at the repo root wires directly into
   `AGENTS_DIR`, same ownership model as root-level `skills/` — for hand-authored
   subagents that aren't a compose.py role (no `delegates_to`, not a team
   position; e.g. a ported persona/behavior-modifier like `grid-ponytail`).
   Wired last, so a root-owned agent overrides a same-named composed one.
+- **No-catalog mode:** `GRID_NO_CATALOG=1` skips only the `SKILLS.md` refresh
+  (`.wired.manifest` is still written). `grid install` sets it for its own `wire.sh`
+  runs so a partial, submodule-free machine never rewrites the tracked catalogue; use
+  `GRID_NO_CATALOG=1 bash scripts/wire.sh` to re-wire such a machine by hand.
+- **Typed entries:** `scripts/grid` ignores typed manifest entries (`project:`, `rules:`,
+  `harness:`, any `kind:`); only `wire.sh` acts on them. `grid install` reads untyped
+  `repo` / `repo/skill` / `-repo` / `-repo/skill` lines only.
 
 ## agent-factory (composed agents)
 
@@ -286,7 +433,7 @@ with the team. grid topology: `ceo → tech-lead, product-manager, growth-hacker
 orchestrator). `examples/grid.yaml` is the **dev-team project** — 24 roles: 3
 orchestrators → CC skills, 21 specialists → CC subagents.
 
-Three sibling public projects, same repo, composed and gated independently:
+Four public projects (`grid` above; `finance-desk`, `core` and `learning-desk` below), same repo, composed and gated independently:
 `examples/finance-desk.yaml` — `finance-manager → the finance desk pipeline`
 (sentinel → analyst → strategist → risk-officer → scribe), a **standalone**
 top-level orchestrator, deliberately never under the CEO's `delegates_to` — a
@@ -294,12 +441,13 @@ personal desk, not a dev-team initiative. `examples/core.yaml` — cross-desk
 shared infra with no delegation chain (`gh-triage`, `librarian`,
 `researcher` — the general-purpose investigator, domain-general on purpose
 and gated here so it survives `-project:grid`; `platform-engineer` — personal
-dev-environment portability across macOS/Ubuntu/Arch, likewise), gated
+dev-environment portability across macOS/Ubuntu/Arch, likewise; `tron` — the
+front door, `/tron`, likewise), gated
 `project:core` and meant to stay wired on every machine regardless of which
-desk-specific project (`grid`, `finance-desk`, or a private desk) that
-machine actually runs — the three projects split apart specifically so a
+desk-specific project (`grid`, `finance-desk`, `learning-desk`, or a private desk) that
+machine actually runs — the projects split apart specifically so a
 task-specific machine can subtract a whole desk via its overlay
-(`-project:grid`, `-project:finance-desk`) without losing the other two. A
+(`-project:grid`, `-project:finance-desk`) without losing the others. A
 private desk (e.g. a personal research vertical) can be composed the same
 way, sourcing roles from `GRID_PRIVATE_ROLES_DIR` — never committed to this
 repo; see compose.py's `role_dir()`.
@@ -319,7 +467,7 @@ entry) gives `/<role>` instead — keep bare role names unique across wired proj
 
 > **Rollout note:** `agent-factory/projects/*` is git-ignored (regenerable output). A
 > machine picks up roster/topology changes only after `git pull` **then re-running
-> `compose.py`** (BOOTSTRAP step 4) and `wire.sh` — pulling alone is not enough.
+> `compose.py`** (BOOTSTRAP step 6, or step 3 of "Updating an existing machine") and `wire.sh` — pulling alone is not enough.
 
 ## Spec-driven development (OpenSpec)
 
@@ -351,7 +499,7 @@ mirroring `skill-scout` — never runs `openspec init`, never writes specs).
 from `skills/` (wired), `agent-factory/` (composes personas), and
 `automation-factory/` (cuts a pattern into an existing repo's `.claude/`-adjacent
 `loop/`). A `project-factory` template is standalone: no logic of its own, doesn't
-run, doesn't depend on the-grid once cut. `scripts/cut-project.sh <template>
+run, doesn't depend on the-grid once cut. `project-factory/scripts/cut-project.sh <template>
 <target-dir>` either **seeds** a brand-new project (empty target) or **retrofits**
 an existing one (non-empty target) — same script, same rule either way: never
 overwrite a file that already exists and differs from the template; anything
@@ -387,7 +535,7 @@ Durable lessons mined from project history — full context and sources in
   of its **own** — but a shared `core` project for cross-desk infra (roles no
   single desk owns, meant to survive that desk being subtracted on a
   task-specific machine) is a real category, not project-proliferation for
-  its own sake. `gh-triage`, `librarian`, `researcher` and `platform-engineer` all live there now.
+  its own sake. `gh-triage`, `librarian`, `researcher`, `platform-engineer` and `tron` all live there now.
 - A role only looks team-owned until you ask what happens when that team is
   gated off. `researcher`'s method was always domain-agnostic — only its
   membership in `grid.yaml` made it look like a dev-team role. Moving it to

@@ -2,16 +2,59 @@ name: tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
   pull_request:
 
+# Least privilege: the gate only reads the repo.
+permissions:
+  contents: read
+
+# A newer push to the same PR supersedes a running gate. Pushes to main/next are NOT
+# cancelled: a cancelled run is neither pass nor fail, so a superseded merge commit
+# would never get a gate result (an automated merger must treat "cancelled" as not green).
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  bats:
-    runs-on: ubuntu-latest
+  gate:
+    # Pinned image: ubuntu-latest moves to a new LTS without notice and the
+    # loop treats this job as its truth signal.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
+          # PR code runs below; it must not find a persisted token in .git/config.
+          persist-credentials: false
 
-      - name: Run bats suite
-        run: tests/lib/bats-core/bin/bats tests/
+      # The venv-gated tests (compose, lint-roles, deploy, evals) need PyYAML.
+      # This is the only venv step in this file; other changes add nothing here.
+      - name: Build agent-factory venv
+        run: |
+          python3 -m venv agent-factory/.venv
+          agent-factory/.venv/bin/pip install -r agent-factory/requirements.txt
+
+      # gate.sh skips shellcheck silently-ish when it is missing; on CI that
+      # must be a hard failure, so assert the tool first.
+      - name: Require shellcheck
+        run: shellcheck --version
+
+      # --strict: a skipped check that is not listed here fails the job, so a removed venv
+      # step or check script cannot silently drop a check. Each name is a check the CI runner
+      # cannot run: plugins-validate (needs the claude CLI), personal-denylist (private
+      # denylist), and the four composed projects (composed output is gitignored; CI runs only
+      # compose.py --lint-roles). catalog, sources and the budget baseline are NOT skipped: they
+      # run against the tracked example baseline, which CI has.
+      # GRID_LOCK_ALLOW_SHALLOW: the lock stage runs `grid lock --check` on depth-1 submodule
+      # checkouts, which cannot prove a locked sha is on its upstream ref. That proof is a
+      # hard failure by default; here the skip is the deliberate opt-in. The proof runs
+      # wherever submodules are fully cloned (maintainer machines, gate.sh locally).
+      - name: Gate
+        env:
+          GRID_LOCK_ALLOW_SHALLOW: "1"
+          GRID_GATE_EXPECT_SKIPPED: >-
+            plugins-validate personal-denylist
+            compose-core compose-grid compose-finance-desk compose-learning-desk
+        run: bash scripts/gate.sh --strict

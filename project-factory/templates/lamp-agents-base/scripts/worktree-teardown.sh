@@ -4,6 +4,9 @@
 # Recomputes the schema name from the CURRENT worktree path rather than
 # trusting .env.local's contents, so a stale or hand-edited .env.local can
 # never point teardown at the wrong (possibly still-in-use) schema.
+# The env file path is computed at run time, so shellcheck cannot follow `source` (file-wide:
+# a directive before `set -a; source ...` would only cover `set -a`).
+# shellcheck disable=SC1090
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

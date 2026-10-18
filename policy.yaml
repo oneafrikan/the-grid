@@ -1,0 +1,230 @@
+# policy.yaml — what `grid audit` flags. Restricted YAML subset (see design.md).
+version: 1
+
+# Directories (relative to --root) whose content the-grid owns; everything else is upstream tier.
+owned_roots: [skills, agents, rules, hooks, agent-factory, plugins, dist]
+skip_dirs: ['.git']          # node_modules is NOT skipped: it is reported as builtin vendored-deps
+
+sources:
+  allowed_hosts: [github.com]
+  allowed_repos:
+    - anthropics/skills
+    - garrytan/gstack
+    - jeffallan/claude-skills
+    - mattpocock/skills
+    - obra/superpowers
+    - Fission-AI/openspec
+    - DietrichGebert/ponytail
+
+limits:
+  max_file_bytes: 1048576
+  max_seconds: 300             # wall-clock budget for one audit run (exit 2 when spent)
+
+negation: '(?i)\b(?:never|do not|don.t|must not|mustn.t|avoid|reject|refuse)\b'
+
+classes:
+  # hook is listed BEFORE test on purpose: hooks/fixtures/h.sh is a hook, not a fixture.
+  # `test` is also never given to SKILL.md, agent .md, .mcp.json or hooks.json (see file_class).
+  - name: hook
+    globs: ['hooks/**', '**/hooks/**', '**/hooks.json', '**/*-hook', '**/*-hook.*']
+  - name: test
+    globs: ['test/**', 'tests/**', '**/test/**', '**/tests/**', '**/__tests__/**', '**/*.test.*', '**/*.spec.*', '**/fixtures/**', 'evals/**']
+  - name: script
+    globs: ['**/*.sh', '**/*.bash', '**/*.zsh', '**/*.py', '**/*.js', '**/*.mjs', '**/*.cjs', '**/*.ts', '**/*.rb', '**/*.ps1', '**/bin/**', '**/*.bat', '**/*.cmd', '**/*.php', '**/*.pl', '**/*.lua', '**/*.fish', '**/*.awk', '**/*.tcl', '**/Makefile', '**/Dockerfile']
+  - name: config
+    globs: ['**/*.json', '**/*.toml', '**/*.yaml', '**/*.yml', '**/.mcp.json', '**/*.html', '**/*.svg', '**/*.ipynb', '**/*.xml', '**/*.cfg', '**/*.ini']
+  - name: doc
+    globs: ['**/*.md', '**/*.mdx', '**/*.txt', '**/*.tmpl']
+  # Second `script` entry, deliberately AFTER doc: anything else under scripts/ runs
+  # as code (extensionless helpers, .conf, data a script sources), while
+  # scripts/README.md still matches doc first.
+  - name: script
+    globs: ['scripts/**', '**/scripts/**']
+
+builtin:
+  hidden-unicode: high
+  symlink-escape: high
+  binary-exec: low             # high for script/hook/config class, SKILL.md and agent .md (as oversize-file)
+  oversize-file: low           # high for script/hook/config class, SKILL.md and agent .md (rule 7)
+  unscannable-file: low        # NUL-bearing file that is not a known image/archive/font; same class-based raise
+  vendored-deps: high          # a node_modules/ directory inside a target; not descended into
+  frontmatter-complex: high    # SKILL.md / agent .md frontmatter outside the plain shape of scripts/lib/fmshape.py (low for the grid's own assets); a frontmatter over 128 KiB is one file-level finding, allowed only by a sha256 entry
+  source-not-allowed: low      # raised to high for repos named in the baseline (see --baseline)
+  source-uncurated: low        # raised to high for repos named in the baseline (see --baseline)
+  allow-unused: low
+  allow-stale: low             # sha256-pinned allowlist entry whose file no longer matches; entry inactive
+
+rules:
+  - id: curl-pipe-shell
+    severity: high
+    message: downloads and executes remote code
+    regex: '\b(?:curl|wget)\b[^\n|]{0,300}(?:\|[^\n|]{0,200}){0,3}\|\s*(?:\S{0,64}/)?(?:sudo(?:\s+-\S+){0,4}\s+)?(?:(?:\S{0,64}/)?env\s+)?(?:\S{0,64}/)?(?:(?:ba|z|k|da|a|c|tc|fi)?sh|python[\d.]*|node|ruby|perl|php|pwsh|deno|bun)\b|\b(?:ba|z|k|da|a|c|tc|fi)?sh\s+<\(\s*(?:\S{0,64}/)?(?:curl|wget)|\b(?:(?:ba|z|k|da|a|c|tc|fi)?sh|eval|source|python[\d.]*|perl|ruby|node|php|pwsh|deno|bun)\b[^\n]{0,300}(?:\$\(|\x60)\s*(?:\S{0,64}/)?(?:curl|wget)\b|(?:\bsource|(?:^|\s)\.)\s+<\(\s*(?:\S{0,64}/)?(?:curl|wget)|\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n]{0,300}\|\s*iex\b|\biex\s*\(\s*(?:iwr|irm)\b'
+    downgrade: [comment]          # no negation (prose is not an excuse to run it) and no test (exec rule)
+  - id: npx-unpinned
+    severity: high
+    message: npx -y runs whatever is currently published; pin pkg@x.y.z
+    regex: '\bnpx\s+(?:-y|--yes)\b|"args"\s*:\s*\[\s*"(?:-y|--yes)"'
+    ignore_regex: '\bnpx\s+(?:(?:-y|--yes)\s+)+(?:--?\S+\s+)*@?[\w./-]+@\d|"(?:-y|--yes)"\s*,\s*"@?[\w./-]+@\d'
+    downgrade: [comment]
+  - id: latest-tag
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: '@latest is unpinned; pin an exact version'
+    regex: '@latest\b'
+    downgrade: [negation, comment, test]
+  - id: uvx-unpinned
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high}
+    message: uvx without a pinned version
+    regex: '\buvx\s+[-\w.]'
+    ignore_regex: '\buvx\s+(?:--?\S+\s+(?:\d[\w.]*\s+)?)*[\w.-]+(?:==|@)\d|--from\s+\S+=='
+    downgrade: [negation, comment, test]
+  - id: secret-shape
+    severity: high
+    message: looks like a credential
+    regex: '(?<![A-Za-z0-9])(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{22,}|sk-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35})|-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'
+    ignore_regex: 'EXAMPLE|(?i:placeholder|your[_-]|x{6,}|dummy|fake|redacted)|\.\.\.'
+    downgrade: []
+  - id: home-path
+    severity: low
+    owned_severity: high
+    message: absolute per-user home path (non-portable, may leak a username)
+    regex: '(?<![\w.~:/-])/(?:Users|home)/(?!(?:you|user|username|me|name|someone|yourname|youruser|runner|\$|<|\{|\.\.\.|\*))[A-Za-z0-9_.-]+/|[A-Za-z]:\\Users\\(?!(?:you|user|username|name)\\)[A-Za-z0-9_.-]+\\'
+    downgrade: [test]
+  - id: ssh-write
+    severity: high
+    message: writes to ~/.ssh
+    regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install|rsync|scp)\b[^\n|;&]{0,200}?|\bsed\s+-i\S*[^\n|;&]{0,200}?)\s*[\"\x27]?(?:~|\$HOME|\$\{HOME\})/\.ssh/'
+    downgrade: [comment]
+  - id: shell-rc-write
+    severity: high
+    message: modifies a shell startup file
+    regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install)\b[^\n|;&]{0,200}?|\bsed\s+-i\S*[^\n|;&]{0,200}?)\s*[\"\x27]?(?:~|\$HOME|\$\{HOME\}|\$\{?ZDOTDIR\}?)/\.(?:zshrc|zprofile|zshenv|zlogin|zlogout|bashrc|bash_profile|bash_login|bash_logout|profile)\b|(?:>>?|\btee\b(?:\s+-a)?)\s*[\"\x27]?(?:~|\$HOME)/\.config/fish/config\.fish'
+    downgrade: [comment]
+  - id: prompt-injection
+    severity: high
+    message: text that tries to override the agent's instructions
+    regex: '(?i)\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|your\s+|the\s+|these\s+|those\s+|my\s+|of\s+)*(?:previous|prior|above|earlier|preceding|system|original)\s+(?:instructions?|prompts?|rules|directions|guidelines|context)\b|\byou\s+are\s+now\s+(?:in\s+)?(?:developer\s+mode|DAN|jailbroken|unrestricted)|\b(?:do\s+not|don.t|never)\s+(?:tell|inform|reveal\s+(?:this\s+)?to|mention\s+(?:this\s+)?to)\s+the\s+user|\bkeep\s+(?:this|that|it)\s+(?:a\s+)?secret\s+from\s+the\s+user|<\s*/\s*system\s*>'
+    normalise: true               # NFKC + confusable fold + invisible chars removed before matching
+    window: 2                     # a phrase split across two lines still matches
+    downgrade: [negation-quoted, test]   # a quote of the phrase after a negation; advisory rule
+  - id: hook-network
+    severity: high
+    applies: [hook]
+    message: hook makes a network call
+    regex: '\b(?:curl|wget|nc|ncat|telnet|ssh|scp)\s|https?://|\bfetch\s*\(|requests\.(?:get|post|put)|\burllib|\bhttp\.client|Invoke-WebRequest|XMLHttpRequest'
+    ignore_regex: 'https?://(?:localhost|127\.0\.0\.1|\[::1\])'
+    downgrade: [comment]
+  - id: credential-read
+    severity: low
+    severity_by_class: {script: high, hook: high, test: high}
+    message: reads a credential store
+    regex: '(?:~|\$HOME|\$\{HOME\})/(?:\.ssh/(?!(?:known_hosts|config)(?:[\s\"''`;)|&]|$)|\s|$)|\.aws/|\.kube/|\.config/gcloud|\.config/gh/hosts\.yml|\.netrc|\.docker/config\.json|\.npmrc|\.git-credentials)|Library/Keychains|security\s+find-(?:generic|internet)-password|\b(?:cat|less|more|head|tail|base64|xxd|cp|scp)\s+(?:\S{0,64}/)?\.env(?:\.(?!example|sample|template)\w+)?(?=\s|$)|@\.env\b|\b(?:tar|zip|7z|rsync|scp|cp\s+-\w*r\w*)\b[^\n|;&]{0,80}(?:~|\$HOME|\$\{HOME\})/\.(?:ssh|aws|kube|gnupg)\b'
+    downgrade: [comment]
+  - id: decode-and-exec
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high, test: high}
+    message: decodes a payload and pipes it to an interpreter
+    regex: '(?:\bbase64\s+(?:-d|-D|--decode)\b|\bxxd\s+-r\b|\bopenssl\s+(?:enc|base64)\b[^\n|]{0,100}\s-d\b)[^\n|]{0,100}(?:\|[^\n|]{0,100}){0,2}\|\s*(?:\S{0,64}/)?(?:sudo(?:\s+-\S+){0,4}\s+)?(?:(?:\S{0,64}/)?env\s+)?(?:\S{0,64}/)?(?:(?:ba|z|k|da|a|c|tc|fi)?sh|python[\d.]*|node|ruby|perl|php|pwsh|deno|bun)\b'
+    downgrade: [comment]
+  # download-then-run is written word by word (bounded `\s+word` repeats, no lazy `[^\n]*?` scans)
+  # so its cost per start position is constant: a hostile megabyte of `curl >>` stays linear.
+  - id: download-then-run
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high, test: high}
+    message: downloads a file and then runs it
+    regex: '\b(?:curl|wget)\b(?:\s+(?!-o|-O\b|--output|>)[^\s;&|]+){0,16}\s+(?:-o\s*|-O\s+|--output(?:=|\s+)|--output-document(?:=|\s+)|>\s*)(?P<f>[^\s;&|<>-][^\s;&|]{0,100})(?:\s+[^\s;&|]+){0,12}\s*(?:;|&&|\|\|)\s*(?:chmod\s+(?:\+x|[0-7]{3,4})\s+(?:\S+\s+)?(?P=f)(?=[\s;&|)]|$)|\b(?:ba|z|k|da|a|c|tc|fi)?sh\s+(?:-\S+\s+)*(?P=f)(?=[\s;&|)]|$)|\./(?P=f)(?=[\s;&|)]|$))'
+    downgrade: [comment]
+  - id: eval-cat
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high, test: high}
+    message: evals the contents of a file
+    regex: '\beval\s+[\"\x27]?(?:\$\(|\x60)\s*cat\b'
+    downgrade: [comment]
+  - id: exec-urlopen
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high, test: high}
+    message: executes code fetched at run time
+    regex: '\bexec\s*\([^\n]{0,200}\burlopen\b|\.then\s*\(\s*eval\b|\beval\s*\(\s*await\s+fetch\b'
+    downgrade: [comment]
+  - id: powershell-iex
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high, test: high}
+    message: PowerShell Invoke-Expression runs a string as code
+    regex: '(?i)\b(?:iex|invoke-expression)\b'
+    ignore_regex: '\|\s*iex\b|\biex\s*\(\s*(?:iwr|irm)\b'
+    downgrade: [comment]
+  - id: pip-git-install
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high, test: high}
+    message: installs a package straight from a git URL (unpinned source)
+    regex: '\b(?:pip3?|uv\s+pip|pipx)\s+install\b[^\n]{0,200}\bgit\+'
+    downgrade: [comment]
+  - id: runner-unpinned
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high, test: high}
+    message: package runner without a pinned version
+    regex: '(?:^\s*(?:\$\s+)?|[;&|(]\s*|\brun:\s*|\$\(\s*|[\"\x27]\s*|\b(?:then|do|else|xargs|time|nohup|exec|sudo|command|env(?:\s+\w+=\S+)*)\s+)(?:npx|bunx|pnpm\s+dlx|yarn\s+dlx|npm\s+exec)\s+(?:--?[A-Za-z][\w-]*(?:=\S+)?\s+)*@?[\w.][\w./-]*'
+    ignore_regex: '(?:^\s*(?:\$\s+)?|[;&|(]\s*|\brun:\s*|\$\(\s*|[\"\x27]\s*|\b(?:then|do|else|xargs|time|nohup|exec|sudo|command|env(?:\s+\w+=\S+)*)\s+)(?:npx|bunx|pnpm\s+dlx|yarn\s+dlx|npm\s+exec)\s+(?:--?[A-Za-z][\w-]*(?:=\S+)?\s+)*@?[\w./-]+@(?:\d|latest\b)|\bnpx\s+(?:--?\S+\s+)*(?:-y|--yes)\b'
+    downgrade: [comment]
+  - id: exfil-pipe
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high, test: high}
+    message: sends local files or the environment to a remote host
+    regex: '\b(?:curl|wget)\b[^\n]{0,300}(?:\s(?:-d|--data\S*|-F|--form\S*)\s*=?\s*[\"\x27]?@|\s(?:-T|--upload-file)\s+\S)|\b(?:env|printenv)\b\s*(?:\|[^\n|]{0,100}){0,2}\|\s*(?:curl|wget|nc|ncat|socat)\b'
+    downgrade: [comment]
+  - id: destructive-system
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high, test: high}
+    message: deletes the home directory or edits sudoers
+    regex: '\brm\s+-[A-Za-z]*[rR][A-Za-z]*\s+(?:-\S+\s+)*(?:~|\$HOME|\$\{HOME\})/?\*?(?=\s|$|;|&|\|)|/etc/sudoers(?:\.d)?\b'
+    downgrade: [comment]
+  - id: claude-config-write
+    severity: low
+    severity_by_class: {script: high, hook: high, config: high, test: high}
+    message: writes under ~/.claude/ (the agent's own configuration)
+    regex: '(?:>>?|\btee\b(?:\s+-a)?|\b(?:cp|mv|ln|install|rsync)\b[^\n|;&]{0,200}?|\bsed\s+-i\S*[^\n|;&]{0,200}?)\s*[\"\x27]?(?:~|\$HOME|\$\{HOME\})/\.claude/'
+    downgrade: [comment]
+  # hook-declared: a SKILL.md / agent .md frontmatter is checked by shape first (scripts/lib/fmshape.py, builtin
+  # frontmatter-complex: only plain lines pass, anything reader-dependent is a finding) and then read by
+  # scripts/lib/fmyaml.py, which denies by default inside every hooks block (see _HookStructure in audit.py); the whole
+  # word `hooks` in a key position nothing judged is a finding too. A frontmatter hook line is allowlisted only
+  # together with its block (an entry's `hooks_sha256`, the finding's `sha256`). So this regex only covers the JSON
+  # manifests of class hook (hooks.json): any "command" key.
+  - id: hook-declared
+    severity: high
+    owned_severity: low
+    message: declares a hook that runs a command
+    regex: '"command"\s*:'
+    physical: true                # anchored: also match lines a continuation join swallowed
+    applies: [hook]
+    downgrade: []
+  - id: mcp-declared
+    severity: high
+    owned_severity: low
+    message: declares an MCP server
+    regex: '"mcpServers"\s*:|"type"\s*:\s*"(?:http|sse)"'
+    applies: [config, hook]
+    downgrade: []
+  - id: lifecycle-script
+    severity: high
+    owned_severity: low
+    message: package.json lifecycle script runs on install
+    regex: '"(?:preinstall|install|postinstall|prepare)"\s*:\s*"'
+    applies: [config, hook, test]
+    downgrade: []
+  - id: allowed-tools-bash
+    severity: high
+    owned_severity: low
+    message: skill pre-approves unrestricted Bash (scope it, e.g. Bash(git:*))
+    regex: '^["'']?allowed-tools["'']?\s*:[^\n]*?\bBash\b(?!\()|^["'']?allowed-tools["'']?\s*:[^\n]*\bBash\(\*\)'
+    physical: true                # anchored: also match lines a continuation join swallowed
+    applies: [doc]
+    downgrade: []
+  - id: plugin-hooks-declared
+    severity: high
+    owned_severity: low
+    message: declares hooks inside a JSON manifest (plugin.json)
+    regex: '"hooks"\s*:\s*[{\[]'
+    applies: [config, hook]
+    downgrade: []

@@ -11,6 +11,7 @@ summary: >-
   on only when the operator is ready. Quizzes after each section, ends with an
   integrative challenge and a reflection, and logs what was learned to the
   private learning store. Teaches only; does not do the operator's work for them.
+description: "Morpheus. Socratic tutor: builds a syllabus, teaches one lesson at a time, asks before telling, quizzes, logs learning. Teaches only. Use to learn a topic interactively."
 base_skills: []
 # Orchestrator in the compose sense only: orchestrator roles ship as Claude Code
 # SKILLS, which run in the main session. A tutor needs that (a multi-turn dialogue

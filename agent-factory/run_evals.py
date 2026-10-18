@@ -11,7 +11,9 @@ Usage:
     run_evals.py --list                      # list cases and their baseline expectation
     run_evals.py --dry-run                   # show the plan and the worst-case spend; no model call
     GRID_EVALS=1 run_evals.py --yes          # run for real (costs money)
+    run_evals.py --changed origin/next...HEAD --dry-run   # only the roles a git range touched
     options: --role R  --case NAME  --runs N  --budget USD  --cases-dir D  --results-dir D
+             --changed RANGE  --max-total USD (default 5.00; caps every plan)  --repo D (default: this repo)
 
 A case (evals/cases/<role>/<name>.yaml):
     role:          the grid role under test (must exist)
@@ -28,7 +30,9 @@ model. Tools are switched OFF, so a case can only talk and can never act on anyt
 Results go to evals/results/*.jsonl (git-ignored) with pass rate and flip rate.
 """
 import argparse
+import fnmatch
 import json
+import math
 import os
 import re
 import subprocess
@@ -46,6 +50,7 @@ import compose  # noqa: E402  (role lookup + model resolution, same code the dep
 REPO = HERE.parent
 CASES_DIR = REPO / "evals" / "cases"
 RESULTS_DIR = REPO / "evals" / "results"
+DEFAULT_MAX_TOTAL = 5.00   # USD; any run refuses a plan whose worst case is above this
 EXPECT = {"pass", "fail", "unknown"}
 REQUIRED = ("role", "finding", "expect_today", "prompt", "must_match")
 DEFAULT_RUNS = 3
@@ -98,6 +103,97 @@ def validate(case: dict) -> list[str]:
     if "runs" in case and not (isinstance(case["runs"], int) and case["runs"] >= 1):
         errs.append(f"{where}: runs must be an integer >= 1")
     return errs
+
+
+def all_roles() -> list[str]:
+    """Every role name (public tree plus the private override tree, if any); '_retired' etc. are skipped."""
+    trees = [compose.ROLES_DIR] + ([compose.PRIVATE_ROLES_DIR] if compose.PRIVATE_ROLES_DIR else [])
+    return sorted({d.name for t in trees if t.is_dir() for d in t.iterdir()
+                   if d.is_dir() and not d.name.startswith("_")})
+
+
+def load_touchfiles(repo: Path) -> tuple[list[dict], list[str]]:
+    """(rules, problems) from <repo>/evals/touchfiles.yaml. A missing file is not an error:
+    it simply adds no rules beyond the built-in per-role directory mapping."""
+    path = repo / "evals" / "touchfiles.yaml"
+    if not path.is_file():
+        return [], []
+    where = "touchfiles.yaml"
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        return [], [f"{where}: {exc}"]
+    if not isinstance(data, dict) or set(data) != {"rules"}:
+        return [], [f"{where}: must be a mapping with only a 'rules' key"]
+    rules = data["rules"]
+    if not isinstance(rules, list):
+        return [], [f"{where}: 'rules' must be a list"]
+    errs = []
+    for i, rule in enumerate(rules, 1):
+        if not isinstance(rule, dict):
+            errs.append(f"{where}: rule {i} must be a mapping")
+            continue
+        paths, roles = rule.get("paths"), rule.get("roles")
+        if not (isinstance(paths, list) and paths and all(isinstance(p, str) and p for p in paths)):
+            errs.append(f"{where}: rule {i}: 'paths' must be a non-empty list of patterns")
+        if "eval" in rule:
+            # A pointer rule: the files feed a separate eval runner, so a change prints its command.
+            if "roles" in rule or rule["eval"] not in EVAL_POINTERS:
+                errs.append(f"{where}: rule {i}: 'eval' must be one of {', '.join(EVAL_POINTERS)} and cannot be "
+                            "combined with 'roles'")
+            continue
+        if roles in ("all", "orchestrators"):
+            continue
+        if not (isinstance(roles, list) and roles and all(isinstance(r, str) for r in roles)):
+            errs.append(f"{where}: rule {i}: 'roles' must be 'all', 'orchestrators' or a list of role names")
+            continue
+        errs += [f"{where}: rule {i}: unknown role {r!r}" for r in roles if not compose.role_dir(r).is_dir()]
+    return ([] if errs else rules), errs
+
+
+# `eval:` touchfile rules: eval name -> the line --changed prints when a matching file changed.
+EVAL_POINTERS = {
+    "instincts": "instincts eval selected: run GRID_EVALS=1 scripts/instincts.sh eval-prompt --yes",
+}
+
+
+def eval_pointers_for_path(path: str, rules: list[dict]) -> set[str]:
+    """Pointer lines for a changed path: the FIRST matching rule decides, and only an `eval:` rule gives one."""
+    for rule in rules:
+        if any(fnmatch.fnmatchcase(path, pat) for pat in rule["paths"]):
+            return {EVAL_POINTERS[rule["eval"]]} if "eval" in rule else set()
+    return set()
+
+
+def roles_for_path(path: str, rules: list[dict]) -> set[str]:
+    """Roles whose eval prompt a changed path can alter. First match wins: the built-in
+    per-role directories, then touchfiles rules in file order. fnmatchcase: '*' also crosses '/'."""
+    m = re.match(r"(?:agent-factory/roles|evals/cases)/([^/]+)/", path)
+    if m:
+        return {m.group(1)}
+    for rule in rules:
+        if any(fnmatch.fnmatchcase(path, pat) for pat in rule["paths"]):
+            if "eval" in rule:
+                return set()           # a pointer rule selects no role
+            if rule["roles"] == "all":
+                return set(all_roles())
+            if rule["roles"] == "orchestrators":
+                return {r for r in all_roles() if compose.is_orchestrator(r)}
+            return set(rule["roles"])
+    return set()
+
+
+def changed_files(repo: Path, rng: str) -> list[str] | None:
+    """Paths changed in a git range (NUL-separated so odd names survive), or None if git refuses it."""
+    if rng.startswith("-"):            # never let a range be read as a git option
+        print(f"E_RANGE: {rng!r} is not a git range", file=sys.stderr)
+        return None
+    proc = subprocess.run(["git", "-C", str(repo), "diff", "--name-only", "-z", "--no-renames", rng, "--"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        print(f"E_RANGE: {proc.stderr.strip() or 'git diff failed'}", file=sys.stderr)
+        return None
+    return [p for p in proc.stdout.split("\0") if p]
 
 
 def system_prompt(role: str, cache: dict) -> tuple[str, str]:
@@ -159,10 +255,18 @@ def main() -> int:
     ap.add_argument("--budget", type=float, default=DEFAULT_BUDGET, help="USD cap per run")
     ap.add_argument("--cases-dir", type=Path, default=CASES_DIR)
     ap.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
+    ap.add_argument("--repo", type=Path, default=REPO, help="checkout --changed and evals/touchfiles.yaml read from")
+    ap.add_argument("--changed", metavar="RANGE", help="only roles touched by this git range, e.g. origin/next...HEAD")
+    ap.add_argument("--max-total", type=float, default=DEFAULT_MAX_TOTAL,
+                    help="refuse a plan whose worst case exceeds this many USD")
     args = ap.parse_args()
 
+    if not (math.isfinite(args.budget) and args.budget > 0 and math.isfinite(args.max_total) and args.max_total > 0):
+        print("refusing: --budget and --max-total must be finite numbers above 0.", file=sys.stderr)
+        return 2
     cases = load_cases(args.cases_dir)
-    problems = [e for c in cases for e in validate(c)]
+    rules, tf_problems = load_touchfiles(args.repo)
+    problems = [e for c in cases for e in validate(c)] + tf_problems
     if args.validate or problems:
         for p in problems:
             print(f"E_CASE: {p}", file=sys.stderr)
@@ -170,6 +274,25 @@ def main() -> int:
         return 1 if problems else 0
 
     cases = [c for c in cases if (not args.role or c["role"] == args.role) and (not args.case or c["name"] == args.case)]
+    if args.changed:
+        files = changed_files(args.repo, args.changed)
+        if files is None:
+            return 2
+        selected = set().union(*(roles_for_path(f, rules) for f in files))
+        pointers = sorted(set().union(*(eval_pointers_for_path(f, rules) for f in files)))
+        no_cases = sorted(selected - {c["role"] for c in cases})
+        # Intersect with roles that have cases; the --role/--case filter above already narrowed `cases`.
+        cases = [c for c in cases if c["role"] in selected]
+        names = sorted({c["role"] for c in cases})
+        if names or no_cases:
+            print(f"changed: {len(files)} file(s); selected roles: {', '.join(names) or 'none'}; "
+                  f"no cases: {', '.join(no_cases) or 'none'}")
+        for line in pointers:
+            print(line)
+        if not cases:
+            if not pointers:
+                print("no eval-relevant changes")
+            return 0
     if args.list:
         for c in cases:
             print(f"{c['role']:<18} {c['name']:<28} finding {c['finding']:<4} baseline: {c['expect_today']}")
@@ -178,6 +301,11 @@ def main() -> int:
     plan = [(c, args.runs or c.get("runs", DEFAULT_RUNS)) for c in cases]
     total = sum(n for _, n in plan)
     print(f"plan: {len(plan)} case(s), {total} run(s); worst case ${total * args.budget:.2f} (cap ${args.budget:.2f}/run)")
+    # Spend cap for every plan. Before the --dry-run return so a dry run shows the refusal too.
+    if total * args.budget > args.max_total:
+        print(f"refusing: worst case ${total * args.budget:.2f} exceeds --max-total ${args.max_total:.2f}. "
+              "Narrow it with --role, or raise --max-total.", file=sys.stderr)
+        return 2
     if args.dry_run:
         return 0
     if os.environ.get("GRID_EVALS") != "1":

@@ -64,6 +64,7 @@ Kind is read from `role.yaml`. A role can be both an orchestrator and unattended
 - Sections: `Scope`, `What to get right hardest`, `Hard rules`, plus the sections it already has
   (`Roster`, `Delegation & Context`, `Routing`). `Receiving work` is not required.
 - `AGENTS.md` ≤ 5120 bytes (rules stay inline; do not move them to a linked file).
+- The `## Decision briefs` section is appended automatically from `_core/DECISION_BRIEF.md`; do not restate it in `AGENTS.md`. The 5120-byte cap counts the role file only.
 - The shared four, reworded for acceptance:
   1. **Verify before accepting.** Read or re-run the specialist's evidence (the command and its
      output, the paths, the PR) before reporting anything as done. A summary is not evidence.
@@ -84,6 +85,19 @@ Kind is read from `role.yaml`. A role can be both an orchestrator and unattended
 `compose.py --lint-roles` enforces presence by keyword: `E_SHARED_RULE_MISSING` (a shared-four idea is
 absent from `Hard rules`) and `E_UNATTENDED_RULE_MISSING` (no safe-target / run-record rule). It checks
 that a rule exists, not that it is well worded; the golden cases in `evals/` check behaviour.
+
+The `tools:` allowlist and what it does and does not protect: see
+[Tool allowlists and residual risk](../README.md#tool-allowlists-and-residual-risk).
+
+## Description
+
+Every new role's `role.yaml` has a `description:`: one line, at most 250 characters, in the
+form `<Title>. <what it owns>. Use for <when to reach for it>.` Facts from `summary:` only.
+`compose.py` emits it verbatim as the subagent or skill description. Keep the "Use for ..."
+when-to-use phrasing: Claude picks a role from this listing line alone. Keep it short because
+every description shares one listing budget (`python3 scripts/budget.py --check` enforces the
+limit). `summary:` stays as is; rosters use it. A role without `description:` still composes,
+with the legacy text.
 
 ## Writing rules
 

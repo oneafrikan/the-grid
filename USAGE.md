@@ -39,8 +39,8 @@ CLAUDE.md). Two different invocation shapes:
 
 | Form | Roles | How to invoke |
 |------|-------|----------------|
-| **Skill** (orchestrator) | `grid-ceo-orchestrator`, `grid-tech-lead`, `grid-growth-hacker`, `finance-desk-finance-manager` | Slash command, e.g. `/grid-tech-lead`. Transforms the session into that role for the rest of the conversation. |
-| **Subagent** (specialist) | the other 25 roles | Not a slash command. Either delegate explicitly — *"use the grid-backend-dev subagent to implement this"* — or let an orchestrator hand off automatically once you've invoked it. |
+| **Skill** (orchestrator) | `grid-ceo-orchestrator`, `grid-tech-lead`, `grid-growth-hacker`, `finance-desk-finance-manager`, `tron`, `morpheus`, `oracle` | Slash command, e.g. `/grid-tech-lead`. Transforms the session into that role for the rest of the conversation. |
+| **Subagent** (specialist) | the other 31 roles | Not a slash command. Either delegate explicitly — *"use the grid-backend-dev subagent to implement this"* — or let an orchestrator hand off automatically once you've invoked it. |
 
 Typical flow: `/grid-ceo-orchestrator` to scope a business goal → it delegates
 to `grid-tech-lead` / `grid-product-manager` / `grid-growth-hacker` → those
@@ -48,7 +48,7 @@ delegate further down to specialists. You can also skip straight to a
 specialist subagent for a narrow task without going through an orchestrator
 at all.
 
-Three composed projects, each independently wired and gated
+Four composed projects, each independently wired and gated
 (`project:<name>` in `baseline-submodules.txt` or a machine overlay):
 
 - **`grid`** — the dev team (engineering, product, marketing).
@@ -56,8 +56,12 @@ Three composed projects, each independently wired and gated
   (`finance-desk-finance-manager` → sentinel/analyst/strategist/risk-officer/
   scribe). Standalone, not part of the CEO's chain — invoke directly.
 - **`core`** — cross-desk shared infra (`core-gh-triage`, `core-librarian`,
-  `core-researcher`, `core-platform-engineer`), meant to stay wired regardless
+  `core-researcher`, `core-platform-engineer`, and `/tron`, the front door that
+  recommends which skill or agent to use), meant to stay wired regardless
   of which desk-specific project a machine runs.
+- **`learning-desk`** — the learning agents, all operator-triggered: `/morpheus`
+  (Socratic tutor), `/oracle` (learns about you, privately) and `tank`
+  (agent-to-agent lessons from the run log).
 
 A task-specific machine can subtract a whole desk (`-project:grid` or
 `-project:finance-desk`) via its overlay to cut clutter, while keeping `core`.
@@ -118,7 +122,7 @@ target repo instead of running it ad hoc in a session — copy the pattern into 
 tracked `loop/` folder, fill its placeholders, then `bash loop/setup.sh` to wire
 the machine-specific bits (absolute paths, the `.claude/settings.json` hook).
 Full steps: [automation-factory/patterns/issue-loop/README.md](automation-factory/patterns/issue-loop/README.md).
-(`instantiate.sh`, tracked as issue #15, will collapse this to one command.)
+(`instantiate.sh`, which collapsed this to one command, is retired and quarantined under `_retired/issue-loop/`; the cut is manual again. See `_retired/issue-loop/RETIRED.md`.)
 
 ## project-factory — starting a brand-new project
 
@@ -132,6 +136,21 @@ templates and what each assumes: [project-factory/README.md](project-factory/REA
 Composing an agent-factory persona, wiring skills, or adding an automation-factory
 pattern into the new project all happen *after* the cut, as normal steps in that
 repo.
+
+## Context modes
+
+Optional: start Claude Code already in a working mode (dev, research or review).
+Add this line to `~/.zshrc` or `~/.bashrc`, then open a new shell:
+
+```bash
+source "$HOME/.the-grid/contexts/aliases.sh"
+```
+
+You then have `claude-dev`, `claude-research` and `claude-review`. Each is
+`claude --append-system-prompt-file <mode file>`, so the mode text is added to
+Claude Code's own prompt, not a replacement for it. Extra arguments pass through,
+e.g. `claude-review "check PR 12"`. The mode files are in `contexts/` (each under
+1200 bytes); edit them to taste.
 
 ## Growing what's wired
 
@@ -147,13 +166,13 @@ repo.
 ## Keeping it healthy
 
 ```bash
-bash scripts/check-grid.sh      # fast health check — bats suite + broken-symlink scan
-tests/lib/bats-core/bin/bats tests/   # full test suite directly
+bash scripts/check-grid.sh      # the full test suite (many minutes; ~15 on CI) + broken-symlink scan
+tests/lib/bats-core/bin/bats tests/   # the same test suite directly, without the symlink scan
 bash scripts/sources.sh --check # link-check every submodule upstream URL
 ```
 
-A `pre-commit` hook runs the same tests automatically before every commit in this
-repo (bypass with `git commit --no-verify` or `GRID_SKIP_HOOK=1`).
+A `pre-commit` hook runs `scripts/gate.sh` (which includes the tests) automatically before
+every commit in this repo (bypass with `git commit --no-verify` or `GRID_SKIP_HOOK=1`).
 
 `sources.sh --check` is the rot detector: upstream repos get renamed, deleted, or
 made private with no local symptom until a fresh machine tries to clone. Run it
@@ -165,6 +184,6 @@ occasionally, not every commit.
 - [docs/SOURCES.md](docs/SOURCES.md) — generated: upstream URL + tier per submodule.
 - [docs/model-selection.md](docs/model-selection.md) — which model for which job:
   prices, independent benchmarks, worked cost maths, and what's *not* known.
-- [TODO.md](TODO.md) — open issues (GitHub Issues is the source of truth) + done history.
+- [TODO.md](TODO.md) — map of the open issues (GitHub Issues is the source of truth).
 - [LEARNINGS.md](LEARNINGS.md) — durable lessons mined from project history.
 - [CLAUDE.md](CLAUDE.md) — full technical context, for Claude sessions and for you.

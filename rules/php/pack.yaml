@@ -1,0 +1,4 @@
+# Flat "key: value" lines only. Parsed by rules.py (no YAML library).
+summary: PHP language pitfalls and security functions from the PHP manual
+tier: 2
+adapted_from: affaan-m/ECC rules/php @ ef648e0 (MIT)

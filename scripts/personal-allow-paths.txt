@@ -1,0 +1,15 @@
+# personal-allow-paths.txt - paths check-personal.sh skips entirely.
+# One bash glob per line (matched with `case` against the repo-relative path,
+# so `dir/*` covers nested files), then a MANDATORY trailing `# reason`.
+# A line without a reason is a usage error. Add a path here only with a reason.
+tests/lib/*	# vendored bats submodule files, not our content
+scripts/personal-patterns.txt	# the rules themselves contain the patterns they match
+scripts/personal-denylist.example.txt	# placeholder rows for the private denylist format
+scripts/personal-allow-paths.txt	# this file: reasons may quote what they exempt
+tests/test_check_personal.bats	# fixtures deliberately contain flaggable strings
+tests/test_audit.bats	# fixtures deliberately contain flaggable home-path strings (positive and negative cases for the audit rule)
+openspec/changes/vetting/design.md	# quotes the audit test fixtures verbatim (home paths, PEM header); the strings are the spec
+openspec/changes/hook-profiles/design.md	# quotes a placeholder-token fixture the hook must exempt; the string is the spec
+the-grid.png	# hero image is over the size limit; remove this line when the front-door change replaces it
+plugins/grid-core/LICENSE	# byte copy of the repo-root LICENSE that each plugin bundle ships; its copyright line names the rights holder, which the licence requires (allow rules are match-level, so this is a path exemption)
+plugins/grid-agents/LICENSE	# same byte copy for the agents bundle (one entry per bundle: a glob would also exempt anything nested below it)

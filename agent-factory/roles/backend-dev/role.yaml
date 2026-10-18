@@ -6,5 +6,6 @@ title: Backend Dev        # human-readable role for IDENTITY.md nameplate
 default_model: sonnet
 summary: >-
   Server-side logic, APIs, database, auth, business rules. Implements to a PRD.
+description: "Backend Dev. Server-side logic, APIs, database, auth and business rules, implemented to a PRD. Use for backend implementation."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false

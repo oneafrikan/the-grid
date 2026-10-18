@@ -11,6 +11,7 @@ summary: >-
   circuit breaker, no leverage/options, cash floor) is Layer 1 pure code in
   finance-agents-base's guardrail/rules.py, not this agent — hard limits
   enforced by an LLM are hard limits enforced by a probability distribution.
+description: "Finance Risk Officer. Layer-2 sanity check: verifies the Strategist's arithmetic and rationale against the Investment Policy text. Hard-limit veto is code, not this agent. Use to check a finance proposal."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
 model_rationale: >-

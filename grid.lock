@@ -1,0 +1,1058 @@
+{
+  "entries": [
+    {
+      "hash": "sha256:9643bd188592525ae2ab89bd005bdbd336acc689ecd0072a4f9fb5392238a221",
+      "kind": "skill",
+      "name": "architecture-designer",
+      "path": "skills/architecture-designer",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "44b08027e2c06856066b6e27f1584acb7328e164"
+    },
+    {
+      "hash": "sha256:607a56f322a473f370645bcb68430c0546b5007558d75854c52d21990d974e09",
+      "kind": "skill",
+      "name": "autoplan",
+      "path": "autoplan",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "aa4e73aaf6890918cb220d3727185e2e51843b24"
+    },
+    {
+      "hash": "sha256:c4a5e4610b5c60d0f212232b350cb9269b37dd6afbf2f9752ed017dc04c969d5",
+      "kind": "skill",
+      "name": "benchmark",
+      "path": "benchmark",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "64f5063af3e24ec62f7b1cf0167ffa30692bf2c0"
+    },
+    {
+      "hash": "sha256:097b2bbf93b0e02365669a2d7279338dfacd9ed1f3a2003a3e092b8ce269f190",
+      "kind": "skill",
+      "name": "brainstorming",
+      "path": "skills/brainstorming",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "881fc4ac82a25e61a58d332426b5673efe060da0"
+    },
+    {
+      "hash": "sha256:91c97ab9bb03a10c05d9b219a97a82588cd948cf8c7b35074f539f292d3e5598",
+      "kind": "skill",
+      "name": "browse",
+      "path": "browse",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "685305585555abb10ac45ec9cb8ef665ca553f91"
+    },
+    {
+      "hash": "sha256:30c6b6e3f13073465056ffd28993f25bfb46f9e2175b4425576cebec603a09f2",
+      "kind": "skill",
+      "name": "canary",
+      "path": "canary",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "0ef8f5bbfa69db270eee8233cb98e78a3b24369a"
+    },
+    {
+      "hash": "sha256:96c7532c3df39170dc84fd151356ceccad34f4f9c44b0f8211670edd4edb8a86",
+      "kind": "skill",
+      "name": "careful",
+      "path": "careful",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "f8c7700f94ffc0410baeb4451180d8afb204c632"
+    },
+    {
+      "hash": "sha256:f75763c58925cfa871007da6eab40d2c3cb3604946d7d3898965b2b0cab22bb9",
+      "kind": "skill",
+      "name": "claude-api",
+      "path": "skills/claude-api",
+      "sha": "53048666b05b4799081517d00e09e0a2dd688678",
+      "source": "anthropic",
+      "tree": "8910cdbce78a7735c65ba63e42048dfe8d0d33a3"
+    },
+    {
+      "hash": "sha256:ab0c074cb0bd4137bfad118e000884fd99bd814fa28fd3a85ecd12d4c52503f9",
+      "kind": "skill",
+      "name": "cli-developer",
+      "path": "skills/cli-developer",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "7023cd84ff40d187979c13e4c4090a88c6a252a1"
+    },
+    {
+      "hash": "sha256:e89bf122be5b4092d83b8ae1986208f3e595503a4ee6b87476bae885e33ac405",
+      "kind": "skill",
+      "name": "code-documenter",
+      "path": "skills/code-documenter",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "54699ba9cbeaeee208107f4efb5b7eb17cfae7fe"
+    },
+    {
+      "hash": "sha256:96cead7fa251494c1e69daf7b7ce2a1207e772c4bc0f0823434ebdcdf52d4080",
+      "kind": "skill",
+      "name": "code-reviewer",
+      "path": "skills/code-reviewer",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "fbfe6c2768105206d43d4ff764f47584240ac304"
+    },
+    {
+      "hash": "sha256:6c3aed478972c86fb7e4591560a56544c0ba8bea9dd954a898928e64388d4e21",
+      "kind": "skill",
+      "name": "codex",
+      "path": "codex",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "cef987cd4004111bdcb27a77b4eeca1d4de096e4"
+    },
+    {
+      "hash": "sha256:95ae9f60cbc6c5b69ec4591dc95f73c3af29edc810d9e29ea9e8c87f900ba460",
+      "kind": "skill",
+      "name": "context-restore",
+      "path": "context-restore",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "6703c75f47bc1d4f4d324e1a85b4bf3569794b63"
+    },
+    {
+      "hash": "sha256:ed1506bb5d0e4c99b152cf875fceeae119e855b4c387617216b5cc2bfb990dcc",
+      "kind": "skill",
+      "name": "context-save",
+      "path": "context-save",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "ef1652b84b227b4b25a134958b36278e355f0a53"
+    },
+    {
+      "hash": "sha256:ba1bb8d0461e0dd3398b559a953a86e9a72c5008d27c5ff5ad934db0b6b80d21",
+      "kind": "skill",
+      "name": "cso",
+      "path": "cso",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "cbcaecc4e7e318cfb5027b338f401cbff438441f"
+    },
+    {
+      "hash": "sha256:18b00230806d49b27ec5764b89a5e847ea69757d08d5ca58221245b4bd7f38d7",
+      "kind": "skill",
+      "name": "database-optimizer",
+      "path": "skills/database-optimizer",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "6e26215a1c9eee2d7a490a0b3ac9e34b1e90cccc"
+    },
+    {
+      "hash": "sha256:4ec4a5d70429fe90caac5a882331c3857e4c56d85434d5b8f1c4233d0b1793f3",
+      "kind": "skill",
+      "name": "debugging-wizard",
+      "path": "skills/debugging-wizard",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "70330c92dcbb837d6f3c63b40e34fd13ea84c1f1"
+    },
+    {
+      "hash": "sha256:d4d11c8b05cfdebebe0221526e9b49bad17639afa1f7f59f4271a4b2a19f7783",
+      "kind": "skill",
+      "name": "design-consultation",
+      "path": "design-consultation",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "f7ab4b29ee5feeb444506918fe688ad7ed065eaa"
+    },
+    {
+      "hash": "sha256:67a7f963851b2a25cfcd8d0cbd7ee83d0c1cb3a82428e077e3350fb4339f0e0a",
+      "kind": "skill",
+      "name": "design-html",
+      "path": "design-html",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "8a3a3bb5057b8e907d658e6ce5e31aa157a05f33"
+    },
+    {
+      "hash": "sha256:b76d72e18f3f1a7484ed3b82890735aa694e8ce82d69e509c56f07c0617a24f7",
+      "kind": "skill",
+      "name": "design-review",
+      "path": "design-review",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "8a70a65a5a05c25973b3e99d28f3b881028ad5d1"
+    },
+    {
+      "hash": "sha256:47545e248b2d61f3a104455e1553eaf6593193f4bd98effa024747b82237e552",
+      "kind": "skill",
+      "name": "design-shotgun",
+      "path": "design-shotgun",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "cc16d77a7eef1cf93f59da73c9a238ab6f213c3c"
+    },
+    {
+      "hash": "sha256:0153d527aa913854b1bc92b712cd5ccfe87d364d94708d6ab5cd3e8bb03e5763",
+      "kind": "skill",
+      "name": "devex-review",
+      "path": "devex-review",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "8ae65612b0d5190a1d9d7560044d2059633b8044"
+    },
+    {
+      "hash": "sha256:b05d6ca5bf96054d01f3eacdfd05d10be709937f0cdb56573fc1100ac78120ef",
+      "kind": "skill",
+      "name": "devops-engineer",
+      "path": "skills/devops-engineer",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "9376c07c52d24a90ee14fe9f24fa28c164f9ec91"
+    },
+    {
+      "hash": "sha256:e6baa42c75950481308cda5811294b80fba31f865750ed2dbe2cded487d5574a",
+      "kind": "skill",
+      "name": "diagnosing-bugs",
+      "path": "skills/engineering/diagnosing-bugs",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "99bd56983e42bc752c52da67f1112e4121781cd1"
+    },
+    {
+      "hash": "sha256:4c7b4ad8f96a197c62c9ca3a4137fee59d3c9b86bf9f06262cc10ca5e760cc9d",
+      "kind": "skill",
+      "name": "dispatching-parallel-agents",
+      "path": "skills/dispatching-parallel-agents",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "15697cb0726c26a66bff737494e8b5266667ba0c"
+    },
+    {
+      "hash": "sha256:414f256b45ff457608afcdcb421f22586ef04695dbb530279a1a236e3568509d",
+      "kind": "skill",
+      "name": "document-generate",
+      "path": "document-generate",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "a451ba422e5a971c40a8f4b43993c0361634ab1f"
+    },
+    {
+      "hash": "sha256:e5a1b12bfc580b7c65f4914fce3abb1cb2f8cb9583fd2567a81865887c72a6f8",
+      "kind": "skill",
+      "name": "document-release",
+      "path": "document-release",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "65ef9ad0e8359f8d6bc15fd8e75d2406b8fb5323"
+    },
+    {
+      "hash": "sha256:73ae24d12f9c26b4233842ccb3534cebddf2b04976f04c5627332474c9fea253",
+      "kind": "skill",
+      "name": "docx",
+      "path": "skills/docx",
+      "sha": "53048666b05b4799081517d00e09e0a2dd688678",
+      "source": "anthropic",
+      "tree": "6e6f5b95c1de6e803cc07b214f5059b074d64e0c"
+    },
+    {
+      "hash": "sha256:b45fab0be645bcc2870283674db014bef0a30e636d63cef96c8b3f03723c4eeb",
+      "kind": "skill",
+      "name": "executing-plans",
+      "path": "skills/executing-plans",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "1484ffb29998ba1db2a7b6bf0e641081eb8612e9"
+    },
+    {
+      "hash": "sha256:142e2cc2dc928626f66c83f9f55db6765519424276ea2dff33a7b15232d985b2",
+      "kind": "skill",
+      "name": "feature-forge",
+      "path": "skills/feature-forge",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "0530576a359761dac0f0b3f9ba0bb73ebc3144f2"
+    },
+    {
+      "hash": "sha256:5a18170b63a7fab3e6fbc91b92ec45942e824f5adb65c362e0269838627be9bd",
+      "kind": "skill",
+      "name": "finishing-a-development-branch",
+      "path": "skills/finishing-a-development-branch",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "3b1205aa5038c71946077dd63b9e71b447729e70"
+    },
+    {
+      "hash": "sha256:cdcfc2cb3f952927b9db5c5608f061a7ea86eff27770d8fc8c33ba3a2710ca00",
+      "kind": "skill",
+      "name": "freeze",
+      "path": "freeze",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "085fc939822fdae1165e4de9999850542baee781"
+    },
+    {
+      "hash": "sha256:936cc103f9ee908e0470b893615a5eb72a6472eca1050dc1489c987902613242",
+      "kind": "skill",
+      "name": "git-guardrails-claude-code",
+      "path": "skills/misc/git-guardrails-claude-code",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "ceed97af09633b300826d0ca0b1464c527ec9a35"
+    },
+    {
+      "hash": "sha256:07463c7a85f208231a3e4e6a7cd012c37aed2340309a7927bac353329e0ac1f7",
+      "kind": "skill",
+      "name": "grill-with-docs",
+      "path": "skills/engineering/grill-with-docs",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "eedaf2562c83155115e9c649fa3ecaac2e10e81d"
+    },
+    {
+      "hash": "sha256:8d734c05e8ee6f8ac89b16c08592dc4e1dd166493d97266423f4273dfdc80600",
+      "kind": "skill",
+      "name": "grilling",
+      "path": "skills/productivity/grilling",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "f0732035b8b1b60ae39454e4191caef32fa91903"
+    },
+    {
+      "hash": "sha256:2b2eda6ad29d6b9651cb33615d56e9aaf6ce275b0fcdf5dfbfae892059f592e2",
+      "kind": "skill",
+      "name": "guard",
+      "path": "guard",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "a9bc855a5f49c491c3e02a7c9ea712943f2d2771"
+    },
+    {
+      "hash": "sha256:05fc0ac0e35d7948615893dbd7365eb8347e2374881b92660ea340e7de3f9210",
+      "kind": "skill",
+      "name": "health",
+      "path": "health",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "d6d13f970d3a47c6d92f672a6ac591fffd39cda4"
+    },
+    {
+      "hash": "sha256:858961b91783c6472a98fb65b4c2558f2165c792946f79de0d6c71b09edc47df",
+      "kind": "skill",
+      "name": "improve-codebase-architecture",
+      "path": "skills/engineering/improve-codebase-architecture",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "3d35cd438f4067b03c8b3792e038960e4ac11526"
+    },
+    {
+      "hash": "sha256:74ac3450ffabeed04bfd0bdd94967795e4c6b09af6f4c8c4f979b52140d7f205",
+      "kind": "skill",
+      "name": "internal-comms",
+      "path": "skills/internal-comms",
+      "sha": "53048666b05b4799081517d00e09e0a2dd688678",
+      "source": "anthropic",
+      "tree": "9869687dcf6deb6802ca88ac11e67b6f7278017a"
+    },
+    {
+      "hash": "sha256:ca2ab6899a9aed7257777675e1b6d46ea916aa88ba68faf884dbf3b1600352b4",
+      "kind": "skill",
+      "name": "investigate",
+      "path": "investigate",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "f998510473d531571c60ac95c5243aa3d73bfc30"
+    },
+    {
+      "hash": "sha256:d6498e50095816190a85a7001f040b4770bd4cbc6bb7795f537190c68044241c",
+      "kind": "skill",
+      "name": "land-and-deploy",
+      "path": "land-and-deploy",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "b7b8679653525aabea935e3e272358c9e4f5d812"
+    },
+    {
+      "hash": "sha256:c91ea9f16de99c658e61edde1abb7c591994e32e3429b088fe6bbfb2e72349c5",
+      "kind": "skill",
+      "name": "landing-report",
+      "path": "landing-report",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "7aaccd7d82e9ae17f625dbebbd9cbe964442fe3e"
+    },
+    {
+      "hash": "sha256:f00522a11c2bbb90ac953d5d4e45e6b0465d7f864ba1e87a46d36f39f62cfe6b",
+      "kind": "skill",
+      "name": "learn",
+      "path": "learn",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "308992236d7d62bdb3e5554259a125ec6b55dbc5"
+    },
+    {
+      "hash": "sha256:bb9a599cc34de8768dc47bc7c83427e39ebec71e651a9bc593b4015a21d40e7e",
+      "kind": "skill",
+      "name": "legacy-modernizer",
+      "path": "skills/legacy-modernizer",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "154e7a26a163265098e76f14818c1746f3514a7f"
+    },
+    {
+      "hash": "sha256:d644f0aebcae2996619d83dfddd5f25d175d3dcb799893a41f0d4f61f1ca4ba5",
+      "kind": "skill",
+      "name": "make-pdf",
+      "path": "make-pdf",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "f140649d935eb47dfbac1d1c4d6ebf01d61417fc"
+    },
+    {
+      "hash": "sha256:3959c6a63dadfe724605cbaa420875176276fdcd23c5bbb77d7972fc849a910b",
+      "kind": "skill",
+      "name": "mcp-builder",
+      "path": "skills/mcp-builder",
+      "sha": "53048666b05b4799081517d00e09e0a2dd688678",
+      "source": "anthropic",
+      "tree": "b866bcfb57b780c10b587c7b543e871a91661ce0"
+    },
+    {
+      "hash": "sha256:cc53f4577587f245288f12ca0c8d937869cfbc666d3b3f6298d278c7fa04ac6f",
+      "kind": "skill",
+      "name": "mcp-developer",
+      "path": "skills/mcp-developer",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "4ce77beee20f661f48bd0c60845c3c80a49785a5"
+    },
+    {
+      "hash": "sha256:e7281f4b1c2176e2ae25735ae3d848ee4b5a37eae8df00bea10cc828e719c0ef",
+      "kind": "skill",
+      "name": "office-hours",
+      "path": "office-hours",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "98d531fa5578bcb0ba9b1e33ecc562caae95fefe"
+    },
+    {
+      "hash": "sha256:dd90a5cdebb33947624dcdf5ddaeadfe8940a83c62cf642ad76ec3398a6a8f88",
+      "kind": "skill",
+      "name": "openspec-apply-change",
+      "path": "skills/openspec-apply-change",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "12fc4ed61fc486a8a85bc96d7d6c9efd9fecbdbd"
+    },
+    {
+      "hash": "sha256:6a057516894957c08ad080eb9c6074b00b44c751659a604f87b36e67307c13e1",
+      "kind": "skill",
+      "name": "openspec-archive-change",
+      "path": "skills/openspec-archive-change",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "8b2c9578cca3f76b5dcc17088b676d96f4343aa3"
+    },
+    {
+      "hash": "sha256:dc22f2f724e8b6cc5e560ecad8fff0791d888058186cde4b359d9dc7b67aad0a",
+      "kind": "skill",
+      "name": "openspec-bulk-archive-change",
+      "path": "skills/openspec-bulk-archive-change",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "aa3daf69f44fa465690c7321cee1c55bfee30be7"
+    },
+    {
+      "hash": "sha256:20a5eeb8279a28cacdf7b90d298293ddf85241265ec000bde2cbed74abbafe8d",
+      "kind": "skill",
+      "name": "openspec-continue-change",
+      "path": "skills/openspec-continue-change",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "03cb6a8a2458298ac2bd5ba13523e3bab79946ed"
+    },
+    {
+      "hash": "sha256:23c715c09d847c53629a0d11ec761a4567974be1a8218ed2cb0a9ab91e67f620",
+      "kind": "skill",
+      "name": "openspec-explore",
+      "path": "skills/openspec-explore",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "1920f1f8c1487ede25ba2d3a7fa97f4bc2cc8b95"
+    },
+    {
+      "hash": "sha256:684a426b092cfcf5311640d5099d5e7a4999ab67fddab68cec49e7d5ef430a8b",
+      "kind": "skill",
+      "name": "openspec-ff-change",
+      "path": "skills/openspec-ff-change",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "872349078f8a421a69a6fd188ec2ac7d89bc3275"
+    },
+    {
+      "hash": "sha256:1fd177da1cebf3c0d3f5ed1bc507e998bd6bb7a7554f821b67f2366e557c69ef",
+      "kind": "skill",
+      "name": "openspec-new-change",
+      "path": "skills/openspec-new-change",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "14f550cd494d879932fa5693ce3f09af145fdd27"
+    },
+    {
+      "hash": "sha256:36720a44c3cd6417f556f8e4629f997f06e9702d90c8e6b535a9f36038be429c",
+      "kind": "skill",
+      "name": "openspec-onboard",
+      "path": "skills/openspec-onboard",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "ac069934197ffb89fa120f549bd40befa05436b0"
+    },
+    {
+      "hash": "sha256:72a05f76089e19011f9de0d3b6d58a657be88b6a0ff2a2f8a9117d8bc9e72f49",
+      "kind": "skill",
+      "name": "openspec-propose",
+      "path": "skills/openspec-propose",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "cd78b46843b0f09cc20e014be695103ffaaec1bb"
+    },
+    {
+      "hash": "sha256:564d1246cef112a23a182c25d3205ce613ae0b0b432cc47a3849c65176777679",
+      "kind": "skill",
+      "name": "openspec-sync-specs",
+      "path": "skills/openspec-sync-specs",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "04985999acb91f7a8bb9db4a3f81d1040ee04ff0"
+    },
+    {
+      "hash": "sha256:56f434aed1648f19478b8d15f64cb4d9f67662e9e30df102056dae8e79cfb384",
+      "kind": "skill",
+      "name": "openspec-update-change",
+      "path": "skills/openspec-update-change",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "00bb6186890d8aeb5030037aefad5cad9f991183"
+    },
+    {
+      "hash": "sha256:32cd02d37c9014a39953d00b52204c697fba1de800db28ae145821d1f12fa2cd",
+      "kind": "skill",
+      "name": "openspec-verify-change",
+      "path": "skills/openspec-verify-change",
+      "sha": "e062b9572be933564ba3899d059377dfa1393e32",
+      "source": "openspec",
+      "tree": "00f5f1a0141d55a62b91c94b3eebb62d504c5bfc"
+    },
+    {
+      "hash": "sha256:fc566f8329f96e2130b26515b1eb20ddbeba735b2d03e2e3275b9a28019aaf1e",
+      "kind": "skill",
+      "name": "pair-agent",
+      "path": "pair-agent",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "d7fc80db09953bd46bdca9aabba49a43e3600fc7"
+    },
+    {
+      "hash": "sha256:0698c6aefc9f9222548ddac9e3f91271a55f2a1844c09d41a7b8b5bc620c2214",
+      "kind": "skill",
+      "name": "pdf",
+      "path": "skills/pdf",
+      "sha": "53048666b05b4799081517d00e09e0a2dd688678",
+      "source": "anthropic",
+      "tree": "6369f4649de69bd6857c9bc3b058a77206009238"
+    },
+    {
+      "hash": "sha256:57fa65587caa0d0bb49bbfc68001b161b679241f8665fcacbfb83e9326b389d9",
+      "kind": "skill",
+      "name": "plan-ceo-review",
+      "path": "plan-ceo-review",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "a3e7fa492c39c5561a788c9f88f9b00a563c9501"
+    },
+    {
+      "hash": "sha256:8bf745aee778babff5e80d153cbc3b2936280baed9582e4357dcdb649e367d9b",
+      "kind": "skill",
+      "name": "plan-design-review",
+      "path": "plan-design-review",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "e2dfcdacf90b4afd3767e59f8670056ce6ea4f35"
+    },
+    {
+      "hash": "sha256:e72916ec730834341740843480a9536939d2955a85083941e87862b401cff8d3",
+      "kind": "skill",
+      "name": "plan-devex-review",
+      "path": "plan-devex-review",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "db722b35dc19eb22d554bff228af2720dc18dc6f"
+    },
+    {
+      "hash": "sha256:f7839ea7433aa6e8f1dbda109ad6e2635dca9e81f90bd89c5401be199f00407c",
+      "kind": "skill",
+      "name": "plan-eng-review",
+      "path": "plan-eng-review",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "f7fd2212cb417e4223dd1adceea2ed3f9cb0d292"
+    },
+    {
+      "hash": "sha256:9a0a94f6bae26949e1a3ff0ab056000a2b4cd56f88215dbae0bd288ffc61d7e5",
+      "kind": "skill",
+      "name": "plan-tune",
+      "path": "plan-tune",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "22635453b4db0d21c43fde44aec49b397bea5064"
+    },
+    {
+      "hash": "sha256:f6a792ee79ee2dd0136f10404a9ab14bf3537dcd96d65b7d7155f5e1b6dfc82c",
+      "kind": "skill",
+      "name": "ponytail",
+      "path": "skills/ponytail",
+      "sha": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+      "source": "ponytail",
+      "tree": "cb6e53477eaf04e6daeca22feacb85f9ce20d40c"
+    },
+    {
+      "hash": "sha256:f30be427275a33b3c0a9709e829629006d06f01016f9e574a9e8d55561e00d53",
+      "kind": "skill",
+      "name": "ponytail-audit",
+      "path": "skills/ponytail-audit",
+      "sha": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+      "source": "ponytail",
+      "tree": "19744a9490abb0f5d0f18c6e39e3a3eb50f4daa1"
+    },
+    {
+      "hash": "sha256:aa192eea3703a1fc3cc95e78597c06812f7438a1ec567883bfe2cfcb5600ef0a",
+      "kind": "skill",
+      "name": "ponytail-debt",
+      "path": "skills/ponytail-debt",
+      "sha": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+      "source": "ponytail",
+      "tree": "fe9ea82cad2b42a9c244acc275c9091c414ff528"
+    },
+    {
+      "hash": "sha256:6b1b512b51e6faf5e76e3227aef18b17ca87ea4d3cc44d8aa3080894b68da45b",
+      "kind": "skill",
+      "name": "ponytail-gain",
+      "path": "skills/ponytail-gain",
+      "sha": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+      "source": "ponytail",
+      "tree": "13724e1903f76456164f00ec2a3074848433588f"
+    },
+    {
+      "hash": "sha256:c658db63534305c497fd2e664838712dab73b1a9b8339faa4141a24f1f6f24a1",
+      "kind": "skill",
+      "name": "ponytail-help",
+      "path": "skills/ponytail-help",
+      "sha": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+      "source": "ponytail",
+      "tree": "b7df7bc32b6e4e8bbde8acb2ef3c97ee7e7638f7"
+    },
+    {
+      "hash": "sha256:321b350f1aa1dbbed4dd1cb5ad6861d3142ba894ef0ea8f6c1819c882c8dfd5f",
+      "kind": "skill",
+      "name": "ponytail-review",
+      "path": "skills/ponytail-review",
+      "sha": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+      "source": "ponytail",
+      "tree": "dc6d9660c4297496a9220de377f6f7df38ab1a53"
+    },
+    {
+      "hash": "sha256:161cfd10c2b4ac3ae459edde74a97e0cbfe16c86e5bb36385f43216bb0b62df2",
+      "kind": "skill",
+      "name": "postgres-pro",
+      "path": "skills/postgres-pro",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "5e1a56c4e2973fb9827f57a34fbbbc39b497e7c7"
+    },
+    {
+      "hash": "sha256:ee91dae7179713567169a0af375632e6ca1babe63c0739712c44fdcc91d8e16f",
+      "kind": "skill",
+      "name": "pptx",
+      "path": "skills/pptx",
+      "sha": "53048666b05b4799081517d00e09e0a2dd688678",
+      "source": "anthropic",
+      "tree": "64529c8b3f35fe632b7256bd2f6d46e4b40160ce"
+    },
+    {
+      "hash": "sha256:786a7aaf3b56b25df4e0d18bf53ba637b042d73cec55abf0139297f17e35b559",
+      "kind": "skill",
+      "name": "prompt-engineer",
+      "path": "skills/prompt-engineer",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "3c306a45231f1ce2891b1a89132b558a31cd744d"
+    },
+    {
+      "hash": "sha256:c47df35b9d2976191710e76fdf5a4bd7c9df2c51731ef12f681a409d82f3cab7",
+      "kind": "skill",
+      "name": "qa",
+      "path": "qa",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "d3d2fd80d4150146d7be87c4e5da57b6cabf86ac"
+    },
+    {
+      "hash": "sha256:aa8dded76b6b0d0d2be943fc4a33e96bb1c4514aeacb09a7a9cc14c7fe89ef3d",
+      "kind": "skill",
+      "name": "qa-only",
+      "path": "qa-only",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "6687fdfa37a933253b727e446d45b80e93b3d114"
+    },
+    {
+      "hash": "sha256:58d6fc9611e1de76e922a3105eca7b2ab2964ad4e51ff9465ba3eef95eba22d0",
+      "kind": "skill",
+      "name": "receiving-code-review",
+      "path": "skills/receiving-code-review",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "b5e154fc3ec7a6a0b1e710eebacc2168620cc428"
+    },
+    {
+      "hash": "sha256:68f7ae620fa2cecba17b0c93b9b540c83e10cfe2e69b8d7df0f48696f0043c86",
+      "kind": "skill",
+      "name": "requesting-code-review",
+      "path": "skills/requesting-code-review",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "2ef6b5734813e7504d9866a7ec1ae89b505bfe70"
+    },
+    {
+      "hash": "sha256:793aea9be1b99ee9e925ee9c6ba1109eb101cc40f4d6ecca5506032ff0309645",
+      "kind": "skill",
+      "name": "retro",
+      "path": "retro",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "943c36127cc855a8fe2db3f4dd3f956856318dbd"
+    },
+    {
+      "hash": "sha256:cca0fe99b5cf5dc3bf514d1e4861cc795237b3648d83b0071048e53db8d9d797",
+      "kind": "skill",
+      "name": "review",
+      "path": "review",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "423c9948512ef7e43d200d095fd20f80b600417e"
+    },
+    {
+      "hash": "sha256:5a18a966b43ef6ac239e850ed361e39cfda4d775c83aec32db2c9597b5587fa3",
+      "kind": "skill",
+      "name": "scaffold-exercises",
+      "path": "skills/misc/scaffold-exercises",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "44a0ee332b9d67ebbd59389c7eb4e5aff1ce845c"
+    },
+    {
+      "hash": "sha256:3df252dd1123cbe194a6d1a52f288c4978b0f4bffb5edfb187bc457deed6e4ba",
+      "kind": "skill",
+      "name": "scrape",
+      "path": "scrape",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "63d595a67698362872201ea8f93051c5418abc35"
+    },
+    {
+      "hash": "sha256:4f5c625c1e108839a109189d7304101c055a2dfc74c0517846c0b022837e06a9",
+      "kind": "skill",
+      "name": "secure-code-guardian",
+      "path": "skills/secure-code-guardian",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "f8b0294cd0bdd186d142b45211d9d8c7f893dac6"
+    },
+    {
+      "hash": "sha256:5f7bac6e0b581cf38e9bcac303b972022ba570b1d1f0805dc0081ff69caed7ec",
+      "kind": "skill",
+      "name": "security-reviewer",
+      "path": "skills/security-reviewer",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "4785ccbfb6ee8c2fdc9af3a2746c58b09da5d6a7"
+    },
+    {
+      "hash": "sha256:1837a98a2276d6364978927d176b9a5070fd3bec8385bdef5cd62005fa9ef33b",
+      "kind": "skill",
+      "name": "setup-browser-cookies",
+      "path": "setup-browser-cookies",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "c1bf17651ff54981a7a6928c2fd9fab3d071c4c8"
+    },
+    {
+      "hash": "sha256:538cf99d06317b311ff696204e5bc92b9fad6ead985d2e7eb2a74ca4c7e3625f",
+      "kind": "skill",
+      "name": "setup-deploy",
+      "path": "setup-deploy",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "6365fcbf163393fb93f50cdb9afda7f08581aeea"
+    },
+    {
+      "hash": "sha256:8b126ffa933de0e89e13e8c421373ab6a07cb4b716712cf7dd4643f4ced5b76b",
+      "kind": "skill",
+      "name": "setup-pre-commit",
+      "path": "skills/misc/setup-pre-commit",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "5b63f9f665bacc9be04cae51982e9ef1469d6699"
+    },
+    {
+      "hash": "sha256:b1e7fd7094f63845e8bfebc9dd779df52334cae1a10a1026ae000f06a25549bf",
+      "kind": "skill",
+      "name": "ship",
+      "path": "ship",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "0423a8fa2e8537ae541bf0c8fa6447007b9c473c"
+    },
+    {
+      "hash": "sha256:44546c60526dff55a8db16e745b8945b5b90ae8af7625a167e54c5fe276ff941",
+      "kind": "skill",
+      "name": "skill-creator",
+      "path": "skills/skill-creator",
+      "sha": "53048666b05b4799081517d00e09e0a2dd688678",
+      "source": "anthropic",
+      "tree": "3cf9a8db32597ba3e24b584a3d696f4e11c7d7b6"
+    },
+    {
+      "hash": "sha256:3bce068ff9061a7a01b9df2a32406ca032baaa34de8aef2a683723625bb88ffc",
+      "kind": "skill",
+      "name": "skillify",
+      "path": "skillify",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "1a27931c43bd11442126fee4b41146480e0938cd"
+    },
+    {
+      "hash": "sha256:52c4bb17b998d1308ea32abdd5ff68b7c0e8e2095e6eeb50a82e5a169895b741",
+      "kind": "skill",
+      "name": "spec",
+      "path": "spec",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "d14fbaf298cd48ad33a4fcc3e286eae2bcd92583"
+    },
+    {
+      "hash": "sha256:9a2995b7a6af11cbc64ebb938da39404ddda73b3f4bf17b6e96fd712e3375ebf",
+      "kind": "skill",
+      "name": "spec-miner",
+      "path": "skills/spec-miner",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "47c0839a70c3fc45151e7469d57e598929665184"
+    },
+    {
+      "hash": "sha256:56cf0d04986763bf02ebb1a0c3f0005127b8171002746048eb2bb946b05d4474",
+      "kind": "skill",
+      "name": "sql-pro",
+      "path": "skills/sql-pro",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "38e06a35f874e99dd107eac9f9608d0b3bb94c0e"
+    },
+    {
+      "hash": "sha256:cb06ce068611641729a084182b3f57276278132bcf13cc4eef70e53379665926",
+      "kind": "skill",
+      "name": "subagent-driven-development",
+      "path": "skills/subagent-driven-development",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "8133f2b10d4e71e73d867f2e2e365e0778ff0e4e"
+    },
+    {
+      "hash": "sha256:99f41794f9a42a53349d1c83a72bdad6ca72fa5e4c839937c8f0bc2fb95eb128",
+      "kind": "skill",
+      "name": "systematic-debugging",
+      "path": "skills/systematic-debugging",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "ab83fc82f82582e047d96fc516bac9bc03095ee0"
+    },
+    {
+      "hash": "sha256:ff60e0ac6b6c539c1d69234aa2a9dbbe9f6a0475aca47bb68e86f6e157994592",
+      "kind": "skill",
+      "name": "tdd",
+      "path": "skills/engineering/tdd",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "79288be15c67b849f22b6572056601090fd20913"
+    },
+    {
+      "hash": "sha256:3bb49ece3eb9fbec33b3aefce94e40081221bf87b9f176fcfd243ad5d25ca0ed",
+      "kind": "skill",
+      "name": "teach",
+      "path": "skills/productivity/teach",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "2ab11f2f51f3c29771edb5d4258d807a49462491"
+    },
+    {
+      "hash": "sha256:481b862d466ed07436fe5d1d2065c626d26db09176a6c275061531f8b508469b",
+      "kind": "skill",
+      "name": "template",
+      "path": "template",
+      "sha": "53048666b05b4799081517d00e09e0a2dd688678",
+      "source": "anthropic",
+      "tree": "a38aa7fa73fd2835b9ce77a60274f7dc62d015a6"
+    },
+    {
+      "hash": "sha256:2ab8f510531ca3f762d5e7d4775d9f54f2158845827b5a3c511affaa6003725d",
+      "kind": "skill",
+      "name": "test-driven-development",
+      "path": "skills/test-driven-development",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "a82cf8b413600c6bd7c4b482272d7990e9588cf1"
+    },
+    {
+      "hash": "sha256:1a71e125e390ba8f3c08f6f2b4ab38bf5c651c2d58abc1b6dc51b495efc7dcbf",
+      "kind": "skill",
+      "name": "test-master",
+      "path": "skills/test-master",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "28db277fe02c3968d72769456f7a9960807816a9"
+    },
+    {
+      "hash": "sha256:867598b48ad7251f5e39e3936b00ae7903af957e5f453ed11186db12801b8a9f",
+      "kind": "skill",
+      "name": "the-fool",
+      "path": "skills/the-fool",
+      "sha": "882ef55e377dbf9a4dbe496bb41ac6ccd0e555cf",
+      "source": "jeffallan",
+      "tree": "d5a09bd0ab58afd73b2d6c3ce2cfac306b7245b9"
+    },
+    {
+      "hash": "sha256:562548392adcba93d99c09cc33014d9812f603a0b6f0baa81b8e5e6b91b2fb3a",
+      "kind": "skill",
+      "name": "to-spec",
+      "path": "skills/engineering/to-spec",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "136b9651747cfccbfbb7c50a6b0dfb757e7547d2"
+    },
+    {
+      "hash": "sha256:a435f690df5b1751f3b65183b525f05eb87eba6718a77e2f61d8aed66e4efb9a",
+      "kind": "skill",
+      "name": "to-tickets",
+      "path": "skills/engineering/to-tickets",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "b32c94e5a51c24ee9c41fcb7fe9ea9fff9af6369"
+    },
+    {
+      "hash": "sha256:df36655a5c6f6f34feb036d80c1a0554a44e929cd41a73c047bc25111549fe94",
+      "kind": "skill",
+      "name": "triage",
+      "path": "skills/engineering/triage",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "95fa21bf236993cd9af25bd3670476c17fdb95a4"
+    },
+    {
+      "hash": "sha256:16358e39e9cfca0a0e4c221d014ecba8290b1ebe014dd05c3d9c1ee6e1e90f8d",
+      "kind": "skill",
+      "name": "unfreeze",
+      "path": "unfreeze",
+      "sha": "20eb6202fa8ea83a882e7c0463b722cd8a31af1e",
+      "source": "gstack",
+      "tree": "114661778a9cdbb00da46bcb7cb24726f07a23aa"
+    },
+    {
+      "hash": "sha256:ee7792f537eda0aa7a4890334d2e9aaa63d8bb24af3039528bbcff755c9d437e",
+      "kind": "skill",
+      "name": "using-git-worktrees",
+      "path": "skills/using-git-worktrees",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "d2b8357b922667a091bfe967840abf5ae84ce99c"
+    },
+    {
+      "hash": "sha256:4dbe702d8b58e994e58296d864e939264b5b5dcafc9a7ccafbb59844f222815b",
+      "kind": "skill",
+      "name": "using-superpowers",
+      "path": "skills/using-superpowers",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "e8e3b9ddf73018fdc48d188b12ba654e7363de9f"
+    },
+    {
+      "hash": "sha256:865f49e61c305839f37515ff230fc5617bb47d03ddcfdc0951b1d16b384d98de",
+      "kind": "skill",
+      "name": "verification-before-completion",
+      "path": "skills/verification-before-completion",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "a4cb0b69aaefeab540947a7f1642bdaad810e37a"
+    },
+    {
+      "hash": "sha256:36a3a9325d2fd0992cb51a1b32cda588c981644c696d4fb4ecf9475f52e9d5a3",
+      "kind": "skill",
+      "name": "writing-beats",
+      "path": "skills/in-progress/writing-beats",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "3a28fb076fdaaec0927080718abb98fc0f340011"
+    },
+    {
+      "hash": "sha256:488b7f1e6e51b1d3e1b0f671c893afda53a10de1aa5e5d430784fb383a265658",
+      "kind": "skill",
+      "name": "writing-for-agents",
+      "path": "skills/productivity/writing-for-agents",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "ad2925850efb8973a72d2e666f7a975f9a2d4a9b"
+    },
+    {
+      "hash": "sha256:ee813d56d60f1bc433dff5ebbdc4954251696f3ef07b1f02d91c5d1fd3465e7e",
+      "kind": "skill",
+      "name": "writing-fragments",
+      "path": "skills/in-progress/writing-fragments",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "98e500e0097ec80f52f6a024c5a2ff6d15235bdb"
+    },
+    {
+      "hash": "sha256:bf9fa0e2f30f9eba23066b6c1cc61ffe3deddf0ff52561184258f4255d33a31d",
+      "kind": "skill",
+      "name": "writing-plans",
+      "path": "skills/writing-plans",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "e4d3c3faf3853a453016cece5de2ca0581807742"
+    },
+    {
+      "hash": "sha256:43118fbddffc04a9e60c88567d4624c0b5cd612a8ac1644973f355fb37a05393",
+      "kind": "skill",
+      "name": "writing-shape",
+      "path": "skills/in-progress/writing-shape",
+      "sha": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "source": "mattpocock",
+      "tree": "ac92229646fccf7315ae139c37b479b3790617f2"
+    },
+    {
+      "hash": "sha256:472fdd741a946dff6bab714937547e727a250227179859d745e2da858bf61a7b",
+      "kind": "skill",
+      "name": "writing-skills",
+      "path": "skills/writing-skills",
+      "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "source": "superpowers",
+      "tree": "1768f7552ec98fc6b06aeea747a0c4ef6bde0473"
+    },
+    {
+      "hash": "sha256:7a2d0d2a9e8835fd1bd8ce2b3c6c8aaf7d1fb8d07cad882e84c83b113d947a1f",
+      "kind": "skill",
+      "name": "xlsx",
+      "path": "skills/xlsx",
+      "sha": "53048666b05b4799081517d00e09e0a2dd688678",
+      "source": "anthropic",
+      "tree": "fe6471cc9b5b97aae0b576ccb92ffd9b0207589d"
+    }
+  ],
+  "lockVersion": 1
+}

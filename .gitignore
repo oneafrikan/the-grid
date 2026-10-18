@@ -26,3 +26,9 @@ machines/*.txt
 
 # Golden-case results are per-run local output (agent-factory/run_evals.py); never committed.
 evals/results/
+
+# grid install staging dirs (scripts/grid; removed after every run, stale ones swept at start)
+.grid-tmp/
+
+# Python bytecode (scripts/grid and audit.sh avoid writing it, but local runs can still create it)
+__pycache__/

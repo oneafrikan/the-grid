@@ -14,11 +14,95 @@ How to get the-grid running on any machine — new or existing.
 
 ---
 
-## New machine (fresh Claude Code install)
+## Install without submodules
+
+For a machine that only needs the curated skill set, not a maintainer checkout.
+`scripts/grid` fetches the commits pinned in `grid.lock` straight into
+`repos/<source>/` (partial clone + sparse checkout, no submodules) and runs
+`wire.sh`. Every skill is scanned by the vetting audit before it is placed.
+
+Prerequisites: `python3` 3.8+, `git` 2.25+. On macOS both come from the Xcode
+Command Line Tools (`xcode-select --install`); `/usr/bin/python3` without them
+opens an installer prompt.
+
+`scripts/grid` exists on the `next` branch only until `next` is promoted to `main`.
+Until then add `--branch next` to the clone. Using your own fork? Put its URL in
+place of `oneafrikan/the-grid`.
 
 ```bash
-# 1. Clone the-grid
-git clone https://github.com/<your-username>/the-grid.git ~/.the-grid
+# 1. Clone without blobs (the skill repos are fetched separately by grid)
+git clone --filter=blob:none --branch next https://github.com/oneafrikan/the-grid.git ~/.the-grid
+
+# 2. Look before you place anything: prints the plan, no network access, no writes
+python3 ~/.the-grid/scripts/grid install --dry-run
+
+# 3. Install and wire
+python3 ~/.the-grid/scripts/grid install
+```
+
+Day to day, all as `python3 ~/.the-grid/scripts/grid <command>`:
+
+| Command | Does |
+|---|---|
+| `grid doctor` | read-only check of the manifest, the ledger, the placed directories and the links; exit 1 on any finding |
+| `grid repair` | re-fetch what doctor reports missing, stale or absent, then re-wire (`--dry-run` previews; `--force` replaces an edited directory; `--prune` drops directories the lock no longer selects) |
+| `grid uninstall` | prints what it would remove; `--yes` removes the placed directories, their links and the ledger |
+| `grid audit --wired` | vetting scan of what `wire.sh` would link on this machine |
+| `grid schedule install` | writes the weekly drift-report schedule files for this OS and prints the activation command; it never activates anything (`grid schedule remove` deletes them) |
+
+Notes:
+
+- Skills sit under `repos/<source>/<path>`, the same place the maintainer path
+  puts them. The record of what `grid` placed is `~/.grid/installed.manifest`
+  (`GRID_STATE_DIR` relocates it).
+- `grid install` seeds `baseline-submodules.txt` and `machines/<host>.txt` from
+  the examples (step 3 of the maintainer path). `grid` reads only untyped
+  entries; typed entries (`project:`, `rules:`, `harness:`) are left to `wire.sh`.
+- Composed agents (`project:` entries) are **not** part of `grid install`. They
+  still need the `compose.py` venv (step 6 of the maintainer path).
+- Repos that need a runtime (gstack) are skipped with a notice; use the
+  maintainer path for them.
+- Re-wiring on such a machine is `GRID_NO_CATALOG=1 bash ~/.the-grid/scripts/wire.sh`.
+  The variable skips the `SKILLS.md` refresh, which would otherwise rewrite a
+  tracked file from a partial set.
+- `git submodule update --init` refuses a `repos/<source>` that `grid` populated.
+  To switch to the maintainer path, run
+  `python3 ~/.the-grid/scripts/grid uninstall --yes` first.
+- `grid uninstall --yes` and `grid repair` also run `wire.sh` (with
+  `GRID_NO_CATALOG=1`) to refresh the links and `.wired.manifest`.
+- Use `grid` as a single writer: it takes no lock, so do not run two `grid`
+  commands that write at the same time. A scheduled `grid drift` never touches `repos/`,
+  but it is not read-only: it stages fetches in a temporary `.grid-tmp` inside the clone
+  and writes its reports under the state dir (`~/.grid/reports`).
+- A `repos` symlink that arrives inside a clone is accepted like one you made: `grid install`
+  then places the reviewed `grid.lock` content under the link's target. Check `ls -ld repos`
+  after cloning a grid you did not write (a committed `repos` symlink is content you did not review).
+- The ledger is trusted same-user state, not an authenticated record:
+  `grid uninstall --force` removes any directory under `repos/<source>/` that a
+  ledger row names. Keep `~/.grid` writable only by you.
+- `grid` runs git without your user or system gitconfig (so a URL rewrite there
+  cannot redirect what it fetches). Behind a corporate proxy or credential
+  helper (or `~/.netrc`, or a `safe.directory` entry) set `GRID_GIT_FORWARD_CONFIG=1`
+  to forward your git environment. A scheduled `grid drift` job does not inherit your
+  shell, so add the variable to the job's own environment.
+  `GRID_AUDIT_TIMEOUT=<seconds>` (default 300) bounds each `audit.py` run.
+- `grid lock --check` fails (exit 2) on a shallow submodule checkout that cannot prove
+  a locked commit is on its declared ref. A CI job that clones submodules at depth 1
+  sets `GRID_LOCK_ALLOW_SHALLOW=1` (exactly `1`) to skip that one proof with a notice;
+  `grid lock` itself never skips it. Run `grid lock --check` on a full clone to get the proof.
+- A damaged ledger is reported by `grid doctor` with its path. Restore a backup,
+  or delete the file and re-run `grid install`, which adopts directories that
+  still match `grid.lock`.
+- `grid schedule` needs a clone path (and `HOME`, and the state dir) made only of
+  `A-Z a-z 0-9 _ . / @ + -`. A path with a space is refused and nothing is written.
+
+---
+
+## Maintainer path: new machine (submodules, fresh Claude Code install)
+
+```bash
+# 1. Clone the-grid (your fork's URL works too)
+git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid
 
 # 2. Pull all skill submodules
 cd ~/.the-grid && git submodule update --init --recursive
@@ -38,7 +122,7 @@ bash ~/.the-grid/scripts/wire.sh
 cp ~/.the-grid/agent-factory/user.yaml.example ~/.the-grid/agent-factory/user.yaml
 # then edit agent-factory/user.yaml
 
-# 6. Build the composed agent teams (three public projects) and wire into Claude
+# 6. Build the composed agent teams (four public projects) and wire into Claude
 cd ~/.the-grid/agent-factory
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python compose.py examples/core.yaml --target claude-code
@@ -49,9 +133,22 @@ cd ~/.the-grid && bash scripts/wire.sh
 
 # 7. External CLI the wired openspec skills depend on
 npm install -g @fission-ai/openspec@latest
+
+# 8. If wire.sh printed "runtime MISSING: <repo>" (a wired repo whose skills
+#    need its own setup, e.g. gstack's browse daemon), run the wrapper. It needs
+#    `bun`, downloads a browser, and aborts (exit 3) if setup changed your
+#    Claude settings file, so read the repo's map first: scripts/lib/runtimes.txt.
+#    Dry run prints the command without running it:
+bash ~/.the-grid/scripts/runtime-setup.sh gstack --dry-run
+bash ~/.the-grid/scripts/runtime-setup.sh gstack
 ```
 
 Skills are live after step 4. Agents (subagents + orchestrator skills) are live after step 6.
+
+`wire.sh` also adds one generated auto-handoff SessionEnd hook to
+`~/.claude/settings.json`, on by default. Put `-hook:auto-handoff` in your baseline
+or machine overlay (`machines/<host>.txt`) and re-wire to switch it off; see
+[hooks/README.md](hooks/README.md).
 No restart needed — Claude picks up symlinks immediately (open a fresh session for new agents/skills).
 
 **Step 3 is what decides which skills actually load.** Without it, `wire.sh`'s
@@ -77,7 +174,7 @@ runtime. Without the binary they load and dead-end on the first step. Verify wit
 `openspec --version` — it should match `repos/openspec/package.json`.
 
 Nothing else in the-grid needs it, so skip step 7 if you're not using specs;
-the other ~209 skills are unaffected.
+the rest of the wired skills are unaffected.
 
 ### Private projects (optional)
 
@@ -103,11 +200,12 @@ When you pull the-grid on a machine that's already set up:
 ```bash
 cd ~/.the-grid
 git pull                                    # 1. latest the-grid (source of truth)
-git submodule update --init --recursive     # 2. sync submodule pointers
+git submodule sync --recursive              # 2. only if the pull changed .gitmodules (URLs)
+git submodule update --init --recursive     #    sync submodule pointers
 
 # 3. If ANYTHING under agent-factory/ changed (roles, compose.py, or a compose
 #    config), recompose — projects/ is git-ignored, so a pull alone does NOT
-#    refresh the composed agents/rosters on this machine. Recompose all three
+#    refresh the composed agents/rosters on this machine. Recompose all four
 #    public projects (cheap even if only one actually changed):
 cd agent-factory
 .venv/bin/python compose.py examples/core.yaml --target claude-code
@@ -132,7 +230,7 @@ not enough. If your pull touched nothing under `agent-factory/`, skip step 3;
 
 > ⚠ **Recompose private projects in the same pass.** A change under
 > `agent-factory/_core/` or to `compose.py` affects *every* project, but only the
-> three public configs are listed above. `compose.py` **overwrites**
+> four public configs are listed above. `compose.py` **overwrites**
 > `projects/<name>/` wholesale — so recomposing the public set while a private
 > project's roles are unreachable (repo not cloned, `GRID_PRIVATE_ROLES_DIR`
 > unset) silently destroys that project's composed output, and the next
@@ -154,15 +252,15 @@ bash ~/.the-grid/scripts/reconcile.sh   # dry run — lists real dirs shadowing 
 wire.sh will **skip** any real directory that shadows a grid skill — it only manages
 symlinks, so nothing is clobbered. `reconcile.sh` then shows exactly which shadows remain.
 
-To make the machine match the-grid exactly, remove those shadows and re-wire:
+To make the machine match the-grid exactly, move those shadows aside and re-wire:
 
 ```bash
-bash ~/.the-grid/scripts/reconcile.sh --force   # removes shadows (sudo only where needed) + re-wires
+bash ~/.the-grid/scripts/reconcile.sh --force   # moves shadows to a dated backup dir (audit gate first, sudo only where needed) + re-wires
 ```
 
-`reconcile.sh` only ever removes a path that is a **real dir** (never a symlink) and that
-wire.sh itself flagged as shadowing a grid skill — so it can't delete anything custom that
-the-grid doesn't already provide. It's idempotent: a clean machine reports "Nothing to reconcile".
+`reconcile.sh` only ever moves aside a path that is a **real dir** (never a symlink) and that
+a dry wire flagged as shadowing a grid skill — so it can't touch anything custom that
+the-grid doesn't already provide, and what it moves stays recoverable in the backup dir. It's idempotent: a clean machine reports "Nothing to reconcile".
 
 > If a shadow is a skill you customised and want to keep, move it into `~/.the-grid/` first
 > (`mv ~/.claude/skills/<name> ~/.the-grid/<name>`) so it becomes a grid-owned skill before
@@ -174,10 +272,10 @@ the-grid doesn't already provide. It's idempotent: a clean machine reports "Noth
 
 wire.sh wires skills in two passes:
 
-1. **Repo skills first** (mattpocock, superpowers, gstack, jeffallan, anthropic)
-2. **Root-level skills second** — your skills in `~/.the-grid/` directly, which override any same-named repo skill
+1. **Repo skills first** (alphabetical, later wins on a name clash: anthropic, gstack, jeffallan, mattpocock, superpowers)
+2. **Skills in `skills/` second** — your own skills in `~/.the-grid/skills/`, which override any same-named repo skill
 
-So if you've modified mattpocock's `tdd` and put it in `~/.the-grid/tdd/`, your version
+So if you've modified mattpocock's `tdd` and put it in `~/.the-grid/skills/tdd/`, your version
 wins. If you haven't touched it, mattpocock's version is served directly from the submodule.
 
 ---
@@ -185,8 +283,8 @@ wins. If you haven't touched it, mattpocock's version is served directly from th
 ## Adding a new skill (yours)
 
 ```bash
-mkdir ~/.the-grid/my-skill
-cat > ~/.the-grid/my-skill/SKILL.md <<'EOF'
+mkdir ~/.the-grid/skills/my-skill
+cat > ~/.the-grid/skills/my-skill/SKILL.md <<'EOF'
 ---
 name: my-skill
 description: What it does and when to use it.
@@ -202,11 +300,11 @@ bash ~/.the-grid/scripts/wire.sh
 
 ## Overriding a repo skill
 
-To customise e.g. mattpocock's `caveman`:
+To customise e.g. mattpocock's `tdd`:
 
 ```bash
-cp -r ~/.the-grid/repos/mattpocock/skills/productivity/caveman ~/.the-grid/caveman
-# edit ~/.the-grid/caveman/SKILL.md
+cp -r ~/.the-grid/repos/mattpocock/skills/engineering/tdd ~/.the-grid/skills/tdd
+# edit ~/.the-grid/skills/tdd/SKILL.md
 bash ~/.the-grid/scripts/wire.sh   # your version now takes precedence
 ```
 
@@ -218,7 +316,7 @@ bash ~/.the-grid/scripts/wire.sh   # your version now takes precedence
 cd ~/.the-grid
 git submodule add <repo-ssh-url> repos/<name>
 git submodule update --init
-bash wire.sh
+bash scripts/wire.sh
 git add .gitmodules repos/<name>
 git commit -m "feat: add <name> skills submodule"
 ```
@@ -230,7 +328,7 @@ git commit -m "feat: add <name> skills submodule"
 ```bash
 cd ~/.the-grid
 git submodule update --remote   # pull latest from all upstream repos
-bash wire.sh                    # re-wire in case new skills were added
+bash scripts/wire.sh            # re-wire in case new skills were added
 git add repos/
 git commit -m "chore: update skill submodules"
 ```
@@ -244,7 +342,8 @@ cd ~/.the-grid
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All 36 tests should be green. If they're not, something is misconfigured.
+This is the full suite (many minutes; roughly 15 on CI), and every test should be
+green. If one is not, something is misconfigured.
 
 ---
 

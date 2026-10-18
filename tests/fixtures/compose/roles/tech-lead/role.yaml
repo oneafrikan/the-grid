@@ -1,0 +1,6 @@
+name: tech-lead
+title: Fixture tech-lead
+summary: Fixture role tech-lead.
+default_model: sonnet
+orchestrator: true
+model_rationale: fixture

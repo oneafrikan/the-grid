@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "hooks": [
+    {
+      "id": "pre-bash-no-bypass",
+      "scope": "project",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "min_profile": "minimal",
+      "fail": "closed",
+      "timeout": 5,
+      "on_failure": "block",
+      "model_cost": false,
+      "cost": "0 tokens; about 50 ms per Bash call (measured on one Linux box); prints ~60 tokens only when it blocks.",
+      "description": "Blocks git --no-verify (and commit -n), hook-disabling config, and force-push. Blocks while it runs; if the launcher file is missing the command exits 127, which Claude Code does not treat as blocking."
+    },
+    {
+      "id": "pre-bash-secret-scan",
+      "scope": "project",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "min_profile": "standard",
+      "fail": "closed",
+      "timeout": 5,
+      "on_failure": "block",
+      "model_cost": false,
+      "cost": "0 tokens; about 60 ms per Bash call (measured on one Linux box), more only for a git commit or git add that scans a diff; prints a short file:line list only when it blocks.",
+      "description": "Blocks git commit when an added line looks like a secret, and git add of key and .env files. Blocks while it runs; if the launcher file is missing the command exits 127, which Claude Code does not treat as blocking."
+    },
+    {
+      "id": "auto-handoff",
+      "scope": "user",
+      "event": "SessionEnd",
+      "fail": "open",
+      "timeout": 5,
+      "model_cost": true,
+      "cost": "One Sonnet run per session with 5+ human turns and no manual handoff; capped by --max-budget-usd 1.00, --max-turns 25 and a 900 s wall clock.",
+      "description": "Writes a handoff via the real /handoff skill when the session did not run one."
+    },
+    {
+      "id": "instincts-capture-tool",
+      "scope": "project",
+      "event": "PostToolUse",
+      "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+      "opt_in": "learning",
+      "fail": "open",
+      "timeout": 2,
+      "model_cost": false,
+      "cost": "0 tokens; about 70 ms per tool call; appends one scrubbed line to a local file under ~/.grid/instincts/, prints nothing.",
+      "description": "Records which tool ran and a scrubbed, truncated summary of its input, only in a project with learning: on."
+    },
+    {
+      "id": "instincts-capture-failure",
+      "scope": "project",
+      "event": "PostToolUseFailure",
+      "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+      "opt_in": "learning",
+      "fail": "open",
+      "timeout": 2,
+      "model_cost": false,
+      "cost": "0 tokens; about 70 ms per failed tool call; appends one scrubbed line to a local file, prints nothing.",
+      "description": "Records a failed tool call with an error flag, only in a project with learning: on."
+    },
+    {
+      "id": "instincts-capture-prompt",
+      "scope": "project",
+      "event": "UserPromptSubmit",
+      "opt_in": "learning",
+      "fail": "open",
+      "timeout": 2,
+      "model_cost": false,
+      "cost": "0 tokens; about 70 ms per prompt; appends one scrubbed, truncated line to a local file, prints nothing.",
+      "description": "Records a scrubbed, truncated copy of each prompt, only in a project with learning: on."
+    },
+    {
+      "id": "instincts-inject",
+      "scope": "project",
+      "event": "SessionStart",
+      "opt_in": "learning",
+      "fail": "open",
+      "timeout": 5,
+      "model_cost": false,
+      "cost": "0 tokens to run; prints a few short habit hints (about 100 to 300 tokens) into the session when any instincts exist, nothing otherwise.",
+      "description": "Prints the project's learned habit hints at session start, only in a project with learning: on."
+    }
+  ]
+}

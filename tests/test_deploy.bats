@@ -4,11 +4,12 @@
 # test deploys into a temp project dir — never the real repo or ~/.claude.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   DEPLOY="$REPO_ROOT/agent-factory/deploy.py"
   PROJ=$(mktemp -d)
 }
@@ -298,4 +299,42 @@ print('ok')
 "
   [ "$status" -eq 0 ]
   [[ "$output" == *"ok"* ]] || false
+}
+
+# --- neutral identity for full-profile deploys (--identity) -------------------
+
+@test "full deploy ignores an ambient GRID_USER_CONFIG and uses the neutral identity" {
+  printf 'machine: ambient-xyz\n' > "$PROJ.ambient.yaml"
+  GRID_USER_CONFIG="$PROJ.ambient.yaml" run "$PY" "$DEPLOY" "$PROJ" --roles qa-engineer --profile full
+  rm -f "$PROJ.ambient.yaml"
+  [ "$status" -eq 0 ]
+  grep -q "your-machine" "$PROJ/.claude/agents/grid-qa-engineer.md"
+  ! grep -q "ambient-xyz" "$PROJ/.claude/agents/grid-qa-engineer.md" || false
+}
+
+@test "--identity opts in to a chosen identity file" {
+  printf 'machine: sentinel-xyz\n' > "$PROJ.id.yaml"
+  run "$PY" "$DEPLOY" "$PROJ" --roles qa-engineer --profile full --identity "$PROJ.id.yaml"
+  rm -f "$PROJ.id.yaml"
+  [ "$status" -eq 0 ]
+  grep -q "sentinel-xyz" "$PROJ/.claude/agents/grid-qa-engineer.md"
+  ! grep -q "your-machine" "$PROJ/.claude/agents/grid-qa-engineer.md" || false
+}
+
+@test "--identity naming a missing file fails before anything is written" {
+  run "$PY" "$DEPLOY" "$PROJ" --roles qa-engineer --profile full --identity /nonexistent
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"identity file not found"* ]] || false
+  [ ! -e "$PROJ/.claude" ]
+}
+
+@test "--identity has no effect on lean output (lean has no nameplate)" {
+  PROJ2=$(mktemp -d)
+  printf 'machine: sentinel-xyz\n' > "$PROJ.id.yaml"
+  "$PY" "$DEPLOY" "$PROJ" --roles qa-engineer --profile lean
+  "$PY" "$DEPLOY" "$PROJ2" --roles qa-engineer --profile lean --identity "$PROJ.id.yaml"
+  rm -f "$PROJ.id.yaml"
+  run diff -r "$PROJ" "$PROJ2"
+  rm -rf "$PROJ2"
+  [ "$status" -eq 0 ]
 }

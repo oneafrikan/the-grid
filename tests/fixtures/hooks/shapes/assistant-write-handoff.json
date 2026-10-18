@@ -1,0 +1,87 @@
+{
+  "parentUuid": "00000000-0000-4000-8000-000000000000",
+  "isSidechain": false,
+  "message": {
+    "model": "claude-haiku-5-5",
+    "id": "msg_00000000000000000000000",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_00000000000000000000000000",
+        "name": "Write",
+        "input": {
+          "file_path": "/tmp/project/LOGS/2000-01-01-host-slug-handoff.md",
+          "content": "__TEXT__"
+        },
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ],
+    "container": null,
+    "stop_reason": "tool_use",
+    "stop_sequence": null,
+    "stop_details": null,
+    "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 690,
+      "cache_read_input_tokens": 46900,
+      "output_tokens": 1422,
+      "output_tokens_details": {
+        "thinking_tokens": 541
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 690,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1422,
+          "cache_read_input_tokens": 46900,
+          "cache_creation_input_tokens": 690,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 690
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    },
+    "input_transformations": [],
+    "diagnostics": null,
+    "context_management": null
+  },
+  "wireToolInputs": {
+    "toolu_00000000000000000000000000": {
+      "file_path": "/tmp/project/LOGS/2000-01-01-host-slug-handoff.md",
+      "content": "__TEXT__"
+    }
+  },
+  "apiBlockIndex": 1,
+  "requestId": "req_00000000000000000000000",
+  "requestedModel": "claude-haiku-5-5",
+  "attributionSkill": "handoff",
+  "type": "assistant",
+  "uuid": "00000000-0000-4000-8000-000000000000",
+  "timestamp": "2000-01-01T00:00:00.000Z",
+  "advisorModel": "claude-opus-5-5",
+  "effort": "medium",
+  "perTurnEffort": "medium",
+  "userType": "external",
+  "entrypoint": "sdk-cli",
+  "cwd": "/tmp/project",
+  "sessionId": "00000000-0000-4000-8000-000000000000",
+  "version": "2.1.296",
+  "gitBranch": "main"
+}

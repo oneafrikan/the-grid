@@ -1,0 +1,17 @@
+# Harness registry — read by scripts/lib/harness.sh (and so by wire.sh).
+#
+# Whitespace-separated (spaces or tabs; no field contains whitespace), '#' starts a
+# comment. '-' means the harness has none of that thing. A leading '~/' expands to
+# the harness base (see harness_path in harness.sh). Only the `claude` row is for
+# reference: wire.sh keeps using SKILLS_DIR / AGENTS_DIR for Claude as before.
+# Add a harness by adding a row; see docs/harnesses.md for the columns and the
+# verified vendor facts behind each path.
+#
+# harness    skills_dir                       agents_dir                  compose_target  rules_file                    rules_harness
+claude       ~/.claude/skills                 ~/.claude/agents            claude-code     -                             -
+codex        ~/.agents/skills                 ~/.codex/agents             codex           ~/.codex/AGENTS.md            agents-md
+opencode     ~/.agents/skills                 ~/.config/opencode/agents   opencode        ~/.config/opencode/AGENTS.md  agents-md
+gemini       ~/.agents/skills                 ~/.gemini/agents            gemini-cli      ~/.gemini/GEMINI.md           gemini
+antigravity  ~/.gemini/antigravity-cli/skills -                           -               -                             -
+pi           ~/.agents/skills                 -                           -               ~/.pi/agent/AGENTS.md         agents-md
+openclaw     ~/.agents/skills                 -                           -               -                             -

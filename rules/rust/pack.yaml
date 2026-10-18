@@ -1,0 +1,4 @@
+# Flat "key: value" lines only. Parsed by rules.py (no YAML library).
+summary: Rust - API Guidelines naming and types, Result over panics, unsafe hygiene, integer pitfalls, test layout, Cargo.toml
+tier: 2
+adapted_from: affaan-m/ECC rules/rust @ ef648e0 (MIT)

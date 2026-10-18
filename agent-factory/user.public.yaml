@@ -1,0 +1,6 @@
+# user.public.yaml: neutral identity for anything composed into a tracked or shipped file
+# (goldens, personas, plugin bundles). Use with GRID_USER_CONFIG=agent-factory/user.public.yaml.
+# Never put personal values here; your own identity goes in user.yaml (git-ignored).
+operator: ""
+machine: "your-machine"   # must stay non-empty: blank falls back to the local hostname
+channels: ""

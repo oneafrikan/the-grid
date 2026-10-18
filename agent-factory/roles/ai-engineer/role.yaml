@@ -6,6 +6,7 @@ title: AI Engineer        # human-readable role for IDENTITY.md nameplate
 default_model: sonnet
 summary: >-
   The LLM runtime around the prompts: token budgets, caching, model choice, structured-output plumbing, failure handling, agent loops, tools/MCP, async execution, retrieval, cost tracking.
+description: "AI Engineer. The LLM runtime around prompts: token budgets, caching, model choice, structured-output plumbing, failure handling, agent loops, tools/MCP, retrieval, cost tracking. Use for LLM runtime work."
 owns: >-
   Context and token budgets, prompt caching, model/effort selection, retries and failure codes, agent loops, tool/MCP integration, async model calls, retrieval plumbing, observability and cost tracking.
 base_skills: []
