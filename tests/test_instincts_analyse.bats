@@ -1354,3 +1354,43 @@ PY
   [ -e "$OBSDIR/obs-2026-W37.jsonl" ]
   [ ! -e "$OBSDIR/obs-2026-W36.jsonl" ]
 }
+
+# --- H-14: old or hand-edited observation files are scrubbed again before the digest ----------
+
+@test "digest (H-14): short secrets of unlisted tools and separator tricks stored in plaintext never reach the digest" {
+  local S="sword""fishq" zw=$'\xe2\x80\x8b' ac=$'\xcc\x81'
+  {
+    printf 's1|tool|Bash|0|%s\n' \
+      "7z a -p $S out.7z in" "rar a -hp$S o.rar i" "vault login $S" "twine upload -p $S dist/*" \
+      "az login -p $S" "ldapsearch -x -w $S -b dc=x" "smbclient //srv/share -U user%$S" \
+      "xfreerdp /v:srv /p:$S" "sudo -S ls <<<$S" "echo $S | sudo -S ls" "export session=$S" "dbpw=$S make" \
+      "git clone https://$S@host/x" "DOCKER login -p $S" "docker login \\\\n -p $S" \
+      "mysql${zw}-p${zw}$S db" "pa${ac}ssword=$S" "acme-tool -p $S" "acme-tool -w$S" "cd x && acme-tool -P $S" \
+      "make check-h14"
+    printf 's2|tool|Bash|0|%s\n' "make check-h14"
+  } | obs
+  neutral 40
+  analyse_run --dry-run
+  [ "$status" -eq 0 ]
+  lacks "$output" "$S"
+  contains "$output" "make check-h14"
+}
+
+@test "digest (H-14): a plaintext unlisted -p flag is dropped from the digest, an ordinary -p is kept" {
+  printf '%s\n' 's1|tool|Bash|0|acme-tool -p hunter' 's2|tool|Bash|0|acme-tool -p hunter' \
+    's1|tool|Bash|0|mkdir -p out' 's2|tool|Bash|0|mkdir -p out' | obs
+  neutral 40
+  analyse_run --dry-run
+  [ "$status" -eq 0 ]
+  lacks "$output" "hunter"
+  contains "$output" "mkdir -p out"
+}
+
+@test "digest (H-14): the correction stems cap is 8 plain words, as the privacy doc says" {
+  printf '%s\n' 's1|prompt||0|never use one two three four five six seven eight nine ten eleven twelve' | obs
+  neutral 40
+  analyse_run --dry-run
+  [ "$status" -eq 0 ]
+  contains "$output" "never use one two three four five six seven"
+  lacks "$output" "eight"
+}

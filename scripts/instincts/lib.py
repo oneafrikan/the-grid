@@ -144,11 +144,59 @@ def _strip_hidden(text: str, keep: str = "") -> str:
     return "".join(out)
 
 
+def _space_hidden(text: str, keep: str = "") -> str:
+    """Like _strip_hidden, but EVERY hidden character becomes a space instead of vanishing.
+
+    No shell reads a zero-width, format, NUL, ESC or DEL character as a separator, so the
+    stripped reading (`_strip_hidden`) is the one that stops them splitting a key name. But a
+    pasted or generated command can also carry one as the only glue between two words
+    (`mysql<ZWSP>-p<ZWSP>x`), and deleting it fuses the words. Both readings are scrubbed.
+    """
+    return "".join(c if c in keep or not _is_hidden(c) else " " for c in text)
+
+
+def _has_glue(text: str) -> bool:
+    """True when text holds a hidden character that is not whitespace (ZWSP, NUL, ESC, DEL...)."""
+    return any(_is_hidden(c) and not c.isspace() for c in text)
+
+
+def _fold(text: str, keep: str = "") -> str:
+    """NFKC, then: combining marks on ASCII letters/digits are dropped, every remaining
+    whitespace character other than those in `keep` becomes a space.
+
+    NFKC alone leaves `pa` + U+0301 + `ssword` as `p` + U+00E1 + `ssword`, so the key rules never
+    see "password"; folding the mark away restores it. Accents on Latin text are lost as a result
+    (cost accepted: stored text is habit data, not prose). Marks on other scripts are untouched.
+    U+1680 (Ogham space mark) is whitespace to str.isspace() but survives NFKC and is not a hidden
+    character, so without the last step it reached the rules as a letter and glued two words.
+    """
+    text = unicodedata.normalize("NFKC", text)
+    if not text.isascii():
+        out = []
+        ascii_base = False
+        for c in unicodedata.normalize("NFD", text):
+            if ascii_base and unicodedata.category(c) == "Mn":
+                continue
+            out.append(c)
+            ascii_base = c.isascii() and c.isalnum()
+        text = unicodedata.normalize("NFC", "".join(out))
+    return "".join(" " if c.isspace() and c not in keep else c for c in text)
+
+
+def _prep(text: str, keep: str, glue_as_space: bool) -> str:
+    """One reading of text for matching: hidden characters stripped (or spaced), then folded.
+
+    Hidden characters are handled again after the fold in case NFKC produced one.
+    """
+    hide = _space_hidden if glue_as_space else _strip_hidden
+    return hide(_fold(hide(text, keep), keep), keep)
+
+
 # Key names whose value is a secret. `auth` must not eat `author(s|ed)`, but must
 # still match `authorization`; hence the lookahead. `pass`, `pw` and `pwd` are short,
-# so they only count as a whole identifier segment (`DB_PASS`, `pw=`, not `passed`).
+# so they only count at the END of a name (`DB_PASS`, `dbpw=`, `pw=`, not `passed`).
 _SECRET_KEY = (r"(?:api[_-]?key|access[_-]?key|token|secret|passw(?:or)?d|passphrase"
-               r"|pass(?![a-z])|(?<![a-z])pwd?(?![a-z])|auth(?!or(?:s|ed)?\b)"
+               r"|pass(?![a-z])|pwd?(?![a-z])|auth(?!or(?:s|ed)?\b)"
                r"|credential|private[_-]?key|cookie)")
 
 # One value: a quoted run (to the closing quote, or to the end of the line when the
@@ -180,26 +228,62 @@ _CMD_FLAGS: dict[str, tuple[str, tuple[str, ...]]] = {
     "curl": ("uUb", ("user", "proxy-user", "oauth2-bearer", "cookie")),
     "ssh-keygen": ("NP", ()),
     "openssl": ("k", ("pass", "passin", "passout")),
+    # H-14: tools outside the first list whose secret is a short flag value. The attached form
+    # (`-pSECRET`) is also caught by the generic `-p` rule below; the space form and `-hp` are not.
+    "7z": ("p", ()), "7za": ("p", ()), "7zr": ("p", ()), "7zz": ("p", ()),   # 7-Zip: -p[SECRET]
+    "rar": ("p", ()), "unrar": ("p", ()),                     # RAR: -p[SECRET], -hp[SECRET]
+    "twine": _PW,                                             # twine upload -p / --password
+    "rdesktop": ("p", ()),
+    # OpenLDAP clients: -w is the bind password; ldappasswd also takes the old (-a) and new (-s)
+    # password as flag values (in ldapsearch `-s` is the search scope, so only there).
+    **{f"ldap{t}": ("w", ()) for t in ("search", "modify", "add", "delete", "modrdn", "whoami", "compare")},
+    "ldappasswd": ("was", ()),
 }
+# Extra short flags that are not a single letter (rar `-hp` encrypts the headers too).
+_CMD_SHORT_EXTRA = {"rar": ("hp",), "unrar": ("hp",)}
 _CMD_FLAG_RES = {
     cmd: re.compile(
         r"(?P<pre>(?<![\w-])(?:" + "|".join(
-            ([f"-[{short}]\\s*"] if short else [])
-            + [f"--{re.escape(n)}(?:=|\\s+)" for n in longs]) + r"))" + _VALUE)
+            ([f"-(?:[{short}]" + "".join(f"|{x}" for x in _CMD_SHORT_EXTRA.get(cmd, ())) + r")\s*"] if short else [])
+            + [f"(?i:--{re.escape(n)})(?:=|\\s+)" for n in longs]) + r"))" + _VALUE)
     for cmd, (short, longs) in _CMD_FLAGS.items()
 }
 # A command word, then its argument words up to a shell separator. Separators inside
-# quotes do not end the segment (`mysql -p "a;b"`), and a backslash-newline continues it.
+# quotes do not end the segment (`mysql -p "a;b"`), and a backslash-newline continues it
+# (also between the words of the command itself: `docker \<newline> login`). The command name
+# is matched in any letter case (`DOCKER login`): a case-insensitive filesystem or shell, or a
+# plain typo, must not be a way past the rules.
 _CMD_SEGMENT = re.compile(
-    r"(?<![\w-])(?P<cmd>(?:(?:docker|podman|nerdctl|buildah|skopeo|oras)[ \t]+login"
-    r"|helm[ \t]+registry[ \t]+login|mysql(?:dump|admin|pump)?|mariadb|mongo(?:sh|dump|restore)?"
-    r"|sshpass|redis-cli|u?n?zip|gpg2?|curl|ssh-keygen|openssl|htpasswd))"
-    r"(?P<rest>(?:[ \t](?:\\\n|\"[^\"\n]*\"|'[^'\n]*'|[^\n;&|\"'])*)?)")
+    r"(?<![\w-])(?P<cmd>(?i:(?:docker|podman|nerdctl|buildah|skopeo|oras|az|oc|cf)(?:[ \t]|\\\n)+login"
+    r"|helm(?:[ \t]|\\\n)+registry(?:[ \t]|\\\n)+login|vault(?:[ \t]|\\\n)+login"
+    r"|smbclient|mysql(?:dump|admin|pump)?|mariadb|mongo(?:sh|dump|restore)?"
+    r"|sshpass|redis-cli|u?n?zip|gpg2?|curl|ssh-keygen|openssl|htpasswd"
+    r"|7z[arz]?|(?:un)?rar|twine|rdesktop"
+    r"|ldap(?:search|modify|add|delete|modrdn|whoami|compare|passwd)))"
+    r"(?P<rest>(?:(?:[ \t]|\\\n)(?:\\\n|\"[^\"\n]*\"|'[^'\n]*'|[^\n;&|\"'])*)?)")
+
+# Words of a command tail: a quoted run or a bare run, backslash and whitespace excluded.
+_TAIL_WORD = re.compile(r"""(?:"[^"]*"|'[^']*'|[^\s\\])+""")
+
+
+def _redact_words(rest: str, pick) -> str:
+    """Redact every word of a command tail for which pick(word, previous_word) is true."""
+    words = list(_TAIL_WORD.finditer(rest))
+    texts = [w.group(0) for w in words]
+    out, pos = [], 0                              # rebuilt in one pass: linear however many words match
+    for i, w in enumerate(words):
+        if pick(texts[i], texts[i - 1] if i else ""):
+            out.append(rest[pos:w.start()])
+            out.append(REDACTED)
+            pos = w.end()
+    out.append(rest[pos:])
+    return "".join(out)
 
 
 def _scrub_command_segment(m: re.Match) -> str:
     full = m.group("cmd").lower()
-    cmd = "login" if full.endswith("login") else full
+    first = re.split(r"(?:[ \t]|\\\n)+", full)[0]
+    cmd = ("vault" if first == "vault" else "login") if full.endswith("login") else full
     rest = m.group("rest")
     if cmd == "htpasswd":
         # `-b` puts the password on the command line as the LAST non-flag word
@@ -210,12 +294,23 @@ def _scrub_command_segment(m: re.Match) -> str:
             if words:
                 w = words[-1]
                 rest = rest[:w.start()] + REDACTED + rest[w.end():]
+    elif cmd == "vault":
+        # `vault login TOKEN`: the token is a bare word. Flags (`-method=ldap`) and `key=value`
+        # words stay (a `password=` pair is the key rule's job); a flag's separate value is
+        # redacted with the rest, which only costs readability.
+        rest = _redact_words(rest, lambda w, _prev: not w.startswith("-") and "=" not in w)
+    elif cmd == "smbclient":
+        # `smbclient //host/share PASSWORD`: the word after the service name is the password.
+        rest = _redact_words(rest, lambda w, prev: prev.startswith(("//", "\\\\")) and not w.startswith("-"))
     else:
         rx = _CMD_FLAG_RES.get(cmd)
         if rx:
             rest = rx.sub(_redact_value, rest)
     return m.group("cmd") + rest
 
+
+# `sudo ... -S` / `sudo --stdin`: sudo told to read its password from stdin.
+_SUDO_STDIN = r"sudo\b[^\n;&|<]{0,200}?\s(?:-[A-Za-z]*S|--stdin)\b"
 
 # Each rule is (compiled regex, replacement or callable). Applied in order, so the
 # specific shapes run before the generic key=value and high-entropy catch-alls. Where a
@@ -241,6 +336,11 @@ _SCRUB_RULES: list[tuple[re.Pattern, object]] = [
      r"\1" + REDACTED + "@"),
     # Userinfo with no colon is a token (`https://TOKEN@host`): 16+ chars of one class.
     (re.compile(r"(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*://)[A-Za-z0-9_-]{16,}@", re.I),
+     r"\1" + REDACTED + "@"),
+    # The same with a SHORT token (`https://tok123@host`): any length, but not for the ssh family,
+    # where the userinfo is an account name (`ssh://git@host`) and not a secret.
+    (re.compile(r"(?<![a-z0-9+.-])(?!(?:ssh|sftp|scp|rsync|git\+ssh|ssh\+git)://)([a-z][a-z0-9+.-]*://)"
+                r"[^/\s:@]{1,15}@", re.I),
      r"\1" + REDACTED + "@"),
     # Known token shapes, anchored so `task-...` cannot trip `sk-`.
     (re.compile(
@@ -273,6 +373,23 @@ _SCRUB_RULES: list[tuple[re.Pattern, object]] = [
     (re.compile(r"(?i)((?<![\w-])-pass(?:in|out)?\s+(?:file|env|fd):)\S+"), r"\1" + REDACTED),
     # Space-form secret flags after a known command (docker login -p X, mysql -p X, ...).
     (_CMD_SEGMENT, _scrub_command_segment),
+    # xfreerdp style `/p:SECRET` (also `/pth:` pass-the-hash and `/gp:` gateway password). The
+    # capture path has already rewritten `/p:x` to `(outside)/p:x`, so that form is matched too.
+    (re.compile(r"""(?i)((?<![\w.~-])(?:\(outside\))?/(?:p|pth|gp):)(?:"[^"\n]*"?|'[^'\n]*'?|\S+)"""),
+     r"\1" + REDACTED),
+    # Samba style `-U user%SECRET` (smbclient, rpcclient, ...) and `--user user%SECRET`.
+    (re.compile(r"""((?<![\w-])(?:-U\s*|--user(?:name)?(?:=|\s+))["']?[^\s%'"]{1,64}%)[^\s'"]+"""),
+     r"\1" + REDACTED),
+    # `sudo -S` / `sudo --stdin` reads the password from stdin: a here-string (`<<< SECRET`), the
+    # first line of a heredoc, or `echo SECRET | sudo -S`. Gaps are bounded, so all stay linear.
+    (re.compile(r"(?i)(\b" + _SUDO_STDIN + r"[^\n;&|<]{0,200}?<<<\s*)" + _VALUE),
+     lambda m: m.group(1) + REDACTED),
+    (re.compile(r"""(?i)(\b""" + _SUDO_STDIN + r"""[^\n;&|<]{0,200}?<<-?[ \t]*(["']?)\w{1,32}\2[^\n]{0,100}\n)[^\n]{1,300}"""),
+     lambda m: m.group(1) + REDACTED),
+    (re.compile(r"(?i)(<<<\s*)" + _VALUE + r"(?=[ \t]{0,8}\|[ \t]{0,8}" + _SUDO_STDIN + r")"),
+     lambda m: m.group(1) + REDACTED),
+    (re.compile(r"(?i)(\b(?:echo|printf)\s+)[^|\n;&]{1,300}?([ \t]{0,8}\|[ \t]{0,8}" + _SUDO_STDIN + r")"),
+     r"\1" + REDACTED + r"\2"),
     # Credential flags with a value: `--password x`, `--token=x`, also prefixed
     # (`--http-password x`). `--password-stdin` and `--with-token` style flags carry no
     # value, so they stay out: a name must be followed by `=` or whitespace.
@@ -290,6 +407,11 @@ _SCRUB_RULES: list[tuple[re.Pattern, object]] = [
     # this rule quadratic (64 KB of `a.a.a.` took minutes). The trailing run is capped.
     (re.compile(r"(?i)(?P<pre>" + _SECRET_KEY + r"[\w.-]{0,64}['\"]?\s*[:=]\s*)" + _VALUE),
      _redact_value),
+    # A session id/cookie value. Narrower than the key list above (`XDG_SESSION_TYPE=x11` is not
+    # a secret): the name must END in sess / session / session_id / session_key. The lazy prefix is
+    # bounded and the lookbehind starts it at a word start only, so it stays linear.
+    (re.compile(r"(?i)(?P<pre>(?<![\w-])[\w-]{0,32}?sess(?:ion)?(?:[_-]?(?:id|key|token|secret))?['\"]?\s*[:=]\s*)"
+                + _VALUE), _redact_value),
 ]
 
 # Generic high-entropy run: 32+ chars of the base64/url alphabet that holds a
@@ -311,25 +433,62 @@ def _apply_rules(text: str) -> str:
     return text
 
 
+def _scrub_core(out: str, decode: bool, entropy: bool) -> str:
+    """The rule set over one already-normalised reading of the text."""
+    out = _apply_rules(out)
+    if decode and "%" in out:
+        decoded = urllib.parse.unquote(out)
+        if decoded != out:
+            # The decoded copy may itself carry hidden or odd characters (`%E2%80%8B`, `%00`).
+            red, changed = _scrub_readings(decoded, decode=False, entropy=False)
+            if changed:
+                out = red
+    return _ENTROPY_RUN.sub(_entropy_sub, out) if entropy else out
+
+
+def _scrub_readings(text: str, decode: bool, entropy: bool) -> tuple[str, bool]:
+    """Scrub the text under both readings of its hidden characters; returns (text, redacted?).
+
+    Reading A strips hidden characters (so zero-width junk cannot split a key name); reading B
+    turns each into a space (so one used as the only glue between words cannot fuse them). They
+    only differ when the text holds a hidden non-whitespace character. If one reading redacts
+    and the other does not, the redacting one wins. If both redact and disagree about what, the
+    two cannot be merged exactly, so the whole text is redacted (fail closed; needs hidden
+    characters AND two different secrets in one text).
+    """
+    keep = "\n\t"
+    a = _prep(text, keep, False)
+    ra = _scrub_core(a, decode, entropy)
+    if not _has_glue(text):
+        return ra, ra != a
+    b = _prep(text, keep, True)
+    if b == a:
+        return ra, ra != a
+    rb = _scrub_core(b, decode, entropy)
+    changed_a, changed_b = ra != a, rb != b
+    if not changed_b:
+        return ra, changed_a
+    if not changed_a:
+        return rb, True
+    if "".join(ra.split()) == "".join(rb.split()):
+        return ra, True
+    return REDACTED, True
+
+
 def scrub(text: str) -> str:
     """Redact secrets from text and strip hidden unicode / control characters.
 
-    Hidden characters go first so zero-width junk cannot split a token, then NFKC
-    folds fullwidth and compatibility forms onto the ASCII the rules expect. A secret
+    Hidden characters go first so zero-width junk cannot split a token (and, as a second
+    reading, so a hidden character used as the only glue between words cannot fuse them), then
+    NFKC folds fullwidth and compatibility forms onto the ASCII the rules expect, combining
+    marks on ASCII letters are dropped and any remaining whitespace becomes a space. A secret
     hidden behind URL-encoding (`password%3Dhunter2`) is found on a decoded copy;
     when that copy matches, the decoded, redacted text is returned. Newlines and tabs
     are kept (multi-line commands stay readable; sanitize() flattens them where one
-    line is required). Idempotent.
+    line is required). CRLF counts as one newline so a backslash-CRLF stays a continuation.
+    Idempotent.
     """
-    out = unicodedata.normalize("NFKC", _strip_hidden(text, keep="\n\t"))
-    out = _apply_rules(out)
-    if "%" in out:
-        decoded = urllib.parse.unquote(out)
-        if decoded != out:
-            redacted = _apply_rules(decoded)
-            if redacted != decoded:
-                out = redacted
-    return _ENTROPY_RUN.sub(_entropy_sub, out)
+    return _scrub_readings(text.replace("\r\n", "\n"), decode=True, entropy=True)[0]
 
 
 def sanitize(text: str, max_len: int | None = None) -> str:
@@ -436,10 +595,186 @@ def drop_sensitive_lines(text: str) -> str:
     the caller then records no observation).
 
     The text is NFKC-normalised and stripped of hidden characters first, so a fullwidth or
-    zero-width-split keyword (`ｐａｓｓｗｏｒｄ`, `pass<ZWSP>word`) cannot slip past the keyword rules.
+    zero-width-split keyword (`ｐａｓｓｗｏｒｄ`, `pass<ZWSP>word`) cannot slip past the keyword rules,
+    and combining marks on ASCII letters are folded away (`pa` + U+0301 + `ssword`). A line that holds
+    a hidden non-whitespace character is judged under both readings (hidden characters stripped, or
+    read as spaces: see _scrub_readings) and dropped when either is sensitive; if it stays, it is
+    returned with those characters still in it, so scrub() can apply both readings again.
     """
-    text = unicodedata.normalize("NFKC", _strip_hidden(text, keep="\n"))
-    return "\n".join(ln for ln in text.splitlines() if not _line_is_sensitive(ln))
+    text = text.replace("\r\n", "\n")
+    # Hidden WHITESPACE (CR, VT, FF, NEL, U+2028...) is a space in every reading; doing it up
+    # front keeps the line breaks identical across readings.
+    text = "".join(" " if c != "\n" and c.isspace() and _is_hidden(c) else c for c in text)
+    kept = []
+    for line in text.splitlines():
+        if _has_glue(line):
+            if _line_is_sensitive(_prep(line, "", False)) or _line_is_sensitive(_prep(line, "", True)):
+                continue
+            kept.append(line)
+        else:
+            line = _prep(line, "", False)
+            if not _line_is_sensitive(line):
+                kept.append(line)
+    return "\n".join(kept)
+
+
+# --------------------------------------------------------------------------
+# Fail-safe default for flags the scrubber does not know (H-14)
+# --------------------------------------------------------------------------
+# The scrubber knows a finite list of tools whose `-p`/`-w` value is a secret. Any other tool can
+# take one, so a Bash command that passes a value to `-p`, `-P`, `-w` (or attaches one: `-pX`,
+# `-hpX`) is NOT recorded unless its tool is on the list below of tools where those flags are
+# harmless (port, parents, word match, workers...) or the scrubber already redacts them. Cost
+# accepted: an unlisted tool using `-p`/`-w` for something harmless loses its observation. To
+# keep one, add the tool to _FLAG_BENIGN.
+
+_FLAG_LISTED = frozenset(k for k in _CMD_FLAGS if k != "login") | {
+    "htpasswd", "vault", "smbclient", "az", "oc", "cf"}
+_FLAG_BENIGN = frozenset("""
+    mkdir cp mv ln install rsync tar chmod chown touch ls cat echo printf cd tee test export
+    ssh scp sftp nc ncat netcat nmap masscan ping ping6 traceroute wget
+    ps pgrep pkill kill lsof strace ltrace gdb timeout
+    grep egrep fgrep rg ag ack sort uniq head tail wc diff sed awk find du df jq yq
+    psql pg_dump pg_dumpall pg_restore pg_isready pg_ctl createdb dropdb createuser
+    git docker podman nerdctl docker-compose buildah skopeo oras helm kubectl k9s minikube
+    pytest py.test python python2 python3 pypy pip pip3 pipx uv poetry bats shellcheck
+    npm npx yarn pnpm node deno bun go cargo rustc make cmake gcc g++ cc c++ clang clang++ ld ar
+    gunicorn uvicorn flask rake bundle ruby gem java mvn gradle dotnet terraform ansible
+    ansible-playbook tmux screen ffmpeg ffprobe pandoc
+""".split())
+# Wrappers: skip them (and the arguments they consume) to find the real command.
+_FLAG_WRAPPERS: dict[str, frozenset] = {
+    "sudo": frozenset(["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t"]),
+    "doas": frozenset(["-u", "-C"]),
+    "env": frozenset(["-u", "-S", "-C"]), "nice": frozenset(["-n"]), "ionice": frozenset(["-c", "-n", "-p"]),
+    "xargs": frozenset(["-n", "-P", "-I", "-L", "-s", "-d", "-E", "-a", "-J", "-l", "-i"]),
+    "timeout": frozenset(["-s", "-k"]), "watch": frozenset(["-n"]),
+    "time": frozenset(), "nohup": frozenset(), "command": frozenset(), "exec": frozenset(),
+    "builtin": frozenset(), "setsid": frozenset(), "stdbuf": frozenset(), "unbuffer": frozenset(),
+}
+_FLAG_SHELLS = frozenset(["bash", "sh", "zsh", "dash", "ksh", "fish"])
+# `-pVALUE` / `-p=VALUE` / `-hpVALUE`; anything may follow (an escaped space keeps `-p secret` one word).
+_ATTACHED_FLAG = re.compile(r"-(?:hp|p|P|w).+", re.S)
+# ssh options that take a separate value; the first other word is the host, the rest a remote command.
+_SSH_VALUE_FLAGS = frozenset("-p -i -o -l -F -J -L -R -D -E -S -b -c -e -I -m -O -Q -W -w".split())
+
+
+def _command_segments(text: str) -> list[list[str]]:
+    """Split a command string into segments of shell words (quotes and backslashes resolved).
+
+    A small tokeniser, not a shell: `;` `|` `&` newline `(` `)` `{` `}` and a backtick end a
+    segment unless quoted; a backslash-newline joins lines. One pass, so it stays linear.
+    """
+    text = text.replace("\\\n", " ")
+    segs: list[list[str]] = []
+    words: list[str] = []
+    cur: list[str] = []
+    quote = ""
+    started = False                           # inside a word (an empty quoted word counts)
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if quote:
+            if c == quote:
+                quote = ""
+            elif c == "\\" and quote == '"' and i + 1 < n:
+                i += 1
+                cur.append(text[i])
+            else:
+                cur.append(c)
+        elif c == "\\" and i + 1 < n:
+            i += 1
+            cur.append(text[i])
+            started = True
+        elif c in "\"'":
+            quote = c
+            started = True
+        elif c.isspace() and c != "\n":
+            if started:
+                words.append("".join(cur))
+                cur, started = [], False
+        elif c in ";|&\n(){}`":
+            if started:
+                words.append("".join(cur))
+                cur, started = [], False
+            if words:
+                segs.append(words)
+                words = []
+        else:
+            cur.append(c)
+            started = True
+        i += 1
+    if started:
+        words.append("".join(cur))
+    if words:
+        segs.append(words)
+    return segs
+
+
+def _segment_has_flag_value(words: list[str], depth: int) -> bool:
+    i, n = 0, len(words)
+    while i < n:
+        w = words[i]
+        base = w.rsplit("/", 1)[-1].lower()
+        if re.fullmatch(r"[A-Za-z_]\w*=.*", w, re.S):          # VAR=value prefix
+            i += 1
+        elif base in _FLAG_WRAPPERS:
+            takes_value = _FLAG_WRAPPERS[base]
+            i += 1
+            while i < n and (words[i].startswith("-") or (base == "env" and "=" in words[i])):
+                i += 2 if words[i] in takes_value else 1
+            if base == "timeout":
+                i += 1                                         # the duration
+        else:
+            break
+    if i >= n:
+        return False
+    cmd = words[i].rsplit("/", 1)[-1].lower()
+    rest = words[i + 1:]
+    if depth < 3:
+        if cmd in _FLAG_SHELLS:
+            # `bash -c 'script'` / `bash -lc script`: the script is another command string.
+            for j, w in enumerate(rest[:-1]):
+                if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", w):
+                    return _text_has_flag_value(rest[j + 1], depth + 1)
+        elif cmd == "eval":
+            return _text_has_flag_value(" ".join(rest), depth + 1)
+        elif cmd == "ssh":
+            # `ssh [options] host COMMAND...`: the remote command is checked like a local one.
+            j = 0
+            while j < len(rest) and rest[j].startswith("-"):
+                j += 2 if rest[j] in _SSH_VALUE_FLAGS else 1
+            return _text_has_flag_value(" ".join(rest[j + 1:]), depth + 1)
+    if cmd in _FLAG_LISTED or cmd in _FLAG_BENIGN:
+        return False
+    for j, w in enumerate(rest):
+        if w == "--":
+            break
+        if w in ("-p", "-P", "-w"):
+            val = rest[j + 1] if j + 1 < len(rest) else ""
+            # No value, another flag, a shell variable or an already redacted value: nothing to store.
+            if val and not val.startswith(("-", "$")) and REDACTED not in val:
+                return True
+        elif _ATTACHED_FLAG.fullmatch(w) and REDACTED not in w:
+            return True
+    return False
+
+
+def _text_has_flag_value(text: str, depth: int = 0) -> bool:
+    return any(_segment_has_flag_value(seg, depth) for seg in _command_segments(text))
+
+
+def unlisted_secret_flag(text: str) -> bool:
+    """True when a Bash command passes a value to `-p`, `-P` or `-w` (or `-hp`) of a tool that is
+    neither one the scrubber redacts nor one where those flags are harmless (see _FLAG_BENIGN).
+
+    Both readings of hidden characters are checked (see _scrub_readings). Callers drop the whole
+    observation when this is true: redaction cannot be trusted for a tool nobody listed.
+    """
+    text = text.replace("\r\n", "\n")
+    if _text_has_flag_value(_prep(text, "\n", False)):
+        return True
+    return _has_glue(text) and _text_has_flag_value(_prep(text, "\n", True))
 
 
 def prune_old_obs(directory: str | os.PathLike, now, days: int = 28) -> None:
