@@ -104,9 +104,12 @@ work=0
 MAX_SCAN_FILES="$(num_or "${GRID_SCAN_MAX_FILES:-}" 500)"
 MAX_SCAN_BYTES="$(num_or "${GRID_SCAN_MAX_BYTES:-}" 5242880)"
 MAX_MATCH_BYTES="$(num_or "${GRID_SCAN_MAX_MATCH_BYTES:-}" 1048576)"
-MATCH_SECONDS=3
+MATCH_SECONDS="$(num_or "${GRID_SCAN_MAX_SECONDS:-}" 3)"
 match_bytes=0
-scan_t0=$SECONDS
+# H-05: the wall-clock budget of the whole diff scan. It is checked between lines here and
+# inside a line by the matcher (hooks/lib/secret-patterns.sh), in microseconds where bash
+# has EPOCHREALTIME, so one dense line cannot run past it either.
+secret_budget_start "$MATCH_SECONDS"
 too_large=0          # more candidate lines than MAX_SCAN_LINES
 add_too_big=0        # a chained add would stage more than MAX_SCAN_FILES / MAX_SCAN_BYTES
 PREFILTER_RE="$(secret_prefilter_re)"
@@ -157,8 +160,9 @@ segment_targets() {
 # each. More than MAX_SCAN_LINES candidates sets $too_large and stops. So does the scan
 # budget: the matcher's cost is per byte and varies about threefold with the text, so a
 # line count alone does not bound it. The whole scan may feed it MAX_MATCH_BYTES in total
-# and may run MATCH_SECONDS (whole seconds, from $SECONDS); past either the scan stops
-# with a finding named oversize-scan instead of being killed by the hook timeout.
+# (past that: a finding named oversize-scan) and may run MATCH_SECONDS of wall-clock time
+# (past that: a finding named scan-budget, whether the clock runs out between two lines or
+# inside one), instead of being killed by the hook timeout.
 consume_stream() {
   local file lineno content n=0
   [ "$too_large" = 0 ] || return 0
@@ -166,8 +170,12 @@ consume_stream() {
     n=$((n + 1))
     if [ "$n" -gt "$MAX_SCAN_LINES" ]; then too_large=1; return 0; fi
     match_bytes=$((match_bytes + ${#content}))
-    if [ "$match_bytes" -gt "$MAX_MATCH_BYTES" ] || [ $((SECONDS - scan_t0)) -ge "$MATCH_SECONDS" ]; then
+    if [ "$match_bytes" -gt "$MAX_MATCH_BYTES" ]; then
       add_finding "scan budget: oversize-scan (...)"
+      too_large=1; return 0
+    fi
+    if _secret_over_budget; then
+      add_finding "scan budget: scan-budget (...)"
       too_large=1; return 0
     fi
     if secret_match_long "$content"; then
@@ -253,7 +261,9 @@ scan_chained_add() {
   for path in "${files[@]}"; do
     if secret_sensitive_name "${path##*/}"; then add_finding "$(clean_name "$path"): sensitive-file"; fi
   done
-  total="$(cd "$top" && cat -- "${files[@]}" 2>/dev/null | wc -c)"
+  # H-05: count at most MAX_SCAN_BYTES + 1 bytes (head ends the pipe, cat stops on SIGPIPE);
+  # reading a huge file to the end just to learn that it is over the cap cost seconds.
+  total="$(cd "$top" && cat -- "${files[@]}" 2>/dev/null | head -c $((MAX_SCAN_BYTES + 1)) | wc -c)"
   if [ "${total//[[:space:]]/}" -gt "$MAX_SCAN_BYTES" ]; then add_too_big=1; return 0; fi
   consume_stream < <(cd "$top" && {
                        for path in "${files[@]}"; do
@@ -421,8 +431,13 @@ done
 
 # 3. the command text of a commit: the message, and a same-command write such as
 #    `echo key=... >> file && git commit -am x` that is not on disk yet.
-if [ "$handled_commit" = 1 ] && secret_match_long "$command"; then
-  add_finding "commit command text: $SECRET_MATCH_NAME (${SECRET_MATCH_TEXT:0:4}...)"
+if [ "$handled_commit" = 1 ]; then
+  # H-05: a budget of its own (the command is capped at 20 KB, so two seconds are ample); the
+  # diff budget may be spent by now, and the text must still be scanned.
+  secret_budget_start 2
+  if secret_match_long "$command"; then
+    add_finding "commit command text: $SECRET_MATCH_NAME (${SECRET_MATCH_TEXT:0:4}...)"
+  fi
 fi
 
 if [ "${#findings[@]}" -gt 0 ] || [ "$too_large" = 1 ] || [ "$add_too_big" = 1 ]; then
