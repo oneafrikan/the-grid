@@ -198,32 +198,24 @@ def normalize_for_match(line):
     return re.sub(r"\s+", " ", "".join(out))
 
 
-# Scripts with letters that pass for ASCII ones (matched on the Unicode name). Latin and CJK
-# are deliberately absent: accented Latin, sharp s, o-slash, l-stroke and CJK text are ordinary.
-LOOKALIKE_SCRIPTS = ("CYRILLIC", "GREEK", "ARMENIAN", "CHEROKEE", "COPTIC", "LISU", "OSAGE",
-                     "CANADIAN SYLLABICS")
-# Latin-script letters that pass for an ASCII one but are not accented forms of it:
-# dotless i, Latin alpha, script g, and the small capitals i c o u v w z.
-LATIN_LOOKALIKES = frozenset(chr(cp) for cp in (0x0131, 0x0251, 0x0261, 0x026A, 0x1D04, 0x1D0F,
-                                                0x1D1C, 0x1D20, 0x1D21, 0x1D22))
-
-
 def is_lookalike_letter(ch):
-    """True for a non-ASCII letter that could pass for an ASCII one inside an ASCII word:
-    (a) one NFKC folds to ASCII letters (fullwidth, ligatures, mathematical alphanumerics),
-    (b) one of a script with ASCII look-alikes (LOOKALIKE_SCRIPTS), or (c) one of the few
-    Latin look-alikes. Everything else (accented Latin, sharp s, o-slash, the micro sign,
-    CJK) is ordinary text and is not flagged."""
+    """True for a non-ASCII letter that could pass for an ASCII one inside an ASCII word.
+
+    The rule is deliberately broad (no list of scripts or code points to keep current): ANY
+    non-ASCII letter is flagged, except an accented Latin letter, i.e. a Latin letter that
+    NFD-decomposes to an ASCII base plus marks (e-acute, n-tilde). So sharp s, o-slash,
+    l-stroke, the micro sign and CJK next to ASCII letters are flagged too; non-English text
+    belongs in a code span or outside rule text."""
     if not ch.isalpha() or ord(ch) < 128:
         return False
-    folded = unicodedata.normalize("NFKC", ch)
-    if folded != ch and folded.isascii() and any(c.isalpha() for c in folded):
-        return True
-    return unicodedata.name(ch, "").startswith(LOOKALIKE_SCRIPTS) or ch in LATIN_LOOKALIKES
+    if unicodedata.name(ch, "").startswith("LATIN"):
+        base = unicodedata.normalize("NFD", ch)
+        return not (len(base) > 1 and base[0].isascii() and base[0].isalpha())
+    return True
 
 
 def mixed_script_words(line):
-    """Words that mix ASCII letters with look-alike letters of another script (spoofing)."""
+    """Words that mix ASCII letters with a non-ASCII letter other than an accented Latin one."""
     out = []
     for word in re.findall(r"\w+", line):
         if not any("a" <= c.lower() <= "z" for c in word):
@@ -637,7 +629,7 @@ def lint_rule_file(rel, path, denylist, f):
         if ctl:
             f.add("E_STYLE", rel, "line %d: control character %s" % (i, ", ".join(ctl)))
         for word in mixed_script_words(line):
-            f.add("E_STYLE", rel, "line %d: word %r mixes ASCII letters with a confusable non-ASCII letter" % (i, word))
+            f.add("E_STYLE", rel, "line %d: word %r mixes ASCII letters with a non-ASCII letter (only accented Latin letters are allowed)" % (i, word))
 
     # Marker text anywhere (fenced or not) would corrupt the managed block or the .mdc
     # generated-file detection once delivered, so it is refused at the source.

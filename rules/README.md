@@ -56,15 +56,15 @@ paths:
   bidi character (zero-width, tag, variation selector, BOM, a blank look-alike such as
   U+3164 or U+2800), a combining mark (any Mn/Me character, so decomposed `e` + U+0301 is
   refused; write the precomposed letter), a control character (ESC, NUL, DEL; a tab is
-  fine) or a word mixing ASCII letters with a confusable non-ASCII letter is `E_STYLE`,
-  fenced or not. A confusable letter is one that (a) NFKC folds to ASCII letters (fullwidth,
-  ligatures such as U+FB01, mathematical alphanumerics), (b) belongs to a script with ASCII
-  look-alikes other than Latin or CJK (Cyrillic, Greek, Armenian, Cherokee, Coptic, Lisu,
-  Osage, Canadian syllabics), or (c) is one of a few Latin look-alikes (dotless i U+0131,
-  Latin alpha U+0251, script g U+0261, small capitals U+026A U+1D04 U+1D0F U+1D1C U+1D20
-  U+1D21 U+1D22). Accented Latin letters (precomposed), sharp s, o-slash, l-stroke, the
-  micro sign and CJK next to ASCII are fine. The denylist is matched after NFKC folding, dropping invisible
-  characters (blank look-alikes become a space) and collapsing whitespace.
+  fine) or a word mixing ASCII letters with a non-ASCII letter is `E_STYLE`, fenced or
+  not. The word rule is deliberately broad: any non-ASCII letter in a word that also holds
+  an ASCII letter is flagged unless it is an accented Latin letter (one that decomposes to
+  an ASCII letter plus marks, such as e-acute or n-tilde). So Cyrillic, Greek, fullwidth,
+  ligature and dotless-i look-alikes are caught, and so are the micro sign, sharp s,
+  o-slash, l-stroke and CJK written next to ASCII letters. Every line is scanned, a code
+  span included, so avoid non-English text in rules. The denylist is matched after NFKC
+  folding, dropping invisible characters (blank look-alikes become a space) and collapsing
+  whitespace.
 - Files must be UTF-8 (`E_ENCODING`) and readable (`E_UNREADABLE`); neither is ever a
   traceback. An empty `denylist.txt` with packs present is `E_OPINION` (fails closed).
 - Lint is a format and hygiene check, not a security control. A merged pack is loaded as

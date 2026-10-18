@@ -1765,16 +1765,29 @@ print('\n'.join(rules.lint('$R', check_urls=True).lines()))"
   done
 }
 
-@test "VS1 E_STYLE: ordinary non-ASCII text next to ASCII letters is NOT flagged" {
+@test "VS1 E_STYLE: accented Latin letters pass, a word with no ASCII letter passes" {
   PK=g; make_pack g
   local v
-  # accented Latin, micro sign, sharp s, o-slash, l-stroke, o-acute/z-acute, CJK next to ASCII,
-  # and a word with no ASCII letter at all (fullwidth only).
-  for v in $'caf\xc3\xa9' $'5\xc2\xb5s' $'Stra\xc3\x9fe' $'S\xc3\xb8ren' $'\xc5\x81\xc3\xb3d\xc5\xba' \
-           $'API\xe7\x94\xa8' $'\xe7\x94\xa8API' $'na\xc3\xafve' $'\xef\xbd\x97\xef\xbd\x89\xef\xbd\x8e'; do
+  # e-acute, i-diaeresis, e-diaeresis, n-tilde, o-acute z-acute; and words with no ASCII letter
+  # at all (fullwidth only, CJK only).
+  for v in $'caf\xc3\xa9' $'na\xc3\xafve' $'Zo\xc3\xab' $'ma\xc3\xb1ana' $'d\xc3\xb3\xc5\xba' \
+           $'\xef\xbd\x97\xef\xbd\x89\xef\xbd\x8e' $'\xe7\x94\xa8\xe6\x88\xb7'; do
     rule_with '**/*.sql' "- Use \`foo\` ${v} first."
     run lint
     [ "$status" -eq 0 ] || { echo "rejected: $v: $output"; return 1; }
+  done
+}
+
+@test "VS1 E_STYLE: the broad rule's accepted cost: micro sign, sharp s, o-slash, l-stroke, CJK next to ASCII are flagged" {
+  PK=g; make_pack g
+  local v
+  # Every line is scanned, so a code span does not exempt such a word (the last value).
+  for v in $'5\xc2\xb5s' $'Stra\xc3\x9fe' $'S\xc3\xb8ren' $'\xc5\x81\xc3\xb3d\xc5\xba' $'API\xe7\x94\xa8' $'\xe7\x94\xa8API' \
+           $'`5\xc2\xb5s`'; do
+    rule_with '**/*.sql' "- Use \`foo\` ${v} first."
+    run lint
+    [ "$status" -eq 1 ] || { echo "accepted: $v"; return 1; }
+    [[ "$output" == *"E_STYLE rules/g/style.md: line 7: word"*"mixes ASCII letters with a non-ASCII letter"* ]]
   done
 }
 
