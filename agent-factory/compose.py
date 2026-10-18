@@ -44,14 +44,19 @@ Requires PyYAML — install into the project venv:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import errno
+import fcntl
 import functools
 import json
 import os
 import re
 import shutil
 import socket
+import stat
 import sys
-from pathlib import Path
+from collections.abc import Callable
+from pathlib import Path, PurePosixPath
 
 try:
     import yaml
@@ -68,7 +73,11 @@ STACKS_DIR = HERE / "stacks"
 SKILLS_DIR = HERE / "skills"
 CORE_DIR = HERE / "_core"
 PROJECTS_DIR = HERE / "projects"
-USER_CONFIG_PATH = HERE / "user.yaml"
+# GRID_USER_CONFIG: path to the identity file; replaces agent-factory/user.yaml when set and
+# non-empty. Used by goldens, committed personas and plugin bundles so no personal value or
+# hostname reaches a tracked file. A set-but-missing path is a hard error (no silent hostname
+# fallback) -- see load_user_config(). Relative paths resolve against the current directory.
+USER_CONFIG_PATH = Path(os.environ["GRID_USER_CONFIG"]) if os.environ.get("GRID_USER_CONFIG") else HERE / "user.yaml"
 
 # A role normally lives under ROLES_DIR (committed, public). GRID_PRIVATE_ROLES_DIR
 # names an optional second roles/ tree — outside this repo, never committed — for
@@ -82,7 +91,23 @@ USER_CONFIG_PATH = HERE / "user.yaml"
 _PRIVATE_ROLES_DIR = os.environ.get("GRID_PRIVATE_ROLES_DIR")
 if _PRIVATE_ROLES_DIR is None and (Path.home() / ".the-grid-private" / "roles").is_dir():
     _PRIVATE_ROLES_DIR = str(Path.home() / ".the-grid-private" / "roles")
+# An explicitly set, non-empty path that is not a directory is a typo: ignoring it would silently
+# compose without the private roles (same rule as GRID_USER_CONFIG). The ~/.the-grid-private
+# fallback is only chosen when the dir exists, so only the env var can trip this.
+if _PRIVATE_ROLES_DIR and not Path(_PRIVATE_ROLES_DIR).expanduser().is_dir():
+    sys.exit(f"GRID_PRIVATE_ROLES_DIR not found: {_PRIVATE_ROLES_DIR}")
 PRIVATE_ROLES_DIR = Path(_PRIVATE_ROLES_DIR).expanduser().resolve() if _PRIVATE_ROLES_DIR else None
+
+# Names that become path components of generated output. fullmatch, not match: `$` in a
+# pattern also accepts a trailing newline. The length cap keeps a name inside NAME_MAX
+# once a slug prefix and suffix are added.
+PROJECT_RE = re.compile(r"[a-z][a-z0-9-]{0,63}")
+ROLE_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+TARGET_SUB_RE = re.compile(r"_[a-z][a-z-]*")   # the _<target> dir under a project
+
+
+def valid_role_name(role) -> bool:
+    return isinstance(role, str) and ROLE_NAME_RE.fullmatch(role) is not None
 
 
 def role_dir(role: str) -> Path:
@@ -196,6 +221,12 @@ def role_meta(role: str) -> dict:
     return {}
 
 
+def role_description(role: str) -> str:
+    """The role.yaml `description:` collapsed to one line, or '' when the role has none."""
+    desc = role_meta(role).get("description")
+    return " ".join(str(desc).split()) if desc else ""
+
+
 MODEL_SECTIONS = ("tiers", "openclaw")   # tiers = Claude Code agents; openclaw = OpenClaw/Paperclip agents.yaml
 
 
@@ -233,6 +264,10 @@ def load_user_config() -> dict[str, str]:
     per-install config, not per-project. `machine` falls back to the local
     hostname so a fresh install with no user.yaml still gets a sane value."""
     cfg: dict = {}
+    # An explicit GRID_USER_CONFIG that points nowhere is a typo, not "no config": exiting
+    # here stops a tracked build silently falling back to user.yaml or the hostname.
+    if os.environ.get("GRID_USER_CONFIG") and not USER_CONFIG_PATH.is_file():
+        sys.exit(f"GRID_USER_CONFIG not found: {USER_CONFIG_PATH}")
     if USER_CONFIG_PATH.is_file():
         cfg = yaml.safe_load(_read(USER_CONFIG_PATH)) or {}
     machine = str(cfg.get("machine") or "").strip()
@@ -287,8 +322,14 @@ def load_config(path: Path) -> dict:
         if key not in config:
             errors.append(f"missing required top-level key: {key}")
 
+    # `project` is a path component of every writer's output (and is rmtree'd): it must be a
+    # plain kebab-case name, never '..', '.', a path or a non-string.
+    if "project" in config and not (
+            isinstance(config["project"], str) and PROJECT_RE.fullmatch(config["project"])):
+        errors.append("project must be lowercase kebab-case, at most 64 chars (e.g. 'full-team')")
+
     slug = config.get("slug")
-    if slug is not None and not re.match(r'^[a-z][a-z0-9-]+$', str(slug)):
+    if slug is not None and not re.fullmatch(r'[a-z][a-z0-9-]+', str(slug)):
         errors.append("slug must be lowercase kebab-case (e.g. 'full-team')")
     if not isinstance(config.get("bare_names", False), bool):
         errors.append("bare_names must be true/false")
@@ -298,6 +339,8 @@ def load_config(path: Path) -> dict:
         errors.append("`agents` must be a list")
         agents = None
 
+    seen_role: dict[str, int] = {}   # role -> first agents[] index
+    seen_out: dict[str, int] = {}    # composed Claude Code name -> first agents[] index
     for i, agent in enumerate(agents or []):
         where = f"agents[{i}]"
         if not isinstance(agent, dict):
@@ -309,24 +352,50 @@ def load_config(path: Path) -> dict:
             errors.append(f"{where}: missing required key: role")
         else:
             errors.extend(f"{where}: {p}" for p in lint_role(role))
+            # Two entries that write the same output silently overwrite each other (and the
+            # success counts then report the input, not the files).
+            if valid_role_name(role) and isinstance(agent.get("bare", False), bool):
+                if role in seen_role:
+                    errors.append(f"{where}: role '{role}' is already listed at agents[{seen_role[role]}]")
+                else:
+                    seen_role[role] = i
+                    out_name = slugged(agent_slug(agent, cc_slug(config, str(config.get("project")))), role)
+                    if out_name in seen_out:
+                        errors.append(f"{where}: composed name '{out_name}' collides with "
+                                      f"agents[{seen_out[out_name]}]")
+                    else:
+                        seen_out[out_name] = i
 
         if not isinstance(agent.get("bare", False), bool):
             errors.append(f"{where}: bare must be true/false")
 
-        for stack in agent.get("stacks", []) or []:
-            if not (STACKS_DIR / stack).is_dir():
-                errors.append(f"{where}: stack '{stack}' has no dir at {STACKS_DIR / stack}")
-
-        for skill in agent.get("skills", []) or []:
-            if not (SKILLS_DIR / skill).is_dir():
-                errors.append(f"{where}: skill '{skill}' has no dir at {SKILLS_DIR / skill}")
+        # stacks:/skills: names become read paths (STACKS_DIR / name), so each must be a plain
+        # kebab-case name (same rule as `project`) BEFORE any path is built from it.
+        for key, base, code in (("stacks", STACKS_DIR, "E_STACK_NAME"), ("skills", SKILLS_DIR, "E_SKILL_NAME")):
+            names = agent.get(key, []) or []
+            if not isinstance(names, list):
+                errors.append(f"{where}: {code}: `{key}` must be a list of names")
+                continue
+            for name in names:
+                if not (isinstance(name, str) and PROJECT_RE.fullmatch(name)):
+                    errors.append(f"{where}: {code}: {key} entry {name!r} must be lowercase "
+                                  f"kebab-case, at most 64 chars (no paths, '..' or control characters)")
+                elif (base / name).is_symlink() or base.is_symlink():
+                    # a linked stack/skill dir would read (and bundle) content from outside the repo
+                    errors.append(f"{where}: {code}: {key[:-1]} '{name}' is reached through a symlink "
+                                  f"at {base / name if (base / name).is_symlink() else base}; "
+                                  f"refusing to follow it")
+                elif not (base / name).is_dir():
+                    errors.append(f"{where}: {key[:-1]} '{name}' has no dir at {base / name}")
 
     # Roster validation: an orchestrator's roster is generated from delegates_to
     # and injected at the {{ROSTER_TABLE}} token in its AGENTS.md. Enforce that
     # the two stay in lockstep so a roster can never silently render empty (the
     # very drift this mechanism exists to prevent), and that every delegate is a
     # role actually present on this team.
-    team_roles = {a.get("role") for a in (agents or []) if isinstance(a, dict)}
+    # str only: a malformed (list/number) role is already reported above and must not crash here.
+    team_roles = {a.get("role") for a in (agents or [])
+                  if isinstance(a, dict) and isinstance(a.get("role"), str)}
     for i, agent in enumerate(agents or []):
         if not isinstance(agent, dict):
             continue
@@ -338,10 +407,10 @@ def load_config(path: Path) -> dict:
             errors.append(f"{where}: delegates_to must be a list")
             delegates = None
         for d in delegates or []:
-            if d not in team_roles:
+            if not isinstance(d, str) or d not in team_roles:
                 errors.append(f"{where}: delegates_to '{d}' is not a role on this team")
 
-        if role and role_dir(role).is_dir():
+        if valid_role_name(role) and role_dir(role).is_dir():
             agents_md = role_dir(role) / "AGENTS.md"
             has_token = agents_md.is_file() and ROSTER_TOKEN in _read(agents_md)
             if has_token and delegates is None:
@@ -381,6 +450,12 @@ def render_stack_overlay(stacks: list[str]) -> str:
         if summary:
             sections.extend(["", summary])
         for fragment in meta.get("fragments", []) or []:
+            # A fragment is read into the generated agent file: it must stay inside its own
+            # stack dir (no '..', absolute path or symlink out), else refuse rather than read.
+            if not isinstance(fragment, str) or "\0" in fragment or not (
+                    STACKS_DIR / stack / fragment).resolve().is_relative_to((STACKS_DIR / stack).resolve()):
+                sys.exit(f"E_STACK_FRAGMENT: stack {stack!r}: fragment {str(fragment)!r} "
+                         f"is outside the stack dir")
             frag_path = STACKS_DIR / stack / fragment
             if frag_path.is_file():
                 sections.extend(["", _read(frag_path).rstrip()])
@@ -434,6 +509,8 @@ def render_agent(agent: dict, slug: str | None = None) -> dict[str, str]:
     # AGENTS.md: inject the generated roster (orchestrators) then any stack overlay.
     agents_md = _layer(role, "AGENTS.md", CORE_DIR / "AGENTS_base.md")
     agents_md = inject_roster(agents_md, agent, slug=slug)
+    if is_orchestrator(role):   # orchestrators only; specialists are unchanged
+        agents_md = agents_md.rstrip() + "\n\n" + render_decision_brief() + "\n"
     overlay = render_stack_overlay(agent.get("stacks", []) or [])
     rendered["AGENTS.md"] = agents_md.rstrip() + "\n" + overlay if overlay else agents_md
     return rendered
@@ -556,6 +633,12 @@ def render_roster_table(delegates: list[str], slug: str | None = None) -> str:
     return "\n".join(rows)
 
 
+def render_decision_brief() -> str:
+    """The shared decision-brief section (_core/DECISION_BRIEF.md), comment-stripped.
+    Appended to orchestrators only: the format is how they put a choice to the human."""
+    return strip_html_comments(_read(CORE_DIR / "DECISION_BRIEF.md")).strip()
+
+
 def inject_roster(agents_md: str, agent: dict, slug: str | None = None) -> str:
     """Replace the {{ROSTER_TABLE}} token (if present) with the generated roster.
     load_config has already validated token/delegates_to symmetry, so here we
@@ -584,6 +667,8 @@ def _flattened_identity(agent: dict, slug: str | None = None) -> str:
 #         rules, "What the X is NOT"            — the role's judgement and lane
 #   keep  AGENTS.md (role layer only): every section — scope, receiving work,
 #         routing, and any hard rules / ranked priorities the role defines
+#   add   _core/DECISION_BRIEF.md, orchestrators only, after the AGENTS sections
+#         (the one shared fragment lean keeps; it is the format for asking the human)
 #   keep  SKILL.md — the operating procedure (the actual job)
 #   keep  project context, if the deploy supplies one
 #   drop  _core base scaffolding, IDENTITY nameplate, USER, MEMORY seed, boot
@@ -642,6 +727,8 @@ def render_lean_body(agent: dict, slug: str, project_context: str = "", referenc
         agents_md = inject_roster(strip_html_comments(_read(agents_path)), agent, slug=slug)
         _, agent_secs = split_sections(agents_md)
         parts += [f"{h}\n{b.strip()}" for h, b in agent_secs]
+    if is_orchestrator(role):   # after the role's AGENTS sections, before the stack overlay
+        parts.append(render_decision_brief())
     overlay = render_stack_overlay(agent.get("stacks", []) or []).strip()
     if overlay:
         parts.append(overlay)
@@ -685,6 +772,43 @@ def slugged(slug: str, role: str) -> str:
     return f"{slug}-{role}" if slug else role
 
 
+def render_subagent_body(agent: dict, slug: str, project_context: str = "") -> str:
+    """The full-profile body of a specialist subagent (everything after the frontmatter).
+
+    Shared by emit_cc_subagent and every harness agent emitter in AGENT_TARGETS, so all
+    harnesses carry one identical prompt. Extracted verbatim from emit_cc_subagent:
+    Claude output must stay byte-identical.
+    """
+    role = agent["role"]
+    title = role_meta(role).get("title") or role
+    skills = agent_skills(agent)
+    procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
+    bolt_ons = (
+        f"\n\nAdditional skills available to you: {', '.join(skills[1:])}."
+        if len(skills) > 1 else ""
+    )
+    context = f"## Project context\n\n{project_context.strip()}\n\n---\n\n" if project_context.strip() else ""
+    return (
+        f"You are the **{title}**, a specialist agent on a composed dev team. "
+        f"Adopt the identity, behaviour, and operating rules below as your own.\n\n"
+        f"{_flattened_identity(agent, slug=slug)}\n\n---\n\n"
+        f"{context}"
+        f"## Operating procedure\n\n"
+        f"{procedure}{bolt_ons}\n"
+    )
+
+
+def subagent_description(role: str) -> str:
+    """The description of a specialist subagent, identical on every harness except that Codex
+    strips control characters (TOML forbids them; role lint rejects them at the source).
+
+    A role.yaml `description:` (one line, budget-and-usage) replaces the legacy formula
+    verbatim; roles without it keep the old text byte-for-byte.
+    """
+    title = role_meta(role).get("title") or role
+    return role_description(role) or f"{title}. {role_summary(role)} Use this subagent for {role} work."
+
+
 def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
                      project_context: str = "", reference_path: str = "") -> tuple[str, str]:
     """A specialist role → one Claude Code subagent `.md` (spawnable).
@@ -696,35 +820,18 @@ def emit_cc_subagent(agent: dict, slug: str, profile: str = "full",
     """
     role = agent["role"]
     slugged_name = slugged(slug, role)
-    title = role_meta(role).get("title") or role
-    skills = agent_skills(agent)
 
     fields = {
         "name": slugged_name,
-        "description": f"{title}. {role_summary(role)} "
-                       f"Use this subagent for {role} work.",
+        "description": subagent_description(role),
         "model": model_id(resolve_model(agent)),
     }
-    tools = role_meta(role).get("tools")
+    tools = role_tools(role)
     if tools:   # a role.yaml `tools:` allowlist narrows the subagent; absent = inherits every tool
         fields = {**{k: v for k, v in fields.items() if k != "model"}, "tools": ", ".join(tools), "model": fields["model"]}
     if profile == "lean":
         return f"{slugged_name}.md", _frontmatter(fields) + "\n" + render_lean_body(agent, slug, project_context, reference_path)
-    procedure = strip_html_comments(_read(role_dir(role) / "SKILL.md"))
-    bolt_ons = (
-        f"\n\nAdditional skills available to you: {', '.join(skills[1:])}."
-        if len(skills) > 1 else ""
-    )
-    context = f"## Project context\n\n{project_context.strip()}\n\n---\n\n" if project_context.strip() else ""
-    body = (
-        f"You are the **{title}**, a specialist agent on a composed dev team. "
-        f"Adopt the identity, behaviour, and operating rules below as your own.\n\n"
-        f"{_flattened_identity(agent, slug=slug)}\n\n---\n\n"
-        f"{context}"
-        f"## Operating procedure\n\n"
-        f"{procedure}{bolt_ons}\n"
-    )
-    return f"{slugged_name}.md", _frontmatter(fields) + "\n" + body
+    return f"{slugged_name}.md", _frontmatter(fields) + "\n" + render_subagent_body(agent, slug, project_context)
 
 
 def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
@@ -744,7 +851,9 @@ def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
 
     fields = {
         "name": slugged_name,
-        "description": f"{title} orchestrator. {role_summary(role)} "
+        # An explicit role.yaml `description:` wins; otherwise the legacy formula.
+        "description": role_description(role) or
+                       f"{title} orchestrator. {role_summary(role)} "
                        f"Invoke with /{slugged_name}"
                        # Only team orchestrators (those with reports) coordinate dev-team work.
                        + (" or when coordinating a multi-step dev-team feature." if agent.get("delegates_to") else "."),
@@ -773,6 +882,298 @@ def emit_cc_skill(agent: dict, slug: str, profile: str = "full",
     return {"SKILL.md": _frontmatter(fields) + "\n" + body}
 
 
+# ── writer safety ─────────────────────────────────────────────────────────────
+# Every writer replaces a generated dir. vet_target() decides WHERE it may write (a plain
+# project name, inside --out, never a symlink); install_tree()/install_project() decide HOW
+# (render everything first, write into <target>.tmp, then swap), so a failure mid-write
+# leaves the previous tree untouched and a refusal never prints a traceback.
+
+def _remove(path: Path, strict: bool = True) -> None:
+    """Delete a file, symlink (the link only) or dir; absent is fine. strict=False swallows errors."""
+    try:
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+    except OSError:
+        if strict:
+            raise
+
+
+# The swap dirs (<target>.tmp / <target>.old, <project>.tmp / .old) sit next to user content, so
+# a crashed run's debris may only be deleted when compose.py itself made it. Ownership is a
+# sibling marker FILE (<dir>.compose-owned), written before the dir exists: the dir's own
+# contents (a previous generated tree) cannot carry one. Anything unmarked is a user's, refused.
+OWNED_SUFFIX = ".compose-owned"
+
+
+def _marker(p: Path) -> Path:
+    return p.with_name(p.name + OWNED_SUFFIX)
+
+
+def _unmark(p: Path) -> None:
+    """Remove p's marker if it is a file or link (a link is unlinked, never followed); never a dir."""
+    m = _marker(p)
+    if m.is_symlink() or m.is_file():
+        m.unlink()
+
+
+def _recheck_not_link(*paths: Path) -> None:
+    """Re-verify, immediately before the first rename, what vet_target() checked at the start:
+    the project dir and the target are still not symlinks. Narrows (does not close) the window in
+    which a same-user process could swap a link in after vetting; an fd-based swap would close it."""
+    for p in paths:
+        if p.is_symlink():
+            sys.exit(f"error: refusing to write: {p} became a symlink after it was vetted")
+
+
+def _claim(p: Path, claimed: list) -> None:
+    """About to create `p`: clear compose.py's own debris there, refuse anything else, then mark it
+    ours and record it in `claimed`. Failure cleanup releases ONLY what is in `claimed`, never a
+    path it merely finds a marker-shaped thing beside (a dir or FIFO there is not our marker)."""
+    m = _marker(p)
+    marked = m.is_symlink() or m.is_file()    # a marker that is a dir/FIFO is nobody's: refused below
+    if os.path.lexists(m) and not (m.is_symlink() or m.is_file()):
+        sys.exit(f"error: refusing to touch {m}: not a plain file")
+    if os.path.lexists(p) and not marked:
+        sys.exit(f"error: refusing to delete {p}: there is no {m.name} beside it, so it cannot be "
+                 f"told from your own files (it may be the previous output kept by an interrupted "
+                 f"run); move or remove it and re-run")
+    _remove(p)
+    _unmark(p)                                # stale marker: a link is unlinked, never followed
+    p.parent.mkdir(parents=True, exist_ok=True)   # the marker is a sibling; its dir may not exist yet
+    fd = os.open(_marker(p), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    os.close(fd)
+    claimed.append(p)
+
+
+def _release(p: Path, strict: bool = True) -> None:
+    """Delete a dir we claimed, and its marker. Only ever called on a path _claim()ed first.
+    strict=False swallows errors, but never drops the marker of a dir it failed to delete: the
+    marker is what lets the next run clear the debris instead of refusing it as a user's."""
+    try:
+        _remove(p, strict=True)
+        _unmark(p)
+    except OSError:
+        if strict:
+            raise
+
+
+IDENTITY_FILES = {"SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md", "AGENTS.md"}   # render_agent()
+
+
+def _is_own_output(entry: Path) -> bool:
+    """A top-level entry the legacy target writes: agents.yaml, or a real role dir that holds
+    only the identity files (links and anything else are not ours)."""
+    if entry.is_symlink():
+        return False
+    if entry.name == "agents.yaml":
+        return entry.is_file()
+    return entry.is_dir() and all(
+        f in IDENTITY_FILES and (entry / f).is_file() and not (entry / f).is_symlink()
+        for f in os.listdir(entry))
+
+
+def vet_target(out_dir: Path, name, sub: str | None = None) -> Path:
+    """The dir a writer will replace: <out_dir>/<name>[/<sub>]. Exits (no traceback) unless the
+    name is a plain project name, neither the project dir nor the target is a symlink or a
+    non-dir, and the resolved target lies strictly inside the resolved out_dir."""
+    if not (isinstance(name, str) and PROJECT_RE.fullmatch(name)):
+        sys.exit(f"error: refusing to write: project name {name!r} is not lowercase kebab-case")
+    if sub is not None and not TARGET_SUB_RE.fullmatch(sub):
+        sys.exit(f"error: refusing to write: target dir {sub!r} is not of the form _<target>")
+    project = out_dir / name
+    target = project / sub if sub else project
+    for p in dict.fromkeys((project, target)):
+        if p.is_symlink():
+            sys.exit(f"error: refusing to write: {p} is a symlink, not a dir")
+        if os.path.lexists(p) and not p.is_dir():
+            sys.exit(f"error: refusing to write: {p} exists and is not a dir")
+    root, resolved = out_dir.resolve(), target.resolve()
+    if resolved == root or root not in resolved.parents:
+        sys.exit(f"error: refusing to write: {target} resolves outside {out_dir}")
+    # A project name can equal some other dir that already sits under --out (e.g. `skills`).
+    # install_project() moves every top-level non-'_' entry of the project dir aside and deletes
+    # it, so only a dir that looks like compose output may be reused: every entry is a dotfile, a
+    # `_<target>` dir, the legacy target's agents.yaml, or a role dir holding only the identity
+    # files render_agent() writes. Ownership of the project dir is not otherwise recorded, hence
+    # this shape test.
+    if os.path.lexists(project):
+        for entry in sorted(os.listdir(project)):
+            if entry.startswith((".", "_")) or _is_own_output(project / entry):
+                continue
+            sys.exit(f"error: refusing to write: {project} already exists and does not look like "
+                     f"compose output (it holds {entry!r}); use another project name or --out")
+    return target
+
+
+@contextlib.contextmanager
+def _swap_lock(project: Path):
+    """Exclusive, non-blocking lock on the project dir for the length of one swap. Two runs
+    swapping the same project would otherwise clear each other's .tmp/.old and die with a
+    traceback; now the second exits with a message. The kernel drops the lock if the holder dies
+    (SIGKILL included). The dir is opened O_NOFOLLOW, so a link swapped in after vet_target()
+    is refused here too. A filesystem that cannot lock (ENOLCK/EOPNOTSUPP...) runs unlocked,
+    as it did before this lock existed."""
+    try:
+        project.mkdir(parents=True, exist_ok=True)
+        fd = os.open(project, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
+        sys.exit(f"error: refusing to write: cannot open {project} as a plain dir "
+                 f"(a symlink after it was vetted?): {exc}")
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
+                sys.exit(f"error: another compose run is writing {project}; "
+                         f"wait for it to finish and re-run")
+        yield
+    finally:
+        os.close(fd)
+
+
+def _materialise(root: Path, files: dict[str, str], dirs=()) -> None:
+    """Write {relative path: text} (plus empty `dirs`) under root. Relative paths are checked
+    to stay inside root, so a role name can never escape the dir being built."""
+    for rel in [*files, *dirs]:
+        parts = PurePosixPath(rel).parts
+        if not parts or PurePosixPath(rel).is_absolute() or any(x in ("", ".", "..") for x in parts):
+            sys.exit(f"error: refusing to write {rel!r}: path escapes {root}")
+    for rel in dirs:
+        (root / rel).mkdir(parents=True, exist_ok=True)
+    for rel, contents in files.items():
+        f = root / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(contents, encoding="utf-8")
+
+
+def install_tree(target: Path, files: dict[str, str], dirs=()) -> None:
+    """Replace `target` with the rendered tree: build in <target>.tmp, rename the old tree to
+    <target>.old, rename tmp into place, delete old. os.replace cannot replace a non-empty
+    dir, hence the two renames. Any failure restores the old tree and exits with an error.
+    Held under the project dir's lock, so concurrent runs cannot clear each other's scratch."""
+    with _swap_lock(target.parent):
+        _install_tree(target, files, dirs)
+
+
+def _install_tree(target: Path, files: dict[str, str], dirs=()) -> None:
+    tmp = target.with_name(target.name + ".tmp")
+    old = target.with_name(target.name + ".old")
+    claimed: list[Path] = []
+    committed = False                        # True once tmp is in place: old is only leftovers
+    try:
+        for leftover in (tmp, old):          # a crashed earlier run's own debris is ours to clear
+            _claim(leftover, claimed)        # (anything unmarked is a user's: refused, untouched)
+        tmp.mkdir(parents=True)
+        _materialise(tmp, files, dirs)
+        _recheck_not_link(target.parent, target)
+        try:
+            if os.path.lexists(target):
+                os.rename(target, old)
+            os.rename(tmp, target)
+        except BaseException:
+            # Whatever interrupted the swap (an OSError, Ctrl-C, SystemExit), put the previous tree
+            # back if it was moved aside and nothing took its place. If the restore itself fails,
+            # that OSError propagates and the previous tree stays in `old`, named by the handler.
+            if os.path.lexists(old) and not os.path.lexists(target):
+                os.rename(old, target)
+            raise
+        committed = True
+        _release(tmp, strict=False)          # tmp was renamed into place; this drops its marker
+        _release(old, strict=False)
+    except OSError as exc:
+        kept = _abort_swap(tmp, old, claimed, committed)
+        sys.exit(f"error: could not write {target}: {exc}"
+                 + (f" (the previous tree is kept at {kept})" if kept else ""))
+    except BaseException:
+        kept = _abort_swap(tmp, old, claimed, committed)
+        if kept:
+            print(f"error: interrupted while writing {target}: the previous tree is kept at {kept}",
+                  file=sys.stderr)
+        raise
+
+
+def _abort_swap(tmp: Path, old: Path, claimed: list, committed: bool = False) -> Path | None:
+    """Failure cleanup. Releases only paths in `claimed` (so a refused _claim() of a user's dir
+    deletes nothing). `tmp` is ours and is dropped. `old` is dropped only if it is gone or an
+    empty dir; if it still holds anything it may be the only copy of the previous output, so it
+    is kept, its marker removed (the next run then refuses it instead of clearing it), and its
+    path returned for the error message. Once `committed` the new tree is in place and `old` is
+    just the previous one being deleted: it is left alone, marker included, so the next run
+    clears whatever remains."""
+    if tmp in claimed:
+        _release(tmp, strict=False)
+    if old not in claimed or committed:
+        return None
+    if os.path.lexists(old) and not (old.is_dir() and not old.is_symlink() and not os.listdir(old)):
+        try:
+            _unmark(old)
+        except OSError:
+            pass
+        return old
+    _release(old, strict=False)
+    return None
+
+
+def install_project(project_dir: Path, files: dict[str, str]) -> None:
+    """Legacy (default target) writer: replace only this target's own output, i.e. every
+    top-level entry of the project dir NOT starting with '_'. The _<target> dirs that the other
+    targets write (and wire.sh symlinks) are never touched. New entries are built in
+    <project>.tmp first; old own-output is moved to <project>.old and put back on failure.
+    Held under the project dir's lock, like install_tree."""
+    with _swap_lock(project_dir):
+        _install_project(project_dir, files)
+
+
+def _install_project(project_dir: Path, files: dict[str, str]) -> None:
+    tmp = project_dir.with_name(project_dir.name + ".tmp")
+    old = project_dir.with_name(project_dir.name + ".old")
+    claimed: list[Path] = []
+    committed = False
+    try:
+        for leftover in (tmp, old):          # only compose.py's own marked debris is cleared
+            _claim(leftover, claimed)
+        tmp.mkdir(parents=True)
+        _materialise(tmp, files)
+        old.mkdir()
+        _recheck_not_link(project_dir)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        own = sorted(e for e in os.listdir(project_dir) if not e.startswith("_"))
+        new = sorted(os.listdir(tmp))
+        try:
+            for entry in own:
+                os.rename(project_dir / entry, old / entry)
+            for entry in new:
+                os.rename(tmp / entry, project_dir / entry)
+        except BaseException:
+            # Undo from what is on disk, not from bookkeeping an interrupt could outrun: a new
+            # entry no longer in tmp was moved in (out it goes); an old entry still in `old` and
+            # not back in the project dir is put back.
+            for entry in new:
+                if not os.path.lexists(tmp / entry):
+                    _remove(project_dir / entry, strict=False)
+            for entry in own:
+                if os.path.lexists(old / entry) and not os.path.lexists(project_dir / entry):
+                    os.rename(old / entry, project_dir / entry)
+            raise
+        committed = True
+        _release(tmp, strict=False)
+        _release(old, strict=False)
+    except OSError as exc:
+        # old is emptied by a clean rollback; if the rollback itself failed it still holds the
+        # previous own-output, which _abort_swap keeps (and names here) instead of deleting.
+        kept = _abort_swap(tmp, old, claimed, committed)
+        sys.exit(f"error: could not write {project_dir}: {exc}"
+                 + (f" (the previous output is kept at {kept})" if kept else ""))
+    except BaseException:
+        kept = _abort_swap(tmp, old, claimed, committed)
+        if kept:
+            print(f"error: interrupted while writing {project_dir}: the previous output is kept "
+                  f"at {kept}", file=sys.stderr)
+        raise
+
+
 def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
     """Emit the team as Claude Code artifacts under <out_dir>/<name>/_claude-code/.
 
@@ -782,34 +1183,271 @@ def write_claude_code(name: str, config: dict, out_dir: Path) -> Path:
     Slug defaults to the project name when not set in the config.
     """
     slug = cc_slug(config, name)
-    cc_dir = (out_dir / name / "_claude-code")
-    if cc_dir.is_symlink():
-        raise ValueError(f"refusing to write: {cc_dir} is a symlink, not a dir")
-    if cc_dir.exists():
-        shutil.rmtree(cc_dir)
-    (cc_dir / "skills").mkdir(parents=True)
-    (cc_dir / "agents").mkdir(parents=True)
-
+    cc_dir = vet_target(out_dir, name, "_claude-code")
+    # Render everything first; nothing on disk changes until install_tree swaps it in.
+    files: dict[str, str] = {}
     for agent in config["agents"]:
         role = agent["role"]
         aslug = agent_slug(agent, slug)
         slugged_name = slugged(aslug, role)
         if is_orchestrator(role):
-            skill_dir = cc_dir / "skills" / slugged_name
-            skill_dir.mkdir()
             for relpath, contents in emit_cc_skill(agent, aslug).items():
-                (skill_dir / relpath).write_text(contents, encoding="utf-8")
+                files[f"skills/{slugged_name}/{relpath}"] = contents
         else:
             filename, contents = emit_cc_subagent(agent, aslug)
-            (cc_dir / "agents" / filename).write_text(contents, encoding="utf-8")
+            files[f"agents/{filename}"] = contents
+    install_tree(cc_dir, files, dirs=("skills", "agents"))
     return cc_dir
+
+
+# ── generic harness agent writer ──────────────────────────────────────────────
+# Per-harness agent emitters (Codex, OpenCode, Gemini CLI, ...) register here as
+# {target: emit_fn}. emit_fn(agent, slug) -> (filename, contents) for ONE specialist,
+# built on render_subagent_body() so every harness carries the same prompt. Empty
+# until a harness group registers its emitter; --target choices are built from it.
+AGENT_TARGETS: dict[str, Callable[[dict, str], tuple[str, str]]] = {}
+
+
+def write_harness_agents(target: str, name: str, config: dict, out_dir: Path) -> Path:
+    """Emit the team's specialists for one harness under <out_dir>/<name>/_<target>/agents/.
+
+    Orchestrators are skipped (they are session skills, not spawnable agents).
+    Idempotent: the _<target> dir is wiped and rewritten each run, which is what
+    prevents orphaned files when a role is removed or renamed.
+    """
+    emit = AGENT_TARGETS[target]
+    slug = cc_slug(config, name)
+    target_dir = vet_target(out_dir, name, f"_{target}")
+    # Run every emit BEFORE anything is touched so an emitter error leaves the old tree
+    # untouched and writes nothing.
+    rendered = [
+        emit(agent, agent_slug(agent, slug))
+        for agent in config["agents"]
+        if not is_orchestrator(agent["role"])
+    ]
+    install_tree(target_dir, {f"agents/{filename}": contents for filename, contents in rendered},
+                 dirs=("agents",))
+    return target_dir
+
+
+# ── Codex agent emitter ───────────────────────────────────────────────────────
+# Codex CLI reads ~/.codex/agents/<name>.toml: `name`, `description` and
+# `developer_instructions` are required; `name` (not the filename) is the identity.
+# The stdlib has no TOML writer, so strings are escaped by hand; the output is checked
+# by round-tripping through tomllib (tests/test_harness_formats.bats).
+def _toml_clean(s: str) -> str:
+    """Drop the control characters TOML forbids in strings (everything below U+0020 except
+    tab and newline, plus DEL), so a stray CR or NUL cannot make the file invalid."""
+    return "".join(c for c in s if c in "\n\t" or (c >= " " and c != "\x7f"))
+
+
+def toml_basic(s: str) -> str:
+    """A TOML single-line basic string literal, including the quotes."""
+    out = _toml_clean(s).replace("\\", "\\\\").replace('"', '\\"')
+    return '"' + out.replace("\n", "\\n").replace("\t", "\\t") + '"'
+
+
+def toml_multiline(s: str) -> str:
+    """A TOML multi-line basic string literal, including the delimiters.
+
+    Only `\\` and runs of three quotes need escaping inside; trailing quotes are escaped
+    too, since they would otherwise merge with the closing delimiter. The newline right
+    after the opening delimiter is trimmed by TOML, so the parsed value equals `s`.
+    """
+    cleaned = _toml_clean(s)
+    # Peel trailing quotes off BEFORE escaping, so the escapes below cannot be re-split.
+    body = cleaned.rstrip('"')
+    trailing = len(cleaned) - len(body)
+    out = body.replace("\\", "\\\\").replace('"""', '\\"\\"\\"') + '\\"' * trailing
+    return '"""\n' + out + '"""'
+
+
+def emit_codex_agent(agent: dict, slug: str) -> tuple[str, str]:
+    """A specialist role → one Codex subagent `<name>.toml`. Returns (filename, contents).
+
+    Key order is name, description, sandbox_mode (only when the role has a `tools:` allowlist
+    with neither Edit nor Write), developer_instructions. `model` is never written, so Codex
+    uses the session's model.
+
+    `sandbox_mode = "read-only"` is a best-effort default, NOT an enforced least-privilege
+    control: a Codex subagent inherits the parent session's sandbox, and `--yolo` or
+    `/permissions` override the agent file. Codex also cannot express "no Bash" (see the
+    warning below). While a read-only sandbox does apply it blocks writes through Bash too,
+    which Claude's allowlist does not.
+    """
+    role = agent["role"]
+    name = slugged(slug, role)
+    lines = [f"name = {toml_basic(name)}", f"description = {toml_basic(subagent_description(role))}"]
+    tools = role_tools(role)
+    if tools and not {"Edit", "Write"} & set(tools):
+        lines.append('sandbox_mode = "read-only"')
+    elif tools and "Bash" not in tools:
+        # Edit or Write but no Bash: Claude gives this role no shell, Codex cannot say so.
+        print(f"warning: role {role} gets a shell on Codex (its allowlist has no Bash, "
+              "but Codex cannot express that)", file=sys.stderr)
+    lines.append(f"developer_instructions = {toml_multiline(render_subagent_body(agent, slug))}")
+    return f"{name}.toml", "\n".join(lines) + "\n"
+
+
+AGENT_TARGETS["codex"] = emit_codex_agent
+
+
+# ── OpenCode agent emitter ────────────────────────────────────────────────────
+# OpenCode reads ~/.config/opencode/agents/<name>.md (the filename is the agent id):
+# YAML frontmatter with a required `description`, `mode` and an optional `permission` map,
+# then the system prompt as the body. The frontmatter is written with PyYAML via
+# _frontmatter(), so descriptions containing ': ' or quotes are quoted correctly.
+def emit_opencode_agent(agent: dict, slug: str) -> tuple[str, str]:
+    """A specialist role → one OpenCode subagent `<name>.md`. Returns (filename, contents).
+
+    Key order is description, mode, permission. `mode` is always `subagent` (orchestrators
+    are skills, never agent files). `permission` is written only when the role has a `tools:`
+    allowlist AND that allowlist denies something; keys, in order:
+      edit: deny     if neither Edit nor Write is listed
+      bash: deny     if Bash is absent
+      webfetch: deny if neither WebFetch nor WebSearch is listed
+    Absent keys inherit OpenCode's default, so an allowlist becomes a PARTIAL denylist of
+    edit, bash and webfetch only: every other tool (task, MCP servers, ...) keeps the default
+    and the role is not read-only. `model` is never written (model ids are
+    provider-specific; inheriting the session model is always valid) and neither is the
+    deprecated `tools` key.
+    """
+    role = agent["role"]
+    name = slugged(slug, role)
+    fields: dict = {"description": subagent_description(role), "mode": "subagent"}
+    tools = role_tools(role)
+    if tools:
+        allowed = set(tools)
+        permission = {}
+        if not {"Edit", "Write"} & allowed:
+            permission["edit"] = "deny"
+        if "Bash" not in allowed:
+            permission["bash"] = "deny"
+        if not {"WebFetch", "WebSearch"} & allowed:
+            permission["webfetch"] = "deny"
+        if permission:   # an allowlist that denies nothing needs no block
+            fields["permission"] = permission
+    # Blank line after the fence, as the Claude subagent has it.
+    return f"{name}.md", _frontmatter(fields) + "\n" + render_subagent_body(agent, slug)
+
+
+AGENT_TARGETS["opencode"] = emit_opencode_agent
+
+
+# ── Gemini CLI agent emitter ──────────────────────────────────────────────────
+# Gemini CLI reads ~/.gemini/agents/<name>.md: YAML frontmatter `name` (lowercase, digits,
+# `-`, `_`), `description`, optional `tools`, then the Markdown body as the system prompt.
+# `tools` is a restriction list in Gemini's own tool names, so a Claude allowlist is mapped
+# name by name. `model` is never written (default `inherit`: the session's model).
+GEMINI_TOOLS: dict[str, list[str]] = {
+    "Read": ["read_file", "read_many_files"],
+    "Grep": ["grep_search"],
+    "Glob": ["glob", "list_directory"],
+    "Bash": ["run_shell_command"],
+    "Edit": ["replace"],
+    "Write": ["write_file"],
+    "WebFetch": ["web_fetch"],
+    "WebSearch": ["google_web_search"],
+}
+
+
+# The tool names a role.yaml `tools:` allowlist may use: exactly the ones GEMINI_TOOLS maps, so
+# every harness can express (or knowingly narrow) each of them. Case-sensitive.
+KNOWN_TOOLS = frozenset(GEMINI_TOOLS)
+
+
+def check_tools(role: str, tools) -> None:
+    """Exit E_TOOL_UNMAPPED unless `tools` is a non-empty list of KNOWN_TOOLS names.
+
+    Called by every emit_*_agent. An unknown name used to be ignored on Codex and OpenCode and
+    abort the whole Gemini project; an empty or malformed list used to fail OPEN (no allowlist,
+    every tool inherited). load_config's lint catches these first on a normal compose
+    (E_TOOL_UNKNOWN / E_FIELD_TYPE); this guards callers that reach an emitter directly."""
+    if not isinstance(tools, list) or not tools:
+        sys.exit(f"E_TOOL_UNMAPPED: {role}: 'tools' must be a non-empty list of tool names, got {tools!r}")
+    for tool in tools:
+        if not (isinstance(tool, str) and tool in KNOWN_TOOLS):
+            sys.exit(f"E_TOOL_UNMAPPED: {role}: tool {tool!r} is not a known tool "
+                     f"(known: {', '.join(sorted(KNOWN_TOOLS))})")
+
+
+def role_tools(role: str):
+    """The role's validated `tools:` allowlist, or None when it has none (inherits every tool)."""
+    meta = role_meta(role)
+    if "tools" not in meta:
+        return None
+    check_tools(role, meta["tools"])
+    return meta["tools"]
+
+
+def gemini_tools(role: str, tools: list[str]) -> list[str]:
+    """Map a role's Claude tool allowlist to Gemini tool names, in the role's listed order,
+    first occurrence wins. A tool with no mapping is a hard error (E_TOOL_UNMAPPED): silently
+    dropping it would widen or narrow the role's powers without anyone noticing. Gemini's
+    `tools` narrows what a subagent may call; a role that lists Bash keeps run_shell_command,
+    so the list is not a read-only guarantee."""
+    mapped: list[str] = []
+    for tool in tools:
+        if tool not in GEMINI_TOOLS:
+            sys.exit(f"E_TOOL_UNMAPPED: {role}: tool {tool!r} has no Gemini CLI mapping "
+                     f"(known: {', '.join(GEMINI_TOOLS)})")
+        mapped += [g for g in GEMINI_TOOLS[tool] if g not in mapped]
+    return mapped
+
+
+def emit_gemini_agent(agent: dict, slug: str) -> tuple[str, str]:
+    """A specialist role → one Gemini CLI subagent `<name>.md`. Returns (filename, contents).
+
+    Frontmatter is name, description, then `tools` only when the role has an allowlist (a
+    role without one inherits every tool, as on Claude). `tools` is a YAML block list; the
+    docs say only "tool names", so a list is the natural form (group 9 confirms on a real
+    install). Runs before write_harness_agents wipes anything, so an unmapped tool exits
+    with the old tree intact.
+    """
+    role = agent["role"]
+    name = slugged(slug, role)
+    fields = {"name": name, "description": subagent_description(role)}
+    tools = role_tools(role)
+    if tools:
+        fields["tools"] = gemini_tools(role, tools)
+    return f"{name}.md", _frontmatter(fields) + "\n" + render_subagent_body(agent, slug)
+
+
+AGENT_TARGETS["gemini-cli"] = emit_gemini_agent
+
+
+# ── portable persona writer ──────────────────────────────────────────────────
+# One plain-Markdown file per role (orchestrators included) for pasting into a chat-UI
+# Project. Not a harness agent: no frontmatter, no tools, no permissions, so it does not
+# go through AGENT_TARGETS. The lean body (empty slug, no project context) carries no
+# nameplate, boot sequence or memory plumbing, hence no machine or operator values and
+# no user-config override is needed.
+def write_portable(name: str, config: dict, out_dir: Path) -> Path:
+    """Emit <out_dir>/<name>/_portable/<role>.md for every role in the config.
+
+    Each file is `# <Title>` + blank line + render_lean_body(agent, ""). Idempotent: the
+    _portable dir is wiped and rewritten each run, so a removed role leaves no orphan.
+    """
+    target_dir = vet_target(out_dir, name, "_portable")
+    # Render everything BEFORE anything is touched so a render error leaves the old tree untouched.
+    # The portable export is public output: it must not name the private repo or its layout.
+    # Role sources keep the real path (the agents need it); only this export swaps in a
+    # placeholder the reader can map to their own private directory.
+    rendered = [
+        (f"{agent['role']}.md",
+         (f"# {role_meta(agent['role']).get('title') or agent['role']}\n\n"
+          + render_lean_body(agent, "")).replace("~/.the-grid-private/", "<private-dir>/"))
+        for agent in config["agents"]
+    ]
+    install_tree(target_dir, dict(rendered))
+    return target_dir
 
 
 # ── paperclip emitter ─────────────────────────────────────────────────────────
 # A third emit target: render a deploy-ready manifest for a live Paperclip
 # instance. Pure rendering only — no network calls, no talking to a Paperclip
 # API. A later deploy script (agent-factory/scripts/deploy_paperclip.py, see
-# docs/openclaw-paperclip-targets-plan.md Session A2) walks this manifest and
+# agent-factory/openclaw/README.md Session A2) walks this manifest and
 # does the actual POST/PATCH.
 #
 # The Paperclip roster is a curated subset of the team, fixed by the plan doc:
@@ -830,8 +1468,14 @@ def paperclip_roster(config: dict) -> list[dict]:
     leaf role like product-manager). Returns the agent dicts in their original
     compose-config order (not yet topological — see topological_roster)."""
     by_role = {a["role"]: a for a in config["agents"] if isinstance(a, dict) and a.get("role")}
+    # A config without the apex, or with none of the leads, has no Paperclip roster: say so
+    # instead of a KeyError. A lead that is merely absent is skipped.
+    leads = [lead for lead in PAPERCLIP_LEAD_ROLES if lead in by_role]
+    if PAPERCLIP_APEX_ROLE not in by_role or not leads:
+        sys.exit(f"error: paperclip needs role {PAPERCLIP_APEX_ROLE} and at least one of "
+                 f"{', '.join(PAPERCLIP_LEAD_ROLES)} in this config")
     roster_roles = {PAPERCLIP_APEX_ROLE}
-    for lead in PAPERCLIP_LEAD_ROLES:
+    for lead in leads:
         roster_roles.add(lead)
         roster_roles.update(by_role[lead].get("delegates_to") or [])
     return [a for a in config["agents"] if a.get("role") in roster_roles]
@@ -921,26 +1565,19 @@ def write_paperclip(name: str, config: dict, out_dir: Path) -> Path:
     parent_map = paperclip_parent_map(config)
     ordered = topological_roster(roster, parent_map)
 
-    pc_dir = out_dir / name / "_paperclip"
-    if pc_dir.is_symlink():
-        raise ValueError(f"refusing to write: {pc_dir} is a symlink, not a dir")
-    if pc_dir.exists():
-        shutil.rmtree(pc_dir)
-    pc_dir.mkdir(parents=True)
-
+    pc_dir = vet_target(out_dir, name, "_paperclip")
     manifest = [paperclip_payload(agent, parent_map, slug) for agent in ordered]
-    (pc_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    install_tree(pc_dir, {
+        "manifest.json": json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"})
     return pc_dir
 
 
 # ── openclaw-native emitter ───────────────────────────────────────────────────
-# A fourth emit target: render the Guide-shaped 9-file workspace set (see
+# A fourth emit target: render the 9-file workspace set (see
 # openclaw/README.md, Session B1) for the curated 5 grid orchestrator roles
 # named in openclaw/roster.json. Pure rendering only — no docker exec, no
 # writes under ~/.openclaw (that's agent-factory/scripts/deploy_openclaw.sh,
-# Session B3, per docs/openclaw-paperclip-targets-plan.md).
+# Session B3, per agent-factory/openclaw/README.md).
 #
 # Named "openclaw-native" (not "openclaw") because that name is already taken
 # by the legacy default target (write_project below) — the bare 5-file dump
@@ -1019,19 +1656,12 @@ def write_openclaw(name: str, config: dict, out_dir: Path) -> Path:
     slug = config.get("slug") or name
     by_role = {a["role"]: a for a in config["agents"] if isinstance(a, dict) and a.get("role")}
 
-    oc_dir = out_dir / name / "_openclaw"
-    if oc_dir.is_symlink():
-        raise ValueError(f"refusing to write: {oc_dir} is a symlink, not a dir")
-    if oc_dir.exists():
-        shutil.rmtree(oc_dir)
-    oc_dir.mkdir(parents=True)
-
+    oc_dir = vet_target(out_dir, name, "_openclaw")
+    files: dict[str, str] = {}
     for role in openclaw_roster_roles(config):
-        role_dir = oc_dir / role
-        role_dir.mkdir()
         for filename, contents in render_openclaw_role(by_role[role], slug).items():
-            (role_dir / filename).write_text(contents, encoding="utf-8")
-
+            files[f"{role}/{filename}"] = contents
+    install_tree(oc_dir, files)
     return oc_dir
 
 
@@ -1040,25 +1670,19 @@ def write_openclaw(name: str, config: dict, out_dir: Path) -> Path:
 def write_project(name: str, config: dict, out_dir: Path) -> Path:
     """Write the rendered team under <out_dir>/<name>/. Idempotent.
 
-    The project dir is generated output, so it is wiped and rewritten each run —
-    the result reflects the config exactly, and a re-run with an unchanged config
-    produces byte-identical files. The wipe is guarded to a real directory under
-    out_dir (never a symlink) for safety.
+    This target's own output (every top-level entry not starting with '_') is replaced each
+    run — the result reflects the config exactly, and a re-run with an unchanged config
+    produces byte-identical files. The _<target> dirs the other targets write beside it
+    (and that wire.sh symlinks into ~/.claude) are never touched. The target is vetted to
+    a real dir under out_dir (never a symlink) first; see vet_target / install_project.
     """
-    project_dir = out_dir / name
-    if project_dir.is_symlink():
-        raise ValueError(f"refusing to write: {project_dir} is a symlink, not a dir")
-    if project_dir.exists():
-        shutil.rmtree(project_dir)
-    project_dir.mkdir(parents=True)
-
+    project_dir = vet_target(out_dir, name)
+    files: dict[str, str] = {}
     for agent in config["agents"]:
-        agent_dir = project_dir / agent["role"]
-        agent_dir.mkdir()
         for filename, contents in render_agent(agent).items():
-            (agent_dir / filename).write_text(contents, encoding="utf-8")
-
-    (project_dir / "agents.yaml").write_text(render_agents_yaml(config), encoding="utf-8")
+            files[f"{agent['role']}/{filename}"] = contents
+    files["agents.yaml"] = render_agents_yaml(config)
+    install_project(project_dir, files)
     return project_dir
 
 
@@ -1067,12 +1691,19 @@ def write_project(name: str, config: dict, out_dir: Path) -> Path:
 # config. Every finding carries a stable code so tests (and humans grepping CI
 # output) can match the exact failure mode, and every finding names the file.
 ROLE_YAML_KEYS = {"name", "title", "summary", "owns", "default_model", "cron_model",
-                  "base_skills", "orchestrator", "tools", "unattended", "model_rationale"}
+                  "base_skills", "orchestrator", "tools", "unattended", "model_rationale",
+                  "description"}
 ROLE_MODELS = {"opus", "sonnet", "haiku", "fable"}
 
 
 def lint_role(role: str) -> list[str]:
     """All problems with one role's source files, as 'CODE: role/file: detail'."""
+    # Checked before any path is built: a name like '../x' must never be looked up, and a name the
+    # harnesses reject (upper case, spaces) must not compose and fail later.
+    if not valid_role_name(role):
+        shown = role if isinstance(role, str) and role.isprintable() else repr(role)
+        return [f"E_ROLE_NAME: {shown}: role names are lowercase letters, digits, '-' and '_', "
+                "start with a letter or digit, at most 64 chars"]
     rdir = role_dir(role)
     if not rdir.is_dir():
         return [f"E_ROLE_MISSING: {role}: no directory at {rdir}"]
@@ -1121,10 +1752,23 @@ def lint_role(role: str) -> list[str]:
                     f"default_model {meta.get('default_model')!r} differs from the {DEFAULT_MODEL!r} default: say why in 'model_rationale'")
             if not isinstance(meta.get("unattended", False), bool):
                 bad("E_FIELD_TYPE", "role.yaml", "'unattended' must be true/false")
+            # Text that reaches generated files: a control character other than tab/newline is
+            # invalid in TOML (Codex strips it, so output would differ per harness) and has no
+            # place in a one-line description.
+            for key in ("description", "title", "summary"):
+                if isinstance(meta.get(key), str) and any(
+                        (c < " " and c not in "\t\n") or c == "\x7f" for c in meta[key]):
+                    bad("E_TEXT_CONTROL", "role.yaml",
+                        f"'{key}' contains a control character (only tab and newline are allowed)")
             if "tools" in meta:
                 tools = meta["tools"]
                 if not (isinstance(tools, list) and tools and all(isinstance(t, str) and t.strip() and "," not in t for t in tools)):
                     bad("E_FIELD_TYPE", "role.yaml", "'tools' must be a non-empty list of tool names (no commas)")
+                else:
+                    for t in tools:
+                        if t not in KNOWN_TOOLS:
+                            bad("E_TOOL_UNKNOWN", "role.yaml",
+                                f"tool {t!r} is not one of: {', '.join(sorted(KNOWN_TOOLS))} (case-sensitive)")
                 if meta.get("orchestrator", False):
                     bad("E_TOOLS_ON_ORCHESTRATOR", "role.yaml",
                         "'tools' only narrows subagents; orchestrators deploy as skills and would silently ignore it")
@@ -1135,6 +1779,36 @@ def lint_role(role: str) -> list[str]:
             if not (f.name == "AGENTS.md" and tok == "{{ROSTER_TABLE}}"):
                 bad("E_TOKEN_UNRESOLVED", f.name, f"unresolved placeholder {tok}")
     return out
+
+
+DESCRIPTION_WARN_CHARS = 250   # per_entry_max_chars in docs/budget-target.json
+
+
+def lint_warnings(role: str) -> list[str]:
+    """Non-fatal findings for one role: printed by --lint-roles, never counted as problems."""
+    if not valid_role_name(role) or not role_dir(role).is_dir():
+        return []
+    try:
+        desc = subagent_description(role)
+    except Exception:   # a malformed role.yaml is reported by lint_role, not here
+        return []
+    if len(desc) > DESCRIPTION_WARN_CHARS:
+        return [f"W_DESCRIPTION_LONG: {role}/role.yaml: description is {len(desc)} chars "
+                f"(over {DESCRIPTION_WARN_CHARS}, the per-entry budget cap)"]
+    return []
+
+
+def lint_decision_brief(path: Path = CORE_DIR / "DECISION_BRIEF.md") -> list[str]:
+    """Problems with the shared decision-brief fragment: missing, over 1500 bytes, or
+    without the `D<N>` label that the format (and the evals) key on."""
+    if not path.is_file():
+        return [f"E_DECISION_BRIEF: {path.name}: missing"]
+    data = path.read_bytes()
+    if len(data) > 1500:
+        return [f"E_DECISION_BRIEF: {path.name}: {len(data)} bytes, over the 1500 cap"]
+    if "D<N>" not in data.decode("utf-8", errors="replace"):
+        return [f"E_DECISION_BRIEF: {path.name}: lacks the D<N> label"]
+    return []
 
 
 def lint_models() -> list[str]:
@@ -1208,7 +1882,12 @@ def lint_authoring(role: str) -> list[str]:
     if not agents.is_file():
         return [f"E_SECTION_MISSING: {role}/AGENTS.md: required for authored roles"]
     text = agents.read_text(encoding="utf-8")
-    meta = role_meta(role)
+    try:
+        meta = role_meta(role)
+    except yaml.YAMLError:
+        meta = {}   # lint_role already reports E_YAML_PARSE for this file; don't crash a second time
+    if not isinstance(meta, dict):
+        meta = {}   # a string/list role.yaml: lint_role reports E_YAML_SHAPE; don't call .get on it
     orchestrator = bool(meta.get("orchestrator", False))   # orchestrator variant: gates others' work; no 'Receiving work', bigger cap
     max_bytes = ORCHESTRATOR_MAX_BYTES if orchestrator else AGENTS_MAX_BYTES
     if len(text.encode("utf-8")) > max_bytes:
@@ -1256,16 +1935,46 @@ def all_roles() -> list[str]:
 
 
 # ── drift check ───────────────────────────────────────────────────────────────
-def _tree(root: Path) -> dict[str, bytes]:
-    """{relative path: bytes} for every file under root ({} if root is absent)."""
+def _tree(root: Path, skip_top: str = "") -> dict[str, bytes]:
+    """{relative path: bytes} for everything under root ({} if root is absent).
+
+    Beyond regular files: a symlink is recorded as `symlink -> <target>` (never followed), an
+    empty dir as `<rel>/` and any other special file as a marker, so diff_trees can report them;
+    a symlinked root is a single `.` entry. `skip_top` drops top-level entries with that prefix
+    (the legacy target ignores its siblings' `_<target>` dirs).
+    """
+    if root.is_symlink():
+        return {".": b"symlink -> " + os.readlink(root).encode()}
     if not root.is_dir():
         return {}
-    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+    out: dict[str, bytes] = {}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        here = Path(dirpath)
+        if here == root and skip_top:
+            dirnames[:] = [d for d in dirnames if not d.startswith(skip_top)]
+            filenames = [f for f in filenames if not f.startswith(skip_top)]
+        dirnames.sort()
+        if here != root and not dirnames and not filenames:
+            out[f"{here.relative_to(root)}/"] = b"empty dir"
+        for d in dirnames:                       # a symlinked dir is listed here, not descended
+            if (here / d).is_symlink():
+                out[str((here / d).relative_to(root))] = b"symlink -> " + os.readlink(here / d).encode()
+        for f in sorted(filenames):
+            path = here / f
+            rel = str(path.relative_to(root))
+            mode = os.lstat(path).st_mode
+            if stat.S_ISLNK(mode):
+                out[rel] = b"symlink -> " + os.readlink(path).encode()
+            elif stat.S_ISREG(mode):
+                out[rel] = path.read_bytes()
+            else:
+                out[rel] = b"special file"
+    return out
 
 
-def diff_trees(expected: Path, actual: Path) -> list[str]:
+def diff_trees(expected: Path, actual: Path, skip_top: str = "") -> list[str]:
     """Human-readable differences between a freshly rendered tree and the one on disk."""
-    exp, act = _tree(expected), _tree(actual)
+    exp, act = _tree(expected), _tree(actual, skip_top)
     problems = [f"missing   {rel}" for rel in sorted(exp.keys() - act.keys())]
     problems += [f"unexpected {rel}" for rel in sorted(act.keys() - exp.keys())]
     problems += [f"stale     {rel}" for rel in sorted(exp.keys() & act.keys()) if exp[rel] != act[rel]]
@@ -1280,13 +1989,14 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=PROJECTS_DIR, help="output dir")
     parser.add_argument(
         "--target",
-        choices=["openclaw", "claude-code", "paperclip", "openclaw-native"],
+        choices=["openclaw", "claude-code", "paperclip", "openclaw-native", "portable", *sorted(AGENT_TARGETS)],
         default="openclaw",
         help="emit shape: openclaw = 5 files + agents.yaml (default, legacy bare dump); "
              "claude-code = CC skills (orchestrators) + subagents (specialists); "
              "paperclip = _paperclip/manifest.json for the curated Paperclip roster; "
              "openclaw-native = _openclaw/<role>/ 9-file workspace set for roster.json's "
-             "5 orchestrator roles (whichever are present in this config)",
+             "5 orchestrator roles (whichever are present in this config); "
+             "portable = _portable/<role>.md plain-Markdown persona per role, orchestrators included",
     )
     parser.add_argument(
         "--lint-roles", action="store_true",
@@ -1308,6 +2018,10 @@ def main() -> None:
         problems = [p for r in all_roles() for p in lint_role(r)]
         problems += [p for r in sorted(authored_roles() & set(all_roles())) for p in lint_authoring(r)]
         problems += lint_models()
+        problems += lint_decision_brief()
+        for r in all_roles():
+            for w in lint_warnings(r):
+                print(w, file=sys.stderr)
         for p in problems:
             print(p, file=sys.stderr)
         print(f"lint-roles: {len(all_roles())} roles, {len(problems)} problem(s)")
@@ -1328,11 +2042,14 @@ def main() -> None:
         writers = {
             "claude-code": write_claude_code, "paperclip": write_paperclip,
             "openclaw-native": write_openclaw, "openclaw": write_project,
+            "portable": write_portable,
+            **{t: functools.partial(write_harness_agents, t) for t in AGENT_TARGETS},
         }
         with tempfile.TemporaryDirectory() as tmp:
             rendered = writers[args.target](name, config, Path(tmp))
             on_disk = args.out / rendered.relative_to(tmp)
-            problems = diff_trees(rendered, on_disk)
+            # The legacy target shares <project>/ with its siblings' _<target> dirs: ignore them.
+            problems = diff_trees(rendered, on_disk, skip_top="_" if args.target == "openclaw" else "")
         if problems:
             print(f"STALE '{name}' ({args.target}): {on_disk}", file=sys.stderr)
             for line in problems:
@@ -1363,6 +2080,22 @@ def main() -> None:
             if missing:
                 print(f"[dry-run] not in this compose config, skipped: {', '.join(missing)}")
             return
+        if args.target == "portable":
+            for agent in agents:
+                print(f"  - {agent['role']:<20} -> _portable/{agent['role']}.md")
+            print(f"[dry-run] {len(agents)} personas -> _portable/")
+            return
+        if args.target in AGENT_TARGETS:
+            # Harness agent target: specialists only, one file each (orchestrators are skipped).
+            n = 0
+            for agent in agents:
+                if is_orchestrator(agent["role"]):
+                    continue
+                filename, _ = AGENT_TARGETS[args.target](agent, agent_slug(agent, cc_slug(config, name)))
+                print(f"  - {agent['role']:<20} -> _{args.target}/agents/{filename}")
+                n += 1
+            print(f"[dry-run] {n} specialists -> _{args.target}/agents/")
+            return
         for agent in agents:
             role = agent["role"]
             if args.target == "claude-code":
@@ -1380,12 +2113,25 @@ def main() -> None:
     if args.target == "claude-code":
         cc_dir = write_claude_code(name, config, args.out)
         slug = cc_slug(config, name)
-        print(f"composed '{name}' (claude-code): {len(agents)} agents -> {cc_dir}")
+        # Counts come from what was written, not from the input list.
+        n_cc = sum(len(os.listdir(cc_dir / sub)) for sub in ("skills", "agents"))
+        print(f"composed '{name}' (claude-code): {n_cc} agents -> {cc_dir}")
         for agent in agents:
             role = agent["role"]
             slugged_name = slugged(agent_slug(agent, slug), role)
             shape = "skill" if is_orchestrator(role) else "subagent"
             print(f"  - {slugged_name} ({resolve_model(agent)}) -> CC {shape}")
+        return
+
+    if args.target in AGENT_TARGETS:
+        ha_dir = write_harness_agents(args.target, name, config, args.out)
+        n = len(list((ha_dir / "agents").iterdir()))
+        print(f"composed '{name}' ({args.target}): {n} specialists -> {ha_dir}/agents/")
+        return
+
+    if args.target == "portable":
+        pp_dir = write_portable(name, config, args.out)
+        print(f"composed '{name}' (portable): {len(os.listdir(pp_dir))} personas -> {pp_dir}")
         return
 
     if args.target == "paperclip":
@@ -1410,7 +2156,8 @@ def main() -> None:
         return
 
     project_dir = write_project(name, config, args.out)
-    print(f"composed '{name}': {len(agents)} agents -> {project_dir}")
+    n_roles = sum(1 for e in os.listdir(project_dir) if (project_dir / e).is_dir() and not e.startswith("_"))
+    print(f"composed '{name}': {n_roles} agents -> {project_dir}")
     for agent in agents:
         print(f"  - {agent['role']} ({resolve_model(agent)})  skills: {', '.join(agent_skills(agent))}")
 

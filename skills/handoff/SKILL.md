@@ -4,7 +4,7 @@ description: Compact the current conversation into a handoff document for anothe
 argument-hint: "What will the next session be used for?"
 ---
 
-## Session Handoff file (Gareth's SOP)
+## Session handoff file
 
 Write a handoff document summarising the current conversation so a fresh agent can continue the work.
 
@@ -12,11 +12,11 @@ Write a handoff document summarising the current conversation so a fresh agent c
 
 **Filename:** `YYYY-MM-DD-<machine>-<slug>-handoff.md` where:
 - `YYYY-MM-DD` is today's date
-- `<machine>` is the output of `hostname -s` (e.g. `wilderness`, `guide-server`, `forge`, `scout`)
+- `<machine>` is the output of `hostname -s` (e.g. `my-laptop`, `build-box`)
 - `<slug>` is a 2-4 word kebab-case summary of the session topic (e.g. `machine-overlays`, `agent-factory-roster`)
 - `-handoff` is appended to make the file self documenting
 
-**Save location:** follow the Document locations reference below. Read the file before writing (create the directory if it doesn't exist).
+**Save location:** the location resolved by the Document locations reference below (ask before creating the directory).
 
 **Rules:**
 - Do not duplicate content already captured in commits, diffs, PRDs, plans, or ADRs — reference them by path or URL instead
@@ -25,7 +25,7 @@ Write a handoff document summarising the current conversation so a fresh agent c
 
 ---
 
-## Session context file (Gareth's SOP)
+## Session context file
 
 Also write a context file using today's actual date.
 **Template:** load `context-template.md` from this skill's base directory and fill it in.
@@ -36,23 +36,28 @@ Also write a context file using today's actual date.
 
 ## Document locations reference
 
-Determine save location by matching the current working directory path:
+Default: save to `LOGS/` — ask before creating it if it doesn't exist.
 
-| Project | Location |
-|---------|----------|
-| `guide-build` | `Logs/` |
-| `guide-core` | `Logs/` if it exists, otherwise project root |
-| `guide-engine` | `context/` |
-| Obsidian vault (`Gareth_SovereignOS`) | `LOGS/` |
-| All others | `LOGS/` — ask before creating if it doesn't exist |
+Optional per-project overrides: if `handoff-locations.md` exists in the private dir
+(`$GRID_PRIVATE_DIR`, default `~/.the-grid-private/`), read its table first (rows: `| directory-name-or-glob | location |`).
+If the file is absent or no row matches, use the default above.
 
-**Case handling:** match case-insensitively — if a directory matching the
-table's name already exists on disk in any casing (`logs`, `Logs`, `LOGS`),
-write there as-is. Do not compare on-disk casing against git's tracked
-casing, do not check `core.ignorecase`, do not investigate or flag a
-mismatch — that's out of scope for this skill and wastes tokens. Only
-create a new directory (using the table's casing) when nothing matching
-exists at all.
+**Table rules** (the unattended auto-handoff worker applies the same ones):
+- The first column matches the working directory's basename, or its full
+  path as a glob. The first matching row wins.
+- `location` is relative to the working directory unless it is absolute; a
+  leading `~` is the home directory.
+- A matched row whose directory does not exist stops the search: do not fall
+  through to the default. Interactive use asks before creating it; the
+  unattended worker creates nothing and writes to its fallback directory.
+
+**Case handling:** match the directory case-insensitively — if a directory
+matching the row's `location` (or the default `LOGS/`) already exists on disk
+in any casing (`logs`, `Logs`, `LOGS`), write there as-is. Do not compare
+on-disk casing against git's tracked casing, do not check `core.ignorecase`,
+do not investigate or flag a mismatch — that's out of scope for this skill
+and wastes tokens. Only create a new directory (using the table's casing)
+when nothing matching exists at all.
 
 ---
 

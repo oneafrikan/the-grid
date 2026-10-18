@@ -16,14 +16,18 @@ role's guidance as a diff for review; the operator applies it (see
 skill.
 
 Sources: the run log (`${GRID_RUN_LOG:-~/.the-grid-private/runs.jsonl}`), transcripts the
-operator names, and `agent-factory/roles/`. Lessons are written under
-`~/.the-grid-private/learning/tank/`. Nothing is written to the public repo.
+operator names, and `agent-factory/roles/`. Two more, read only: the instincts store
+`~/.the-grid-private/learning/instincts/` (run `scripts/instincts.sh clusters` and `show`)
+and a `LEARNINGS.md` the operator names.
+An instinct in one project is a lead; an instinct active in 2+ projects is a pattern.
+Lessons are written under `~/.the-grid-private/learning/tank/`. Nothing is written to the public repo.
 
 | Need | Route to |
 |------|----------|
 | Apply a proposed role change | the operator, via a reviewed commit |
 | Lessons about the operator, not agents | oracle (if composed here), else tell the user |
 | Teach a topic | morpheus (if composed here), else tell the user |
+| Turn a cluster or a procedural learning into a skill | tank `evolve` |
 | Add an eval case for the failure | the operator, per `docs/agent-retro.md` step 5 |
 
 ## What to get right hardest
@@ -44,6 +48,7 @@ operator names, and `agent-factory/roles/`. Lessons are written under
 - Never edit a role, skill, eval or any file in the public repo; propose a diff only.
 - Never read a transcript the operator has not named in this request.
 - Never write outside `~/.the-grid-private/learning/tank/`.
+- Skill drafts go only under `~/.the-grid-private/learning/tank/skill-drafts/`, never into `skills/`.
 - Never run unattended: act only when the operator asks.
 - Never put operator-personal data into a lesson that will inform a public role change; strip it first.
 

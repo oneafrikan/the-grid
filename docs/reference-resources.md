@@ -214,9 +214,9 @@
 
 | Resource | Notes |
 |---|---|
-| ai-dev-team-playbook.pdf (uploaded) | 154-page playbook by "Neo". Converted to markdown in this session |
-| ai-dev-team-playbook.md (generated) | Full markdown conversion — available in outputs |
-| openclaw-lamp-team-prompt.md (generated) | Opus 4 prompt to build LAMP-stack agent team — available in outputs |
+| ai-dev-team-playbook.pdf | 154-page playbook by "Neo". Kept privately |
+| ai-dev-team-playbook.md | Full markdown conversion. Kept privately |
+| openclaw-lamp-team-prompt.md | Opus 4 prompt to build LAMP-stack agent team. Kept privately |
 
 ---
 
@@ -303,7 +303,7 @@ Skills, SOUL.md, and MEMORY.md live in OpenClaw. Agent has a full life outside P
 ### Recommendation
 **Build in OpenClaw first, bind to Paperclip second.**
 
-Given the Z8 G4 / Ollama / LiteLLM / Tailscale stack already in place, agents should live in OpenClaw. Their SOUL.md and MEMORY.md are their identity — that should persist independently of Paperclip. Build and test each agent standalone in OpenClaw until the skills, personality, and memory are working correctly. Then bind to Paperclip once the agent is solid, resolving the gateway configuration one step at a time (token → device pairing → session key policy → multi-agent routing).
+Given a local-model stack (Ollama / LiteLLM) already in place, agents should live in OpenClaw. Their SOUL.md and MEMORY.md are their identity — that should persist independently of Paperclip. Build and test each agent standalone in OpenClaw until the skills, personality, and memory are working correctly. Then bind to Paperclip once the agent is solid, resolving the gateway configuration one step at a time (token → device pairing → session key policy → multi-agent routing).
 
 This avoids debugging gateway integration and agent behaviour simultaneously — the most common failure mode reported in the GitHub issues above.
 

@@ -11,12 +11,12 @@
 # Machine/Operator/Channels row of its identity table).
 
 # Who these agents answer to primarily. Free text — name, contact, whatever's
-# useful on a nameplate. Example: "Gareth Knight <gareth.knight@gmail.com>"
+# useful on a nameplate. Example: "Your Name <you@example.com>"
 operator: ""
 
 # Which machine this install's composed agents run on. Blank falls back to
 # this machine's hostname — override only if the raw hostname isn't a useful
-# label (e.g. you'd rather see "wilderness" than a generated macOS hostname).
+# label (e.g. you'd rather see "my-laptop" than a generated macOS hostname).
 machine: ""
 
 # Where these agents are reachable — Slack, Telegram, etc. Free text.

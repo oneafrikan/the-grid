@@ -1,0 +1,3299 @@
+#!/usr/bin/env python3
+"""grid - install, pin and check the wired skill set without git submodules.
+
+One Python 3 (3.8+) stdlib file; the only import from the repo is the
+restricted-YAML reader scripts/lib/miniyaml.py. Design: openspec change
+`manifest-lock-install` (design.md "CLI shape", "File formats", "Input
+validation", "Fetch mechanism").
+
+Group 1 landed the shared helpers, the grid.yaml reader, the typed-entry
+reader, the grid.lock reader with its input validation, and the `audit`
+passthrough. Group 2 added the content-hash helpers, `lock` and `lock --check`.
+Group 3 adds the ledger, the fetch/verify/audit/place routine and `install`.
+Group 4 adds `doctor`, `repair` and `uninstall`, which read the ledger and reuse
+group 3's classify / fetch / verify / audit / place routine.
+Group 5 adds `drift` (read-only upstream drift report) and `schedule` (render
+the weekly drift schedule; it never activates anything).
+
+Python 3.8 floor: no str.removeprefix/removesuffix, no `dict | dict`, no
+`list[str]` annotations evaluated at runtime, no `match`. Checked with
+    python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), feature_version=(3, 8))' scripts/grid
+
+Exit codes: 0 ok | 1 findings or failed entries | 2 usage or error |
+            3 (`lock --check` only) not checkable here.
+"""
+import sys
+
+# Running grid must never leave a __pycache__ in the repo (it is not tracked and
+# the vetting scanner would otherwise see it). Set BEFORE importing miniyaml.
+sys.dont_write_bytecode = True
+
+import argparse
+import atexit
+import contextlib
+import datetime
+import errno
+import hashlib
+import json
+import os
+import posixpath
+import re
+import shutil
+import signal
+import socket
+import stat
+import subprocess
+import tempfile
+import time
+import urllib.parse
+
+# ...and the same for every child (audit.py runs under sys.executable): dont_write_bytecode
+# only covers this process, so without the variable the children write scripts/lib/__pycache__.
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
+# miniyaml lives next to us in scripts/lib, the same way audit.py finds it.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "lib"))
+import miniyaml  # noqa: E402  (must follow the sys.path insert)
+
+EXIT_OK = 0
+EXIT_FINDINGS = 1
+EXIT_ERROR = 2
+EXIT_NOT_CHECKABLE = 3
+
+GIT_FLOOR = (2, 25)          # sparse-checkout `init --cone` + `set` needs 2.25
+GIT_TIMEOUT = 600            # seconds; a timeout is a failed fetch for that source
+
+
+class GridError(Exception):
+    """A user-facing failure. `code` is the process exit status; str() is the message."""
+
+    def __init__(self, msg, code=EXIT_ERROR):
+        super().__init__(msg)
+        self.code = code
+
+
+# --- shared helpers (design.md "CLI shape" / "Fetch mechanism") ----------------
+
+def resolve_grid_dir(arg=None):
+    """The grid dir as a realpath: --grid-dir, else GRID_DIR, else the parent of scripts/.
+
+    Resolved once and used everywhere (including as GRID_DIR for child wire.sh
+    runs) so link targets are realpaths and every path comparison is safe on
+    macOS, where temp and home paths pass through symlinks such as /var.
+    """
+    path = arg or os.environ.get("GRID_DIR")
+    if not path:
+        path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    return os.path.realpath(path)
+
+
+def state_dir():
+    """Machine-local state dir: GRID_STATE_DIR, else $HOME/.grid."""
+    env = os.environ.get("GRID_STATE_DIR")
+    if env:
+        return os.path.abspath(env)             # messages that name a state file show a full path
+    return os.path.join(os.environ.get("HOME") or os.path.expanduser("~"), ".grid")
+
+
+HOST_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
+
+
+def host_key():
+    """Machine key for overlay files: GRID_HOST, else the short hostname.
+
+    socket.gethostname().split('.')[0] equals `hostname -s` but needs no external
+    `hostname` binary (a minimal Arch or container install may lack it).
+
+    The value becomes a file name (machines/<host>.txt), so it must be one safe path
+    component: letters, digits, `_`, `.`, `-`, not starting with `.` or `-`. A value
+    like `../../x` would otherwise read or seed a file outside machines/. A leading
+    `_` is allowed on purpose: `grid lock` passes the sentinel `__baseline__` to
+    wire.sh. Same rule as scripts/wire.sh.
+    """
+    env_host = os.environ.get("GRID_HOST")
+    host = env_host or socket.gethostname().split(".")[0]
+    if not HOST_RE.fullmatch(host):
+        if not env_host:
+            # The user set nothing: do not blame a GRID_HOST they never wrote.
+            raise GridError("grid: the hostname %s is not usable as a machine key (letters, digits, "
+                            "`_`, `.`, `-`; not starting with `.` or `-`); set GRID_HOST to a valid one"
+                            % _printable(host))
+        raise GridError("grid: GRID_HOST %s is not a valid machine key (letters, digits, `_`, `.`, "
+                        "`-`; not starting with `.` or `-`)" % _printable(host))
+    return host
+
+
+def atomic_write(path, content):
+    """Write `content` (str) to `path` via temp file + os.replace; skip if unchanged.
+
+    Returns True when the file was (re)written. Always "\\n" line endings and
+    UTF-8, whatever the platform. Skipping an unchanged write keeps the inode
+    and mtime stable, which callers (and tests) rely on to prove a no-op re-run.
+    """
+    data = content.encode("utf-8")
+    try:
+        with open(path, "rb") as fh:
+            if fh.read() == data:
+                return False
+    except FileNotFoundError:
+        pass
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    # Temp file in the destination dir so os.replace stays on one filesystem.
+    fd, tmp = tempfile.mkstemp(prefix=".grid-write-", dir=parent)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    return True
+
+
+_GIT_HOME = []                  # one empty HOME per process, created on first use
+
+
+def _empty_git_home():
+    """An empty directory used as HOME (and XDG_CONFIG_HOME) for git children; removed at exit."""
+    if not _GIT_HOME:
+        path = tempfile.mkdtemp(prefix="grid-git-home-")
+        atexit.register(shutil.rmtree, path, True)
+        _GIT_HOME.append(path)
+    return _GIT_HOME[0]
+
+
+# Variables that can change which URL git really contacts, which program it runs, or what
+# config it reads. Dropped from every git child unless GRID_GIT_FORWARD_CONFIG=1.
+_GIT_SCRUB_EXACT = ("GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_PROXY_COMMAND",
+                    "GIT_EXEC_PATH", "GIT_ASKPASS", "GIT_TEMPLATE_DIR")
+_GIT_SCRUB_PREFIX = ("GIT_SSH", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+
+
+def git_env():
+    """Environment for every git child.
+
+    LC_ALL=C: stable output to parse. GIT_TERMINAL_PROMPT=0: an unreachable or
+    private URL fails instead of waiting on a prompt an unattended job can never
+    answer. The GIT_DIR family is removed so a call made from inside a git hook
+    still addresses the repo named by `-C`.
+
+    GIT_ALLOW_PROTOCOL: a child may speak https only (plus file when the test-only
+    GRID_ALLOW_FILE=1 is set), so a source URL that slipped past the string checks
+    still cannot make git use ssh, git:// or an ext:: helper.
+
+    Config isolation (private WP-034, D55): the URL that was checked against policy.yaml
+    must be the URL that is fetched, but a user or system gitconfig (or GIT_CONFIG_* in the
+    environment) can carry `url.<base>.insteadOf` rewrites. So git children read NO user or
+    system config: GIT_CONFIG_GLOBAL/SYSTEM point at /dev/null (git >= 2.32) AND HOME and
+    XDG_CONFIG_HOME point at an empty temp dir with GIT_CONFIG_NOSYSTEM=1 (older git), and
+    the variables listed above are dropped. Cost: a corporate proxy or credential helper
+    configured in gitconfig stops working; GRID_GIT_FORWARD_CONFIG=1 opts back in to the
+    caller's environment as it was (only the GIT_DIR family is still removed).
+    """
+    env = dict(os.environ)
+    env["LC_ALL"] = "C"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_ALLOW_PROTOCOL"] = "https:file" if os.environ.get("GRID_ALLOW_FILE") == "1" else "https"
+    for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"):
+        env.pop(var, None)
+    if os.environ.get("GRID_GIT_FORWARD_CONFIG") != "1":
+        for var in list(env):
+            if var in _GIT_SCRUB_EXACT or var.startswith(_GIT_SCRUB_PREFIX):
+                del env[var]
+        home = _empty_git_home()
+        env.update({"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+                    "GIT_CONFIG_NOSYSTEM": "1", "HOME": home, "XDG_CONFIG_HOME": home})
+    return env
+
+
+# stderr of a git failure that grid's config isolation (git_env) can cause or hide: safe.directory
+# ("dubious ownership"), and credentials/proxy that live in ~/.netrc or gitconfig.
+_GIT_CONFIG_FAILURE_RE = re.compile(
+    r"dubious ownership|safe\.directory|Authentication failed|could not read (?:Username|Password)"
+    r"|terminal prompts disabled|Proxy Authentication|Could not resolve proxy", re.IGNORECASE)
+FORWARD_CONFIG_HINT = ("grid runs git without your gitconfig, ~/.netrc and environment; if this is "
+                       "safe.directory, a credential helper, netrc or a proxy, set "
+                       "GRID_GIT_FORWARD_CONFIG=1 and re-run")
+
+
+def run_git(args, timeout=GIT_TIMEOUT):
+    """Run `git <args>`; return stdout (str). Raise GridError(2) on non-zero or timeout.
+
+    The failing command line is in the message so an operator can re-run it.
+    """
+    cmd = ["git"] + list(args)
+    shown = " ".join(cmd)
+    try:
+        proc = subprocess.run(
+            cmd, env=git_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=timeout, encoding="utf-8", errors="surrogateescape")
+    except subprocess.TimeoutExpired:
+        raise GridError("grid: git timed out after %ds: %s" % (timeout, shown))
+    except FileNotFoundError:
+        raise GridError("grid: git is required but not on PATH")
+    if proc.returncode != 0:
+        hint = ""
+        if os.environ.get("GRID_GIT_FORWARD_CONFIG") != "1" and _GIT_CONFIG_FAILURE_RE.search(proc.stderr):
+            hint = "\ngrid: hint: " + FORWARD_CONFIG_HINT
+        raise GridError("grid: git failed (exit %d): %s\n%s%s"
+                        % (proc.returncode, shown, proc.stderr.strip(), hint))
+    return proc.stdout
+
+
+def check_git_version():
+    """Exit 2 unless git is at least GIT_FLOOR. Parses `git version 2.39.5 (Apple ...)`."""
+    out = run_git(["--version"]).strip()
+    m = re.match(r"git version (\d+)\.(\d+)(?:\.[\w.]+)?", out)
+    if not m:
+        raise GridError("grid: cannot parse `git --version` output: %s" % out)
+    if (int(m.group(1)), int(m.group(2))) < GIT_FLOOR:
+        found = out[len("git version "):].split(" ")[0]
+        raise GridError("grid: git %d.%d or newer is required (found %s)"
+                        % (GIT_FLOOR[0], GIT_FLOOR[1], found))
+
+
+def notice(msg):
+    """One stderr line, no failure."""
+    sys.stderr.write(msg + "\n")
+
+
+# --- grid.yaml (design.md "File formats") ---------------------------------------
+
+# Top-level keys reserved for later changes: accepted, ignored, one notice each.
+RESERVED_KEYS = ("rules", "harnesses")
+REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
+SOURCE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _yaml_error(msg):
+    return GridError("grid: grid.yaml: %s" % msg)
+
+
+def _check_keys(where, mapping, allowed):
+    """Any key outside `allowed` is exit 2 naming it (typos must fail loudly)."""
+    for key in mapping:
+        if key not in allowed:
+            raise _yaml_error("unknown key '%s'%s" % (key, " in " + where if where else ""))
+
+
+def _require_map(where, value):
+    if not isinstance(value, dict):
+        raise _yaml_error("'%s' must be a map" % where)
+    return value
+
+
+def _require_str(where, value):
+    # miniyaml turns `1` into an int and a block into a list/dict; only a
+    # non-empty string is a usable url/ref/path.
+    if not isinstance(value, str) or not value:
+        raise _yaml_error("'%s' must be a non-empty string" % where)
+    return value
+
+
+def load_grid_yaml(grid_dir):
+    """Read and validate <grid_dir>/grid.yaml; return a normalised dict.
+
+    {"version": 1, "sources": {name: {"url": str, "ref": str}}, "wired": {"baseline": str}}
+    `ref` defaults to HEAD. Reserved top-level keys (rules, harnesses) are
+    ignored with one stderr notice each. Any other unknown key, or a wrong
+    type, is GridError(2) naming the key; a miniyaml.ParseError is exit 2
+    with its line number.
+    """
+    path = os.path.join(grid_dir, "grid.yaml")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        raise GridError("grid: grid.yaml not found in %s" % grid_dir)
+    except UnicodeDecodeError:
+        # Not a traceback with exit 1: a bad file is exit 2, as audit reports it.
+        raise _yaml_error("not valid UTF-8")
+    try:
+        doc = miniyaml.loads(text)
+    except miniyaml.ParseError as exc:
+        raise _yaml_error(str(exc))
+    if not isinstance(doc, dict):
+        raise _yaml_error("top level must be a map")
+
+    for key in RESERVED_KEYS:
+        if key in doc:
+            notice("grid: grid.yaml key '%s' is reserved and ignored by this version" % key)
+    _check_keys("", doc, ("version", "sources", "wired") + RESERVED_KEYS)
+
+    # `version` must be the integer 1. bool is an int subclass in Python, so
+    # test the exact type (miniyaml reads `true` as bool).
+    if "version" not in doc:
+        raise _yaml_error("missing required key 'version'")
+    if type(doc["version"]) is not int or doc["version"] != 1:
+        raise _yaml_error("'version' must be 1 (found %r)" % (doc["version"],))
+
+    if "sources" not in doc:
+        raise _yaml_error("missing required key 'sources'")
+    sources = {}
+    for name, body in _require_map("sources", doc["sources"]).items():
+        where = "sources.%s" % name
+        if not SOURCE_RE.fullmatch(str(name)):
+            raise _yaml_error("source name '%s' is not a valid directory name" % name)
+        _require_map(where, body)
+        _check_keys(where, body, ("url", "ref"))
+        if "url" not in body:
+            raise _yaml_error("'%s' is missing required key 'url'" % where)
+        url = _require_str(where + ".url", body["url"])
+        ref = _require_str(where + ".ref", body["ref"]) if "ref" in body else "HEAD"
+        if not REF_RE.fullmatch(ref):
+            raise _yaml_error("'%s.ref' value %r is not a valid ref" % (where, ref))
+        sources[str(name)] = {"url": url, "ref": ref}
+
+    if "wired" not in doc:
+        raise _yaml_error("missing required key 'wired'")
+    wired = _require_map("wired", doc["wired"])
+    _check_keys("wired", wired, ("baseline",))
+    if "baseline" not in wired:
+        raise _yaml_error("'wired' is missing required key 'baseline'")
+    baseline = _require_str("wired.baseline", wired["baseline"])
+    # The baseline file is parsed and parts of it are echoed by `lock --check`, so it must be a
+    # file of THIS grid: relative, no `..`, and (after symlinks) still inside the grid dir.
+    # Otherwise grid.yaml could name any readable file on the machine (private WP-034).
+    real_grid = os.path.realpath(grid_dir)
+    try:
+        inside = (not os.path.isabs(baseline) and ".." not in baseline.split("/")
+                  and os.path.commonpath([real_grid, os.path.realpath(os.path.join(grid_dir, baseline))])
+                  == real_grid)
+    except ValueError:                                  # NUL byte, different drive
+        inside = False
+    if not inside:
+        raise _yaml_error("'wired.baseline' must be a relative path inside the grid dir "
+                          "(no absolute path, no '..', no symlink out)")
+
+    return {"version": 1, "sources": sources, "wired": {"baseline": baseline}}
+
+
+# --- typed entries (design.md "Typed entries") -----------------------------------
+
+def read_regular_file(path):
+    """Text of the regular file at `path`; None when it does not exist.
+
+    A FIFO (or any other non-regular file) at a path grid reads must not block it: a plain
+    open() of a FIFO waits for a writer for ever, which hung every command that reads the
+    wired-set files (private H-12). The file is opened O_NONBLOCK and the type is checked with
+    an fstat on the descriptor already held, as _seed_copy does. Symlinks are followed (a
+    user may keep machines/ in a private repo); only the TYPE of what is finally opened
+    matters. A non-regular file, or a parent that is not a directory, is a GridError naming
+    the absolute path (exit 2) instead of a hang or a raw errno.
+    """
+    shown = os.path.abspath(path)
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    except FileNotFoundError:
+        return None
+    except NotADirectoryError:
+        culprit = os.path.dirname(shown)
+        while culprit != os.path.dirname(culprit) and not (os.path.lexists(culprit)
+                                                           and not os.path.isdir(culprit)):
+            culprit = os.path.dirname(culprit)
+        raise GridError("grid: cannot read %s: %s is not a directory (remove or rename it)"
+                        % (shown, culprit))
+    except OSError as exc:
+        raise GridError("grid: cannot read %s: %s" % (shown, exc.strerror or exc))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise GridError("grid: %s is not a regular file; refusing to read it (remove it and "
+                            "re-run)" % shown)
+        with os.fdopen(fd, "rb", closefd=False) as fh:
+            return fh.read().decode("utf-8")
+    finally:
+        os.close(fd)
+
+
+def read_wired_entries(paths):
+    """Read wired-set files; return (adds, denies) of UNTYPED entries only.
+
+    Parsing matches wire.sh's load_manifest: strip a trailing `#` comment, drop
+    all whitespace, skip empty lines. An entry whose text before the first `/`
+    contains `:` is typed (`project:x`, `-rules:sql`, `harness:codex`, any kind,
+    known or not): grid ignores every typed entry and leaves it to wire.sh, so a
+    new kind needs no change here. `adds` are `repo` / `repo/skill`; `denies`
+    are the same with the leading `-` removed. Missing files are skipped; a file that
+    is not a regular file is exit 2 (see read_regular_file), never a hang.
+    """
+    adds, denies = [], []
+    for path in paths:
+        text = read_regular_file(path)
+        if text is None:
+            continue
+        lines = text.splitlines()
+        for line in lines:
+            entry = "".join(line.split("#", 1)[0].split())
+            if not entry:
+                continue
+            if ":" in entry.split("/", 1)[0]:
+                continue                      # typed entry: not ours
+            if entry.startswith("-"):
+                denies.append(entry[1:])
+            else:
+                adds.append(entry)
+    return adds, denies
+
+
+# --- input validation (design.md "Input validation") --------------------------------
+# grid.lock arrives through a PR and `dest` is built from it, so every field is
+# checked against a fixed pattern when the file is read, before any network
+# access or write. Without this a `path` of `../../../.ssh` would make install
+# write (and uninstall delete) outside repos/<source>, and a leading `-` would
+# reach `git sparse-checkout set` as an option.
+
+# One path component: no leading `-`, not `.` or `..`, no spaces/control chars.
+# Dot-directories such as `.claude/skills/x` are allowed.
+PATH_COMPONENT_RE = re.compile(r"(?!-)(?!\.\.?$)[A-Za-z0-9._@+-]+")
+HEX40_RE = re.compile(r"[0-9a-f]{40}")
+HASH_RE = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def validate_source(source, sources):
+    """`source` is a safe directory name AND has an entry under grid.yaml `sources`."""
+    if not isinstance(source, str) or not SOURCE_RE.fullmatch(source):
+        raise ValueError("source %r is not a valid directory name" % (source,))
+    if source not in sources:
+        raise ValueError("source '%s' has no entry under sources in grid.yaml" % source)
+
+
+def validate_path(path):
+    """Repo-relative skill dir: forward slashes, never empty/absolute, safe components."""
+    if not isinstance(path, str) or not path:
+        raise ValueError("path must be a non-empty string")
+    if path.startswith("/") or "\\" in path:
+        raise ValueError("path %r must be relative with forward slashes" % path)
+    for comp in path.split("/"):
+        if not PATH_COMPONENT_RE.fullmatch(comp):
+            raise ValueError("path %r has an unsafe component %r" % (path, comp))
+
+
+def validate_sha(value, field):
+    """`sha` / `tree`: exactly 40 lowercase hex characters."""
+    if not isinstance(value, str) or not HEX40_RE.fullmatch(value):
+        raise ValueError("%s must be 40 lowercase hex characters" % field)
+
+
+def validate_hash(value):
+    """Content hash: `sha256:` plus 64 lowercase hex."""
+    if not isinstance(value, str) or not HASH_RE.fullmatch(value):
+        raise ValueError("hash must be 'sha256:' plus 64 lowercase hex characters")
+
+
+def validate_ref(ref):
+    if not isinstance(ref, str) or not REF_RE.fullmatch(ref):
+        raise ValueError("ref %r is not a valid ref" % (ref,))
+
+
+# C0 (incl. ESC, BEL, tab, newline), DEL and C1 controls: a name is a display label that
+# is printed to the terminal, and tab/newline are also the ledger's column/row separators.
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def validate_label(value, field):
+    """`kind` / `name`: non-empty, no control characters (spaces are allowed: existing locks use them)."""
+    if not isinstance(value, str) or not value or _CONTROL_RE.search(value):
+        raise ValueError("%s must be a non-empty string without control characters" % field)
+
+
+def _printable(value):
+    """`value` as text that is safe to print: non-printable characters shown as escapes."""
+    return ascii(str(value))[1:-1]
+
+
+def _fold(text):
+    """`text` case-folded the way a case-insensitive filesystem folds names: ONE character to one.
+
+    str.casefold() is a FULL fold (the sharp s becomes "ss"), which would call two names that
+    no filesystem equates duplicates. Characters whose full fold is longer than one character
+    are kept as they are, which leaves the simple folds (Foo / foo, and the rest) that a
+    case-insensitive volume applies.
+    """
+    return "".join(c.casefold() if len(c.casefold()) == 1 else c for c in text)
+
+
+def dest_for(source, path):
+    """Grid-relative destination of a placed skill: repos/<source>/<path>."""
+    return "repos/%s/%s" % (source, path)
+
+
+def source_root(grid_dir, source):
+    """<realpath(<grid>/repos)>/<source>: the containment root of one source.
+
+    realpath is applied to repos/ ONLY, never to the source dir. A symlinked repos/
+    (the whole directory) is a deliberate layout and is followed, but its target must be
+    on the same filesystem as the grid: install and repair rename staged copies into
+    place and fail with EXDEV across filesystems. A symlinked repos/<source> must stay
+    refused, and resolving it here would make it contain its own target (see is_contained).
+
+    Trust note: a `repos` symlink that arrives with a cloned grid (it is committed content) is
+    accepted like one the user made. What install places is still only the reviewed grid.lock
+    content, but it lands under the link's target; check `ls -ld repos` after cloning a grid you
+    do not own.
+    """
+    return os.path.join(os.path.realpath(os.path.join(grid_dir, "repos")), source)
+
+
+def is_contained(grid_dir, source, dest):
+    """True when realpath(<grid>/<dest>) lies under realpath(<grid>/repos)/<source>.
+
+    The one containment test, applied before every write or delete (install and
+    uninstall reuse it). realpath resolves symlinks, so a symlinked parent that
+    points elsewhere is caught as well as a `..` component.
+
+    The root is built from the realpath of repos/, NOT from the realpath of
+    repos/<source>: resolving the source dir itself would make a symlinked
+    repos/<source> contain its own target, so everything under it would pass.
+    A symlinked repos/ moves the root with it, so nothing can land outside the
+    real repos tree whatever repos/ points at.
+    """
+    root = source_root(grid_dir, source)
+    target = os.path.realpath(os.path.join(grid_dir, dest))
+    try:
+        return os.path.commonpath([root, target]) == root
+    except ValueError:                      # different drives (Windows) etc.
+        return False
+
+
+def dest_chain_link(grid_dir, dest, include_leaf):
+    """The first component of <dest> (from `repos` down) that is a symlink, or None.
+
+    lstat on each prefix, so nothing is followed. Meant to be called IMMEDIATELY
+    before an rmtree or rename: is_contained is a check on an earlier moment, and
+    a same-user process could have swapped a parent for a symlink since. This
+    gives the friendly error and narrows the window; the delete and the rename
+    themselves then go through an O_NOFOLLOW descriptor walk (open_chain), which
+    closes the gap between this lstat and the syscall. The threat needs a
+    concurrent process of the same user, so this is hardening, not a boundary.
+    A component that does not exist ends the walk (the caller creates or has
+    already removed it).
+    """
+    parts = dest.split("/")
+    upto = len(parts) if include_leaf else len(parts) - 1
+    # Start below repos/ (i = 2 is repos/<source>): a symlinked repos/ is a supported
+    # layout and the containment root already follows it, so it is not a "swap".
+    for i in range(2, upto + 1):
+        prefix = "/".join(parts[:i])
+        try:
+            st = os.lstat(os.path.join(grid_dir, prefix))
+        except FileNotFoundError:
+            return None
+        if stat.S_ISLNK(st.st_mode):
+            return prefix
+    return None
+
+
+def escape_hint(grid_dir, dest):
+    """The text " (<path> is a symlink)" for the first symlink on <dest>, else "".
+
+    Appended to an "escapes repos/<source>" error: the only way a validated path can
+    leave its root is through a link, and saying which one is the useful part.
+    repos/ itself is named only when no deeper link explains the escape.
+    """
+    link = dest_chain_link(grid_dir, dest, include_leaf=True)
+    if link is None and os.path.islink(os.path.join(grid_dir, "repos")):
+        link = "repos"
+    return " (%s is a symlink)" % link if link else ""
+
+
+# --- no-follow directory walk (closes the check-to-use window of dest_chain_link) -------------
+# dest_chain_link re-checks the path with lstat just before a delete or rename, which leaves
+# the gap between that check and the syscall. These helpers close it for the parent chain:
+# every directory is opened with O_NOFOLLOW relative to the previous one, and the delete or
+# rename then goes through the final descriptor, so a parent swapped for a symlink after the
+# check fails the open (or is never looked at again) instead of redirecting the operation.
+
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+
+
+def open_chain(top, names, create=False):
+    """Open `top`, then each of `names` below it with O_NOFOLLOW; return the descriptors.
+
+    The result has len(names) + 1 descriptors, [0] being `top` itself and [-1] the deepest
+    directory; the caller closes them all (close_chain). A name that is a symlink, or not a
+    directory, raises OSError (ELOOP or ENOTDIR). With `create`, a missing directory is made
+    with mkdir relative to its parent's descriptor, so nothing can be created outside the
+    chain that was opened. `top` is a path, so it must be a realpath the caller already
+    vetted (the realpath of repos/); its own ancestors are not protected.
+    """
+    fds = [os.open(top, os.O_RDONLY | os.O_DIRECTORY)]
+    try:
+        for name in names:
+            try:
+                fd = os.open(name, _DIR_FLAGS, dir_fd=fds[-1])
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(name, 0o777, dir_fd=fds[-1])
+                fd = os.open(name, _DIR_FLAGS, dir_fd=fds[-1])
+            fds.append(fd)
+    except BaseException:
+        close_chain(fds)
+        raise
+    return fds
+
+
+def close_chain(fds):
+    for fd in fds:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def rmtree_at(dir_fd, name):
+    """Remove directory `name` below `dir_fd` and everything in it, never following a link.
+
+    Every directory is opened O_NOFOLLOW relative to its parent; files and links (also links to
+    directories) are unlinked, never entered. shutil.rmtree resolves each path from the top
+    again, so a parent swapped for a link mid-way would redirect it (before Python 3.11 it
+    had no dir_fd at all). OSError on any failure; the tree may then be partly deleted.
+    """
+    fd = os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
+    try:
+        with os.scandir(fd) as it:
+            entries = [(e.name, e.is_dir(follow_symlinks=False)) for e in it]
+        for entry_name, is_dir in entries:
+            if is_dir:
+                rmtree_at(fd, entry_name)
+            else:
+                os.unlink(entry_name, dir_fd=fd)
+    finally:
+        os.close(fd)
+    os.rmdir(name, dir_fd=dir_fd)
+
+
+def source_dir_is_link(grid_dir, source):
+    """True when repos/<source> is itself a symlink (grid never writes or deletes through one).
+
+    Same wording as uninstall's refusal (placed_dir_status) so the operator sees
+    one message for the shape whichever command meets it.
+    """
+    return os.path.islink(os.path.join(grid_dir, "repos", source))
+
+
+# --- grid.lock reader --------------------------------------------------------------
+
+LOCK_FIELDS = ("hash", "kind", "name", "path", "sha", "source", "tree")
+
+
+def _entry_label(index, entry):
+    """Name an entry in an error: its kind/name/source when readable, else its index."""
+    if isinstance(entry, dict):
+        # The values are untrusted file content that reaches the terminal: escape them.
+        return "entry %d (%s %s from %s)" % (
+            index, _printable(entry.get("kind")), _printable(entry.get("name")),
+            _printable(entry.get("source")))
+    return "entry %d" % index
+
+
+def read_grid_lock(grid_dir, sources):
+    """Read, validate and return the `kind: skill` entries of <grid_dir>/grid.lock.
+
+    `sources` is the grid.yaml `sources` map. Every field is validated (exit 2
+    naming the entry); each returned entry is the dict from the file plus
+    `dest`. An entry of another `kind` is skipped with ONE stderr notice per
+    kind and never fails, so a later change can lock other kinds under
+    lockVersion 1. Reads only: nothing is written and nothing is fetched.
+    """
+    path = os.path.join(grid_dir, "grid.lock")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except FileNotFoundError:
+        raise GridError("grid: grid.lock not found in %s" % grid_dir)
+    except ValueError as exc:               # json.JSONDecodeError subclasses ValueError
+        raise GridError("grid: grid.lock is not valid JSON: %s" % exc)
+    if not isinstance(doc, dict) or doc.get("lockVersion") != 1 or not isinstance(doc.get("entries"), list):
+        raise GridError("grid: grid.lock must be an object with lockVersion 1 and an entries list")
+
+    entries, skipped_kinds = [], set()
+    # First entry seen for each identity. install places EVERY entry, while the lock check
+    # compares by (name, source): a hand-added twin would be placed yet invisible to the gate,
+    # so any of the three identities appearing twice is refused here, for every command.
+    seen_by = {}
+    for index, entry in enumerate(doc["entries"]):
+        label = _entry_label(index, entry)
+        if not isinstance(entry, dict):
+            raise GridError("grid: grid.lock %s is not an object" % label)
+        try:
+            validate_label(entry.get("kind"), "kind")
+        except ValueError as exc:
+            raise GridError("grid: grid.lock %s: %s" % (label, exc))
+        if entry["kind"] != "skill":
+            if entry["kind"] not in skipped_kinds:
+                skipped_kinds.add(entry["kind"])
+                notice("grid: grid.lock has entries of kind '%s', which this version does not handle; skipped"
+                       % entry["kind"])
+            continue
+        for field in LOCK_FIELDS:
+            if field not in entry:
+                raise GridError("grid: grid.lock %s: missing field '%s'" % (label, field))
+        try:
+            validate_label(entry["name"], "name")
+            validate_source(entry["source"], sources)
+            validate_path(entry["path"])
+            validate_sha(entry["sha"], "sha")
+            validate_sha(entry["tree"], "tree")
+            validate_hash(entry["hash"])
+        except ValueError as exc:
+            raise GridError("grid: grid.lock %s: %s" % (label, exc))
+        dest = dest_for(entry["source"], entry["path"])
+        if source_dir_is_link(grid_dir, entry["source"]):
+            raise GridError("grid: grid.lock %s: repos/%s is a symlink" % (label, entry["source"]))
+        if not is_contained(grid_dir, entry["source"], dest):
+            raise GridError("grid: grid.lock %s: %s escapes repos/%s%s"
+                            % (label, dest, entry["source"], escape_hint(grid_dir, dest)))
+        # casefold: names and destinations that differ only in case are one directory (or
+        # one link) on a case-insensitive filesystem, so they clash (private NF-066 J3).
+        for what, key in (("destination", ("dest", dest.casefold())),
+                          ("name and source", ("name", _fold(entry["name"]),
+                                               entry["source"].casefold()))):
+            if key in seen_by:
+                raise GridError("grid: grid.lock %s duplicates %s (same %s)"
+                                % (label, seen_by[key], what))
+            seen_by[key] = label
+        item = dict(entry)
+        item["dest"] = dest
+        entries.append(item)
+    return entries
+
+
+# --- content hash (design.md "File formats": Content hash) ---------------------------
+# One hash describes a skill directory. It is computed two ways that MUST agree:
+# from git objects (lock time, install verification) and from disk (doctor,
+# placing). Both build the same lines, `<class> <relpath> <sha256-of-content>\n`
+# sorted by relpath bytes, and hash the concatenation. class is
+#   x  executable file (mode 100755 / any execute bit)
+#   -  regular file    (mode 100644)
+#   l  symlink, including a symlink to a directory (content = the link target)
+# Only the execute bit is hashed, never the full mode, so umask cannot matter.
+
+def _b(text):
+    """str (possibly carrying surrogate-escaped bytes) -> bytes, for byte-order sorting."""
+    return text.encode("utf-8", "surrogateescape")
+
+
+def is_excluded(rel):
+    """Shared exclusion rule, applied on BOTH the git and the disk side.
+
+    Excluded: any file named .DS_Store, any file ending .pyc, and anything below
+    a directory named __pycache__. Finder and Python create these inside placed
+    skill dirs; they are not user edits, so they must never change the hash.
+    `rel` is relative to the skill dir, forward slashes.
+    """
+    parts = rel.split("/")
+    return ("__pycache__" in parts) or parts[-1] == ".DS_Store" or parts[-1].endswith(".pyc")
+
+
+def symlink_escapes(rel, target):
+    """True when symlink `rel` (relative to the skill dir) points outside the skill dir.
+
+    Lexical on purpose: it never touches the filesystem, so the same answer comes
+    from a git blob and from a staged copy. An absolute target is always outside.
+    """
+    if target.startswith("/"):
+        return True
+    joined = posixpath.normpath(posixpath.join(posixpath.dirname(rel), target))
+    return joined == ".." or joined.startswith("../")
+
+
+def _combine(items):
+    """items: iterable of (class, relpath, content-sha256-hex) -> 'sha256:<hex>'."""
+    digest = hashlib.sha256()
+    for cls, rel, content in sorted(items, key=lambda item: _b(item[1])):
+        digest.update(_b("%s %s %s\n" % (cls, rel, content)))
+    return "sha256:" + digest.hexdigest()
+
+
+class BlobReader(object):
+    """One `git cat-file --batch` process per source, reused for every blob.
+
+    `lock --check` runs in the commit gate on every commit, so thousands of
+    per-file git processes are not acceptable. Use as a context manager.
+    """
+
+    def __init__(self, repo_dir):
+        self.repo_dir = repo_dir
+        self.proc = None
+
+    def __enter__(self):
+        try:
+            self.proc = subprocess.Popen(
+                ["git", "-C", self.repo_dir, "cat-file", "--batch"], env=git_env(),
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            raise GridError("grid: git is required but not on PATH")
+        return self
+
+    def __exit__(self, *exc):
+        if self.proc is not None:
+            self.proc.stdin.close()
+            self.proc.stdout.close()
+            self.proc.wait()
+        return False
+
+    def read(self, oid):
+        """Return the bytes of blob `oid`. One request, one reply: no pipe deadlock."""
+        self.proc.stdin.write(oid.encode("ascii") + b"\n")
+        self.proc.stdin.flush()
+        header = self.proc.stdout.readline().split()
+        if len(header) != 3 or header[1] != b"blob":
+            raise GridError("grid: %s: cannot read blob %s" % (self.repo_dir, oid))
+        data = self.proc.stdout.read(int(header[2]))
+        self.proc.stdout.read(1)                      # the newline git appends
+        return data
+
+
+# Git mode -> hash class. 160000 (a nested submodule) is handled before this.
+_MODE_CLASS = {"100755": "x", "100644": "-", "120000": "l"}
+
+
+def git_content_hash(repo_dir, sha, path, blobs, label):
+    """Content hash of <path> at commit <sha>, read from git objects only.
+
+    `git ls-tree -r -z` (NUL-delimited, so any filename is safe) lists the tracked
+    files; blob contents come from `blobs`, a BlobReader on the same repo. Exit 2
+    (naming `label` + the file) for a nested submodule or a symlink that escapes
+    the skill dir.
+    """
+    listing = run_git(["-C", repo_dir, "ls-tree", "-r", "-z", "%s:%s" % (sha, path)])
+    items = []
+    for record in listing.split("\0"):
+        if not record:
+            continue
+        meta, rel = record.split("\t", 1)
+        mode, _kind, oid = meta.split(" ")
+        if is_excluded(rel):
+            # An excluded name is never hashed, so anything tracked under one would be
+            # installed unhashed and unreviewed: refuse it outright (private WP-034).
+            # An escaping link keeps its more specific message (private WP-031).
+            if mode == "120000":
+                target = blobs.read(oid).decode("utf-8", "surrogateescape")
+                if symlink_escapes(rel, target):
+                    raise GridError("grid: %s: symlink %s -> %s points outside the skill directory"
+                                    % (label, rel, target))
+            raise GridError("grid: %s: %s is tracked under an excluded name (.DS_Store, *.pyc, "
+                            "__pycache__) and cannot be locked" % (label, rel))
+        if mode == "160000":
+            raise GridError("grid: %s: nested submodule at %s cannot be pinned by a content hash"
+                            % (label, rel))
+        if mode not in _MODE_CLASS:
+            raise GridError("grid: %s: %s has unsupported git mode %s" % (label, rel, mode))
+        content = blobs.read(oid)
+        if mode == "120000":
+            target = content.decode("utf-8", "surrogateescape")
+            if symlink_escapes(rel, target):
+                raise GridError("grid: %s: symlink %s -> %s points outside the skill directory"
+                                % (label, rel, target))
+        items.append((_MODE_CLASS[mode], rel, hashlib.sha256(content).hexdigest()))
+    return _combine(items)
+
+
+def link_escapes(real_top, full, rel, target):
+    """True when symlink `full` (`rel` inside the skill dir, pointing at `target`) leaves the dir.
+
+    Both tests install applies: the lexical one (what a git blob can be checked with) and a
+    realpath one, because a chain of links can leave the dir although each hop looks inside.
+    `real_top` is realpath(skill dir).
+    """
+    if symlink_escapes(rel, target):
+        return True
+    try:
+        return os.path.commonpath([real_top, os.path.realpath(full)]) != real_top
+    except ValueError:
+        return True
+
+
+def check_links_contained(top, label):
+    """GridError when any symlink under `top` leaves it (install's realpath test, links only).
+
+    `grid lock` hashes from git objects, which only allows the lexical test; install
+    stages from disk and also applies the realpath test, so a chain-link skill used to
+    lock fine and then fail to install. Running the same test on the (clean, at-the-sha)
+    checkout here refuses such a lock at lock time. Reads no file content.
+    """
+    real_top = os.path.realpath(top)
+    for root, dirnames, filenames in os.walk(top, followlinks=False):
+        reldir = os.path.relpath(root, top).replace(os.sep, "/")
+        prefix = "" if reldir == "." else reldir + "/"
+        for name in dirnames + filenames:
+            full = os.path.join(root, name)
+            if os.path.islink(full):
+                target = os.readlink(full)
+                if link_escapes(real_top, full, prefix + name, target):
+                    raise GridError("grid: %s: symlink %s -> %s points outside the skill directory"
+                                    % (label, prefix + name, target))
+
+
+def disk_content_hash(top, check_escape=False):
+    """Content hash of directory `top` on disk; equals git_content_hash for a clean checkout.
+
+    os.walk(followlinks=False): EVERY file under `top` counts (so an added file
+    changes the hash). A symlink, including one to a directory (os.walk lists
+    those under dirnames, so both lists are checked), is class `l` with its
+    link target as content and is never followed. With `check_escape`, a link
+    that points outside `top` is exit 2 (used when staging for install): both
+    the lexical test (what a git blob can be checked with) and a realpath test,
+    because a chain of links can leave `top` although each hop looks inside. The
+    escape check runs BEFORE the exclusion rule, so a link named `__pycache__`,
+    `*.pyc` or `.DS_Store` (which the hash ignores but a copy would still carry)
+    is checked like any other.
+    """
+    items = []
+    real_top = os.path.realpath(top) if check_escape else None
+
+    def escapes(full, rel, target):
+        return link_escapes(real_top, full, rel, target)
+
+    def add(full, rel):
+        is_link = os.path.islink(full)
+        if is_link:
+            target = os.readlink(full)
+            if check_escape and escapes(full, rel, target):
+                raise GridError("grid: %s: symlink %s -> %s points outside the skill directory"
+                                % (top, rel, target))
+        if is_excluded(rel):
+            if check_escape:
+                # Staging: same refusal as the git side, so the bytes verified, audited and
+                # placed are exactly the bytes hashed. Placed dirs (no check_escape) keep
+                # tolerating litter that Finder or Python create later.
+                raise GridError("grid: %s: %s has an excluded name (.DS_Store, *.pyc, __pycache__) "
+                                "and cannot be placed" % (top, rel))
+            return
+        if is_link:
+            items.append(("l", rel, hashlib.sha256(_b(target)).hexdigest()))
+            return
+        # Only a regular file is ever opened: open() on a FIFO blocks for ever, which would
+        # hang doctor, install and uninstall (private WP-034). O_NONBLOCK + O_NOFOLLOW and an
+        # fstat on the OPEN descriptor close the gap between a stat and the open, too.
+        def other(mode):
+            # FIFO, socket, device: hashed as its own class `o` (so the dir reads as modified),
+            # and never opened; staging refuses it.
+            if check_escape:
+                raise GridError("grid: %s: %s is not a regular file or symlink and cannot be placed"
+                                % (top, rel))
+            items.append(("o", rel, hashlib.sha256(_b(stat.filemode(mode)[0])).hexdigest()))
+
+        mode = os.lstat(full).st_mode
+        if not stat.S_ISREG(mode):
+            other(mode)
+            return
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(full, flags)
+        try:
+            mode = os.fstat(fd).st_mode                 # re-check the descriptor we actually hold
+            if not stat.S_ISREG(mode):
+                other(mode)
+                return
+            digest = hashlib.sha256()
+            with os.fdopen(fd, "rb", closefd=False) as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    digest.update(chunk)
+        finally:
+            os.close(fd)
+        items.append(("x" if mode & 0o111 else "-", rel, digest.hexdigest()))
+
+    for root, dirnames, filenames in os.walk(top, followlinks=False):
+        reldir = os.path.relpath(root, top).replace(os.sep, "/")
+        prefix = "" if reldir == "." else reldir + "/"
+        for name in list(dirnames):
+            if os.path.islink(os.path.join(root, name)):
+                dirnames.remove(name)                 # a link to a dir: hashed as a link, not walked
+                add(os.path.join(root, name), prefix + name)
+        if not check_escape:
+            # Only the hash-only walk may skip it. A staging walk must still look inside
+            # a real __pycache__ dir for links, since a copy of the tree would carry them.
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in filenames:
+            add(os.path.join(root, name), prefix + name)
+    return _combine(items)
+
+
+# --- grid lock (design.md "grid lock") -------------------------------------------------
+
+# Env that would redirect wire.sh's targets. GRID_DRY_HOME forces all of them
+# under the temp home anyway; they are also dropped so nothing inherited can leak.
+_LOCK_STRIPPED_ENV = ("SKILLS_DIR", "AGENTS_DIR", "RULES_DIR", "GRID_HARNESS_HOME",
+                      "CLAUDE_CONFIG_DIR")
+
+
+def wired_skill_links(grid_dir, baseline):
+    """Run wire.sh for the tracked baseline in a throwaway home; return the repo-sourced skill links.
+
+    Lock and wire can never read the baseline differently: wire.sh itself
+    resolves the set. The run writes only under a temp dir (GRID_DRY_HOME and
+    HOME both point at <tmp>/home), so the operator's real home is untouched.
+    Returns a sorted list of (name, source, path, target_dir).
+    """
+    script = os.path.join(grid_dir, "scripts", "wire.sh")
+    if not os.path.isfile(script):
+        raise GridError("grid: %s not found" % script)
+    tmp = tempfile.mkdtemp(prefix="grid-lock-")
+    try:
+        home = os.path.join(tmp, "home")
+        env = dict(os.environ)
+        for var in _LOCK_STRIPPED_ENV:
+            env.pop(var, None)
+        env.update({
+            "LC_ALL": "C",
+            "GRID_DIR": grid_dir,                     # the realpath, so link targets are realpaths
+            "GRID_BASELINE": baseline,
+            "GRID_HOST": "__baseline__",              # sentinel host: no machine overlay applies
+            "GRID_HARNESS": "claude",
+            "GRID_SKIP_CATALOG": "1",
+            "GRID_SKIP_AUDIT": "1",
+            "GRID_DRY_HOME": home,
+            "HOME": home,
+        })
+        proc = subprocess.run(["bash", script], env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, encoding="utf-8", errors="surrogateescape")
+        if proc.returncode != 0:
+            raise GridError("grid: wire.sh failed while resolving the wired set (exit %d):\n%s"
+                            % (proc.returncode, proc.stderr.strip()))
+        # wire.sh does not link a skill dir or agent file whose name is unsafe (anything outside
+        # [A-Za-z0-9._-], e.g. a space, TAB or newline) and says so on stderr. Lock must stay
+        # loud about it: dropping the skill silently would hide a refusal this command has
+        # always made (exit 2, naming it).
+        unsafe = [line.split("): ", 1)[1] for line in proc.stderr.splitlines()
+                  if line.startswith("  skip (invalid name): ")]
+        if unsafe:
+            raise GridError("grid: refusing to resolve the wired set: wire.sh skipped skill or "
+                            "agent names that are unsafe to link: %s" % ", ".join(unsafe))
+        # GRID_DRY_HOME puts the skills dir at <home>/.claude/skills (not <tmp>/skills).
+        skills = os.path.join(home, ".claude", "skills")
+        prefix = grid_dir + "/repos/"
+        found = []
+        for name in sorted(os.listdir(skills)) if os.path.isdir(skills) else []:
+            link = os.path.join(skills, name)
+            if not os.path.islink(link):
+                continue
+            target = os.readlink(link)
+            if not target.startswith(prefix):
+                continue                              # root skills/, composed agents, foreign links
+            source, _, path = target[len(prefix):].rstrip("/").partition("/")
+            # No path = the runtime-root link (repos/<source> itself); no SKILL.md = not a skill.
+            if not path or not os.path.isfile(os.path.join(target, "SKILL.md")):
+                continue
+            found.append((name, source, path, target))
+        return found
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def gitlink_sha(grid_dir, source):
+    """The commit the parent repo records for repos/<source>, from the INDEX.
+
+    The index (not HEAD) so a staged pointer bump is seen before it is committed.
+    """
+    rel = "repos/%s" % source
+    out = run_git(["-C", grid_dir, "ls-files", "-s", "--", rel])
+    for line in out.splitlines():
+        meta, _, name = line.partition("\t")
+        fields = meta.split(" ")
+        if name == rel and len(fields) == 3 and fields[0] == "160000" and fields[2] == "0":
+            return fields[1]
+    raise GridError("grid: %s is not a recorded submodule (no gitlink in the parent repo)" % rel)
+
+
+def dirty_paths(repo_dir, path):
+    """Tracked changes (and untracked non-litter files) under <path> in a checkout.
+
+    Untracked .DS_Store / __pycache__ / *.pyc are ignored: they are not part of
+    the hash (is_excluded), so they must not block a lock either.
+    """
+    out = run_git(["-C", repo_dir, "status", "--porcelain", "-z", "--untracked-files=all",
+                   "--", path])
+    tokens = out.split("\0")
+    dirty, i = [], 0
+    while i < len(tokens):
+        token = tokens[i]
+        i += 1
+        if not token:
+            continue
+        xy, changed = token[:2], token[3:]
+        if xy[0] in "RC":
+            i += 1                                    # a rename/copy is followed by its origin path
+        rel = changed[len(path) + 1:] if changed.startswith(path + "/") else changed
+        if xy == "??" and is_excluded(rel):
+            continue
+        dirty.append(changed)
+    return dirty
+
+
+def git_status(args, timeout=GIT_TIMEOUT):
+    """Run `git <args>` WITHOUT raising on a non-zero exit; return (returncode, stdout).
+
+    For questions whose answer is the exit code (`merge-base --is-ancestor`, `rev-parse
+    --verify -q`). A missing git or a timeout is still a GridError.
+    """
+    try:
+        proc = subprocess.run(["git"] + list(args), env=git_env(), stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, timeout=timeout, encoding="utf-8",
+                              errors="surrogateescape")
+    except subprocess.TimeoutExpired:
+        raise GridError("grid: git timed out after %ds: git %s" % (timeout, " ".join(args)))
+    except FileNotFoundError:
+        raise GridError("grid: git is required but not on PATH")
+    return proc.returncode, proc.stdout
+
+
+# Opt-in for `lock --check` on shallow checkouts (see check_sha_on_ref). Exactly "1".
+SHALLOW_ENV = "GRID_LOCK_ALLOW_SHALLOW"
+
+
+def check_sha_on_ref(repo, source, sha, ref, shallow_ok=False, hint_opt_in=False):
+    """GridError unless commit `sha` is on source's declared `ref` (or a tag points at it).
+
+    install fetches the pinned sha directly and never looks at the ref, so without this a
+    commit that is on no branch of the upstream (or only on a fork sharing its object
+    store) could be locked. Accepted: an ancestor of the remote-tracking ref (origin/HEAD
+    for ref HEAD, else origin/<ref>, or the tag <ref>), or any commit a tag points at
+    (D53 default: tags allowed). The proof needs history: a shallow checkout that cannot
+    show the ancestry is a failure, or with `shallow_ok` a notice and no check.
+    `shallow_ok` is the explicit opt-in (generate_lock sets it only for `lock --check`
+    with GRID_LOCK_ALLOW_SHALLOW=1): a silent skip would let a sha that is on no
+    upstream ref pass the check.
+    The sha is only as trustworthy as the review of the lock change itself.
+    """
+    if run_git(["-C", repo, "tag", "--points-at", sha]).strip():
+        return
+    names = (["refs/remotes/origin/HEAD"] if ref == "HEAD"
+             else ["refs/remotes/origin/" + ref, "refs/tags/" + ref])
+    present = [n for n in names
+               if git_status(["-C", repo, "rev-parse", "--verify", "-q", n + "^{commit}"])[0] == 0]
+    shown = "repos/%s" % source
+    fetch_arg = "" if ref == "HEAD" else " " + ref
+    if not present:
+        raise GridError("grid: %s: cannot check that %s is on ref %s: the remote-tracking ref is "
+                        "missing in the checkout; run: git -C %s fetch origin%s"
+                        % (shown, sha[:12], ref, shown, fetch_arg))
+    for name in present:
+        rc, _out = git_status(["-C", repo, "merge-base", "--is-ancestor", sha, name])
+        if rc == 0:
+            return
+        if rc != 1:
+            raise GridError("grid: %s: cannot check ancestry of %s against %s (git exit %d)"
+                            % (shown, sha[:12], name, rc))
+    if git_status(["-C", repo, "rev-parse", "--is-shallow-repository"])[1].strip() == "true":
+        if shallow_ok:
+            notice("grid: %s: shallow checkout, cannot prove %s is on ref %s; reachability not checked"
+                   % (shown, sha[:12], ref))
+            return
+        raise GridError("grid: %s: shallow checkout, cannot prove %s is on ref %s; run: "
+                        "git -C %s fetch --unshallow origin%s"
+                        % (shown, sha[:12], ref, shown,
+                           "; or, for `lock --check` in CI (depth-1 clones), set %s=1 to skip this proof"
+                           % SHALLOW_ENV if hint_opt_in else ""))
+    raise GridError("grid: %s: commit %s is not on the declared ref %s (nor tagged); lock a commit "
+                    "that is on it, or fetch it: git -C %s fetch origin%s"
+                    % (shown, sha[:12], ref, shown, fetch_arg))
+
+
+def generate_lock(grid_dir, cfg, warn=True, strict=True):
+    """Build the grid.lock entries (sorted list of dicts) from the real submodule checkouts.
+
+    Exit 2 (GridError) when a skill path is unsafe, a checkout is missing, not at
+    the commit the parent records, or dirty, or the recorded commit is not on the
+    source's declared ref (nor tagged), or a skill holds a nested submodule or an
+    escaping symlink. `warn` controls the `../` stderr warning (off in --check).
+    `strict` is False only for --check. There a SHALLOW checkout that cannot prove
+    reachability fails (exit 2) like in `grid lock`, unless GRID_LOCK_ALLOW_SHALLOW=1
+    is set: then it is skipped with a notice (CI clones submodules at depth 1).
+    Fail closed by default, because a skip lets a dangling-upstream sha pass; writing
+    a lock (strict) never skips.
+    """
+    baseline = os.path.join(grid_dir, cfg["wired"]["baseline"])
+    if not os.path.isfile(baseline):
+        raise GridError("grid: baseline %s not found" % cfg["wired"]["baseline"])
+    links = wired_skill_links(grid_dir, baseline)
+
+    by_source = {}
+    for name, source, path, target in links:
+        # Same validation as the lock reader: a skill whose path fails it cannot be locked.
+        try:
+            validate_label(name, "name")
+            validate_source(source, cfg["sources"])
+            validate_path(path)
+        except ValueError as exc:
+            raise GridError("grid: cannot lock skill '%s' (repos/%s/%s): %s" % (name, source, path, exc))
+        by_source.setdefault(source, []).append((name, path, target))
+
+    entries = []
+    for source in sorted(by_source):
+        repo = os.path.join(grid_dir, "repos", source)
+        if not os.path.exists(os.path.join(repo, ".git")):
+            raise GridError("grid: repos/%s is not a checkout; run git submodule update --init repos/%s"
+                            % (source, source))
+        sha = gitlink_sha(grid_dir, source)
+        head = run_git(["-C", repo, "rev-parse", "HEAD"]).strip()
+        if head != sha:
+            raise GridError("grid: repos/%s is at %s but the parent repo records %s; check out the "
+                            "recorded commit (or stage the pointer bump) before locking"
+                            % (source, head[:12], sha[:12]))
+        check_sha_on_ref(repo, source, sha, cfg["sources"][source]["ref"],
+                         shallow_ok=(not strict) and os.environ.get(SHALLOW_ENV) == "1",
+                         hint_opt_in=not strict)
+        with BlobReader(repo) as blobs:
+            for name, path, target in sorted(by_source[source]):
+                label = "repos/%s/%s" % (source, path)
+                dirty = dirty_paths(repo, path)
+                if dirty:
+                    raise GridError("grid: repos/%s: %s has uncommitted changes (%s); the lock must "
+                                    "describe committed state only" % (source, path, dirty[0]))
+                check_links_contained(target, label)
+                entries.append({
+                    "hash": git_content_hash(repo, sha, path, blobs, label),
+                    "kind": "skill",
+                    "name": name,
+                    "path": path,
+                    "sha": sha,
+                    "source": source,
+                    "tree": run_git(["-C", repo, "rev-parse", "%s:%s" % (sha, path)]).strip(),
+                })
+                if warn:
+                    with open(os.path.join(target, "SKILL.md"), encoding="utf-8",
+                              errors="replace") as fh:
+                        if "../" in fh.read():
+                            notice("grid: warning: %s: SKILL.md mentions '../'; check it still works "
+                                   "when the skill is installed on its own" % label)
+    entries.sort(key=lambda e: (_b(e["kind"]), _b(e["name"]), _b(e["source"])))
+    return entries
+
+
+def render_lock(entries):
+    """grid.lock text: sorted keys, 2-space indent, trailing newline (stable diffs)."""
+    return json.dumps({"lockVersion": 1, "entries": entries}, indent=2, sort_keys=True) + "\n"
+
+
+def _gitmodules_urls(grid_dir):
+    """{path: url} from <grid>/.gitmodules, or {} when there is none."""
+    path = os.path.join(grid_dir, ".gitmodules")
+    if not os.path.isfile(path):
+        return {}
+    proc = subprocess.run(["git", "config", "-f", path, "--get-regexp", r"^submodule\..*\.(path|url)$"],
+                          env=git_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          encoding="utf-8", errors="surrogateescape")
+    if proc.returncode not in (0, 1):                 # 1 = no match, not an error
+        raise GridError("grid: cannot read .gitmodules: %s" % proc.stderr.strip())
+    by_name = {}
+    for line in proc.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        # Section names may contain dots, so split the variable off the right.
+        section, _, var = key.rpartition(".")
+        by_name.setdefault(section[len("submodule."):], {})[var] = value
+    return dict((v["path"], v.get("url")) for v in by_name.values() if "path" in v)
+
+
+def manifest_findings(grid_dir, cfg):
+    """Manifest checks shared by `lock --check` and (later) doctor: list of (kind, name, detail).
+
+    HTTPS only (file:// only behind GRID_ALLOW_FILE=1, for tests); each source URL
+    equals the .gitmodules URL for repos/<name> where one exists; every untyped
+    baseline repo has a `sources` entry.
+    """
+    findings = []
+    allow_file = os.environ.get("GRID_ALLOW_FILE") == "1"
+    modules = _gitmodules_urls(grid_dir)
+    for source in sorted(cfg["sources"]):
+        url = cfg["sources"][source]["url"]
+        if not (url.startswith("https://") or (allow_file and url.startswith("file://"))):
+            findings.append(("url", source, "source URL is not https: %s" % url))
+        theirs = modules.get("repos/%s" % source)
+        if theirs is not None and theirs != url:
+            findings.append(("url", source, "grid.yaml has %s but .gitmodules has %s" % (url, theirs)))
+    baseline = os.path.join(grid_dir, cfg["wired"]["baseline"])
+    if not os.path.isfile(baseline):
+        findings.append(("baseline", cfg["wired"]["baseline"], "baseline file not found"))
+    adds, _denies = read_wired_entries([baseline])
+    for repo in sorted(set(a.split("/")[0] for a in adds)):
+        if repo not in cfg["sources"]:
+            # Print only something that can be a source name: a baseline line is file text.
+            shown = repo if SOURCE_RE.fullmatch(repo) else "<invalid name>"
+            findings.append(("source-missing", shown,
+                             "baseline names repos/%s but grid.yaml has no sources entry for it" % shown))
+    return findings
+
+
+def lock_check(grid_dir, cfg):
+    """`grid lock --check`: 0 clean, 1 findings, 3 not checkable here (exit codes per CLI shape)."""
+    findings = [("manifest", kind, name, detail) for kind, name, detail in manifest_findings(grid_dir, cfg)]
+    if findings:
+        # No point regenerating against a manifest that is itself wrong.
+        return report_findings(findings)
+
+    locked = read_grid_lock(grid_dir, cfg["sources"])
+    sources = sorted(set(e["source"] for e in locked))
+    missing = [s for s in sources if not os.path.exists(os.path.join(grid_dir, "repos", s, ".git"))]
+    if missing and len(missing) == len(sources):
+        # Nothing at all to compare against: not checkable here (exit 3, as before).
+        sys.stderr.write("grid: lock --check not possible here: repos/%s is not a checkout\n" % missing[0])
+        return EXIT_NOT_CHECKABLE
+    # Some checkouts are absent: check the present ones and say which were skipped, so one
+    # missing checkout cannot hide a stale hash in another source.
+    for source in missing:
+        sys.stderr.write("grid: lock --check skipped repos/%s (not a checkout)\n" % source)
+    locked = [e for e in locked if e["source"] not in missing]
+
+    # Regenerate in memory and diff by (name, source). Only `kind: skill` entries
+    # are compared: the reader already skipped other kinds with a notice. The
+    # duplicate (name, source) case cannot reach here: read_grid_lock rejects it.
+    fresh = dict(((e["name"], e["source"]), e) for e in generate_lock(grid_dir, cfg, warn=False, strict=False)
+                 if e["source"] not in missing)
+    have = dict(((e["name"], e["source"]), e) for e in locked)
+    for key in sorted(fresh):
+        if key not in have:
+            findings.append(("lock", "added", key[0], "%s: in the checkouts but not in grid.lock" % key[1]))
+    for key in sorted(have):
+        if key not in fresh:
+            findings.append(("lock", "removed", key[0], "%s: in grid.lock but no longer wired" % key[1]))
+        else:
+            diff = [f for f in LOCK_FIELDS if have[key].get(f) != fresh[key].get(f)]
+            if diff:
+                findings.append(("lock", "changed", key[0], "%s: %s differ" % (key[1], ", ".join(diff))))
+    if findings:
+        sys.stderr.write("grid: grid.lock is stale; run: python3 scripts/grid lock\n")
+    return report_findings(findings)
+
+
+def report_findings(findings):
+    """Print `<check> <kind> <name> <detail>` lines (sorted); return 1 if any else 0."""
+    for check, kind, name, detail in sorted(findings):
+        print("%s %s %s %s" % (check, kind, name, detail))
+    return EXIT_FINDINGS if findings else EXIT_OK
+
+
+# --- ledger (design.md "File formats": Ledger) ---------------------------------------
+# What THIS machine's `grid` placed, one TSV row per placed skill directory. It is
+# machine-local state (${GRID_STATE_DIR:-$HOME/.grid}/installed.manifest), not
+# tracked. install writes it; doctor, repair and uninstall (group 4) read it, so
+# these are plain functions rather than part of cmd_install.
+
+LEDGER_NAME = "installed.manifest"
+LEDGER_COLS = ("kind", "name", "source", "sha", "path", "dest", "hash")
+
+
+def ledger_path():
+    return os.path.join(state_dir(), LEDGER_NAME)
+
+
+def _ledger_error(path, lineno, msg):
+    # Name the file and the way out: the ledger is machine-local state, so deleting it is
+    # safe (install re-adopts dirs that still match the lock) and restoring a copy is too.
+    return GridError("grid: %s line %d: %s; restore the file from a backup, or delete it and "
+                     "re-run `grid install` (which adopts directories that match grid.lock)"
+                     % (path, lineno, msg))
+
+
+def read_ledger(path=None):
+    """Read the ledger; return (rows, foreign).
+
+    `rows` are dicts (LEDGER_COLS) for `kind` skill, each validated with the same
+    patterns as grid.lock (exit 2 naming the line). `foreign` are the RAW lines of
+    any other kind: skipped with one notice per kind, never an error, and handed
+    back so write_ledger can copy them through (a newer grid's rows must survive
+    an older grid's rewrite). A missing file is ([], []).
+
+    Trust model: the ledger is machine-local, same-user state and is NOT authenticated.
+    Every row is validated (patterns, dest == repos/<source>/<path>, no duplicates), but
+    a row that names a real directory under repos/<source>/ makes `uninstall --force`
+    and `repair --prune --force` willing to delete it. Protecting the file is the
+    user's job (it lives under the state dir, default ~/.grid). Nothing here serialises
+    two grid processes either: use grid as a single writer.
+    """
+    path = path or ledger_path()
+    try:
+        with open(path, "rb") as fh:
+            text = fh.read().decode("utf-8", "replace")
+    except FileNotFoundError:
+        return [], []
+    rows, foreign, seen = [], [], set()
+    first_line = {}                                 # casefolded dest -> (line, dest) of its first row
+    for lineno, line in enumerate(text.split("\n"), 1):
+        if not line:
+            continue
+        cols = line.split("\t")
+        kind = cols[0]
+        if not kind:
+            raise _ledger_error(path, lineno, "empty kind")
+        if kind != "skill":
+            if kind not in seen:
+                seen.add(kind)
+                notice("grid: %s has rows of kind '%s', which this version does not handle; kept as they are"
+                       % (LEDGER_NAME, _printable(kind)))
+            foreign.append(line)
+            continue
+        if len(cols) != len(LEDGER_COLS):
+            raise _ledger_error(path, lineno, "expected %d tab-separated columns, found %d"
+                                % (len(LEDGER_COLS), len(cols)))
+        row = dict(zip(LEDGER_COLS, cols))
+        try:
+            validate_label(row["name"], "name")
+            if not SOURCE_RE.fullmatch(row["source"]):
+                raise ValueError("source %r is not a valid directory name" % row["source"])
+            validate_path(row["path"])
+            validate_sha(row["sha"], "sha")
+            validate_hash(row["hash"])
+            if row["dest"] != dest_for(row["source"], row["path"]):
+                raise ValueError("dest %r is not repos/<source>/<path>" % row["dest"])
+        except ValueError as exc:
+            raise _ledger_error(path, lineno, str(exc))
+        # A doubled dest would plan the same directory twice; it also means the file was
+        # damaged or hand-edited, so refuse rather than guess which row is right.
+        # casefold, as in read_grid_lock: dests that differ only in case are one dir on a
+        # case-insensitive filesystem.
+        folded = row["dest"].casefold()
+        if folded in first_line:
+            first_no, first_dest = first_line[folded]
+            if first_dest == row["dest"]:
+                raise _ledger_error(path, lineno, "duplicate row for %s (first on line %d)"
+                                    % (row["dest"], first_no))
+            # Foo / foo: distinct on Linux, one directory on a case-insensitive volume. Say which
+            # two rows clash, so the one to delete is obvious.
+            raise _ledger_error(path, lineno, "duplicate row: %s (line %d) and %s (line %d) differ "
+                                "only in case, which is one directory on a case-insensitive "
+                                "filesystem" % (first_dest, first_no, row["dest"], lineno))
+        first_line[folded] = (lineno, row["dest"])
+        rows.append(row)
+    return rows, foreign
+
+
+def preflight_state():
+    """GridError unless the ledger can be written: found BEFORE anything is fetched or placed.
+
+    Without this an unwritable state dir was only found by write_ledger at the end,
+    after skills were already placed. The state dir (or, when it does not exist yet,
+    its nearest existing ancestor, which is where it would be created) must be a
+    writable directory, and the ledger path must not be a directory.
+    """
+    sdir = os.path.abspath(state_dir())
+    probe = sdir
+    while not os.path.lexists(probe):
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            break
+        probe = parent
+    if not os.path.isdir(probe) or not os.access(probe, os.W_OK | os.X_OK):
+        raise GridError("grid: state dir %s is not writable (checked %s); set GRID_STATE_DIR to a "
+                        "writable directory" % (sdir, probe))
+    if os.path.isdir(ledger_path()):
+        raise GridError("grid: %s is a directory, not the ledger file; remove it or set "
+                        "GRID_STATE_DIR elsewhere" % ledger_path())
+
+
+def write_ledger(rows, foreign=(), path=None):
+    """Write the ledger atomically, sorted bytewise (LC_ALL=C), no timestamp.
+
+    Returns True when the file changed. An unchanged ledger is not rewritten
+    (atomic_write skips it), so its inode and mtime prove a no-op re-run.
+    """
+    path = path or ledger_path()
+    lines = ["\t".join(row[c] for c in LEDGER_COLS) for row in rows] + list(foreign)
+    lines.sort(key=_b)
+    return atomic_write(path, "".join(line + "\n" for line in lines))
+
+
+# --- placed-directory helpers (shared with uninstall/repair in group 4) ---------------
+
+def dir_hash_or_none(path):
+    """On-disk content hash of a placed dir, or None if it is not a plain directory.
+
+    A symlink is never followed (a link where a skill dir should be is not
+    something grid wrote), and an unreadable tree counts as "unknown", which the
+    callers treat as modified.
+    """
+    if os.path.islink(path) or not os.path.isdir(path):
+        return None
+    try:
+        return disk_content_hash(path)
+    except (OSError, GridError):
+        return None
+
+
+def placed_dir_status(grid_dir, row, force=False):
+    """Decide what may happen to one placed skill dir, WITHOUT touching it. Returns (status, detail).
+
+    status: "ok" (safe to delete), "absent" (already gone), "modified" (on-disk
+    hash differs from the ledger row's and `force` is off: keep it) or "refused"
+    (a containment, `.git` or symlink guard: keep it, even with `force`).
+    Split out of remove_placed_dir so `uninstall` can decide for every row
+    BEFORE it removes any link (links go first, and a link to a kept dir stays).
+    """
+    source, dest = row["source"], row["dest"]
+    target = os.path.join(grid_dir, dest)
+    if os.path.lexists(os.path.join(grid_dir, "repos", source, ".git")):
+        return "refused", "repos/%s is a submodule checkout" % source
+    # realpath containment below treats a symlinked repos/<source> as its own root,
+    # so refuse that shape outright: it would let a delete land outside the grid.
+    if os.path.islink(os.path.join(grid_dir, "repos", source)):
+        return "refused", "repos/%s is a symlink" % source
+    if not is_contained(grid_dir, source, dest):
+        return "refused", "%s resolves outside repos/%s%s" % (dest, source, escape_hint(grid_dir, dest))
+    if os.path.islink(target):
+        return "refused", "%s is a symlink" % dest
+    if not os.path.lexists(target):
+        return "absent", dest
+    if not force and dir_hash_or_none(target) != row["hash"]:
+        return "modified", "%s differs from what grid placed" % dest
+    return "ok", dest
+
+
+def remove_placed_dir(grid_dir, row, force=False):
+    """Delete one placed skill dir with every safety check. Returns (status, detail).
+
+    status: "removed", "absent", "modified", "refused" (see placed_dir_status;
+    the last two keep the dir) or "failed" (the delete itself raised OSError, for
+    example a read-only subtree; the dir may be partly deleted, so a re-run with
+    --force is what finishes it). After removing, now-empty parent directories are
+    removed up to but not including repos/<source>. These are the rules
+    `uninstall` uses.
+    """
+    # The containment root as it is BEFORE the check: dest_chain_link skips repos/ itself
+    # (a symlinked repos/ is supported), so a swap of repos/ in the window is caught by
+    # comparing the root again right before the delete.
+    expected_root = source_root(grid_dir, row["source"])
+    status, detail = placed_dir_status(grid_dir, row, force)
+    if status != "ok":
+        return status, detail
+    # Re-check right before the delete (see dest_chain_link), then delete the path that was
+    # resolved ONCE, so the path named in the check is the path removed.
+    link = dest_chain_link(grid_dir, row["dest"], include_leaf=True)
+    if link:
+        return "refused", "%s became a symlink during the removal" % link
+    if source_root(grid_dir, row["source"]) != expected_root:
+        return "refused", "repos changed during the removal"
+    target = os.path.realpath(os.path.join(grid_dir, row["dest"]))
+    if os.path.commonpath([expected_root, target]) != expected_root or target == expected_root:
+        return "refused", "%s resolves outside repos/%s" % (row["dest"], row["source"])
+    # The delete itself walks down from realpath(repos) one O_NOFOLLOW step at a time and removes
+    # the leaf through its parent's descriptor, so a parent swapped for a link after the checks
+    # above fails the walk instead of redirecting the delete (private H-12, VG2).
+    below = os.path.relpath(target, os.path.dirname(expected_root)).split(os.sep)
+    fds = []
+    try:
+        try:
+            fds = open_chain(os.path.dirname(expected_root), below[:-1])
+        except OSError as exc:
+            if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                return "refused", "%s changed under the removal (a parent is no longer a plain " \
+                                  "directory)" % row["dest"]
+            return "failed", "%s: %s" % (row["dest"], exc.strerror or exc)
+        try:
+            rmtree_at(fds[-1], below[-1])
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                return "refused", "%s changed under the removal (a link appeared)" % row["dest"]
+            # No traceback and no silent success: the caller keeps the ledger row.
+            return "failed", "%s: %s" % (row["dest"], exc.strerror or exc)
+        except RecursionError:
+            return "failed", "%s: directory tree is nested too deeply to delete" % row["dest"]
+        # Now-empty parents, deepest first, up to but not including repos/<source> (fds[1]).
+        for i in range(len(fds) - 1, 1, -1):
+            try:
+                os.rmdir(below[i - 1], dir_fd=fds[i - 1])    # only succeeds while empty
+            except OSError:
+                break
+    finally:
+        close_chain(fds)
+    return "removed", row["dest"]
+
+
+# --- install: selection (design.md "Install algorithm" steps 1, 3-5) --------------------
+
+def read_runtime_sources(grid_dir):
+    """Repo names in scripts/lib/runtimes.txt (first `|` field, trimmed); absent file = none."""
+    path = os.path.join(grid_dir, "scripts", "lib", "runtimes.txt")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except FileNotFoundError:
+        return set()
+    names = set()
+    for line in lines:
+        head = line.split("#", 1)[0].split("|", 1)[0].strip()
+        if head:
+            names.add(head)
+    return names
+
+
+def wired_set_files(grid_dir, host):
+    """The files whose untyped entries select what this machine wires.
+
+    baseline-submodules.txt (or, before it is seeded, the tracked example it is
+    seeded from, which has the same content) plus this host's two overlays.
+    """
+    base = os.path.join(grid_dir, "baseline-submodules.txt")
+    if not os.path.isfile(base):
+        base = os.path.join(grid_dir, "baseline-submodules.example.txt")
+    return [base,
+            os.path.join(grid_dir, "machines", host + ".txt"),
+            os.path.join(grid_dir, "machines", host + ".local.txt")]
+
+
+def select_lock_entries(grid_dir, lock, host):
+    """Install steps 3-5: the lock entries this machine installs, plus the notices to print.
+
+    Drops entries denied by an untyped `-source` / `-source/skill` line (typed
+    lines were already ignored by read_wired_entries), entries whose source needs
+    a runtime (scripts/lib/runtimes.txt), and entries whose source is a
+    submodule checkout (the maintainer path, never written to). Returns
+    (selected, notices); notices are one line per source, sorted.
+    """
+    _adds, denies = read_wired_entries(wired_set_files(grid_dir, host))
+    denies = set(denies)
+    runtimes = read_runtime_sources(grid_dir)
+    selected, notices = [], {}
+    for entry in lock:
+        source = entry["source"]
+        if source in denies or "%s/%s" % (source, posixpath.basename(entry["path"])) in denies:
+            continue
+        if source in runtimes:
+            notices[source] = ("grid: %s needs a runtime; use the maintainer path for it: git submodule "
+                               "update --init repos/%s && bash scripts/runtime-setup.sh %s"
+                               % (source, source, source))
+            continue
+        if os.path.lexists(os.path.join(grid_dir, "repos", source, ".git")):
+            notices[source] = "grid: %s is a submodule checkout; left to the maintainer path" % source
+            continue
+        selected.append(entry)
+    return selected, [notices[k] for k in sorted(notices)]
+
+
+def overlay_notices(grid_dir, lock, host):
+    """Install step 11: untyped `repo/skill` entries that name a skill absent from the lock."""
+    adds, denies = read_wired_entries(wired_set_files(grid_dir, host))
+    known = set("%s/%s" % (e["source"], posixpath.basename(e["path"])) for e in lock)
+    out = []
+    for entry in sorted(set(adds) | set("-" + d for d in denies)):
+        bare = entry.lstrip("-")
+        if "/" in bare and bare not in known:
+            out.append("grid: %s names a skill that is not in grid.lock; skipped" % entry)
+    return out
+
+
+def plain_https_url(url):
+    """True for an https URL whose authority is unambiguous: a hostname, no userinfo,
+    and none of the characters (`#`, `?`, backslash, whitespace, control) that make
+    git/curl contact a different host than a loose reader of the string would.
+
+    Kept here, not only in audit.py's allowlist, so install and drift do not depend
+    on the scanner being present (GRID_AUDIT=warn)."""
+    if not url.startswith("https://") or re.search(r"[#?\\\s\x00-\x1f\x7f]", url):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(url)
+        return bool(parts.hostname) and parts.username is None and parts.password is None
+    except ValueError:
+        return False
+
+
+def check_source_urls(cfg):
+    """Install/drift step 1: every source URL is a plain https:// URL (file:// only behind
+    GRID_ALLOW_FILE=1, for tests)."""
+    allow_file = os.environ.get("GRID_ALLOW_FILE") == "1"
+    for source in sorted(cfg["sources"]):
+        url = cfg["sources"][source]["url"]
+        if plain_https_url(url) or (allow_file and url.startswith("file://")):
+            continue
+        # ascii(): a URL carrying control characters must not reach the terminal raw.
+        raise GridError("grid: source '%s' has a URL that is not https: %s" % (source, ascii(url)[1:-1]))
+
+
+def audit_available(grid_dir):
+    """Install step 1: scripts/audit.py and policy.yaml exist, or fail unless GRID_AUDIT=warn.
+
+    Returns True when content can be vetted. With GRID_AUDIT=warn and no scanner
+    it prints the SKIPPED notice and returns False (placed unvetted, loudly).
+    Nothing is placed unvetted by accident: no scanner is exit 2 BEFORE any
+    network access (SEC13).
+    """
+    have = (os.path.isfile(os.path.join(grid_dir, "scripts", "audit.py"))
+            and os.path.isfile(os.path.join(grid_dir, "policy.yaml")))
+    if have:
+        return True
+    if os.environ.get("GRID_AUDIT") == "warn":
+        notice("grid: audit SKIPPED (no audit.py/policy.yaml) - placed unvetted")
+        return False
+    raise GridError("grid: refusing to place unvetted content (no audit.py/policy.yaml); "
+                    "set GRID_AUDIT=warn to override")
+
+
+AUDIT_TIMEOUT_DEFAULT = 300      # seconds for one audit.py child; GRID_AUDIT_TIMEOUT overrides
+
+
+def audit_timeout():
+    """Seconds an audit.py child may run: GRID_AUDIT_TIMEOUT (a positive integer), else 300.
+
+    Without a limit a scanner stuck on a hostile tree would hang install, repair and the
+    unattended drift job for ever.
+    """
+    try:
+        value = int(os.environ.get("GRID_AUDIT_TIMEOUT", ""))
+    except ValueError:
+        return AUDIT_TIMEOUT_DEFAULT
+    return value if value > 0 else AUDIT_TIMEOUT_DEFAULT
+
+
+def check_source_policy(grid_dir, cfg, sources, vetted, announce_file=True):
+    """Install/drift step 1: `audit.py --check-url` for each source that has a selected entry.
+
+    Runs before any network access. A disallowed source is exit 2 naming it (a
+    stderr warning under GRID_AUDIT=warn). A file:// source (tests only) skips
+    the check with a notice (`announce_file=False`: drift's quiet unattended run
+    prints none); with no scanner (GRID_AUDIT=warn) it is skipped silently, the
+    SKIPPED notice already said so.
+    """
+    warn = os.environ.get("GRID_AUDIT") == "warn"
+    for source in sorted(sources):
+        url = cfg["sources"][source]["url"]
+        if url.startswith("file://"):
+            if announce_file:
+                notice("grid: %s: file:// source, --check-url skipped" % source)
+            continue
+        if not vetted:
+            continue
+        limit = audit_timeout()
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-B", os.path.join(grid_dir, "scripts", "audit.py"),
+                 "--grid-dir", grid_dir, "--check-url", url],
+                env=dict(os.environ, LC_ALL="C"), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                encoding="utf-8", errors="replace", timeout=limit)
+        except subprocess.TimeoutExpired:
+            # A scanner that does not answer has not allowed the source.
+            proc = None
+        if proc is not None and proc.returncode == 0:
+            continue
+        if proc is None:
+            reason = "audit.py --check-url timed out after %ds" % limit
+        else:
+            reason = (proc.stdout.strip() or proc.stderr.strip() or "exit %d" % proc.returncode)
+        msg = "grid: source '%s' is not allowed by policy.yaml: %s" % (source, reason)
+        if warn:
+            notice(msg + " (continuing: GRID_AUDIT=warn)")
+        else:
+            raise GridError(msg)
+
+
+def _seed_copy(grid_dir, src, rel):
+    """Copy `src` to <grid>/<rel> without ever writing outside the grid.
+
+    The copy is a NO-FOLLOW, EXCLUSIVE create walked down from an fd on the grid dir:
+    each parent directory is opened with O_NOFOLLOW (a symlinked `machines/`, even a
+    dangling one, is refused rather than followed out of the grid), and the file is
+    created with O_CREAT|O_EXCL|O_NOFOLLOW (a dangling symlink at the leaf makes the
+    create fail instead of materialising its target). A plain exists/copyfile pair
+    followed such a link: os.path.exists is False for a dangling link and
+    shutil.copyfile writes through it.
+    """
+    parts = rel.split("/")
+    # The example is read with O_NOFOLLOW too, so a symlinked example cannot pull an
+    # outside file's content into a seeded file. O_NONBLOCK: a blocking open of a FIFO waits
+    # for a writer for ever, so the type check below must come from an fstat on a descriptor
+    # that is already open. Anything that is not a regular file is treated as a missing example.
+    try:
+        sfd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return
+    dirfd = None
+    try:
+        if not stat.S_ISREG(os.fstat(sfd).st_mode):
+            return
+        dirfd = os.open(grid_dir, os.O_RDONLY | os.O_DIRECTORY)
+        for part in parts[:-1]:
+            try:
+                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+            except FileNotFoundError:
+                os.mkdir(part, 0o777, dir_fd=dirfd)
+                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+            except OSError:
+                # A symlinked directory (a user may keep machines/ in a private repo) is not
+                # written through, but it is not fatal either: skip this file and go on.
+                # Anything else that is in the way (a regular file) is an error.
+                try:
+                    is_link = stat.S_ISLNK(os.lstat(part, dir_fd=dirfd).st_mode)
+                except OSError:
+                    is_link = False
+                if is_link:
+                    notice("grid: not seeding %s: %s is a symlink and grid never writes through "
+                           "one" % (rel, part))
+                    return
+                raise GridError("grid: refusing to seed %s: %s is not a directory" % (rel, part))
+            os.close(dirfd)
+            dirfd = nfd
+        try:
+            dfd = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                          0o666, dir_fd=dirfd)
+        except FileExistsError:
+            return                        # already there (or a link there): never overwritten
+        try:
+            with os.fdopen(dfd, "wb") as out, os.fdopen(sfd, "rb", closefd=False) as inp:
+                shutil.copyfileobj(inp, out)
+        except BaseException:
+            os.unlink(parts[-1], dir_fd=dirfd)    # no half-written seed file left behind
+            raise
+    except OSError as exc:
+        # The dir_fd calls above report only the last path component ("baseline-submodules.txt"
+        # for a read-only grid); name the file that was being seeded, with its full path.
+        raise GridError("grid: cannot seed %s: %s" % (os.path.join(grid_dir, rel),
+                                                      exc.strerror or exc))
+    finally:
+        os.close(sfd)
+        if dirfd is not None:
+            os.close(dirfd)
+
+
+def seed_wired_files(grid_dir, host):
+    """Install step 2: create baseline-submodules.txt and machines/<host>.txt from their
+    tracked examples when absent. Never overwrites; a missing example is skipped.
+
+    "Absent" means lexists: a dangling symlink at the destination counts as present
+    (and is left alone). The write itself is _seed_copy's no-follow create."""
+    for src, dst in (("baseline-submodules.example.txt", "baseline-submodules.txt"),
+                     ("machines/example.txt", "machines/" + host + ".txt")):
+        if os.path.lexists(os.path.join(grid_dir, dst)):
+            continue
+        _seed_copy(grid_dir, os.path.join(grid_dir, src), dst)
+
+
+# --- install: classification (step 6) ----------------------------------------------------
+
+def classify_entries(grid_dir, selected, old_rows, force):
+    """Install step 6: label each selected entry current / adopt / protected / fetch / replace.
+
+    current   in the ledger with the locked sha and hash, dest re-hashes to it: nothing to do.
+    adopt     dest already re-hashes to the locked hash but the ledger does not say so
+              (crash between placing and the ledger write, or a lost ledger): record it.
+    protected dest exists and re-hashes to neither the ledger hash nor the locked hash
+              (a user edit, or a directory grid did not write): never touched. With
+              --force it becomes `replace`.
+    fetch     dest absent, or in the ledger at another sha/hash and unmodified (a lock bump).
+    Returns a list of (status, entry, old_row_or_None).
+    """
+    by_dest = dict((r["dest"], r) for r in old_rows)
+    plan = []
+    for entry in selected:
+        # Defence in depth: read_grid_lock already refuses this shape, but classification
+        # decides what gets replaced, so it must never trust a link at repos/<source>.
+        if source_dir_is_link(grid_dir, entry["source"]):
+            raise GridError("grid: repos/%s is a symlink; grid will not install through it"
+                            % entry["source"])
+        old = by_dest.get(entry["dest"])
+        target = os.path.join(grid_dir, entry["dest"])
+        if not os.path.lexists(target):
+            plan.append(("fetch", entry, old))
+            continue
+        disk = dir_hash_or_none(target)
+        if disk == entry["hash"]:
+            same = old is not None and old["sha"] == entry["sha"] and old["hash"] == entry["hash"]
+            plan.append(("current" if same else "adopt", entry, old))
+        elif old is not None and disk == old["hash"]:
+            plan.append(("fetch", entry, old))                 # unmodified older version: a lock bump
+        else:
+            plan.append(("replace" if force else "protected", entry, old))
+    return plan
+
+
+# --- install: fetch, verify, audit, place (step 7; design.md "Fetch mechanism") -------------
+
+TMP_DIRNAME = ".grid-tmp"
+STALE_SECONDS = 24 * 3600
+
+
+def staging_top_problem(grid_dir):
+    """Why <grid>/.grid-tmp cannot be trusted as the staging parent, or None.
+
+    None means it is absent (it will be created by us) or is a real directory
+    owned by the current user. lstat, never stat: a symlink there (for example
+    committed by a hostile fork; `.gitignore` does not match a symlink) would
+    point the sweep's deletes and the staging writes at its target.
+    """
+    top = os.path.join(grid_dir, TMP_DIRNAME)
+    try:
+        st = os.lstat(top)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return "cannot be inspected (%s)" % (exc.strerror or exc)
+    if stat.S_ISLNK(st.st_mode):
+        return "is a symlink"
+    if not stat.S_ISDIR(st.st_mode):
+        return "is not a directory"
+    if hasattr(os, "getuid") and st.st_uid != os.getuid():
+        return "is not owned by the current user"
+    return None
+
+
+def require_staging_top(grid_dir):
+    """GridError when <grid>/.grid-tmp is not safe to stage into (see staging_top_problem)."""
+    problem = staging_top_problem(grid_dir)
+    if problem:
+        raise GridError("grid: %s/%s %s; refusing to stage there (remove it and re-run)"
+                        % (grid_dir, TMP_DIRNAME, problem))
+
+
+def rmtree_force(path):
+    """Delete the staging dir `path`, including subtrees a user left read-only.
+
+    A placed skill the user made read-only (chmod -R a-w) is moved into <run>/old/ by a
+    replacing install, and shutil.rmtree(ignore_errors=True) could not empty it: the tree
+    stayed until the 24 h sweep, which failed the same way (private H-12, VG8). Every real
+    directory is made owner-writable first, without following a link; then the plain delete.
+    Used only inside our own staging dir, where a chmod by path has nothing to race against.
+    """
+    stack = [path]
+    while stack:
+        top = stack.pop()
+        try:
+            mode = os.lstat(top).st_mode
+            if not stat.S_ISDIR(mode):
+                continue
+            os.chmod(top, mode | stat.S_IRWXU)
+            with os.scandir(top) as it:
+                stack.extend(e.path for e in it if e.is_dir(follow_symlinks=False))
+        except OSError:
+            continue
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def sweep_stale_staging(grid_dir):
+    """Delete <grid>/.grid-tmp/* entries older than a day (leftovers of a SIGKILL).
+
+    A leftover staged SKILL.md must never be found by a whole-tree `find`, and a
+    killed scheduler job must not leave staging dirs for ever. Only entries named
+    like a run dir (all digits, the pid) are ever deleted, and nothing is swept
+    when .grid-tmp itself is not a plain directory of ours.
+    """
+    top = os.path.join(grid_dir, TMP_DIRNAME)
+    problem = staging_top_problem(grid_dir)
+    if problem:
+        notice("grid: %s %s; stale staging not swept" % (top, problem))
+        return
+    if not os.path.isdir(top):
+        return
+    cutoff = time.time() - STALE_SECONDS
+    for name in os.listdir(top):
+        if not re.fullmatch(r"[0-9]+", name):
+            continue                                           # not a run dir of ours: leave it
+        full = os.path.join(top, name)
+        try:
+            if os.lstat(full).st_mtime >= cutoff:
+                continue
+            if os.path.isdir(full) and not os.path.islink(full):
+                rmtree_force(full)
+            else:
+                os.unlink(full)
+        except OSError:
+            continue
+    try:
+        os.rmdir(top)                                          # only if now empty
+    except OSError:
+        pass
+
+
+@contextlib.contextmanager
+def staging_run(grid_dir):
+    """One staging run dir per invocation: <grid>/.grid-tmp/<pid>/, removed in a `finally`.
+
+    SIGTERM is turned into sys.exit(143) by main(), so the `finally` also runs
+    under a scheduler kill. The dir is inside the grid dir so the final rename
+    into place stays on one filesystem.
+    """
+    require_staging_top(grid_dir)
+    top = os.path.join(grid_dir, TMP_DIRNAME)
+    run = os.path.join(top, str(os.getpid()))
+    if os.path.lexists(run):
+        rmtree_force(run)                                      # a dead process's pid, reused
+    os.makedirs(run)
+    try:
+        yield run
+    finally:
+        rmtree_force(run)
+        try:
+            os.rmdir(top)
+        except OSError:
+            pass
+
+
+def stage_source(run, source, url, sha, paths):
+    """Partial clone + cone sparse checkout of `paths` at `sha` into <run>/repos/<source>.
+
+    The recipe from design.md "Fetch mechanism". Raises GridError on any git
+    failure (the caller turns it into a failed source). Returns the repo dir.
+    """
+    repo = os.path.join(run, "repos", source)
+    os.makedirs(os.path.dirname(repo), exist_ok=True)
+    run_git(["init", "-q", repo])
+    # The user's global line-ending settings must not change bytes and fail verification.
+    run_git(["-C", repo, "config", "core.autocrlf", "false"])
+    run_git(["-C", repo, "config", "core.eol", "lf"])
+    run_git(["-C", repo, "remote", "add", "origin", url])
+    trace = os.environ.get("GRID_TRACE_FETCH")
+    if trace:                                                   # tests prove a no-op re-run with this
+        with open(trace, "a", encoding="utf-8") as fh:
+            fh.write("%s %s\n" % (source, sha))
+    run_git(["-C", repo, "fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", sha])
+    # `init --cone` then `set` (not `set --cone`, which needs git 2.35) works from 2.25.
+    run_git(["-C", repo, "sparse-checkout", "init", "--cone"])
+    run_git(["-C", repo, "sparse-checkout", "set"] + list(paths))
+    run_git(["-C", repo, "checkout", "-q", "FETCH_HEAD"])
+    return repo
+
+
+def _entry_error(entry, detail):
+    """GridError naming an entry; `detail` has no `grid: ` prefix."""
+    return GridError("grid: %s (%s): %s" % (entry["name"], entry["dest"], detail))
+
+
+def _strip_prefix(exc):
+    msg = str(exc)
+    return msg[len("grid: "):] if msg.startswith("grid: ") else msg
+
+
+def verify_staged(repo, entry):
+    """Check one staged skill dir against the lock. Raises GridError naming the entry."""
+    head = run_git(["-C", repo, "rev-parse", "HEAD"]).strip()
+    if head != entry["sha"]:
+        raise _entry_error(entry, "fetched commit %s is not the locked %s" % (head[:12], entry["sha"][:12]))
+    try:
+        tree = run_git(["-C", repo, "rev-parse", "HEAD:%s" % entry["path"]]).strip()
+    except GridError:
+        raise _entry_error(entry, "path %s not found at the locked commit" % entry["path"])
+    if tree != entry["tree"]:
+        raise _entry_error(entry, "tree %s differs from the locked %s" % (tree[:12], entry["tree"][:12]))
+    staged = os.path.join(repo, *entry["path"].split("/"))
+    try:
+        got = disk_content_hash(staged, check_escape=True)
+    except GridError as exc:
+        raise _entry_error(entry, _strip_prefix(exc))
+    if got != entry["hash"]:
+        raise _entry_error(entry, "content hash %s differs from the locked %s" % (got[:19], entry["hash"][:19]))
+
+
+def audit_staged(grid_dir, run, source, entries):
+    """Vet the staged copies of one source. Returns {dest: reason} for the entries that fail.
+
+    One `audit.py --format json` call per source over every verified path, with
+    --root at the staging run dir so reported paths read repos/<source>/..., which
+    is what CURATION.md allowlist entries written for the maintainer path match.
+    Exit 0: all pass. Exit 1: an entry fails when a finding has severity high,
+    is not allowed and lives under that entry's directory; the source's other
+    entries pass. Exit 2 or unparseable output: every entry of the source fails.
+    """
+    # -B: the scanner must not leave a scripts/lib/__pycache__ in the repo (also under --dry-run).
+    cmd = [sys.executable, "-B", os.path.join(grid_dir, "scripts", "audit.py"), "--format", "json",
+           "--root", run, "--grid-dir", grid_dir]
+    cmd += [os.path.join(run, "repos", source, *e["path"].split("/")) for e in entries]
+    try:
+        proc = subprocess.run(cmd, env=dict(os.environ, LC_ALL="C"), stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
+                              timeout=audit_timeout())
+    except subprocess.TimeoutExpired:
+        return dict((e["dest"], "audit could not vet it (audit.py timed out)") for e in entries)
+    if proc.returncode == 0:
+        return {}
+    everything = dict((e["dest"], "audit could not vet it (audit.py exit %d)" % proc.returncode)
+                      for e in entries)
+    if proc.returncode != 1:
+        return everything
+    try:
+        findings = json.loads(proc.stdout)["findings"]
+    except (ValueError, KeyError, TypeError):
+        return everything
+    failed = {}
+    for entry in entries:
+        prefix = "repos/%s/%s/" % (source, entry["path"])
+        hits = [f for f in findings if isinstance(f, dict) and f.get("severity") == "high"
+                and not f.get("allowed") and str(f.get("path", "")).startswith(prefix)]
+        if hits:
+            failed[entry["dest"]] = "audit %s at %s" % (hits[0].get("rule"), hits[0].get("path"))
+    # Exit 1 means a high finding exists. If none maps to an entry, do not guess: fail the source.
+    return failed or everything
+
+
+def _prune_empty_dirs(top):
+    """Remove every empty directory below `top` (deepest first); `top` itself stays.
+
+    The content hash does not cover directories, and a checkout cannot hold an empty one, so
+    an empty directory in the copy is never part of what was verified: it can only have been
+    added to the staged tree after the audit. Dropping it keeps "what is placed is what was
+    hashed", the same rule the excluded names follow.
+    """
+    for root, dirnames, _files in os.walk(top, topdown=False):
+        for name in dirnames:
+            full = os.path.join(root, name)
+            if not os.path.islink(full):
+                try:
+                    os.rmdir(full)                  # only succeeds while empty
+                except OSError:
+                    pass
+
+
+def place_staged(grid_dir, run, repo, entry, counter):
+    """Copy a verified staged dir into place (SEC15). Raises GridError naming the entry.
+
+    The verified directory is copied ONCE (symlinks kept as links, never
+    followed) into <run>/place/<dest>, outside the staged git worktree; the
+    symlink-escape check and the content hash are repeated on that copy, and only
+    then is it renamed into <grid>/<dest>. So the bytes renamed into place are
+    the bytes just verified. An existing dest is first moved into <run>/old/<n>,
+    inside the staging dir and never beside dest: a leftover `*.grid-old` next to
+    a skill would be wired as a skill by wire.sh's plain-find fallback.
+    """
+    staged = os.path.join(repo, *entry["path"].split("/"))
+    copy = os.path.join(run, "place", *entry["dest"].split("/"))
+    os.makedirs(os.path.dirname(copy), exist_ok=True)
+    # `ignore`: skip every excluded name (same predicate as the hash), so what is placed is
+    # exactly what was hashed even if litter appeared in the staged dir after verification.
+    def skip_excluded(src, names):
+        reldir = os.path.relpath(src, staged).replace(os.sep, "/")
+        prefix = "" if reldir == "." else reldir + "/"
+        return [n for n in names if is_excluded(prefix + n)]
+    try:
+        shutil.copytree(staged, copy, symlinks=True, ignore=skip_excluded)
+    except shutil.Error as exc:
+        # Something appeared in the staged dir after verification that cannot be copied (a FIFO is
+        # the case that raises): name it instead of printing shutil's list of tuples.
+        bad = []
+        for src, _dst, why in exc.args[0][:3]:
+            name = os.path.relpath(src, staged).replace(os.sep, "/")
+            try:
+                mode = os.lstat(src).st_mode
+                special = not (stat.S_ISREG(mode) or stat.S_ISDIR(mode) or stat.S_ISLNK(mode))
+            except OSError:
+                special = False
+            bad.append("%s is not a regular file or symlink" % name if special
+                       else "%s: %s" % (name, why))
+        raise _entry_error(entry, "cannot place it, the staged copy holds: " + _printable("; ".join(bad)))
+    _prune_empty_dirs(copy)
+    try:
+        got = disk_content_hash(copy, check_escape=True)
+    except GridError as exc:
+        raise _entry_error(entry, _strip_prefix(exc))
+    if got != entry["hash"]:
+        raise _entry_error(entry, "the copy to be placed hashes %s, not the locked %s"
+                           % (got[:19], entry["hash"][:19]))
+    # Re-check containment against the filesystem as it is NOW, just before the write.
+    # expected_root is taken first: if repos/ is swapped for a link after the check below,
+    # the root differs at the re-checks that follow (dest_chain_link does not look at repos/).
+    expected_root = source_root(grid_dir, entry["source"])
+    if source_dir_is_link(grid_dir, entry["source"]):
+        raise _entry_error(entry, "repos/%s is a symlink" % entry["source"])
+    if not is_contained(grid_dir, entry["source"], entry["dest"]):
+        raise _entry_error(entry, "%s escapes repos/%s%s"
+                           % (entry["dest"], entry["source"], escape_hint(grid_dir, entry["dest"])))
+    link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
+    if link:                                    # friendly error before the parents are made
+        raise _entry_error(entry, "%s became a symlink while placing" % link)
+    if source_root(grid_dir, entry["source"]) != expected_root:
+        raise _entry_error(entry, "repos changed while placing")
+    # The parents are made, and the renames done, through one O_NOFOLLOW descriptor walk from
+    # realpath(repos): a parent swapped for a link after the checks above fails the walk (and
+    # nothing is created outside), and one swapped after it cannot redirect the renames, which
+    # go through the parent's descriptor (private H-12).
+    below = entry["dest"].split("/")[1:]                        # <source>/<path...>/<leaf>
+    try:
+        fds = open_chain(os.path.dirname(expected_root), below[:-1], create=True)
+    except OSError as exc:
+        raise _entry_error(entry, "a parent of the destination became a symlink or is not a "
+                                  "directory while placing (%s)" % (exc.strerror or exc))
+    try:
+        # Re-check with the parents open (see dest_chain_link): these keep the specific errors.
+        link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
+        if link:
+            raise _entry_error(entry, "%s became a symlink while placing" % link)
+        if source_root(grid_dir, entry["source"]) != expected_root:
+            raise _entry_error(entry, "repos changed while placing")
+        leaf = below[-1]
+        moved = None
+        try:
+            os.lstat(leaf, dir_fd=fds[-1])
+            exists = True
+        except FileNotFoundError:
+            exists = False
+        if exists:
+            moved = os.path.join(run, "old", str(next(counter)))
+            os.makedirs(os.path.dirname(moved), exist_ok=True)
+            os.rename(leaf, moved, src_dir_fd=fds[-1])
+        try:
+            os.rename(copy, leaf, dst_dir_fd=fds[-1])
+        except OSError as exc:
+            if moved is not None:
+                os.rename(moved, leaf, dst_dir_fd=fds[-1])      # put the old one back
+            raise _entry_error(entry, "cannot place it: %s" % exc)
+    finally:
+        close_chain(fds)
+
+
+def _count():
+    n = 0
+    while True:
+        n += 1
+        yield n
+
+
+def fetch_and_place(grid_dir, cfg, todo, vetted):
+    """Install step 7: fetch, verify, audit and place `todo` (a list of lock entries).
+
+    Returns (placed, failed): `placed` is the list of entries now on disk at the
+    locked content; `failed` maps dest -> reason for the rest. A failed fetch
+    fails every entry of that source; one bad skill never blocks the others.
+    """
+    placed, failed = [], {}
+    warn = os.environ.get("GRID_AUDIT") == "warn"
+    by_source = {}
+    for entry in todo:
+        by_source.setdefault(entry["source"], []).append(entry)
+    counter = _count()
+    with staging_run(grid_dir) as run:
+        for source in sorted(by_source):
+            entries = by_source[source]
+            sha = entries[0]["sha"]
+            if any(e["sha"] != sha for e in entries):
+                # grid lock writes the one gitlink commit per source, so this is a hand-edit.
+                for e in entries:
+                    failed[e["dest"]] = "grid.lock pins source '%s' at more than one commit" % source
+                notice("grid: grid.lock pins source '%s' at more than one commit" % source)
+                continue
+            try:
+                repo = stage_source(run, source, cfg["sources"][source]["url"], sha,
+                                    sorted(set(e["path"] for e in entries)))
+            except GridError as exc:
+                notice("grid: %s: cannot fetch pinned commit %s (upstream may have removed it; the "
+                       "maintainer must re-run grid lock)\n%s" % (source, sha[:12], exc))
+                for e in entries:
+                    failed[e["dest"]] = "cannot fetch pinned commit"
+                continue
+            verified = []
+            for e in entries:
+                try:
+                    verify_staged(repo, e)
+                    verified.append(e)
+                except GridError as exc:
+                    failed[e["dest"]] = str(exc)
+                    notice(str(exc))
+            if verified and vetted:
+                bad = audit_staged(grid_dir, run, source, verified)
+                for e in list(verified):
+                    if e["dest"] not in bad:
+                        continue
+                    if warn:
+                        notice("grid: %s (%s): %s; placing it anyway (GRID_AUDIT=warn)"
+                               % (e["name"], e["dest"], bad[e["dest"]]))
+                    else:
+                        failed[e["dest"]] = bad[e["dest"]]
+                        notice("grid: %s (%s): not placed, %s" % (e["name"], e["dest"], bad[e["dest"]]))
+                        verified.remove(e)
+            for e in verified:
+                try:
+                    place_staged(grid_dir, run, repo, e, counter)
+                    placed.append(e)
+                except GridError as exc:
+                    failed[e["dest"]] = str(exc)
+                    notice(str(exc))
+    return placed, failed
+
+
+def run_wire(grid_dir, skills_dir=None):
+    """Install step 10: `GRID_NO_CATALOG=1 bash <grid>/scripts/wire.sh`; True on exit 0.
+
+    GRID_NO_CATALOG so a partial machine never rewrites the tracked SKILLS.md
+    (GRID_SKIP_CATALOG is not reused: it also suppresses .wired.manifest).
+    """
+    script = os.path.join(grid_dir, "scripts", "wire.sh")
+    if not os.path.isfile(script):
+        notice("grid: %s not found; skills are placed but not linked" % script)
+        return False
+    env = dict(os.environ, LC_ALL="C", GRID_DIR=grid_dir, GRID_NO_CATALOG="1", GRID_HOST=host_key())
+    if skills_dir:
+        env["SKILLS_DIR"] = skills_dir
+    rc = subprocess.call(["bash", script], env=env)
+    if rc != 0:
+        notice("grid: wire.sh failed (exit %d)" % rc)
+    return rc == 0
+
+
+def describe(entry):
+    return "%s (%s)" % (entry["name"], entry["dest"])
+
+
+def print_dry_run(plan, remove_rows):
+    """The plan `install --dry-run` and `repair --dry-run` print; nothing is touched."""
+    todo = [entry for status, entry, _old in plan if status in ("fetch", "replace")]
+    for status, entry, _old in plan:
+        if status in ("fetch", "replace"):
+            print("would fetch %s from %s at %s" % (describe(entry), entry["source"], entry["sha"][:12]))
+        elif status == "adopt":
+            print("would adopt %s" % describe(entry))
+    for row in remove_rows:
+        print("would remove %s" % row["dest"])
+    print("grid: dry run: %d to fetch, %d to remove, %d current"
+          % (len(todo), len(remove_rows), sum(1 for p in plan if p[0] == "current")))
+
+
+def apply_plan(grid_dir, cfg, skills_dir, vetted, plan, failed, remove_rows, keep_rows, foreign):
+    """Install steps 7-10, shared by `install` and `repair`. Returns (failed, wired_ok).
+
+    plan         classify_entries output; its fetch/replace entries are fetched and placed (step 7)
+    failed       dest -> reason for entries already known to have failed (protected ones)
+    remove_rows  old ledger rows to delete from disk (step 8, with uninstall's protection)
+    keep_rows    old ledger rows that stay exactly as they are (repair without --prune)
+    foreign      raw ledger lines of an unknown kind, copied through (step 9)
+    """
+    todo = [entry for status, entry, _old in plan if status in ("fetch", "replace")]
+
+    # Step 7: fetch, verify, audit, place.
+    placed = []
+    if todo:
+        placed, fetch_failed = fetch_and_place(grid_dir, cfg, todo, vetted)
+        failed.update(fetch_failed)
+        for entry in placed:
+            print("grid: placed %s" % describe(entry))
+
+    # Step 8: remove directories no longer selected, with uninstall's containment and
+    # modified-directory protection. A directory that is kept stays in the ledger.
+    kept_rows = list(keep_rows)
+    for row in remove_rows:
+        status, detail = remove_placed_dir(grid_dir, row)
+        if status == "removed":
+            print("grid: removed %s" % row["dest"])
+        elif status in ("modified", "refused", "failed"):
+            notice("grid: %s: kept (%s)" % (row["dest"], detail))
+            kept_rows.append(row)
+
+    # Step 9: the ledger says what is on disk, even after a partial failure.
+    placed_dests = set(e["dest"] for e in placed)
+    new_rows = list(kept_rows)
+    for status, entry, old in plan:
+        if entry["dest"] in placed_dests or status in ("current", "adopt"):
+            new_rows.append(dict((c, entry[c]) for c in LEDGER_COLS if c in entry))
+        elif old is not None and os.path.lexists(os.path.join(grid_dir, entry["dest"])):
+            new_rows.append(old)                               # the older dir is still there
+    # Nothing to record and no ledger yet (a maintainer checkout installs nothing): do not
+    # create an empty file, which doctor/repair would read as "this is an install machine".
+    if new_rows or foreign or os.path.exists(ledger_path()):
+        write_ledger(new_rows, foreign)
+
+    # Step 10: wire (links and .wired.manifest; never SKILLS.md).
+    return failed, run_wire(grid_dir, skills_dir)
+
+
+def protected_failures(plan):
+    """dest -> reason for every `protected` entry, with install's notice printed for each."""
+    failed = {}
+    for status, entry, _old in plan:
+        if status == "protected":
+            failed[entry["dest"]] = "differs from what grid placed"
+            notice("grid: %s: %s differs from what grid placed; left alone (grid repair --force replaces it)"
+                   % (entry["name"], entry["dest"]))
+    return failed
+
+
+def report_failed(failed):
+    """Install step 11 tail: one stderr line naming every entry that was not installed."""
+    if failed:
+        notice("grid: %d entr%s not installed: %s" % (
+            len(failed), "y" if len(failed) == 1 else "ies", ", ".join(sorted(failed))))
+
+
+def cmd_install(args):
+    """`grid install [--dry-run] [--force]`: place the locked skills without git submodules.
+
+    Steps are numbered as in design.md "Install algorithm". --dry-run runs 1-6
+    and prints the plan: no network, no seeding, no ledger, no wire.sh.
+    """
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    dry = args.dry_run
+    host = host_key()
+
+    # Step 1: read and validate everything, and refuse before any network access.
+    cfg = load_grid_yaml(grid_dir)
+    lock = read_grid_lock(grid_dir, cfg["sources"])
+    check_source_urls(cfg)
+    vetted = audit_available(grid_dir)
+    # Steps 3-5: what this machine installs.
+    selected, notices = select_lock_entries(grid_dir, lock, host)
+    for line in notices:
+        notice(line)
+    check_source_policy(grid_dir, cfg, set(e["source"] for e in selected), vetted)
+
+    if not dry:
+        preflight_state()                                      # before any write or network access
+        sweep_stale_staging(grid_dir)
+        seed_wired_files(grid_dir, host)                       # step 2
+
+    # Step 6: classify against the ledger and the disk.
+    old_rows, foreign = read_ledger()
+    plan = classify_entries(grid_dir, selected, old_rows, args.force)
+    selected_dests = set(e["dest"] for e in selected)
+    stale_rows = [r for r in old_rows if r["dest"] not in selected_dests]
+    failed = protected_failures(plan)
+
+    if dry:
+        print_dry_run(plan, stale_rows)
+        return EXIT_OK
+
+    # Steps 7-10.
+    failed, wired_ok = apply_plan(grid_dir, cfg, args.skills_dir, vetted, plan, failed,
+                                  stale_rows, [], foreign)
+
+    # Steps 11 and 12: notices, then the exit code.
+    for line in overlay_notices(grid_dir, lock, host):
+        notice(line)
+    report_failed(failed)
+    return EXIT_OK if not failed and wired_ok else EXIT_FINDINGS
+
+
+# --- doctor (design.md "doctor / repair / uninstall") ----------------------------------------
+# Four read-only checks, in order: manifest, ledger, disk, links. Every finding is
+# a (check, kind, name, detail) tuple, printed as `<check> <kind> <name> <detail>`.
+
+MAINTAINER_MODE = "no install ledger: maintainer mode"
+
+
+def skills_dir_for(args):
+    """The skills dir wire.sh links into: --skills-dir, else $SKILLS_DIR, else ~/.claude/skills.
+
+    Same default chain wire.sh uses (it ignores CLAUDE_CONFIG_DIR for skills).
+    """
+    return (args.skills_dir or os.environ.get("SKILLS_DIR")
+            or os.path.join(os.environ.get("HOME") or os.path.expanduser("~"), ".claude", "skills"))
+
+
+def ledger_findings(grid_dir, selected, rows):
+    """Doctor check 2: ledger vs grid.lock. `selected` = the lock entries this machine installs.
+
+    missing  selected, but no ledger row (never placed, or the ledger was lost)
+    stale    ledger row's sha or hash differs from the lock (a lock bump not yet installed)
+    extra    ledger row that grid.lock no longer selects (removed upstream, or now denied)
+    """
+    findings = []
+    by_dest = dict((e["dest"], e) for e in selected)
+    have = dict((r["dest"], r) for r in rows)
+    for dest, entry in by_dest.items():
+        row = have.get(dest)
+        if row is None:
+            findings.append(("ledger", "skill", entry["name"], "missing %s" % dest))
+        elif row["sha"] != entry["sha"] or row["hash"] != entry["hash"]:
+            findings.append(("ledger", "skill", entry["name"],
+                             "stale %s: ledger %s, grid.lock %s" % (dest, row["sha"][:12], entry["sha"][:12])))
+    for dest, row in have.items():
+        if dest not in by_dest:
+            findings.append(("ledger", "skill", row["name"], "extra %s: grid.lock no longer selects it" % dest))
+    return findings
+
+
+def disk_findings(grid_dir, rows):
+    """Doctor check 3: every ledger dir is present and still hashes to the ledger's hash.
+
+    A symlink where a dir should be, or an unreadable tree, hashes to None and so
+    counts as modified: grid never wrote it that way.
+    """
+    findings = []
+    for row in rows:
+        target = os.path.join(grid_dir, row["dest"])
+        if not os.path.lexists(target):
+            findings.append(("disk", "skill", row["name"], "absent %s" % row["dest"]))
+        elif dir_hash_or_none(target) != row["hash"]:
+            findings.append(("disk", "skill", row["name"], "modified %s" % row["dest"]))
+    return findings
+
+
+def link_findings(grid_dir, skills_dir):
+    """Doctor check 4: `GRID_SKIP_AUDIT=1 bash wire.sh --check`; each drift line it prints is a finding.
+
+    wire.sh --check wires into a throwaway home and diffs the grid-owned links
+    against the live dirs, printing `< name -> target` (a link that should exist)
+    and `> name -> target` (a stale one) on stderr. Anything else it prints is
+    not a finding, but a non-zero exit with no drift line (wire.sh itself broke)
+    still is one, so a broken check cannot read as healthy.
+    """
+    script = os.path.join(grid_dir, "scripts", "wire.sh")
+    if not os.path.isfile(script):
+        return [("links", "wire", "wire.sh", "scripts/wire.sh not found")]
+    env = dict(os.environ, LC_ALL="C", GRID_DIR=grid_dir, GRID_HOST=host_key(), GRID_SKIP_AUDIT="1")
+    env["SKILLS_DIR"] = skills_dir
+    proc = subprocess.run(["bash", script, "--check"], env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, encoding="utf-8", errors="replace")
+    if proc.returncode == 0:
+        return []
+    findings = []
+    for line in proc.stderr.splitlines():
+        if line[:2] in ("< ", "> "):
+            name, _, target = line[2:].partition(" -> ")
+            findings.append(("links", "link", name, "%s -> %s" % (
+                "missing" if line[0] == "<" else "stale", target)))
+    if not findings:
+        # Every non-blank stderr line, not just the first: the first is often an unrelated
+        # warning and the real cause comes after it.
+        lines = [ln.strip() for ln in proc.stderr.splitlines() if ln.strip()]
+        reason = "; ".join(lines) or "exit %d" % proc.returncode
+        findings.append(("links", "wire", "wire.sh", "check failed: %s" % reason))
+    return findings
+
+
+def doctor_findings(grid_dir, skills_dir, host):
+    """Run the four checks; return (findings, maintainer_mode). Exit 2 only on an unreadable lock."""
+    findings = []
+    try:
+        cfg = load_grid_yaml(grid_dir)
+    except GridError as exc:
+        # A manifest that does not parse is a finding, not a crash: doctor's job is to say so.
+        # Without it there is no source list, so the ledger and disk checks cannot run.
+        detail = " ".join(str(exc).split())
+        return [("manifest", "parse", "grid.yaml", detail)] + link_findings(grid_dir, skills_dir), False
+    findings += [("manifest", kind, name, detail) for kind, name, detail in manifest_findings(grid_dir, cfg)]
+    if not os.path.exists(ledger_path()):
+        return findings + link_findings(grid_dir, skills_dir), True
+    lock = read_grid_lock(grid_dir, cfg["sources"])
+    selected, _notices = select_lock_entries(grid_dir, lock, host)
+    try:
+        rows, _foreign = read_ledger()
+    except (GridError, OSError) as exc:
+        # A damaged ledger is a finding (valid --json too), not a reason to print nothing:
+        # doctor is the command an operator runs to find out what is wrong. Without rows
+        # the ledger and disk checks cannot run; the link check still can.
+        detail = " ".join(str(exc).split())
+        return findings + [("ledger", "file", LEDGER_NAME, detail)] + link_findings(grid_dir, skills_dir), False
+    findings += ledger_findings(grid_dir, selected, rows)
+    findings += disk_findings(grid_dir, rows)
+    findings += link_findings(grid_dir, skills_dir)
+    return findings, False
+
+
+def cmd_doctor(args):
+    """`grid doctor [--json]`: report problems, change nothing. Exit 0 clean, 1 on any finding."""
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    findings, maintainer = doctor_findings(grid_dir, skills_dir_for(args), host_key())
+    findings = sorted(findings)
+    if maintainer:
+        # JSON stdout must stay parseable, so the mode notice goes to stderr there.
+        (sys.stderr if args.json else sys.stdout).write(MAINTAINER_MODE + "\n")
+    if args.json:
+        print(json.dumps([dict(zip(("check", "kind", "name", "detail"), f)) for f in findings],
+                         indent=2, sort_keys=True))
+        return EXIT_FINDINGS if findings else EXIT_OK
+    return report_findings(findings)
+
+
+# --- repair ----------------------------------------------------------------------------------
+
+def cmd_repair(args):
+    """`grid repair [--prune] [--force] [--dry-run]`: fix what doctor reports.
+
+    It is install's step 1 (validation, scanner and --check-url checks) plus
+    steps 3-12 with the same classification (group 3's classify_entries), fetch,
+    verify, audit and place, so it re-fetches only entries that are missing from
+    the ledger or disk, or stale against the lock. An edited directory is
+    replaced only with --force (otherwise it is listed and counts as failed, so
+    a repair never silently discards an edit). Ledger rows grid.lock no longer
+    selects are removed only with --prune. No ledger = maintainer mode: nothing
+    to repair here (use `grid install`).
+    """
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    host = host_key()
+    cfg = load_grid_yaml(grid_dir)
+    lock = read_grid_lock(grid_dir, cfg["sources"])
+    check_source_urls(cfg)
+    if not os.path.exists(ledger_path()):
+        print(MAINTAINER_MODE + "; nothing to repair (grid install places the locked skills)")
+        return EXIT_OK
+    vetted = audit_available(grid_dir)
+    selected, notices = select_lock_entries(grid_dir, lock, host)
+    for line in notices:
+        notice(line)
+    check_source_policy(grid_dir, cfg, set(e["source"] for e in selected), vetted)
+
+    old_rows, foreign = read_ledger()
+    plan = classify_entries(grid_dir, selected, old_rows, args.force)
+    selected_dests = set(e["dest"] for e in selected)
+    extra_rows = [r for r in old_rows if r["dest"] not in selected_dests]
+    # Extras are deleted only with --prune; otherwise they stay on disk AND in the ledger.
+    remove_rows, keep_rows = (extra_rows, []) if args.prune else ([], extra_rows)
+    failed = protected_failures(plan)
+
+    if args.dry_run:
+        print_dry_run(plan, remove_rows)
+        return EXIT_OK
+
+    preflight_state()
+    sweep_stale_staging(grid_dir)
+    failed, wired_ok = apply_plan(grid_dir, cfg, args.skills_dir, vetted, plan, failed,
+                                  remove_rows, keep_rows, foreign)
+    report_failed(failed)
+    return EXIT_OK if not failed and wired_ok else EXIT_FINDINGS
+
+
+# --- uninstall ---------------------------------------------------------------------------------
+
+def owned_links(grid_dir, skills_dir, rows):
+    """Links in skills_dir that point at a ledger dir: [(link path, ledger row)], sorted by link.
+
+    Both sides are resolved with realpath (the link's target relative to the link's own
+    directory), because macOS temp and home paths pass through symlinks such as
+    /var -> /private/var and a string compare of readlink output can silently match
+    nothing. A link to anywhere else, and any real file or dir, is not ours.
+    """
+    wanted = dict((os.path.realpath(os.path.join(grid_dir, row["dest"])), row) for row in rows)
+    found = []
+    if not os.path.isdir(skills_dir):
+        return found
+    for name in sorted(os.listdir(skills_dir)):
+        link = os.path.join(skills_dir, name)
+        if not os.path.islink(link):                           # lstat: never a real dir or file
+            continue
+        real = os.path.realpath(os.path.join(os.path.dirname(link), os.readlink(link)))
+        if real in wanted:
+            found.append((link, wanted[real]))
+    return found
+
+
+def cmd_uninstall(args):
+    """`grid uninstall [--yes] [--force]`: remove what grid placed. A dry run unless --yes.
+
+    Plan: the ledger's dirs, the links in SKILLS_DIR that point at them, and the
+    ledger file. Safety, per dir (placed_dir_status): realpath containment under
+    repos/<source>, `.git` refusal, lstat symlink refusal, and an edited dir is
+    skipped unless --force. Links are removed before directories; a link to a
+    kept dir stays. Never touched: `.git` dirs, baseline-submodules.txt,
+    machines/*, foreign links, real dirs in SKILLS_DIR, repos/<source> itself.
+    A second run finds nothing and says `nothing to remove`.
+    Exit 0, 1 when --yes had to leave a dir behind (edited or refused), or 2 when a
+    delete itself failed (for example a read-only subtree); a dir left behind for
+    any reason keeps its ledger row and the remaining rows are still processed.
+    """
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    skills_dir = skills_dir_for(args)
+    rows, foreign = read_ledger()
+    ledger_exists = os.path.exists(ledger_path())
+
+    # Decide every row first (nothing is deleted yet) so link removal can follow the verdicts.
+    verdicts = [(row,) + placed_dir_status(grid_dir, row, args.force) for row in rows]
+    to_delete = [row for row, status, _d in verdicts if status == "ok"]
+    removable = [row for row, status, _d in verdicts if status in ("ok", "absent")]
+    kept = [(row, status, detail) for row, status, detail in verdicts if status in ("modified", "refused")]
+    links = owned_links(grid_dir, skills_dir, removable)
+
+    # The plan. `verb` reads "would" on a dry run so the same lines serve both.
+    verb = "removing" if args.yes else "would remove"
+    for row in to_delete:
+        print("%s dir %s" % (verb, row["dest"]))
+    for link, _row in links:
+        print("%s link %s" % (verb, link))
+    for row, status, detail in kept:
+        print("skip %s (%s%s)" % (row["dest"], detail, "; --force removes it" if status == "modified" else ""))
+
+    # With nothing left to do the ledger is already gone (or holds only kept rows):
+    # say so, which is what makes a second run a clean no-op.
+    ledger_goes = ledger_exists and not kept and not foreign
+    if not (links or removable or ledger_goes):
+        print("nothing to remove")
+        return EXIT_FINDINGS if (kept and args.yes) else EXIT_OK
+    if ledger_goes:
+        print("%s ledger %s" % (verb, ledger_path()))
+    if not args.yes:
+        print("grid: dry run: nothing changed; pass --yes to remove")
+        return EXIT_OK
+
+    # Same state-dir preflight as install and repair, BEFORE anything is deleted: an unwritable
+    # state dir used to fail only at the ledger write, after the links and dirs were gone,
+    # leaving a ledger that listed them (private NF-066 VG5).
+    preflight_state()
+    # Links first, then directories (a link must never outlive the dir it points at).
+    for link, _row in links:
+        os.unlink(link)
+    # Every row is processed even when an earlier one fails. The result of each removal
+    # decides its ledger row: a dir that is still there (a refusal that appeared since the
+    # check, an edit, or a delete that raised) keeps its row, so the ledger never forgets
+    # something grid placed and did not remove.
+    left = [(row, status, detail) for row, status, detail in kept]
+    failed_rows = []
+    for row in removable:
+        status, detail = remove_placed_dir(grid_dir, row, args.force)
+        if status in ("modified", "refused"):
+            left.append((row, status, detail))
+        elif status == "failed":
+            left.append((row, status, detail))
+            failed_rows.append((row, detail))
+    # The ledger keeps the rows whose dirs were left behind, and any row of an unknown
+    # kind (a newer grid's); with none left the file goes.
+    if ledger_exists and not left and not foreign:
+        os.unlink(ledger_path())
+    elif left or foreign:
+        write_ledger([row for row, _s, _d in left], foreign)
+    # Refresh .wired.manifest (never SKILLS.md); only when something was removed.
+    wired_ok = run_wire(grid_dir, args.skills_dir) if (links or to_delete) else True
+    for row, detail in failed_rows:
+        notice("grid: %s: not removed (%s); fix the cause and re-run `grid uninstall --yes --force`"
+               % (row["dest"], detail))
+    if left:
+        notice("grid: %d dir%s left in place; --force removes an edited one"
+               % (len(left), "" if len(left) == 1 else "s"))
+    if failed_rows:
+        return EXIT_ERROR
+    return EXIT_OK if not left and wired_ok else EXIT_FINDINGS
+
+
+# --- subcommands ---------------------------------------------------------------------
+
+def cmd_audit(args):
+    """`grid audit [args...]`: run `bash <grid>/scripts/audit.sh args...`, return its exit code.
+
+    A pure passthrough (the vetting change owns that interface): same
+    environment, no argument handling, no other logic.
+    """
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    script = os.path.join(grid_dir, "scripts", "audit.sh")
+    if not os.path.isfile(script):
+        raise GridError("grid: %s not found" % script)
+    rc = subprocess.call(["bash", script] + list(args.args))
+    # A signal death is a negative returncode; report it the shell way.
+    return rc if rc >= 0 else 128 - rc
+
+
+def cmd_lock(args):
+    """`grid lock [--check]`: write grid.lock from the submodule checkouts, or verify it."""
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    cfg = load_grid_yaml(grid_dir)
+    if args.check:
+        return lock_check(grid_dir, cfg)
+    # A baseline source that is not checked out contributes no wired links, so lock would drop
+    # its skills without a word and replace the tracked lock with a partial one. Refuse first.
+    adds, _denies = read_wired_entries([os.path.join(grid_dir, cfg["wired"]["baseline"])])
+    for repo in sorted(set(a.split("/")[0] for a in adds)):
+        if repo in cfg["sources"] and not os.path.exists(os.path.join(grid_dir, "repos", repo, ".git")):
+            raise GridError("grid: baseline source '%s' has no checkout at repos/%s; initialise that "
+                            "submodule first (grid.lock left unchanged)" % (repo, repo))
+    entries = generate_lock(grid_dir, cfg)
+    if not entries:
+        # e.g. a clone with no submodules and an empty baseline: not a lock anyone wants.
+        raise GridError("grid: refusing to write grid.lock with 0 entries (are the submodules "
+                        "checked out?); grid.lock left unchanged")
+    # atomic_write leaves an unchanged file alone, so a second run is byte-identical
+    # (same inode, same mtime).
+    wrote = atomic_write(os.path.join(grid_dir, "grid.lock"), render_lock(entries))
+    print("grid: grid.lock %s (%d entries)" % ("written" if wrote else "unchanged", len(entries)))
+    return EXIT_OK
+
+
+# --- drift (design.md "Drift report") -------------------------------------------------
+# Read-only: asks each locked source's upstream where its ref points now and
+# classifies every locked skill as unchanged / changed / removed, or its source
+# as unreachable. Never touches grid.lock, the ledger or repos/.
+
+SHORT_SHA = 12                      # characters of a sha shown in the report
+
+
+def short(sha):
+    return sha[:SHORT_SHA]
+
+
+class StagingRun(object):
+    """Lazy `<grid>/.grid-tmp/<pid>/` run dir, removed on exit (also under SIGTERM).
+
+    Created only when something needs staging, so a run where every source is
+    current touches nothing on disk. The parent `.grid-tmp` is removed too when
+    it ends up empty, so a drift run leaves no untracked directory behind.
+    """
+
+    def __init__(self, grid_dir):
+        self.grid_dir = grid_dir
+        self.parent = os.path.join(grid_dir, TMP_DIRNAME)
+        self.path = os.path.join(self.parent, str(os.getpid()))
+        self.made = False
+
+    def dir(self, name):
+        """A fresh sub-directory `name` inside the run dir; returns its path."""
+        require_staging_top(self.grid_dir)                      # never stage through a symlinked .grid-tmp
+        full = os.path.join(self.path, name)
+        os.makedirs(full)
+        self.made = True
+        return full
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        if self.made:
+            rmtree_force(self.path)
+            try:
+                os.rmdir(self.parent)       # only succeeds when nobody else is staging
+            except OSError:
+                pass
+        return False
+
+
+def remote_head(url, ref):
+    """Where the upstream's `ref` points now: (sha, "") or (None, detail).
+
+    `git ls-remote <url> <ref>` pattern-matches by name TAIL, so `main` also
+    returns `refs/heads/feature/main`; take only a line whose name is EXACTLY
+    one of the candidates below, in this preference order (a peeled annotated
+    tag beats the tag object, which is not a commit). The remote's own stderr
+    is dropped on purpose: it can carry absolute paths and the report must not.
+    """
+    try:
+        out = run_git(["ls-remote", "--", url, ref])
+    except GridError:
+        return None, "cannot reach upstream"
+    names = {}
+    for line in out.splitlines():
+        sha, _, name = line.partition("\t")
+        if HEX40_RE.fullmatch(sha) and name not in names:
+            names[name] = sha
+    if ref == "HEAD":
+        candidates = ["HEAD"]
+    else:
+        candidates = ["refs/heads/" + ref, "refs/tags/" + ref + "^{}", "refs/tags/" + ref]
+    for name in candidates:
+        if name in names:
+            return names[name], ""
+    return None, "ref not found"
+
+
+def fetch_trees(stage, source, url, head):
+    """Fetch only the commit and tree objects of `head` into a bare repo; return its path.
+
+    `--filter=blob:none` skips every file body: drift compares tree ids, which
+    need no content. Raises GridError when the fetch fails.
+    """
+    repo = stage.dir(source + ".git")
+    run_git(["init", "-q", "--bare", repo])
+    # `--` keeps a url that starts with `-` from being read as an option.
+    run_git(["-C", repo, "remote", "add", "--", "origin", url])
+    run_git(["-C", repo, "fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", head])
+    trace = os.environ.get("GRID_TRACE_FETCH")
+    if trace:
+        # Same one-line-per-fetch trace install uses; tests read it to prove a
+        # run with nothing to compare did not fetch.
+        with open(trace, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write("%s %s\n" % (source, head))
+    return repo
+
+
+def compute_drift(grid_dir, cfg, entries):
+    """Classify every locked entry. Returns (results, unreachable).
+
+    results: list of (state, entry, upstream_sha) with state in
+    unchanged | changed | removed. unreachable: list of (source, detail, n_entries).
+    """
+    by_source = {}
+    for entry in entries:
+        by_source.setdefault(entry["source"], []).append(entry)
+    results, unreachable = [], []
+    with StagingRun(grid_dir) as stage:
+        for source in sorted(by_source):
+            group = by_source[source]
+            src = cfg["sources"][source]
+            head, detail = remote_head(src["url"], src["ref"])
+            if head is None:
+                unreachable.append((source, detail, len(group)))
+                continue
+            # An entry already pinned at the upstream head cannot have drifted:
+            # no fetch for it. If every entry is current, nothing is fetched.
+            pending = []
+            for entry in group:
+                if entry["sha"] == head:
+                    results.append(("unchanged", entry, head))
+                else:
+                    pending.append(entry)
+            if not pending:
+                continue
+            try:
+                repo = fetch_trees(stage, source, src["url"], head)
+            except GridError:
+                unreachable.append((source, "cannot fetch upstream", len(pending)))
+                continue
+            for entry in pending:
+                try:
+                    tree = run_git(["-C", repo, "rev-parse", "--verify", "-q",
+                                    "FETCH_HEAD:" + entry["path"]]).strip()
+                except GridError:           # the path no longer exists upstream
+                    results.append(("removed", entry, head))
+                    continue
+                results.append(("unchanged" if tree == entry["tree"] else "changed", entry, head))
+    return results, unreachable
+
+
+def render_drift_report(date, results, unreachable):
+    """The Markdown report body.
+
+    Deliberately contains no absolute path, url or hostname (the report may be
+    shared) and nothing but the UTC date that varies run to run.
+    """
+    counts = {"unchanged": 0, "changed": 0, "removed": 0}
+    for state, _entry, _head in results:
+        counts[state] += 1
+    n_unreachable = sum(n for _s, _d, n in unreachable)
+    lines = ["# grid drift report", "", "Date (UTC): %s" % date, "", "## Summary", "",
+             "- unchanged: %d" % counts["unchanged"],
+             "- changed: %d" % counts["changed"],
+             "- removed: %d" % counts["removed"],
+             "- unreachable: %d (in %d source%s)" % (n_unreachable, len(unreachable),
+                                                     "" if len(unreachable) == 1 else "s"),
+             ""]
+    if not counts["changed"] and not counts["removed"] and not unreachable:
+        lines += ["All %d locked skills are current." % counts["unchanged"], ""]
+    for state, title in (("changed", "Changed"), ("removed", "Removed")):
+        rows = sorted((e["source"], e["name"], e["path"], e["sha"], head)
+                      for s, e, head in results if s == state)
+        if not rows:
+            continue
+        lines += ["## " + title, ""]
+        current = None
+        for source, name, path, sha, head in rows:
+            if source != current:
+                if current is not None:
+                    lines.append("")        # blank line between source groups
+                current = source
+                lines += ["### " + source, ""]
+            lines.append("- `%s` (`%s`): locked %s, upstream %s" % (name, path, short(sha), short(head)))
+        lines.append("")
+    if unreachable:
+        lines += ["## Unreachable", ""]
+        for source, detail, n in sorted(unreachable):
+            lines.append("- `%s`: %s (%d skill%s not checked)" % (source, detail, n, "" if n == 1 else "s"))
+        lines.append("")
+    if unreachable:
+        # The report is stored and must carry no path or remote output, so the hint is static.
+        lines += ["An unreachable source may need your git config (proxy, credentials, ~/.netrc): "
+                  "set GRID_GIT_FORWARD_CONFIG=1 in the job's environment.", ""]
+    lines += ["Maintainer response (manual): `git submodule update --remote repos/<name>`, "
+              "`grid lock`, review, PR.", ""]
+    return "\n".join(lines)
+
+
+def cmd_drift(args):
+    """`grid drift [--quiet]`: write a drift report; exit 0 whenever it was written."""
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    cfg = load_grid_yaml(grid_dir)
+    entries = read_grid_lock(grid_dir, cfg["sources"])
+    # Same refusals as install, BEFORE any network access: the unattended weekly
+    # job must not run ls-remote/fetch against a URL install would have refused.
+    # A violation is exit 2 and no report is written.
+    check_source_urls(cfg)
+    vetted = audit_available(grid_dir)
+    check_source_policy(grid_dir, cfg, set(e["source"] for e in entries), vetted,
+                        announce_file=False)
+    results, unreachable = compute_drift(grid_dir, cfg, entries)
+    date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    body = render_drift_report(date, results, unreachable)
+    reports = os.path.join(state_dir(), "reports")
+    dated = os.path.join(reports, "drift-%s.md" % date)
+    try:
+        atomic_write(dated, body)
+        atomic_write(os.path.join(reports, "drift-latest.md"), body)
+    except OSError as exc:
+        raise GridError("grid: cannot write the drift report: %s" % exc)
+    if not args.quiet:
+        sys.stdout.write(body)
+        print("grid: report written to %s" % dated)
+    # Expected drift is not an error: a schedule must not alarm on it.
+    return EXIT_OK
+
+
+# --- schedule (design.md "Schedule") --------------------------------------------------
+# Renders the weekly drift schedule through scripts/lib/render-schedule.sh (the
+# one renderer) and writes the text it prints, unchanged. Nothing is activated:
+# the activation command is PRINTED. launchctl, systemctl (bar the read-only
+# probe), crontab and loginctl are never run from here.
+
+SCHEDULE_SPEC = "weekly:Mon:09:00"
+LAUNCHD_LABEL = "io.the-grid.drift"
+SYSTEMD_UNIT = "grid-drift"                    # -> grid-drift.service / grid-drift.timer
+
+
+def schedule_scheduler():
+    """launchd | systemd | cron. GRID_OS overrides `uname -s`; Linux needs a user manager."""
+    os_name = os.environ.get("GRID_OS") or os.uname().sysname
+    if os_name == "Darwin":
+        return "launchd"
+    if os_name == "Linux":
+        # GRID_OS=Linux is an explicit statement: skip the probe (tests rely on that).
+        if os.environ.get("GRID_OS") == "Linux":
+            return "systemd"
+        try:
+            # The one scheduler call allowed: read-only, same probe budget-and-usage uses.
+            rc = subprocess.call(["systemctl", "--user", "show-environment"],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            rc = 1
+        return "systemd" if rc == 0 else "cron"
+    return "cron"
+
+
+def render_schedule_text(grid_dir, fn, *fn_args):
+    """Run `bash <grid>/scripts/lib/render-schedule.sh <fn> <args>`; return its stdout.
+
+    Renderer exit 2 (an argument outside [A-Za-z0-9_./@+-]) is exit 2 here, and
+    callers render everything BEFORE writing, so nothing is left half-written.
+    """
+    script = os.path.join(grid_dir, "scripts", "lib", "render-schedule.sh")
+    if not os.path.isfile(script):
+        raise GridError("grid: %s not found" % script)
+    env = dict(os.environ)
+    env["LC_ALL"] = "C"
+    proc = subprocess.run(["bash", script, fn] + list(fn_args), env=env,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          encoding="utf-8", errors="surrogateescape")
+    if proc.returncode != 0:
+        raise GridError("grid: schedule not written: %s\n"
+                        "grid: the renderer does no escaping; use a clone path, HOME and state dir "
+                        "made only of A-Z a-z 0-9 _ . / @ + - to use `grid schedule`."
+                        % proc.stderr.strip())
+    return proc.stdout
+
+
+def schedule_paths(scheduler):
+    """Files `schedule install` writes (and `remove` deletes) for a scheduler."""
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    if scheduler == "launchd":
+        agents = os.environ.get("LAUNCH_AGENTS_DIR") or os.path.join(home, "Library", "LaunchAgents")
+        return [os.path.join(agents, LAUNCHD_LABEL + ".plist")]
+    if scheduler == "systemd":
+        units = os.environ.get("SYSTEMD_USER_DIR") or os.path.join(home, ".config", "systemd", "user")
+        return [os.path.join(units, SYSTEMD_UNIT + ".service"), os.path.join(units, SYSTEMD_UNIT + ".timer")]
+    return []
+
+
+def schedule_plan(grid_dir, scheduler):
+    """Render everything `schedule install` would write: (files, printed lines).
+
+    files: list of (path, text). Nothing here writes; a renderer refusal raises
+    before the caller has touched the disk.
+    """
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    log_dir = os.path.abspath(os.path.join(state_dir(), "logs"))
+    cmd = ["/usr/bin/env", "python3", os.path.join(grid_dir, "scripts", "grid"), "drift", "--quiet"]
+    paths = schedule_paths(scheduler)
+    files, printed = [], []
+    if scheduler == "launchd":
+        text = render_schedule_text(grid_dir, "render_launchd_plist", LAUNCHD_LABEL, home,
+                                    grid_dir, log_dir, SCHEDULE_SPEC, *cmd)
+        files.append((paths[0], text))
+        printed.append(render_schedule_text(grid_dir, "render_activation_commands",
+                                            "launchd", paths[0]).rstrip("\n"))
+    elif scheduler == "systemd":
+        service = render_schedule_text(grid_dir, "render_systemd_service", "grid drift report",
+                                       grid_dir, "600", *cmd)
+        timer = render_schedule_text(grid_dir, "render_systemd_timer", "Weekly grid drift report",
+                                     SYSTEMD_UNIT + ".service", SCHEDULE_SPEC)
+        files.append((paths[0], service))
+        files.append((paths[1], timer))
+        printed.append(render_schedule_text(grid_dir, "render_activation_commands", "systemd",
+                                            SYSTEMD_UNIT + ".timer").rstrip("\n"))
+        # A user timer does not fire while logged out unless lingering is on.
+        printed.append("# a user timer only runs while you are logged in unless you also run:")
+        printed.append('loginctl enable-linger "$USER"')
+    else:
+        log_file = os.path.join(log_dir, "grid-drift.log")
+        line = render_schedule_text(grid_dir, "render_crontab_line", SCHEDULE_SPEC, log_file,
+                                    grid_dir, *cmd).rstrip("\n")
+        printed.append(line)
+        printed.append(render_schedule_text(grid_dir, "render_activation_commands", "cron", line).rstrip("\n"))
+    return files, printed
+
+
+def cmd_schedule(args):
+    """`grid schedule install|remove`: write or delete the scheduler files; print the rest."""
+    grid_dir = resolve_grid_dir(args.grid_dir)
+    scheduler = schedule_scheduler()
+    if args.action == "install":
+        env_state = os.environ.get("GRID_STATE_DIR")
+        if env_state:
+            # The job runs in the scheduler's environment, not this shell's: only the log dir
+            # (baked into the rendered files) follows GRID_STATE_DIR. A relative value would
+            # be baked in against whatever directory install ran from, so refuse it.
+            if not os.path.isabs(env_state):
+                raise GridError("grid: GRID_STATE_DIR must be an absolute path for `schedule install` "
+                                "(got %s)" % _printable(env_state))
+            notice("grid: note: GRID_STATE_DIR is not carried into the scheduled job; the job uses its "
+                   "own environment (default $HOME/.grid) for the ledger and reports; only the log "
+                   "directory is placed under it")
+        notice("grid: note: the scheduled job runs git without your gitconfig, ~/.netrc or proxy "
+               "settings; if an upstream needs them, add GRID_GIT_FORWARD_CONFIG=1 to the job's "
+               "environment")
+        files, printed = schedule_plan(grid_dir, scheduler)     # renders everything first
+        if scheduler == "launchd":
+            # launchd does not create the log dir the plist points at.
+            logs = os.path.abspath(os.path.join(state_dir(), "logs"))
+            try:
+                os.makedirs(logs, exist_ok=True)
+            except OSError as exc:
+                # An unwritable state dir is a user error, not a traceback.
+                # Exit 1 (not the usual 2) as the WP-027 brief states; it is what the
+                # uncaught PermissionError exited with before, so scripts see no change.
+                raise GridError("grid: cannot create %s: %s" % (logs, exc.strerror or exc), code=1)
+        for path, text in files:
+            wrote = atomic_write(path, text)
+            print("grid: %s %s" % ("wrote" if wrote else "unchanged", path))
+        if scheduler == "cron":
+            print("grid: no file written; add this line to your crontab (it is not installed for you):")
+        else:
+            print("grid: nothing is activated; to activate run:")
+        for line in printed:
+            print(line)
+        return EXIT_OK
+
+    # remove: delete exactly the files install writes, for EVERY scheduler by their fixed
+    # names (never by re-detecting one: the systemd probe can answer differently than at
+    # install time, which used to leave the units behind); print how to deactivate each
+    # scheduler that had files, plus the detected one.
+    removed_for = {}
+    for sched in ("launchd", "systemd"):
+        for path in schedule_paths(sched):
+            # Delete by fixed name only when the file is one grid wrote: a same-named file
+            # of someone else's (not naming scripts/grid and drift) is left alone.
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except FileNotFoundError:
+                print("grid: not present %s" % path)
+                continue
+            except OSError:
+                text = ""
+            # Service and plist name scripts/grid + drift; the timer only names its service unit.
+            ours = (("scripts/grid" in text and "drift" in text)
+                    or (path.endswith(".timer") and SYSTEMD_UNIT + ".service" in text))
+            if not ours:
+                print("grid: not removed %s: not written by grid" % path)
+                continue
+            try:
+                os.unlink(path)
+                print("grid: removed %s" % path)
+                removed_for[sched] = True
+            except FileNotFoundError:
+                print("grid: not present %s" % path)
+    # $(id -u) is printed literally for the human's shell to expand.
+    advice = {
+        "launchd": "launchctl bootout gui/$(id -u)/" + LAUNCHD_LABEL,
+        "systemd": "systemctl --user disable --now %s.timer" % SYSTEMD_UNIT,
+        "cron": "delete the crontab line containing `scripts/grid drift` (run `crontab -e`)",
+    }
+    print("grid: nothing is deactivated for you; to deactivate:")
+    for sched in ("launchd", "systemd", "cron"):
+        if sched == scheduler or removed_for.get(sched):
+            print(advice[sched])
+    return EXIT_OK
+
+
+# Shown by `grid uninstall --help` and `grid repair --help` (private WP-032: documented, not changed).
+SIDE_EFFECT_NOTE = (
+    "`grid {cmd}` also runs scripts/wire.sh, to refresh the links and "
+    ".wired.manifest (never SKILLS.md). "
+    "grid is single-writer: it takes no lock, so do not run two grid commands that write at the "
+    "same time. "
+    "The ledger (installed.manifest) is trusted same-user state: `--force` removes any directory "
+    "under repos/<source>/ that a ledger row names, so keep the file writable only by you.")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="grid", description="Install, pin and check the wired skill set.")
+    parser.add_argument("--grid-dir", help="the grid checkout (default: $GRID_DIR, else the parent of scripts/)")
+    parser.add_argument("--skills-dir", help="skills target (default: $SKILLS_DIR)")
+    sub = parser.add_subparsers(dest="command", metavar="COMMAND")
+    sub.required = True
+
+    # `audit` forwards everything after it untouched, options included. argparse
+    # cannot do that (REMAINDER rejects a leading option such as `--owned`), so
+    # main() splits those arguments off before parsing; this entry exists for
+    # --help and for the dispatch. Shared flags go BEFORE `audit`.
+    p_audit = sub.add_parser("audit", help="run scripts/audit.sh with the given arguments (pass-through)")
+    p_audit.set_defaults(func=cmd_audit, args=[])
+
+    # Shared flags are also accepted after the subcommand; SUPPRESS keeps a
+    # value given before the subcommand from being overwritten by a default.
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument("--grid-dir", default=argparse.SUPPRESS)
+    shared.add_argument("--skills-dir", default=argparse.SUPPRESS)
+    p_lock = sub.add_parser("lock", parents=[shared], help="write grid.lock from the submodule checkouts")
+    p_lock.add_argument("--check", action="store_true",
+                        help="regenerate in memory and report differences (exit 1); exit 3 if not checkable here")
+    p_lock.set_defaults(func=cmd_lock)
+    p_install = sub.add_parser("install", parents=[shared],
+                               help="fetch the locked skills into repos/<source>/ and wire them (no submodules)")
+    p_install.add_argument("--dry-run", action="store_true",
+                           help="print the plan; no network access and no writes")
+    p_install.add_argument("--force", action="store_true",
+                           help="replace a directory that differs from the lock (an edit, or one grid did not write)")
+    p_install.set_defaults(func=cmd_install)
+    p_drift = sub.add_parser("drift", parents=[shared],
+                             help="report how far each locked source's upstream has moved (read-only)")
+    p_drift.add_argument("--quiet", action="store_true", help="write the report but print nothing")
+    p_drift.set_defaults(func=cmd_drift)
+    p_sched = sub.add_parser("schedule", parents=[shared],
+                             help="render (never activate) the weekly drift schedule, or remove its files")
+    p_sched.add_argument("action", choices=("install", "remove"))
+    p_sched.set_defaults(func=cmd_schedule)
+    p_doctor = sub.add_parser("doctor", parents=[shared],
+                              help="check the manifest, ledger, placed directories and links (read-only)")
+    p_doctor.add_argument("--json", action="store_true", help="print findings as a JSON array")
+    p_doctor.set_defaults(func=cmd_doctor)
+    p_repair = sub.add_parser("repair", parents=[shared],
+                              help="re-fetch what doctor reports missing, stale or absent, then re-wire",
+                              description=SIDE_EFFECT_NOTE.replace("{cmd}", "repair"))
+    p_repair.add_argument("--prune", action="store_true",
+                          help="also remove ledger directories that grid.lock no longer selects")
+    p_repair.add_argument("--force", action="store_true",
+                          help="also replace a directory that was edited since grid placed it")
+    p_repair.add_argument("--dry-run", action="store_true",
+                          help="print the plan; no network access and no writes")
+    p_repair.set_defaults(func=cmd_repair)
+    p_uninstall = sub.add_parser("uninstall", parents=[shared],
+                                 help="remove what grid placed (dry run unless --yes)",
+                                 description=SIDE_EFFECT_NOTE.replace("{cmd}", "uninstall"))
+    p_uninstall.add_argument("--yes", action="store_true", help="actually delete (default: print the plan only)")
+    p_uninstall.add_argument("--force", action="store_true",
+                             help="also remove a directory that was edited since grid placed it")
+    p_uninstall.set_defaults(func=cmd_uninstall)
+    return parser
+
+
+def split_audit_argv(argv):
+    """If the subcommand is `audit`, return (argv up to and including it, the rest); else None.
+
+    Skips the shared flags that may precede the subcommand. The rest is handed
+    to audit.sh byte for byte, so `grid audit --owned --format json` works.
+    """
+    i = 0
+    while i < len(argv):
+        if argv[i] in ("--grid-dir", "--skills-dir"):
+            i += 2
+        elif argv[i].startswith(("--grid-dir=", "--skills-dir=")):
+            i += 1
+        else:
+            break
+    if i < len(argv) and argv[i] == "audit":
+        return argv[:i + 1], argv[i + 1:]
+    return None
+
+
+def main(argv=None):
+    # A scheduler kill (SIGTERM) must unwind through `finally` blocks so staging
+    # dirs are removed: turn it into a normal exit.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(143))
+    argv = sys.argv[1:] if argv is None else list(argv)
+    split = split_audit_argv(argv)
+    parser = build_parser()
+    args = parser.parse_args(split[0] if split else argv)
+    if split:
+        args.args = split[1]
+    try:
+        # `audit` is a pure passthrough and needs no git of its own.
+        if args.command != "audit":
+            check_git_version()
+        return args.func(args)
+    except GridError as exc:
+        sys.stderr.write(str(exc) + "\n")
+        return exc.code
+    except OSError as exc:
+        # A filesystem failure nobody handled locally: one line and exit 2, never a
+        # traceback (which would also exit 1, the code that means "findings").
+        sys.stderr.write("grid: %s\n" % exc)
+        return EXIT_ERROR
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -10,6 +10,7 @@ summary: >-
   initiatives and bets, makes the build-vs-not call, sets guardrails and budgets,
   delegates to Tech Lead + Product Manager, gates releases, reviews outcomes
   against the goal.
+description: "CEO. Turns a business goal into sequenced initiatives and bets, makes the build-vs-not call, sets guardrails and budgets, gates releases. Use for top-level goals; delegates to Tech Lead and Product Manager."
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: true
 model_rationale: >-

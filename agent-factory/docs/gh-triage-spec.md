@@ -16,7 +16,7 @@ See "Deployment scope" below.
 
 1. Reads its deployment scope file (Step 0) to learn org, repos, and Slack config.
 2. Polls GitHub for unlabeled or `needs-triage` issues across the repos in scope.
-3. If its scope enables Slack: polls the configured channel for new messages;
+3. If its scope enables Slack: reads new channel messages from the file named in the scope;
    creates GH issues from actionable ones (LLM-filtered); ignores chat.
 4. For each issue: classifies severity + state role using LLM judgment with
    repo→live-system context (from the scope file) injected into the prompt.
@@ -44,14 +44,11 @@ which is shared across machines). The contract template is
 `roles/gh-triage/deployment-scope.template.md`; the agent reads the scope in Step 0
 of its SKILL.md.
 
-| Deployment | Org | Scope file | Slack |
-|---|---|---|---|
-| Scout (Jarvis) | `oneafrikan` | `jarvis-core/config/gh-triage-scope.md` | off |
-| guide-server | `gkwilderness` | owned by guide-core | `#guide-backlog` |
+Each install keeps its own deployment table (org, scope file path, Slack on/off)
+in its own infra repo.
 
 Each scope file lists its repos with a live-system description + default severity
-ceiling (e.g. for Scout: `jarvis-core` → Scout OpenClaw runtime, ceiling critical;
-for guide-server: `guide-compose` → Guide Docker stack, ceiling critical). The
+ceiling (e.g. a repo that backs a production runtime gets ceiling critical). The
 agent injects the matching row into the classification prompt.
 
 ---
@@ -118,10 +115,10 @@ All comments open with:
 ## Slack ingestion
 
 Conditional — only runs when the deployment scope sets Slack `enabled: true`
-(e.g. guide-server's `#guide-backlog`; Scout has it off).
+(e.g. a deployment with a backlog channel; others leave it off).
 
 - Channel: named in the scope file (name + id)
-- Agent polls for new messages since last run
+- Messages: read from the `messages-file` named in the scope (the agent has no Slack tool); new = newer than the timestamp in `last-run-file`
 - LLM filters each message: is this a bug report, feature request, or operational
   problem? If yes → create GH issue in the repo named by the scope's
   `file-issues-in` rule, with the original Slack message verbatim in the body +
@@ -136,7 +133,7 @@ Conditional — only runs when the deployment scope sets Slack `enabled: true`
 - Before triaging, check if issue already has a state label. If yes, skip.
 - On `issue_comment` trigger: re-evaluate only if current state is `needs-info`
   and the comment is from the original reporter (not the triage agent itself).
-- Slack: track last-processed message timestamp per channel to avoid reprocessing.
+- Slack: track last-processed message timestamp in the scope's `last-run-file` to avoid reprocessing.
 
 ---
 

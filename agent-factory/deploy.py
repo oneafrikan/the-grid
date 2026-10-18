@@ -11,6 +11,11 @@ Usage:
     deploy.py <project-dir> --roles qa-engineer,sdet [--profile lean|full]
     deploy.py <project-dir>            # re-deploy whatever the lock file lists
     deploy.py <project-dir> --check    # drift report; writes nothing; exit 1 on drift
+    deploy.py <project-dir> --roles qa-engineer --profile full --identity PATH
+                                       # render the IDENTITY nameplate from PATH instead of the
+                                       # neutral agent-factory/user.public.yaml. The lock does not
+                                       # record it, so --check (and bare re-runs) must be passed
+                                       # the same --identity or they report drift.
     deploy.py --list                   # roles available to deploy
     --dry-run                          # show what would be written, write nothing
 
@@ -29,6 +34,8 @@ come from an optional <project-dir>/.grid/project.yaml, never from the grid:
     roles:
       sdet: |         # extra markdown for one role
         ...
+    hooks:            # read by deploy_hooks.py, ignored here (profile, target)
+      profile: standard
 
 Trust: .grid/project.yaml text is written verbatim into the deployed agents'
 system prompts. Anyone who can commit to the project can steer its agents through
@@ -111,9 +118,11 @@ def load_context(project: Path) -> tuple[str, dict[str, str]]:
         die(f"{path}: invalid YAML: {str(exc).splitlines()[0]}")
     if not isinstance(data, dict):
         die(f"{path}: must be a mapping")
-    unknown = set(data) - {"project", "context", "roles"}
+    # `hooks` and `learning` belong to deploy_hooks.py; they are allowed here (and ignored)
+    # so one project.yaml can configure both tools.
+    unknown = set(data) - {"project", "context", "roles", "hooks", "learning"}
     if unknown:
-        die(f"{path}: unknown key(s) {sorted(unknown)} (allowed: project, context, roles)")
+        die(f"{path}: unknown key(s) {sorted(unknown)} (allowed: project, context, roles, hooks, learning)")
     roles = data.get("roles") or {}
     if not isinstance(roles, dict):
         die(f"{path}: 'roles' must be a mapping of role -> markdown")
@@ -261,6 +270,9 @@ def main() -> None:
     ap.add_argument("--check", action="store_true", help="report drift; write nothing")
     ap.add_argument("--dry-run", action="store_true", help="show the plan; write nothing")
     ap.add_argument("--list", action="store_true", help="list deployable roles and exit")
+    ap.add_argument("--identity", type=Path, metavar="PATH",
+                    help="identity YAML for the full-profile nameplate (default: neutral "
+                         "user.public.yaml; the lock does not record it, pass it again to --check)")
     args = ap.parse_args()
 
     index = build_index()
@@ -292,6 +304,18 @@ def main() -> None:
     stray = sorted(set(role_ctx) - set(roles))
     if stray:
         die(f"{project / CONTEXT_REL}: context for role(s) not being deployed: {', '.join(stray)}")
+
+    # Identity for the IDENTITY nameplate (full profile; lean has none, so this is a
+    # no-op there). A project repo is often tracked or shared, so the default is the
+    # neutral tracked identity, never the personal user.yaml or the hostname. The
+    # personal identity is opt-in via --identity only; an ambient GRID_USER_CONFIG is
+    # deliberately NOT read here, so an exported personal path cannot leak into a
+    # project repo by accident. Runs before render_all and before any write.
+    identity = args.identity.expanduser() if args.identity else compose.HERE / "user.public.yaml"
+    if args.identity and not identity.is_file():
+        die(f"identity file not found: {identity}")
+    compose.USER_CONFIG_PATH = identity
+    compose.load_user_config.cache_clear()      # the loader is lru-cached; drop any earlier read
 
     files = render_all(roles, profile, index, shared_ctx, role_ctx)
     new_lock = lock_text(profile, roles, files)

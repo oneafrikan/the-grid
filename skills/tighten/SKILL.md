@@ -1,11 +1,6 @@
 ---
 name: tighten
-description: >
-  Condense verbose prose across one or more project files into a tighter,
-  less-wordy form — cutting filler, hedging, and restated ideas without
-  dropping facts or restructuring content. Docs only, never emails/messages.
-  Use when the user says "tighten this doc", "condense these files", "make
-  this less wordy", or invokes /tighten.
+description: Condense verbose prose in project docs without dropping facts or restructuring; docs only, never emails or messages. Use when the user says "tighten this doc", "condense these files" or "make this less wordy".
 ---
 
 # tighten
@@ -35,7 +30,7 @@ anything. If it's empty after exclusions, say so and stop.
 Docs only. Never apply email/message conventions — no shorthand ("pls",
 "thx"), no sign-off, no informal tone shift.
 
-Load two sources each run:
+Load these sources each run, when available:
 
 1. A personal email-style reference, if you keep one (e.g. in a notes vault
    under something like `<vault>/email-style.md`) — use only the conciseness
@@ -44,13 +39,13 @@ Load two sources each run:
    VOICE section's informalities and skip the ENDING section entirely — those
    are email-specific. If this file is
    missing or unreadable, skip it and note that in the final report.
-2. `~/.dev-env/claude/rules.md`'s communication-style section — the banned
-   jargon words and banned filler phrases. Always available; treat as the
-   hygiene checklist.
+2. A communication-style rules file (banned jargon words and banned filler
+   phrases), only if the user names one — use it as the hygiene checklist. If
+   none is named, skip it and note that in the final report.
 
 Core test per sentence: "if it can be said in one sentence, do that." Cut
 filler, hedging, restated ideas, throat-clearing preamble, and trailing
-summaries. Prefer bullets to prose, per rules.md.
+summaries. Prefer bullets to prose.
 
 ## What not to touch
 

@@ -1,0 +1,23 @@
+{
+  "parentUuid": "00000000-0000-4000-8000-000000000000",
+  "isSidechain": false,
+  "attachment": {
+    "type": "date",
+    "date": "2000-01-01"
+  },
+  "type": "attachment",
+  "uuid": "00000000-0000-4000-8000-000000000000",
+  "timestamp": "2000-01-01T00:00:00.000Z",
+  "rendered": [
+    {
+      "content": "__TEXT__"
+    }
+  ],
+  "renderedRole": "system",
+  "userType": "external",
+  "entrypoint": "sdk-cli",
+  "cwd": "/tmp/project",
+  "sessionId": "00000000-0000-4000-8000-000000000000",
+  "version": "2.1.296",
+  "gitBranch": "main"
+}

@@ -45,7 +45,7 @@ mkdir -p "$(dirname "$log")"
 chmod 700 "$(dirname "$log")" 2>/dev/null || true   # only tighten; a shared dir we do not own is left alone
 
 # Build the JSON in python so quotes, newlines and unicode in free text can never break the line.
-line="$(ROLE="$role" ACTION="$action" OUTCOME="$outcome" TARGET="$target" OPERATOR="$operator" COST="$cost" NOTE="$note" HOST="$(hostname -s)" \
+line="$(ROLE="$role" ACTION="$action" OUTCOME="$outcome" TARGET="$target" OPERATOR="$operator" COST="$cost" NOTE="$note" HOST="${GRID_HOST:-$(hostname -s)}" \
   python3 - <<'PY'
 import json, os, time
 e = os.environ

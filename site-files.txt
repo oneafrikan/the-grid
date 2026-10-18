@@ -1,0 +1,5 @@
+# Files published to GitHub Pages, one repo-relative path per line; directories
+# are copied whole; '#' starts a comment. Read by scripts/stage-site.sh, which
+# the pages workflow runs. front-door appends its assets here.
+index.html
+the-grid.png

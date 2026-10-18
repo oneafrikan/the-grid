@@ -1,0 +1,23 @@
+# evals/touchfiles.yaml: files that change a role's eval prompt without living in its own directory.
+# The eval prompt is the LEAN render (compose.render_lean_body via deploy.py): role files, stack overlays,
+# the roster from examples/*.yaml, and for orchestrators the decision brief. Other _core/ files and
+# models.yaml do not enter it (evals pass the model tier, not models.yaml's id), so they are not listed;
+# add a rule if one starts to.
+# First matching rule wins per file. paths use fnmatch (* also crosses /). roles: all | orchestrators | [role, ...]
+# A rule may carry `eval: instincts` instead of `roles`: those files feed the instincts prompt eval, a separate
+# runner with its own spend cap, so --changed prints its command instead of running it.
+rules:
+  - paths: ["agent-factory/_core/DECISION_BRIEF.md"]
+    roles: orchestrators
+  - paths:
+      - "agent-factory/compose.py"
+      - "agent-factory/deploy.py"
+      - "agent-factory/stacks/*"
+      - "agent-factory/examples/*"
+    roles: all
+  - paths:
+      - "scripts/instincts/prompts/*"
+      - "scripts/instincts/analyse.py"
+      - "scripts/instincts/lib.py"
+      - "evals/instincts/*"
+    eval: instincts

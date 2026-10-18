@@ -7,6 +7,9 @@ default_model: sonnet
 summary: >-
   Converts intent into precise specs. Owns scope, acceptance criteria, PRDs, and
   tracer-bullet tickets. Does not architect or implement.
+description: "Product Manager. Owns scope, acceptance criteria, PRDs and tracer-bullet tickets; does not architect or implement. Use to turn intent into specs."
 owns: Scope, acceptance criteria, PRDs, tracer-bullet tickets   # short roster phrase (summary 1st sentence too thin)
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false
+# Writes the PRD and hand-off notes; no shell.
+tools: [Read, Grep, Glob, Write, Edit]

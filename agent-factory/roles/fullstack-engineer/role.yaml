@@ -7,6 +7,7 @@ default_model: sonnet
 summary: >-
   Builds vertical slices across client and server in one pass (UI, API
   endpoint, application-level data access) and keeps the shared contract in sync.
+description: "Fullstack Engineer. Vertical slices across client and server (UI, API endpoint, data access) keeping the shared contract in sync. Use for thin end-to-end features."
 owns: thin end-to-end feature slices and the client/server contract between them
 base_skills: []
 orchestrator: false

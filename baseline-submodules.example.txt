@@ -13,8 +13,21 @@
 #   repo-name            → wire ALL skills in that submodule
 #   repo-name/skill      → wire ONLY that specific skill
 #   project:<name>       → wire a composed agent-factory project's CC output
-#   -repo | -repo/skill  → SUBTRACT (overlay escape hatch — remove a baseline entry)
+#   -repo | -repo/skill  → SUBTRACT (overlay escape hatch — remove a baseline entry).
+#                          A subtraction always wins: -repo removes every skill of that
+#                          repo, even one a repo/skill entry names.
 #   -project:<name>      → un-gate a project
+#   rules:<pack>         → wire a rule pack (rules/<pack>/*.md) into ~/.claude/rules/grid/<pack>/.
+#                          Opt-in: no rules: entry anywhere means no rules are wired. Each
+#                          rule loads only when Claude touches a file matching its paths:,
+#                          so wire the packs for languages you actually use.
+#   -rules:<pack>        → un-gate a pack (overlay escape hatch; a subtraction always wins)
+#   harness:<name>       → also wire skills (and composed agents) into another harness:
+#                          codex | opencode | gemini | antigravity | pi | openclaw
+#                          (opt-in; `claude` is always on). See docs/harnesses.md.
+#   -harness:<name>      → un-gate a harness (overlay escape hatch)
+#   -hook:auto-handoff   → switch OFF the SessionEnd auto-handoff hook (on by default;
+#                          `hook:auto-handoff` re-enables it, a later file wins)
 #
 # Precedence: repos are wired alphabetically; later wins on name collision.
 # Intentional order: anthropic → gstack → jeffallan → mattpocock → superpowers.
@@ -36,6 +49,11 @@ project:grid
 project:finance-desk
 project:learning-desk
 
+# --- rule packs — opt-in, path-scoped coding conventions (list with: python3 scripts/rules.py list) ---
+# Nothing is wired until you add a line. Examples (uncomment the ones you want):
+# rules:sql
+# rules:bash
+
 # --- anthropic — universal comms + meta tools (9 skills) ---
 # Desktop/design tools (canvas-design, frontend-design, etc.) live in machine overlays.
 anthropic/claude-api
@@ -48,9 +66,9 @@ anthropic/skill-creator
 anthropic/template
 anthropic/xlsx
 
-# --- gstack — workflow, orchestration, and quality tools (29 skills) ---
+# --- gstack — workflow, orchestration, and quality tools (42 skills) ---
 # OpenClaw-specific tools (gstack-openclaw-*, setup-gbrain, sync-gbrain, open-gstack-browser)
-# and benchmark-models live in machine overlays (wilderness + scout).
+# and benchmark-models live in machine overlays.
 gstack/autoplan
 gstack/benchmark
 gstack/browse
@@ -94,7 +112,7 @@ gstack/skillify
 gstack/spec
 gstack/unfreeze
 
-# --- hubspot — wilderness-only; wired via machines/wilderness.txt ---
+# --- hubspot — machine-overlay only; wired via machines/<hostname>.txt ---
 
 # --- jeffallan — universal dev tools (18 skills) ---
 # Stack-specific packs (LAMP, data/ML, infra/SRE) live in machine overlays.
@@ -121,8 +139,9 @@ jeffallan/the-fool
 # Whole-repo entry (not a per-skill list) because the openspec-* skills are one
 # coherent workflow — explore -> propose -> apply -> archive — and a new upstream
 # workflow skill SHOULD wire automatically rather than silently going missing.
-# The one subtraction is openspec's OWN release skill, which lives outside
-# skills/ (.agents/skills/) and is for maintainers of the openspec repo, not us.
+# openspec's own maintainer skills (including release-openspec) live under
+# .agents/skills/ and are excluded by discovery (the root-level dot-dir rule in
+# scripts/lib/find-skill-mds.sh), so no subtraction is needed here.
 #
 # HARD DEPENDENCY: every one of these skills declares
 # `allowed-tools: Bash(openspec:*)` and `compatibility: Requires openspec CLI`.
@@ -130,12 +149,10 @@ jeffallan/the-fool
 #   npm install -g @fission-ai/openspec@latest     (needs Node >= 20.19.0)
 # See docs/SOURCES.md and project-factory/templates/_common/SPECS.md.
 openspec
--openspec/release-openspec
 
-# --- mattpocock — universal dev process (21 skills) ---
+# --- mattpocock — universal dev process (17 skills) ---
 # Design/personal tools (design-an-interface, obsidian-vault, prototype) live in overlays.
-mattpocock/diagnose
-mattpocock/edit-article
+mattpocock/diagnosing-bugs
 mattpocock/git-guardrails-claude-code
 mattpocock/grill-me
 mattpocock/grill-with-docs
@@ -143,20 +160,17 @@ mattpocock/grill-with-docs
 # tool with "grilling"` — required for grill-me to do anything (issue #41).
 mattpocock/grilling
 mattpocock/improve-codebase-architecture
-mattpocock/request-refactor-plan
 mattpocock/scaffold-exercises
 mattpocock/setup-pre-commit
 mattpocock/tdd
 mattpocock/teach
-mattpocock/to-issues
-mattpocock/to-prd
+mattpocock/to-spec
+mattpocock/to-tickets
 mattpocock/triage
-mattpocock/ubiquitous-language
-mattpocock/write-a-skill
 mattpocock/writing-beats
+mattpocock/writing-for-agents
 mattpocock/writing-fragments
 mattpocock/writing-shape
-mattpocock/zoom-out
 
 # --- ponytail — lazy senior dev mode, wanted live everywhere (6 skills) ---
 ponytail

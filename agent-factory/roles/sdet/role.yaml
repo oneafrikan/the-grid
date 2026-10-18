@@ -8,6 +8,7 @@ summary: >-
   Test infrastructure and strategy: suites, fixtures, isolation, contract tests,
   mocks for external and LLM calls, flaky-test diagnosis, and the eval harness
   for LLM features. Builds the machinery; does not decide pass/block.
+description: "SDET. Test infrastructure: suites, fixtures, isolation, contract tests, mocks for external and LLM calls, flaky-test diagnosis, eval harness. Use for test tooling, not pass/block calls."
 owns: Test infrastructure, fixtures and isolation, contract tests, eval harness   # short roster phrase
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false

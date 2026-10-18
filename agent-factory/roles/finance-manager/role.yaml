@@ -9,6 +9,7 @@ summary: >-
   Orchestrates the finance desk pipeline (sentinel -> analyst -> strategist ->
   risk-officer -> your approval queue -> scribe). Routes and grades escalation;
   never sizes a trade, never overrides the Risk Officer, never auto-approves.
+description: "Finance Manager. Orchestrates the finance desk pipeline (sentinel, analyst, strategist, risk-officer, approval queue, scribe); never sizes a trade or auto-approves. Use to run the finance desk."
 owns: Finance desk — market monitoring, evidence, proposals, risk veto, memory
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: true    # player-coach lite: fronts the pipeline, delegates every stage

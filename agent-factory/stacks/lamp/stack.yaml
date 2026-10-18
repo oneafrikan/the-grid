@@ -1,6 +1,7 @@
 # stack.yaml — lamp (STUB)
 # Overlay injected into a role's SKILL.md at compose time. Fragment files live
 # beside this. Stacks are optional overlays, not the spine.
+# Conventions for this stack live in rule packs: php, sql, bash (see docs/rules.md).
 name: lamp
 summary: >-
   PHP, MySQL/MariaDB, Apache/Nginx, raw PDO, Composer. No Node backend.

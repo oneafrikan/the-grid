@@ -1,0 +1,23 @@
+# loop/loop.conf — sourced by loop/run-issues.sh (and read by the hooks). Edit to tune; env vars override.
+# Tracked, plain assignments only, NO SECRETS. Credentials, trusted actors and the
+# operator-home path live in the loop user's env file, not here (see README).
+# Rendered once by instantiate.sh; re-running it never overwrites this file.
+GH_REPO=${GH_REPO:-{{GH_REPO}}}
+BASE_BRANCH=${BASE_BRANCH:-{{BASE_BRANCH}}}
+ISSUE_LABEL=${ISSUE_LABEL:-{{ISSUE_LABEL}}}
+MODE=${MODE:-{{MODE}}}                      # pr | direct (direct = interactive /loop only; the runner refuses it)
+LABEL_BUDGETS=${LABEL_BUDGETS:-}      # space-separated label=usd pairs raising the worker cap, e.g. "ws:rule-packs=15"
+VERIFY_CMD=${VERIFY_CMD:-{{VERIFY_CMD}}}
+SETUP_CMD=${SETUP_CMD:-{{SETUP_CMD}}}              # run in the worktree before the agent (e.g. npm ci); empty = none
+PROJECT_CONTEXT=${PROJECT_CONTEXT:-{{PROJECT_CONTEXT}}}
+REVIEW_FOCUS=${REVIEW_FOCUS:-{{REVIEW_FOCUS}}}
+MAX_ISSUES=${MAX_ISSUES:-{{MAX_ISSUES}}}           # K issues per run
+MAX_TURNS=${MAX_TURNS:-{{MAX_TURNS}}}            # passed as --max-turns only if the claude CLI supports it
+MAX_BUDGET_USD=${MAX_BUDGET_USD:-5}   # worker --max-budget-usd, always passed
+REVIEW_BUDGET_USD=${REVIEW_BUDGET_USD:-2} # review --max-budget-usd, always passed
+ISSUE_TIMEOUT=${ISSUE_TIMEOUT:-{{ISSUE_TIMEOUT}}}  # seconds, per worker run
+REVIEW_TIMEOUT=${REVIEW_TIMEOUT:-600} # seconds, per review run
+WORKER_MODEL=${WORKER_MODEL:-{{WORKER_MODEL}}}
+REVIEW_MODEL=${REVIEW_MODEL:-{{REVIEW_MODEL}}}
+REVIEW_DIFF_LINES=${REVIEW_DIFF_LINES:-1500}
+RUN_ROLE=${RUN_ROLE:-issue-loop}

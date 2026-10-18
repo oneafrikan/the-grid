@@ -4,11 +4,12 @@
 # every result file lands in a temp dir. Needs the agent-factory venv; skipped without it.
 
 load helpers/setup
+load helpers/venv
 
 setup() {
   common_setup
   PY="$REPO_ROOT/agent-factory/.venv/bin/python"
-  [ -x "$PY" ] || skip "agent-factory venv not built"
+  require_venv "$PY"
   EVALS="$REPO_ROOT/agent-factory/run_evals.py"
   CASES=$(mktemp -d)      # a throwaway cases dir for the tests that write their own cases
   RESULTS=$(mktemp -d)

@@ -1,0 +1,20 @@
+{
+  "name": "c10-conflicting-signals",
+  "why": "close call: pnpm in two sessions, npm in one; at most one item, no overreach",
+  "obs": [
+    ["s1", "prompt", "", "use pnpm, not npm", false],
+    ["s2", "prompt", "", "use pnpm, not npm", false],
+    ["s3", "prompt", "", "use npm, not pnpm", false]
+  ],
+  "known": [],
+  "expect": {"max_items": 1},
+  "canned": {
+    "good": [
+      {"kind": "new", "id": "use-pnpm-for-packages", "trigger": "when running package commands", "action": "use pnpm rather than npm", "domain": "tooling", "evidence": ["P1"]}
+    ],
+    "bad": [
+      {"kind": "new", "id": "use-npm-for-packages", "trigger": "when running package commands", "action": "use npm rather than pnpm", "domain": "tooling", "evidence": ["P2"]}
+    ],
+    "bad_reason": "thin-evidence"
+  }
+}

@@ -30,7 +30,7 @@ openspec/
     design.md                    how
     tasks.md                     implementation checklist
     specs/<capability>/spec.md   the DELTA — how the spec changes
-  archive/                       completed changes
+  changes/archive/               completed changes (YYYY-MM-DD-<change-id>/)
 ```
 
 The distinction that matters: `openspec/specs/` is the present tense.

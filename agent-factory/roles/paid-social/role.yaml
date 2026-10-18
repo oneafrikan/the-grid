@@ -9,5 +9,8 @@ summary: >-
   audience strategy (interest / lookalike / custom / Advantage+), creative testing
   and fatigue management, pixel/CAPI tracking, bidding and budget pacing. Plans
   and optimises spend; the human approves the budget.
+description: "Paid Social Specialist. Meta, Instagram, LinkedIn, TikTok: campaign structure, audiences, creative testing, tracking, bidding and pacing. Human approves budget. Use for paid social."
 base_skills: []      # skills always included for this role (TBD — toprank / abm-ad-creative candidates)
 orchestrator: false
+# Bash is here to open PRs (intent only: tools: cannot scope Bash, so it is an unscoped shell). No Edit. Add ads-API tools only if wired as an MCP tool (reopen H-04). Residual risk: agent-factory/README.md, "Tool allowlists and residual risk".
+tools: [Read, Grep, Glob, WebFetch, WebSearch, Write, Bash]

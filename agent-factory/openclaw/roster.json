@@ -1,18 +1,18 @@
 {
   "_meta": {
-    "description": "Status-lifecycle roster for the 5 grid orchestrator roles deployed as real OpenClaw agents on scout. Source of truth for the-grid's OpenClaw target (see agent-factory/docs/openclaw-paperclip-targets-plan.md, Session B1). Ported from ~/Guide/guide-core/agent-factory/roster.json's shape, adapted for an orchestrator-only rollout.",
+    "description": "Status-lifecycle roster for the 5 grid orchestrator roles deployed as real OpenClaw agents on a self-hosted OpenClaw gateway. Source of truth for the-grid's OpenClaw target (see agent-factory/openclaw/README.md, Session B1). Shape adapted from an earlier specialist-agent roster, for an orchestrator-only rollout.",
     "updated": "2026-07-05",
     "statusValues": {
       "planned": "Designed but no build work started",
       "building": "Template rendering / compose.py write_openclaw() output in progress (Session B2)",
-      "testing": "Deployed to ~/.openclaw and registered — Gareth testing before flipping to production (Session B3/B4)",
+      "testing": "Deployed to ~/.openclaw and registered — the operator testing before flipping to production (Session B3/B4)",
       "production": "Live and bound to its Telegram surface, in regular use",
       "paused": "Was live, temporarily disabled"
     },
     "_note": "This roster only covers the 5 OpenClaw orchestrators. It is independent of the Claude Code target's roster (compose.py's grid.yaml) and of the separate Paperclip manifest (Session A track) — no live sync between the three."
   },
   "securityDefaults": {
-    "_comment": "First-pass adaptation of Guide's ADR-022 securityDefaults for grid's orchestrator-only rollout. Session C (security review, gates Session B4) is expected to scrutinize and likely tighten this before any real deploy — not over-engineered here per the plan's own guidance.",
+    "_comment": "First-pass adaptation of an earlier securityDefaults design for grid's orchestrator-only rollout. Session C (security review, gates Session B4) is expected to scrutinize and likely tighten this before any real deploy — not over-engineered here per the plan's own guidance.",
     "exec": "restricted",
     "ask": "on",
     "toolsPermitted": [
@@ -69,7 +69,7 @@
       "telegram": {
         "bot": "TBD",
         "chatId": "TBD",
-        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the existing coach precedent."
+        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the one-bot-per-agent precedent on the gateway."
       },
       "permissionProfile": "orchestrator",
       "status": "planned",
@@ -89,7 +89,7 @@
       "telegram": {
         "bot": "TBD",
         "chatId": "TBD",
-        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the existing coach precedent."
+        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the one-bot-per-agent precedent on the gateway."
       },
       "permissionProfile": "orchestrator",
       "status": "planned",
@@ -108,7 +108,7 @@
       "telegram": {
         "bot": "TBD",
         "chatId": "TBD",
-        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the existing coach precedent. First OpenClaw pilot role per the plan's Session B4."
+        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the one-bot-per-agent precedent on the gateway. First OpenClaw pilot role per the plan's Session B4."
       },
       "permissionProfile": "orchestrator",
       "status": "planned",
@@ -125,7 +125,7 @@
       "telegram": {
         "bot": "TBD",
         "chatId": "TBD",
-        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the existing coach precedent."
+        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the one-bot-per-agent precedent on the gateway."
       },
       "permissionProfile": "orchestrator",
       "status": "planned",
@@ -141,7 +141,7 @@
       "telegram": {
         "bot": "TBD",
         "chatId": "TBD",
-        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the existing coach precedent."
+        "_note": "Binding decided in Session B3/B4 — one dedicated bot per orchestrator, matching the one-bot-per-agent precedent on the gateway."
       },
       "permissionProfile": "orchestrator",
       "status": "planned",

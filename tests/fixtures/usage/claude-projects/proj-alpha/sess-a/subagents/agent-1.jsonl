@@ -1,0 +1,3 @@
+{"type":"assistant","uuid":"c-7","sessionId":"sess-a","message":{"role":"assistant","content":[{"type":"tool_use","id":"t-7","name":"Skill","input":{"skill":"tdd"}}],"id":"m-6","model":"claude-sonnet-5-5","usage":{"input_tokens":1,"output_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":0}},"timestamp":"2026-10-08T11:00:00Z"}
+{"type":"user","uuid":"u-s1","sessionId":"sess-a","timestamp":"2026-10-08T11:01:00Z","message":{"role":"user","content":"<command-name>/handoff</command-name>"}}
+{"type":"attachment","uuid":"h-4","sessionId":"sess-a","timestamp":"2026-10-08T11:02:00Z","attachment":{"type":"hook_success","hookName":"Stop","hookEvent":"Stop","toolUseID":"toolu_hook_h-4","command":"/SECRET/hook-cmd.sh","stdout":"","stderr":""}}

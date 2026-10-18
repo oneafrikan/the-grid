@@ -1,0 +1,22 @@
+```markdown
+# tech-lead uses cron for all scheduled behaviour, not the OpenClaw heartbeat API.
+# Keep this file empty (or with only comments) to skip heartbeat API calls.
+```
+
+<!--
+Genuinely new for the grid, but the convention isn't: mirrors the exact
+wording already used by existing agents on the gateway
+(their workspace HEARTBEAT.md) and by the earlier factory's
+HEARTBEAT.md template. Agent-writable in the deployed workspace
+(mode 664) per B2's file-permission scheme, and PRESERVED ON REGEN — session
+B2/B3 must not overwrite a live agent's own heartbeat tasks with this scaffold
+on redeploy.
+
+Token filled by session B2's write_openclaw():
+  tech-lead — machine role id, e.g. "tech-lead"
+See openclaw/README.md for the full token list.
+-->
+
+## Related
+
+- [Heartbeat config](/gateway/config-agents)

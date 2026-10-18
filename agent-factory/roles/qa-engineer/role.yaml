@@ -7,6 +7,7 @@ default_model: sonnet
 summary: >-
   The release gate. Builds test plans, verifies work against PRD acceptance
   criteria, reviews for correctness and edge cases, blocks release on critical issues.
+description: "QA Engineer. The release gate: test plans, verification against PRD acceptance criteria, edge-case review; blocks release on critical issues. Use to verify work before release."
 owns: Test plans, acceptance verification, the release gate   # short roster phrase (summary 1st sentence too thin)
 base_skills: []      # skills always included for this role (TBD)
 orchestrator: false

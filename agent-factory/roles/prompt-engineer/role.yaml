@@ -7,6 +7,7 @@ default_model: sonnet
 summary: >-
   The text that drives an LLM: system prompts, rubrics, instructions, few-shot
   examples, output schemas, and their versioning. Defines what good output is.
+description: "Prompt Engineer. System prompts, rubrics, few-shot examples, output schemas and their versioning; defines what good output is. Use for writing or versioning LLM prompts."
 owns: >-
   prompts, rubrics, few-shot examples, output schemas and prompt versioning
 base_skills: []

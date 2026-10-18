@@ -1,0 +1,7 @@
+name: fx-readonly
+title: Fixture fx-readonly
+summary: Fixture role fx-readonly.
+default_model: sonnet
+orchestrator: false
+model_rationale: fixture
+tools: [Read, Grep, Glob, Bash]

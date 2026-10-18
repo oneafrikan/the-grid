@@ -23,9 +23,8 @@ the team together and lists each agent's skills by name. A role's operating skil
 (its `SKILL.md`) is referenced by name, not copied — OpenClaw wires skills from a
 shared skills dir.
 
-> Sibling `skills-factory/` is a **separate** concern (skills are built there via a
-> Karpathy loop in another repo, then dropped into `skills/`). This factory only
-> *composes* teams from existing parts.
+> Skills are a **separate** concern (authored as `skills/<name>/SKILL.md` or with the
+> wired `skill-creator` skill). This factory only *composes* teams from existing parts.
 
 ## Layout
 
@@ -69,17 +68,52 @@ Then compose a team from a config. `compose.py` is a **multi-target compiler** �
 one 5-file source, a different artifact shape per `--target`:
 
 ```bash
-# OpenClaw target (default): 5 identity files + agents.yaml per agent
+# OpenClaw target (default, legacy): 5 identity files + agents.yaml per agent.
+# It replaces only its own output in projects/<name>/ (the role dirs and agents.yaml);
+# the _<target> dirs below, which wire.sh links into ~/.claude, are left alone.
 .venv/bin/python compose.py examples/grid.yaml
 .venv/bin/python compose.py examples/grid.yaml --dry-run     # report only
 
 # Claude Code target: orchestrators -> CC skills, specialists -> CC subagents
 .venv/bin/python compose.py examples/grid.yaml --target claude-code
 .venv/bin/python compose.py examples/grid.yaml --target claude-code --dry-run
+
+# Portable target: one plain-Markdown persona per role (orchestrators too), no frontmatter.
+# The committed copies live in dist/personas/; regenerate them with scripts/build-personas.sh
+.venv/bin/python compose.py examples/grid.yaml --target portable
+
+# Harness agent targets: one native subagent file per specialist (orchestrators ship as skills).
+# wire.sh links this output into a harness's agents dir for `harness:<name>` entries
+# (docs/harnesses.md); each target writes only its own _<target>/ dir.
+.venv/bin/python compose.py examples/grid.yaml --target codex        # _codex/agents/*.toml
+.venv/bin/python compose.py examples/grid.yaml --target opencode     # _opencode/agents/*.md
+.venv/bin/python compose.py examples/grid.yaml --target gemini-cli   # _gemini-cli/agents/*.md
 ```
 
 Output is regenerable and idempotent: re-running with an unchanged config
-produces byte-identical files (the output dir is wiped and rewritten each run).
+produces byte-identical files (each target's output dir is rebuilt in a `.tmp` dir and swapped
+into place, so a failed run leaves the previous output intact). Each `.tmp`/`.old` dir is paired
+with a `<name>.compose-owned` marker file; compose.py only clears leftovers it marked, and refuses
+(never deletes) a `.tmp`/`.old` dir without one.
+
+- **Interrupted swaps.** Ctrl-C or a failed rename rolls the previous output back. If the rollback
+  itself fails, the previous output is left in `<name>.old` and the error names it; the next run
+  refuses that unmarked dir, so move it back (or delete it) by hand. A run killed outright
+  (`SIGKILL`, power loss) leaves marked `.tmp`/`.old` debris that the next run clears.
+- **Markers are a convention, not a defence.** Anyone who can write to the output dir can plant a
+  `<name>.compose-owned` file (or link) and so authorise compose.py to delete the dir at that name;
+  a marker left by a killed run has the same effect if you later create your own dir at that name.
+  Leave `*.tmp`, `*.old` and `*.compose-owned` names to compose.py.
+- **Unmarked debris.** A `.tmp`/`.old` dir with no marker (older output, or yours) is refused with
+  "refusing to delete ..."; move or remove it and re-run.
+- **One writer per project.** A swap holds a lock on `<out>/<project>/`; a second run on the same
+  project exits with "another compose run is writing ...". Re-run once the first has finished.
+- **Reused project dirs.** A project name may only reuse an existing `<out>/<project>/` that looks like
+  compose output: empty, or holding only dotfiles, `_<target>` dirs, the legacy target's
+  `agents.yaml` and role dirs of identity files. Any other dir of that name (say `skills/`) is
+  refused, never emptied.
+- **Linked stacks and skills.** A `stacks:`/`skills:` entry that is, or sits under, a symlink is refused.
+
 `projects/` output is gitignored — the compose config is the tracked artefact.
 
 > **On a machine that just pulled new source, recompose before wiring.** A `git
@@ -173,7 +207,8 @@ Stack overlays (when a stack is named) append to `AGENTS.md` as a trailing
   line. Absent means the subagent inherits every tool. Use it for roles whose prose says "advisory"
   or "does not implement" (security-reviewer, qa-engineer). It narrows a role; it does not sandbox it:
   `Bash` can still write files. Not allowed on orchestrators (they deploy as skills and would ignore it:
-  `E_TOOLS_ON_ORCHESTRATOR`).
+  `E_TOOLS_ON_ORCHESTRATOR`). What it does and does not protect: see
+  [Tool allowlists and residual risk](#tool-allowlists-and-residual-risk).
 - **`model_rationale: text`** — required when `default_model` is not `sonnet`: say why this role is on a
   different tier (`E_MODEL_RATIONALE_MISSING`). Keeps the "which tier and why" in one parsed place.
 - **`unattended: true`** — the role runs with no human watching (cron). Today it is a marker (gh-triage,
@@ -191,6 +226,89 @@ agrees with `role.yaml`).
 **Rollout:** composed output is git-ignored, so after pulling a change to these keys run
 `compose.py <cfg> --target claude-code` for each public project and `scripts/wire.sh`; per-project deploys
 pick it up on the next `deploy.py <project>` (its `--check` reports the drift).
+
+## Tool allowlists and residual risk
+
+`tools:` in `role.yaml` is the per-role tool control in the generated subagent files. It is a
+narrowing aid, not a sandbox.
+
+**What it does**
+- Limits a Claude Code subagent to the named built-in tools (`Read`, `Grep`, `Glob`, `Bash`, `Edit`,
+  `Write`, `WebFetch`, `WebSearch`). A tool not listed is not available to that subagent.
+- Is written into the generated agent files for Claude Code (`tools:`) and Gemini (each name mapped
+  to its own tool). Runtime enforcement by those vendors is not verified here.
+- This factory's `KNOWN_TOOLS` validation does not accept MCP tool names. Whether the vendor runtime
+  treats `tools:` as a strict allowlist for MCP tools is not verified here; assume unlisted MCP tools
+  may remain reachable until it is.
+
+**What it does not do**
+- It does not limit what a granted tool can reach: `Bash` can run anything the user can, `Write` is
+  unscoped, `Read` reads any local file the user can. `tools:` cannot scope `Bash`, so a role with
+  `Bash` has an unscoped shell.
+- It does not stop a role from acting on injected instructions in the content it reads.
+- It is not applied on every runtime:
+  - OpenCode: compose emits only `edit`, `bash` and `webfetch` denials, and omits the block when
+    nothing is denied. The four PR roles (researcher, seo, paid-search, paid-social) get no
+    `permission` block; finance-analyst gets only `bash: deny`; gh-triage and librarian get only
+    `webfetch: deny`.
+  - Codex: these roles get no sandbox setting. Compose gives a best-effort read-only sandbox only to
+    roles with neither `Edit` nor `Write`; none of these seven qualify.
+
+**Current allowlists** (seven roles narrowed in H-04, adjusted in H-04b)
+
+| Role | `tools:` | Why |
+|---|---|---|
+| researcher | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Reads the web; Write for the report; Bash is there to open PRs (intent only, the shell is unscoped) |
+| seo | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Audits from web data; Bash is there to open PRs (intent only, the shell is unscoped) |
+| paid-search | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Same as seo; reopen if an ads API is wired as an MCP tool |
+| paid-social | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Same as seo; reopen if an ads API is wired as an MCP tool |
+| finance-analyst | Read, Grep, Glob, WebFetch, WebSearch, Write | Reads the web, writes the evidence pack; no PR step, so no Bash |
+| gh-triage | Read, Grep, Glob, Bash, Write | Bash for `gh`; Write for the message and last-run files named in the scope file |
+| librarian | Read, Grep, Glob, Write, Edit, Bash | Edit for page updates; Bash for the idempotent inbox-to-sources move |
+
+`Edit` is withheld from every web-reading role, but only where the list is applied (see above), and
+`Write` plus `Bash` can still change files. Opening a PR needs `Bash`, which is why the four
+PR-capable web roles have it; `finance-analyst` has no PR step and stays without it.
+`tests/test_role_allowlists.bats` pins these exact lists.
+
+**Accepted residual risks** (2026-10-17, accepted by the operator; documented, not fixed)
+1. `Read` plus `WebFetch`: a prompt-injected role can send any readable local file to an
+   attacker-chosen URL.
+2. `Bash` on a role that reads untrusted content: gh-triage and librarian have it, and now researcher,
+   seo, paid-search and paid-social too. A prompt-injected role reading untrusted web or issue text
+   can run a shell. gh-triage and the four PR roles run `gh` and git with the host user's
+   credentials; the repo stores no token, but in effect the shell can use whatever the user is
+   logged in with.
+3. Remote paths opened by `Bash` on the four web roles (new in H-04b): injected web content can make
+   the role push a branch (for example one that edits a workflow file) that reaches CI with repo
+   secrets, or open a public PR as an outlet for data read locally. `github.com` must stay
+   reachable for the PR step, so a "no network except allowed hosts" sandbox would not stop this.
+4. The PR hand-off is an unscoped second-order injection outlet: text derived from untrusted web
+   content lands in a PR that reviewers, gh-triage and orchestrators then read as repo content.
+   No role text scopes the target repo or branch, or forbids pushing to the default branch,
+   force-pushing or merging.
+5. `Write` is unscoped on all seven roles: it can overwrite shell rc files, hook scripts and similar.
+6. `tools:` is not applied on every runtime (OpenCode, Codex; see above). On those targets the lists
+   give no protection beyond the few OpenCode denials named above.
+7. Roles outside this list. 17 of the 38 public roles (implementers and orchestrators) carry no
+   `tools:` and inherit every tool. Roles outside this repo (private desks) that read untrusted web
+   content may also lack `tools:`; this repo does not track them. `security-reviewer` already has
+   `Bash` plus the web tools, so these residuals are wider than the seven-role table.
+8. Public repos with untrusted content (issues, PRs, web pages) are explicitly not solved. Operator:
+   "that risk is not going to go away in the agentic world".
+
+**What would reduce them**
+- Scoped Bash rules (allow only `gh pr create`, a push of the role's own branch, and the like)
+  instead of a blanket `Bash`.
+- Claude Code `disallowedTools` and permission rules in the project's settings, and the repo's
+  opt-in guard hooks (`pre-bash-no-bypass`, `pre-bash-secret-scan`; off by default).
+- Scoping the PR hand-off in role text (target repo and branch; never push to the default branch,
+  force-push or merge) plus branch protection and no repo secrets on CI runs for branches from
+  these roles.
+- MCP-only tools: wrap the few outward actions as MCP tools with fixed arguments and drop `Bash`.
+- Sandboxing: run these roles in a container or worktree with no credentials beyond the task's and a
+  read-only view of everything outside the output directory. Network limits help against
+  exfiltration to arbitrary hosts, but not against pushing to `github.com`.
 
 ## Spec-driven repos (OpenSpec)
 
@@ -250,7 +368,7 @@ Any violation is a hard `compose.py` error. **grid topology:**
 
 ## Status
 
-**Claude Code delivery target is done and live.** Three public projects compose
+**Claude Code delivery target is done and live.** Four public projects compose
 independently and are gated independently:
 
 | Config | Roles | Shape |
@@ -267,15 +385,15 @@ Claude Code skill/subagent shape; `scripts/wire.sh` wires the CC output into
 directory (see **Private projects** above).
 
 Remaining work (see repo-root `TODO.md` and the issue tracker):
-- **New CLI targets** — `opencode`, OpenAI Codex CLI, Gemini CLI, Cursor, and
-  portable single-file personas for chat-UI Projects. All scoped from the
-  2026-07-24 portability research; none implemented.
+- **Harness targets: real-install checks** — `codex`, `opencode`, `gemini-cli` and
+  `portable` are implemented (see **Running it**); none has been smoke-tested on a
+  real install (`docs/harnesses.md` lists what is unverified). Cursor has rule packs
+  only (`scripts/rules.py emit --harness cursor`), no agent target.
 - **OpenClaw + Paperclip targets** — 5 files → workspace + `openclaw.json`; the
   async/autonomous heartbeat loop. Deferred (Claude Code was built first). Implementation
   plan, scoped to a curated orchestrator roster + chunked into single-session specialist
-  work: `docs/openclaw-paperclip-targets-plan.md`.
+  work: `agent-factory/openclaw/README.md`.
 - **Stack overlays** — `stacks/*` are still `stack.yaml` stubs with empty `fragments`.
-- **Golden-output conformance tests** — `compose.py` has no regression suite.
 
 *(Machine gating is **done**: `project:<name>` entries in the baseline or a
 per-machine overlay control which composed projects `wire.sh` links. With no
@@ -285,7 +403,7 @@ per-machine overlay control which composed projects `wire.sh` links. With no
 
 - The canonical agent is the **live OpenClaw 5-file model** (SOUL / IDENTITY /
   AGENTS / USER / MEMORY) + skills — verified against the running system on
-  guide-server, not the (outdated 3-file) playbook.
+  a Linux box, not the (outdated 3-file) playbook.
 - Target surface is **Claude Code + ACP** (swappable coding CLI), not Claude Code
   alone. Content stays LCD (lowest common denominator) where possible.
 - Memory starts as flat **MEMORY.md** / signal files; a queryable DB (gbrain)
@@ -304,3 +422,46 @@ renders **lean** ones by default — a deterministic selection from the same rol
 writes them into a chosen project's `.claude/`. See the "Drift checks, the commit gate, and
 per-project agents" section of the repo `CLAUDE.md`. `compose.py --lint-roles` and
 `--check` keep roles and composed output honest.
+
+## Hook profiles
+
+`deploy_hooks.py` writes the grid's Claude Code guard hooks into one project's settings.
+It is a separate tool from `deploy.py` (that one needs roles and refuses the-grid itself);
+the two share only `.grid/project.yaml`, where `deploy_hooks.py` reads the `hooks:` key
+and `deploy.py` ignores it.
+
+```yaml
+# <project>/.grid/project.yaml
+hooks:
+  profile: standard   # off | minimal | standard | strict (absent = off)
+  target: local       # local = .claude/settings.local.json (default) | shared = .claude/settings.json
+```
+
+```bash
+agent-factory/.venv/bin/python agent-factory/deploy_hooks.py <project>            # emit
+agent-factory/.venv/bin/python agent-factory/deploy_hooks.py <project> --check    # drift; exit 1
+agent-factory/.venv/bin/python agent-factory/deploy_hooks.py --list               # scope, profile, cost
+```
+
+- Resolution: `--profile` / `--target` flag, then the file, then `off` / `local`.
+- Each entry is `bash "${GRID_DIR:-$HOME/.the-grid}/hooks/run.sh" <id> # GENERATED by the-grid deploy_hooks.py`.
+  No absolute path, so a committed `settings.json` works on any machine with the-grid.
+- The trailing comment is the ownership mark: only handlers of exactly that shape are ever
+  edited or removed. Hand-written hooks and every other settings key are left alone.
+- Both settings files are swept on every run; additions go only to the target file, so
+  changing `target` moves the entries. Lowering the profile (or `off`) removes the rest.
+- Invalid JSON, a non-object file or a symlinked `.claude` / settings file aborts before any write.
+- Re-running with unchanged inputs writes nothing. The catalogue is `hooks/catalogue.json`
+  (`GRID_DIR` overrides which grid is read). See `hooks/README.md` for the hooks and their cost.
+
+## Golden outputs and the neutral identity
+
+`scripts/compose-goldens.sh` composes a small fixture project (`tests/fixtures/compose/`) under
+every target and byte-compares it with the committed trees in `tests/fixtures/compose/golden/`.
+Any change to `compose.py`, `_core/`, a template, `models.yaml` or `openclaw/roster.json` changes
+that output, so run `bash scripts/compose-goldens.sh --update` in the same PR and review the diff
+(`--check` is the default; it is skipped, loudly, when the venv is absent). A new compose target is
+appended to `TARGETS` in the script. The fixture is composed with `GRID_USER_CONFIG` pointing at
+`agent-factory/user.public.yaml`, the tracked neutral identity (`machine: "your-machine"`), so no
+personal value or hostname reaches a tracked file. `GRID_USER_CONFIG` replaces `user.yaml` for any
+compose run; a set-but-missing path exits 1 instead of falling back to the hostname.

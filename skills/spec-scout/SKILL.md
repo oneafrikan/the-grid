@@ -1,11 +1,6 @@
 ---
 name: spec-scout
-description: >
-  Audit a repo's OpenSpec adoption and report drift between openspec/specs/ and
-  what the code actually does — missing specs, stale in-flight changes, specs
-  that no longer match shipped behaviour. Use when the user says "spec-scout",
-  "audit specs", "are our specs current", "check spec drift", "which repos have
-  specs", or invokes /spec-scout.
+description: Audit a repo's OpenSpec adoption and report drift between openspec/specs/ and the code. Use when the user says "spec-scout", "audit specs", "are our specs current" or "check spec drift".
 ---
 
 # spec-scout
@@ -48,35 +43,11 @@ For an **active** repo, list:
 
 - Capabilities: each `openspec/specs/<capability>/spec.md`.
 - In-flight changes: each `openspec/changes/<id>/` (excluding `archive/`).
-- Archived changes: count from `openspec/archive/`.
+- Archived changes: count from `openspec/changes/archive/`.
 
 ### 3. Drift signals
 
-Check each, cheapest first. Report only what you actually find — an empty
-finding list is a good result, and saying "no drift found" is a complete answer.
-
-- **Stale in-flight change** — `openspec/changes/<id>/tasks.md` has all boxes
-  ticked but the change was never archived. Use `git log -1 --format=%ar` on the
-  change directory for age. Anything ticked-and-unarchived for weeks is either
-  finished-and-forgotten or abandoned; both need a human call.
-- **Abandoned change** — a change folder with no commits for a long stretch and
-  unticked tasks. Report the age and the last commit subject; don't guess which
-  it is.
-- **Requirement with no scenario** — a `### Requirement:` heading with no
-  `#### Scenario:` under it. Untestable by construction — flag every instance.
-- **Spec with no code** — the capability name (and the nouns in its
-  requirements) appear nowhere in the source tree. Weak signal on its own:
-  naming rarely matches one-to-one, so report it as a question, not a verdict.
-- **Code with no spec** — a top-level source module or route group with no
-  capability covering it. Expect a lot of these in a brownfield repo; that is
-  the normal, intended state (`SPECS.md` says specs grow per-change). Only flag
-  it for areas that changed recently — `git log --since` on the paths — because
-  a *changing* area with no spec is the case actually worth raising.
-- **Spec contradicted by code** — the most valuable finding and the most
-  expensive. Only attempt it for capabilities the user names, or for specs whose
-  files changed less recently than the code they describe. Read the requirement,
-  read the implementation, and report the contradiction with both locations.
-  If you can't verify it, say so rather than asserting drift.
+Read `sections/drift-signals.md` for the signals to check.
 
 ### 4. Validate (optional)
 
@@ -128,3 +99,7 @@ openspec init                    # adopt (state: none)
   convention prevents.
 - Keep the report short enough to read in one screen per repo. Detail belongs
   behind the file paths.
+
+## Sections
+Read a section only when its condition applies; do not preload them.
+- sections/drift-signals.md: read when running step 3 (drift signals)

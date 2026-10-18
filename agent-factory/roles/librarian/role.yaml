@@ -9,5 +9,8 @@ summary: >-
   agents' research — one wiki per domain. Runs the ingest / query / lint
   cycle (source -> pages -> index -> log), preserves every page's evidence
   tier and provenance in its frontmatter, and never asserts a claim itself.
+description: "Librarian. Maintains cross-linked markdown wikis compiled from other agents' research, one per domain, via ingest, query and lint; keeps evidence tiers. Use for research wikis."
 base_skills: []
 orchestrator: false
+# Bash for the idempotent inbox -> sources move; Edit for page updates
+tools: [Read, Grep, Glob, Write, Edit, Bash]

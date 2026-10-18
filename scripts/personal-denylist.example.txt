@@ -1,0 +1,19 @@
+# personal-denylist.example.txt - template for the PRIVATE denylist.
+#
+# Copy to ~/.the-grid-private/denylist.txt (or point GRID_PRIVATE_DENYLIST at
+# your own file) and replace the placeholder rows below with the real terms
+# that must never appear in this public repo: hostnames, account and org
+# handles, employer names, family names, private project names.
+#
+# Same four-column, TAB-separated format as personal-patterns.txt:
+#   kind <TAB> scope <TAB> label <TAB> regex
+# (kind: deny | deny-i | allow; scope: `*` or a path glob; see that file.)
+#
+# Findings from this file print only `[private:N]`, where N is the rule's
+# position among the rule lines in this file (1 = first rule line, comments and
+# blank lines not counted). The label and the matched text are never printed,
+# so CI logs and pasted transcripts cannot leak the list. Keep your own copy of
+# which N is which term.
+#
+# Placeholder rows - replace them:
+deny-i	*	example-label	\bexample-host\b
