@@ -596,14 +596,14 @@ print(compose.render_stack_overlay(["evil"]))'
   ln -s "$sb/real" "$sb/stacks-root"                 # a linked stacks/ root
   ln -s "$sb/skills/ok" "$sb/skills/lnk"             # one linked skill dir
   run env SB="$sb" REPO_ROOT="$REPO_ROOT" "$PY" - <<'PYEOF'
-import os, sys, tempfile
+import os, sys
 from pathlib import Path
 sys.path.insert(0, os.environ["REPO_ROOT"] + "/agent-factory")
 import compose
 sb = Path(os.environ["SB"])
 def verdict(key, base, name):
     compose.STACKS_DIR, compose.SKILLS_DIR = (base, compose.SKILLS_DIR) if key == "stacks" else (compose.STACKS_DIR, base)
-    cfg = Path(tempfile.mkdtemp()) / "c.yaml"
+    cfg = sb / "c.yaml"                       # inside the sandbox dir the test removes
     cfg.write_text(f"project: zz\nslug: zz\nagents:\n  - role: morpheus\n    {key}: [{name}]\n")
     try:
         compose.load_config(cfg)

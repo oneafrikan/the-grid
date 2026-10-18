@@ -1315,7 +1315,7 @@ time.sleep(30)' "$out/fx" "$TMP/locked" &
     i=$((i + 1))
     if wait "$pid"; then won=$((won + 1)); fi
     cat "$TMP/par$i.log"
-    ! grep -q Traceback "$TMP/par$i.log"
+    if grep -q Traceback "$TMP/par$i.log"; then false; fi
   done
   [ "$won" -ge 1 ]
   "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$TMP/ref" > /dev/null
