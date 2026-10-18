@@ -1677,6 +1677,327 @@ print('\n'.join(rules.lint('$R', check_urls=True).lines()))"
   [[ "$(printf '%s\n' "$output" | sed -n 2p)" == "E_URL rules/g/README.md: https://example.com/style -> HTTP 404" ]]
 }
 
+# --- lint hardening 2 (H-13: VS1 VS2 VS4 VS5 VS6, NF-007 NF-069) -----------------------------
+# Rule files are delivered into agent instruction files, so lint is the injection control.
+
+@test "VS2 E_STYLE: control characters (ESC, DEL, VT, FF, NEL, NUL) are rejected, a tab is not" {
+  PK=g; make_pack g
+  local v
+  for v in $'\x1b[8m' $'\x1b' $'\x7f' $'\x0b' $'\x0c' $'\xc2\x85'; do
+    rule_with '**/*.sql' "- Use \`foo\` ${v} bar."
+    run lint
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"E_STYLE rules/g/style.md: line 7: control character U+00"* ]]
+    # emit re-lints: the pack is excluded and nothing is written.
+    run emit --harness agents-md --packs g --out "$R/AGENTS.md"
+    [ "$status" -eq 2 ]
+    [ ! -e "$R/AGENTS.md" ]
+  done
+  # NUL cannot travel in an argument, so write it straight into the file.
+  printf -- '---\npaths:\n  - "**/*.sql"\n---\n# Title\n\n- Use `foo`\x00 bar.\n' > "$R/rules/g/style.md"
+  run lint
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"control character U+0000"* ]]
+  # Control characters are refused on every line: frontmatter and fences included.
+  printf -- '---\npaths:\n  - "**/*.sql"\n---\n# Title\n\n- Use `foo`.\n\n```\nx\x1b[8my\n```\n' > "$R/rules/g/style.md"
+  run lint
+  [[ "$output" == *"control character U+001B"* ]]
+  # A tab is ordinary layout, not a control finding.
+  rule_with '**/*.sql' $'- Use `foo`\tfor bar.'
+  run lint
+  [ "$status" -eq 0 ]
+}
+
+@test "VS1 E_STYLE: look-alike blanks and combining marks that NFKC leaves visible are rejected" {
+  PK=g; make_pack g
+  local v
+  # U+3164 U+2800 U+115F U+1160 U+FFA0: blank letters/symbols
+  for v in $'\xe3\x85\xa4' $'\xe2\xa0\x80' $'\xe1\x85\x9f' $'\xe1\x85\xa0' $'\xef\xbe\xa0'; do
+    rule_with '**/*.sql' "- Use \`foo\` for${v}bar."
+    run lint
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"E_STYLE rules/g/style.md: line 7: invisible character U+"* ]]
+    rule_with '**/*.sql' "- Use \`foo\`${v}${v}${v} for bar."     # padding form
+    run lint
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"invisible character"* ]]
+  done
+  # U+17B4 U+034F U+180B U+0301: combining marks, named as such
+  for v in $'\xe1\x9e\xb4' $'\xcd\x8f' $'\xe1\xa0\x8b' $'\xcc\x81'; do
+    rule_with '**/*.sql' "- Use \`foo\` for${v}bar."
+    run lint
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"E_STYLE rules/g/style.md: line 7: combining mark U+"* ]]
+    rule_with '**/*.sql' "- Use \`foo\`${v}${v}${v} for bar."     # padding form
+    run lint
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"combining mark"* ]]
+  done
+  # Decomposed text (`e` + U+0301) is refused as a combining mark; the precomposed letter passes.
+  rule_with '**/*.sql' $'- Use `foo` in the cafe\xcc\x81 module.'
+  run lint
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"combining mark U+0301"* ]]
+  [[ "$output" != *"invisible character"* ]]
+  rule_with '**/*.sql' $'- Use `foo` in the caf\xc3\xa9 module.'
+  run lint
+  [ "$status" -eq 0 ]
+  # Emit refuses them too (the pack is excluded, nothing is written).
+  rule_with '**/*.sql' $'- Use `foo` for\xe3\x85\xa4bar.'
+  run emit --harness agents-md --packs g --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [ ! -e "$R/AGENTS.md" ]
+}
+
+@test "VS1 E_STYLE: a confusable letter inside an ASCII word is rejected" {
+  PK=g; make_pack g
+  local v
+  # (b) other look-alike scripts: Armenian oh, Cherokee A, Coptic ei, Cyrillic a, Greek omicron.
+  # (c) Latin look-alikes: Latin alpha, dotless i, script g, small-cap c.
+  # (a) NFKC folds to ASCII: fullwidth w, fi ligature, mathematical bold a.
+  for v in $'w\xd6\x85rd' $'w\xe1\x8e\xa0rd' $'w\xcf\xa9rd' $'w\xd0\xb0rd' $'w\xce\xbfrd' \
+           $'w\xc9\x91rd' $'w\xc4\xb1rd' $'w\xc9\xa1rd' $'w\xe1\xb4\x84rd' \
+           $'\xef\xbd\x97ith' $'\xef\xac\x81le' $'x\xf0\x9d\x90\x9ay'; do
+    rule_with '**/*.sql' "- Use \`foo\` ${v} first."
+    run lint
+    [ "$status" -eq 1 ] || { echo "accepted: $v"; return 1; }
+    [[ "$output" == *"E_STYLE rules/g/style.md: line 7: word"*"mixes ASCII letters with"* ]]
+  done
+}
+
+@test "VS1 E_STYLE: accented Latin letters pass, a word with no ASCII letter passes" {
+  PK=g; make_pack g
+  local v
+  # e-acute, i-diaeresis, e-diaeresis, n-tilde, o-acute z-acute; and words with no ASCII letter
+  # at all (fullwidth only, CJK only).
+  for v in $'caf\xc3\xa9' $'na\xc3\xafve' $'Zo\xc3\xab' $'ma\xc3\xb1ana' $'d\xc3\xb3\xc5\xba' \
+           $'\xef\xbd\x97\xef\xbd\x89\xef\xbd\x8e' $'\xe7\x94\xa8\xe6\x88\xb7'; do
+    rule_with '**/*.sql' "- Use \`foo\` ${v} first."
+    run lint
+    [ "$status" -eq 0 ] || { echo "rejected: $v: $output"; return 1; }
+  done
+}
+
+@test "VS1 E_STYLE: the broad rule's accepted cost: micro sign, sharp s, o-slash, l-stroke, CJK next to ASCII are flagged" {
+  PK=g; make_pack g
+  local v
+  # Every line is scanned, so a code span does not exempt such a word (the last value).
+  for v in $'5\xc2\xb5s' $'Stra\xc3\x9fe' $'S\xc3\xb8ren' $'\xc5\x81\xc3\xb3d\xc5\xba' $'API\xe7\x94\xa8' $'\xe7\x94\xa8API' \
+           $'`5\xc2\xb5s`'; do
+    rule_with '**/*.sql' "- Use \`foo\` ${v} first."
+    run lint
+    [ "$status" -eq 1 ] || { echo "accepted: $v"; return 1; }
+    [[ "$output" == *"E_STYLE rules/g/style.md: line 7: word"*"mixes ASCII letters with a non-ASCII letter"* ]]
+  done
+}
+
+@test "VF1 emit: a BEGIN edited to still start like the marker is quoted text, a deleted BEGIN is a refusal" {
+  make_pack sql
+  printf 'notes\n<!-- BEGIN the-grid rules (edited by me) -->\n%s\n' "$END_LINE" > "$R/AGENTS.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  grep -qx '<!-- BEGIN the-grid rules (edited by me) -->' "$R/AGENTS.md"
+  [ "$(grep -c '^### sql / style' "$R/AGENTS.md")" -eq 1 ]
+  printf 'notes\n%s\n' "$END_LINE" > "$R/AGENTS.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+}
+
+@test "VS1: normalisation folds blank look-alikes to a space and drops marks, zero-width and control characters" {
+  run python3 -c "
+import sys
+sys.path.insert(0, '$REPO_ROOT/scripts')
+import rules
+n = rules.normalize_for_match
+assert n('withoutㅤasking') == 'without asking', repr(n('withoutㅤasking'))
+assert n('without⠀asking') == 'without asking'
+assert n('withoutᅟasking') == 'without asking'
+assert n('without​ asking') == 'without asking'
+assert n('with͏out asking') == 'without asking'
+assert n('with\x1bout asking') == 'without asking'
+assert n('without\x0basking') == 'without asking'
+print('ok')"
+  [ "$status" -eq 0 ]
+  [ "$output" = ok ]
+}
+
+@test "VS4 denylist: a fullwidth (NFKC-folded) phrase is still an E_OPINION hit" {
+  PK=g; make_pack g
+  local v
+  v="$(python3 -c 'print("".join(chr(ord(c) + 0xFEE0) if c != " " else c for c in "without asking"))')"
+  rule_with '**/*.sql' "- Use \`foo\` ${v} first."
+  expect_only E_OPINION
+}
+
+@test "VS4 globs: a brace group counts as its shortest alternative" {
+  PK=g; make_pack g
+  # shortest `a` leaves one literal character: too broad. The longest alternative would pass.
+  rule_with '**/*{a,bcd}' '- Use `foo` for bar.'
+  expect_code E_PATHS
+  rule_with '**/*{ab,bcd}' '- Use `foo` for bar.'
+  run lint
+  [ "$status" -eq 0 ]
+}
+
+@test "VS4 emit: the file mode of an existing instruction file survives a rewrite (644, 640)" {
+  make_pack sql
+  local m
+  for m in 644 640; do
+    rm -f "$R/AGENTS.md"
+    printf 'notes\n' > "$R/AGENTS.md"
+    chmod "$m" "$R/AGENTS.md"
+    run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+    [ "$status" -eq 0 ]
+    grep -q '^### sql / style' "$R/AGENTS.md"
+    [ "$(stat -c %a "$R/AGENTS.md")" = "$m" ]
+  done
+}
+
+@test "VS5 emit: a missing, empty or broken denylist refuses delivery (exit 2) and writes nothing" {
+  make_pack g
+  # Missing.
+  rm "$R/rules/denylist.txt"
+  run --separate-stderr emit --harness agents-md --packs g --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"denylist"* ]]
+  [ ! -e "$R/AGENTS.md" ]
+  run --separate-stderr emit --harness cursor --packs g --out "$R/out"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"denylist"* ]]
+  [ ! -e "$R/out" ]
+  # Empty (only comments).
+  printf '# nothing\n' > "$R/rules/denylist.txt"
+  run --separate-stderr emit --harness agents-md --packs g --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"denylist"* ]]
+  [ ! -e "$R/AGENTS.md" ]
+  # One bad regex among good ones.
+  cp "$REPO_ROOT/rules/denylist.txt" "$R/rules/denylist.txt"
+  printf '(unclosed\n' >> "$R/rules/denylist.txt"
+  run --separate-stderr emit --harness agents-md --packs g --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"denylist"* ]]
+  [ ! -e "$R/AGENTS.md" ]
+}
+
+@test "VS5 emit: removal (empty selection) needs no denylist and still works" {
+  make_pack g
+  run emit --harness agents-md --packs g --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  rm "$R/rules/denylist.txt"
+  run emit --harness agents-md --packs "" --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  ! grep -q 'the-grid rules' "$R/AGENTS.md"
+}
+
+@test "VS6 emit: a lone END line refuses with a message that says the BEGIN is missing" {
+  make_pack sql
+  printf 'notes\n%s\nmore\n' "$END_LINE" > "$R/AGENTS.md"
+  cp "$R/AGENTS.md" "$R/orig"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"expected exactly one BEGIN"* ]]       # wire.sh keys its warning on this text
+  [[ "$output" == *"END line but no BEGIN line"* ]]
+  cmp "$R/AGENTS.md" "$R/orig"
+  # The opposite damage gets its own wording.
+  printf 'notes\n%s\nno end\n' "$BEGIN_LINE" > "$R/AGENTS.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"BEGIN line but no END line"* ]]
+}
+
+# --- marker spellings: one list for rules.py and harness.sh (NF-007, NF-069) ------------------
+
+# A copy of the scripts a test can edit: rules.py and harness.sh find the spelling list next to
+# themselves, so a fake retired spelling in the copy reaches both. Sets $T.
+spelling_copy() {
+  T="$BATS_TEST_TMPDIR/scripts-copy"
+  mkdir -p "$T/lib"
+  cp "$REPO_ROOT/scripts/rules.py" "$T/"
+  cp "$REPO_ROOT/scripts/lib/harness.sh" "$REPO_ROOT/scripts/lib/harnesses.txt" "$T/lib/"
+  cp "$REPO_ROOT/scripts/lib/rules-markers.txt" "$T/lib/"
+}
+
+@test "marker spellings: rules.py and harness.sh read the same lists, current spelling first" {
+  py="$(python3 -c "
+import sys
+sys.path.insert(0, '$REPO_ROOT/scripts')
+import rules
+assert rules.BLOCK_BEGIN == rules.BLOCK_BEGIN_HISTORY[0]
+assert rules.BLOCK_END == rules.BLOCK_END_HISTORY[0]
+print('\n'.join(rules.BLOCK_BEGIN_HISTORY)); print('--'); print('\n'.join(rules.BLOCK_END_HISTORY))")"
+  sh="$(bash -c ". '$REPO_ROOT/scripts/lib/harness.sh'
+printf '%s\n' \"\${HARNESS_BLOCK_BEGIN_HISTORY[@]}\"; echo --; printf '%s\n' \"\${HARNESS_BLOCK_END_HISTORY[@]}\"")"
+  [ -n "$py" ]
+  [ "$py" = "$sh" ]
+  # The current spelling is what a fresh emit writes.
+  make_pack sql
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$(sed -n 1p "$R/AGENTS.md")" = "$BEGIN_LINE" ]
+}
+
+@test "marker spellings: a retired spelling is recognised by wire's grep, by removal and by replacement" {
+  spelling_copy
+  local old_b='<!-- BEGIN old-grid rules v0 -->' old_e='<!-- END old-grid rules v0 -->'
+  printf 'BEGIN %s\nEND %s\n' "$old_b" "$old_e" >> "$T/lib/rules-markers.txt"
+  make_pack sql
+  printf 'keep1\n%s\nstale rule\n%s\nkeep2\n' "$old_b" "$old_e" > "$R/AGENTS.md"
+  cp "$R/AGENTS.md" "$R/orig"
+  # wire's decision: the shipped scripts do not know the old spelling, the edited copy does.
+  [ "$(bash -c ". '$REPO_ROOT/scripts/lib/harness.sh'; harness_rules_action '$R/AGENTS.md' 0 '' '~/AGENTS.md'")" = none ]
+  [ "$(bash -c ". '$T/lib/harness.sh'; harness_rules_action '$R/AGENTS.md' 0 '' '~/AGENTS.md'")" = remove ]
+  # ... and the CRLF form of the retired line.
+  printf 'keep1\r\n%s\r\nstale\r\n%s\r\n' "$old_b" "$old_e" > "$R/crlf.md"
+  [ "$(bash -c ". '$T/lib/harness.sh'; harness_rules_action '$R/crlf.md' 0 '' '~/AGENTS.md'")" = remove ]
+  # Removal takes the old block out and keeps the operator's text.
+  run python3 "$T/rules.py" emit --root "$R" --harness agents-md --packs "" --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$R/AGENTS.md")" = "$(printf 'keep1\nkeep2')" ]
+  # Replacement: the old block gives way to ONE block in the current spelling.
+  cp "$R/orig" "$R/AGENTS.md"
+  run python3 "$T/rules.py" emit --root "$R" --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'BEGIN' "$R/AGENTS.md")" -eq 1 ]
+  [ "$(sed -n 2p "$R/AGENTS.md")" = "$BEGIN_LINE" ]
+  ! grep -q 'old-grid' "$R/AGENTS.md" || false
+  grep -qx keep1 "$R/AGENTS.md"
+  grep -qx keep2 "$R/AGENTS.md"
+  # The shipped rules.py does not know the old spelling: its block is user text (decision D20),
+  # so removal leaves it and a fresh emit appends a second block.
+  cp "$R/orig" "$R/AGENTS.md"
+  run emit --harness agents-md --packs "" --out "$R/AGENTS.md"
+  [ "$status" -eq 0 ]
+  cmp "$R/AGENTS.md" "$R/orig"
+}
+
+@test "marker spellings: a rule file may not carry a retired spelling either (E_MARKER)" {
+  spelling_copy
+  printf 'BEGIN <!-- BEGIN old-grid rules v0 -->\nEND <!-- END old-grid rules v0 -->\n' >> "$T/lib/rules-markers.txt"
+  make_pack g
+  printf -- '- Do not.\n<!-- BEGIN old-grid rules v0 -->\n' >> "$R/rules/g/style.md"
+  run python3 "$T/rules.py" lint --root "$R"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_MARKER"* ]]
+}
+
+@test "marker spellings: a missing or malformed list is a clear exit 2, never a traceback" {
+  spelling_copy
+  rm "$T/lib/rules-markers.txt"
+  make_pack g
+  run --separate-stderr python3 "$T/rules.py" lint --root "$R"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"rules-markers.txt"* ]]
+  [[ "$stderr" != *Traceback* ]]
+  printf 'BEGIN <!-- BEGIN x -->\n' > "$T/lib/rules-markers.txt"      # no END
+  run --separate-stderr python3 "$T/rules.py" lint --root "$R"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"rules-markers.txt"* ]]
+  printf 'BEGIN <!-- BEGIN x -->\nEND <!-- END x -->\nWHAT is this\n' > "$T/lib/rules-markers.txt"
+  run --separate-stderr python3 "$T/rules.py" lint --root "$R"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"rules-markers.txt"* ]]
+}
+
 # --- the real tree --------------------------------------------------------------------------
 
 @test "real packs lint clean" {

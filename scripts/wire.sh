@@ -1272,7 +1272,8 @@ fi
 #   active, packs wired, absent/symlink   -> NO call; manifest row rules@<~file> ... skipped
 #                                            (the grid never creates an instruction file, and
 #                                            never writes through a symlink)
-#   anything else holding the literal marker `BEGIN the-grid rules` in a regular file
+#   anything else holding a complete BEGIN marker line (any spelling in scripts/lib/rules-markers.txt,
+#   the list rules.py reads too) in a regular file
 #                                         -> emit --packs '' (removes the block; no marker, no call)
 # So nothing is injected by default, and an operator's empty opt-in file is never touched.
 # A rules.py failure is reported, the remaining steps still run, and wire exits 1 at the end.
