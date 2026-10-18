@@ -130,6 +130,15 @@ The `pre-bash-secret-scan` hook SHALL exit 2 when a `git commit` Bash command wo
 - **WHEN** the matching added line also contains `grid:allow-secret`
 - **THEN** the hook does not block on that line
 
+#### Scenario: One exempt token does not hide another
+- **WHEN** an added line holds a placeholder token (its own text holds a word such as `example`) before a real token of the same kind
+- **THEN** the hook blocks on the real token
+
+#### Scenario: No usable working directory
+- **WHEN** the payload `cwd` is missing or not a directory and the command has a git call that could commit or add
+- **THEN** the hook exits 2 and says the working directory is unknown
+- **AND** a command whose git calls cannot commit (`git status`) or that has no git exits 0
+
 #### Scenario: Removed secret lines are ignored
 - **WHEN** the staged diff only deletes a line that contains a secret pattern
 - **THEN** the hook exits 0
