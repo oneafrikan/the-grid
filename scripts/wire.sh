@@ -49,7 +49,9 @@
 #
 # Exit codes: 0 wired | 1 --check found drift | 2 unknown argument / bad harness name / python3 missing for an
 #             active harness / a dir that must be written is unwritable or an active
-#             harness dir cannot be resolved (HOME unset); nothing changed in every case |
+#             harness dir cannot be resolved (HOME unset) / HOME unset or empty while a Claude
+#             dir (SKILLS_DIR, AGENTS_DIR, RULES_DIR, CLAUDE_CONFIG_DIR) is not given;
+#             nothing changed in every case |
 #             3 blocked by the audit (nothing changed)
 # Safety: GRID_DIR is canonicalised (pwd -P); link ownership is by resolved path; removed
 #         links are restored by an exit trap if a run fails or is interrupted before it
@@ -90,6 +92,22 @@ if [ -n "${GRID_DRY_HOME:-}" ]; then
   export RULES_DIR="$GRID_DRY_HOME/.claude/rules"
   export GRID_HARNESS_HOME="$GRID_DRY_HOME"
   export GRID_SKIP_CATALOG=1   # no SKILLS.md / .wired.manifest writes either
+fi
+
+# HOME preflight, before anything is read or touched. With HOME unset (or empty, which would
+# map SKILLS_DIR to /.claude/skills) every Claude dir the script derives from it must have
+# been given explicitly; otherwise `set -u` died on the first one it hit (rc 1), and for
+# CLAUDE_CONFIG_DIR that was only AFTER the links had been rebuilt. A dry run never reaches
+# this: GRID_DRY_HOME sets all of them above.
+if [ -z "${HOME:-}" ]; then
+  home_missing=""
+  for home_var in SKILLS_DIR AGENTS_DIR RULES_DIR CLAUDE_CONFIG_DIR; do
+    [ -n "${!home_var:-}" ] || home_missing="$home_missing $home_var"
+  done
+  if [ -n "$home_missing" ]; then
+    echo "wire: HOME is unset or empty, so these cannot be resolved:$home_missing (set HOME or give them explicitly); nothing was changed" >&2
+    exit 2
+  fi
 fi
 
 # find_skill_mds: tracked-only SKILL.md discovery, shared with catalog.sh.
@@ -797,6 +815,25 @@ skip_invalid_name() {
   echo "  skip (invalid name): $san_name" >&2
   MANIFEST_ROWS+=("$1	$san_name	$san_path	skipped	invalid name")
 }
+# skip_outside_project <kind> <name> <path>: same shape as skip_invalid_name, for a composed
+# file whose real location is not under its project dir.
+skip_outside_project() {
+  local san_name san_path
+  san_name="$(printf '%s' "$2" | LC_ALL=C tr '[:cntrl:]' '?')"
+  san_path="$(printf '%s' "$3" | LC_ALL=C tr '[:cntrl:]' '?')"
+  echo "  skip (outside project dir): $san_name" >&2
+  MANIFEST_ROWS+=("$1	$san_name	$san_path	skipped	outside project dir")
+}
+# under_physical <dir> <root>: true when <dir> RESOLVES (symlinks followed) to a path under
+# <root>'s resolved path. Both sides are resolved, so a project dir reached through a symlink
+# still matches its own contents, while a symlinked component that leads elsewhere does not.
+under_physical() {
+  local p r
+  p="$(cd -P "$1" 2>/dev/null && pwd -P)" || return 1
+  r="$(cd -P "$2" 2>/dev/null && pwd -P)" || return 1
+  case "$p" in "$r"/*) return 0 ;; esac
+  return 1
+}
 
 # Wire a skill directory to SKILLS_DIR.
 # Replaces only what the grid owns: a free name, or a link into the grid (a root skill
@@ -978,12 +1015,27 @@ if [ -d "$CC_OUT" ]; then
     proj_dir="${proj_dir%/}"   # the glob's trailing slash would put "//" in every link target
     proj_name="$(basename "$proj_dir")"
     project_is_wired "$proj_name" || continue
-    while IFS= read -r skill_md; do
-      wire_skill "$(dirname "$skill_md")"
-    done < <(find "$proj_dir/_claude-code/skills" -name "SKILL.md" 2>/dev/null)
-    while IFS= read -r agent_md; do
+    # -print0 / read -d '': a path with a line break must not be split into two bogus paths (the
+    # second half can be an absolute path anywhere). Such a path is a named skip, and so is one
+    # whose real location is outside the project dir (a symlinked component of the composed
+    # tree): nothing outside the project is ever linked.
+    while IFS= read -r -d '' skill_md; do
+      skill_dir="${skill_md%/*}"
+      composed_name="${skill_dir#"$proj_dir"/_claude-code/skills/}"
+      case "$skill_md" in
+        *$'\n'*|*$'\r'*) skip_invalid_name skill "$composed_name" "$skill_dir"; continue ;;
+      esac
+      under_physical "$skill_dir" "$proj_dir" || { skip_outside_project skill "$composed_name" "$skill_dir"; continue; }
+      wire_skill "$skill_dir"
+    done < <(find "$proj_dir/_claude-code/skills" -name "SKILL.md" -print0 2>/dev/null)
+    while IFS= read -r -d '' agent_md; do
+      composed_name="${agent_md#"$proj_dir"/_claude-code/agents/}"
+      case "$agent_md" in
+        *$'\n'*|*$'\r'*) skip_invalid_name agent "$composed_name" "$agent_md"; continue ;;
+      esac
+      under_physical "${agent_md%/*}" "$proj_dir" || { skip_outside_project agent "$composed_name" "$agent_md"; continue; }
       wire_agent "$agent_md"
-    done < <(find "$proj_dir/_claude-code/agents" -name "*.md" 2>/dev/null)
+    done < <(find "$proj_dir/_claude-code/agents" -name "*.md" -print0 2>/dev/null)
   done
 fi
 
@@ -1140,8 +1192,21 @@ wire_harness_link() { # $1=src $2=dest dir $3=kind (skill|agent) $4=~/-form dir 
 if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ]; then
   # Portability is decided once per skill, then applied to each distinct dir.
   HL_NAME=(); HL_SRC=(); HL_REASON=()
+  # hl_list_links: the symlinks in SKILLS_DIR, C-sorted, one per line. Listed NUL-delimited and
+  # any name with a control character (line break, TAB...) is dropped BEFORE the line-based sort
+  # and loop: such a name used to be split into two bogus paths, `readlink` of the first failed,
+  # and the whole run died (rc 1) with the shared dir never populated. A control-character name
+  # is never ours (wire_skill refuses to create one), so nothing legitimate is lost, and a TAB
+  # can no longer fake manifest columns.
+  hl_list_links() {
+    local l
+    while IFS= read -r -d '' l; do
+      case "${l##*/}" in *[[:cntrl:]]*) continue ;; esac
+      printf '%s\n' "$l"
+    done < <(find -H "$SKILLS_DIR" -maxdepth 1 -type l -print0 2>/dev/null) | LC_ALL=C sort
+  }
   while IFS= read -r hl_link; do
-    hl_t="$(readlink "$hl_link")"
+    hl_t="$(readlink "$hl_link")" || continue           # vanished since the listing
     target_is_ours "$hl_t" || continue                  # foreign link: not ours to fan out
     hl_reason=""
     hl_rel="${hl_t%/}"
@@ -1153,8 +1218,8 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ]; then
                            esac ;;
     esac
     if [ -z "$hl_reason" ]; then hl_reason="$(skill_portable "$hl_t")" || true; fi
-    HL_NAME+=("$(basename "$hl_link")"); HL_SRC+=("$hl_t"); HL_REASON+=("$hl_reason")
-  done < <(find -H "$SKILLS_DIR" -maxdepth 1 -type l 2>/dev/null | LC_ALL=C sort)
+    HL_NAME+=("${hl_link##*/}"); HL_SRC+=("$hl_t"); HL_REASON+=("$hl_reason")
+  done < <(hl_list_links)
 
   hl_done=()   # distinct dirs already written this run
   for h_name in "${ACTIVE_HARNESSES[@]}"; do
@@ -1219,13 +1284,12 @@ if [ "${#RULES_EFFECTIVE[@]}" -gt 0 ]; then
   rules_csv="$(printf '%s\n' "${RULES_EFFECTIVE[@]}" | LC_ALL=C sort -u | paste -sd, -)"
 fi
 [ -z "${GRID_DRY_HOME:-}" ] || : > "$GRID_DRY_HOME/.rules-wanted"
-rl_done=()   # distinct instruction files handled this run (two harnesses must never share one)
 while IFS= read -r h_name; do
   [ "$h_name" = claude ] && continue
   rl_raw="$(harness_field "$h_name" rules_file)"
   [ "$rl_raw" != "-" ] || continue
-  ! in_list "$rl_raw" "${rl_done[@]:-}" || continue
-  rl_done+=("$rl_raw")
+  # No de-duplication by file here: harness_registry_check (top of the script) already exits 2
+  # when two harnesses share a rules_file, so each file is visited once.
   rl_active=0; if in_list "$h_name" "${ACTIVE_HARNESSES[@]:-}"; then rl_active=1; fi
   if [ -n "${GRID_DRY_HOME:-}" ]; then
     printf '%s\t%s\t%s\n' "$h_name" "$rl_active" "$rules_csv" >> "$GRID_DRY_HOME/.rules-wanted"
