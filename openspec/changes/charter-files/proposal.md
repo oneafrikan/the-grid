@@ -8,14 +8,15 @@ Agents in a grid project start cold. There is no single place that says what the
 - `scripts/map.py` generates `MAP.md` (ontology, topology, epistemology, "read when" column, canon one-liners) with no volatile data: no stage or pending-signal counts. `map.py status` prints those counts and is not checked. `--check` fails on drift only, in the style of `catalog.sh --check`, and stays green across signal and sweep commits. It is added to `scripts/gate.sh` (the-grid) and to the pre-commit shim (project templates; no CI job).
 - `CLAUDE.md` trailhead block: read PURPOSE.md and MAP.md at session start, GUARDRAILS.md before acting, MAP.md for the rest. Added to the four template `CLAUDE.md` files, printed (never applied) by `cut-project.sh` for a retrofit whose `CLAUDE.md` differs, and prepended to the-grid's own `CLAUDE.md`.
 - `agent-factory/_core/AGENTS_base.md` gains three short sections (1670 bytes, cap 2000): stage vocabulary + warrant rule, always-in-context memory rules, and how to file a knowledge signal. This change owns the whole block; `knowledge-signals` does not edit it. Lean project agents do not receive the base, so `signals/README.md` restates the vocabulary and the trailhead points to it. No new compose fragment, no `compose.py` change.
+- Optional `RELATED.md`: a short view of neighbouring projects so an agent does not search widely or build what another project owns. Not seeded by default; `cut-project.sh --with-related` offers it from `project-factory/related.md`. The trailhead gets one line (read it before building a new capability or adding a dependency); MAP.md lists it only when present. The-grid itself gets none in this change.
 - Dogfood first: the-grid gets the files itself before the templates are cut.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `project-charter-files`: the file set, templates, seeding/retrofit, trailhead, dogfooding.
-- `repo-map`: `MAP.md` content contract and `scripts/map.py` generation and `--check`.
+- `project-charter-files`: the file set, templates, seeding/retrofit, trailhead, dogfooding, the optional `RELATED.md`.
+- `repo-map`: `MAP.md` content contract and `scripts/map.py` generation and `--check` (registry includes `RELATED.md` when present).
 - `agent-boot-vocabulary`: stage vocabulary, warrant rule, signal-filing instructions and memory rules in `AGENTS_base.md`.
 
 ### Modified Capabilities
@@ -28,7 +29,7 @@ None exist to modify: `openspec/specs/` is absent on this branch. The coupling w
 
 ## Impact
 
-- New: `PURPOSE.md`, `GUARDRAILS.md`, `BEHAVIOUR.md`, `MAP.md`, `signals/README.md`, `knowledge/README.md`, `knowledge/canon/.gitkeep`, `scripts/map.py`, `tests/test_map.bats`, `tests/test_charter_files.bats`, `project-factory/trailhead.md`, `project-factory/templates/_common/{PURPOSE,GUARDRAILS,BEHAVIOUR}.md`, `.../_common/.githooks/pre-commit`, `.../_common/scripts/map.py` (byte-identical mirror), `.../_common/signals/README.md`, `.../_common/knowledge/{README.md,canon/.gitkeep}`.
+- New: `PURPOSE.md`, `GUARDRAILS.md`, `BEHAVIOUR.md`, `MAP.md`, `signals/README.md`, `knowledge/README.md`, `knowledge/canon/.gitkeep`, `scripts/map.py`, `tests/test_map.bats`, `tests/test_charter_files.bats`, `project-factory/trailhead.md`, `project-factory/related.md` (opt-in template, outside `templates/` so it is never copied by default), `project-factory/templates/_common/{PURPOSE,GUARDRAILS,BEHAVIOUR}.md`, `.../_common/.githooks/pre-commit`, `.../_common/scripts/map.py` (byte-identical mirror), `.../_common/signals/README.md`, `.../_common/knowledge/{README.md,canon/.gitkeep}`.
 - Edited: `scripts/gate.sh` (check `map`; shellcheck list gains the shim), `tests/test_gate.bats`, `CLAUDE.md`, `project-factory/scripts/cut-project.sh`, `project-factory/README.md`, the four `project-factory/templates/*/CLAUDE.md`, `agent-factory/_core/AGENTS_base.md`, `tests/test_project_factory.bats`.
 - Regenerated (gate drift checks): composed agents (`compose.py --check`), `dist/personas/`, `plugins/`.
 - Depends on nothing unbuilt. Does not touch `instincts` (existing change; `learning: on`), `mine-learnings` or `LEARNINGS.md`.
@@ -39,6 +40,7 @@ None exist to modify: `openspec/specs/` is absent on this branch. The coupling w
 
 - The business repo `the-grid-<business>` is a project repo (docs/business-tier, PR #280), so it is seeded with the same charter files by the same `cut-project.sh` path.
 - Its `PURPOSE.md` is where the business problem and outcome are stated; its `GUARDRAILS.md` is where business must-nots live. Neither belongs in the public grid.
+- Its `RELATED.md` (opt-in) lists the public grid as its factory (this is where "this capability lives in the grid" is stated) and its sibling business repos. A business repo may name only repos at the same or greater privacy than itself; the public grid qualifies. Whether Cowork users can file issues in a neighbour repo is UNVERIFIED (pilot).
 - Colleagues on Cowork read `PURPOSE.md`/`MAP.md` through the `CLAUDE.md` trailhead if Cowork loads `CLAUDE.md` (UNVERIFIED; pilot).
 - Not designed here: the business tier itself.
 
@@ -46,6 +48,7 @@ None exist to modify: `openspec/specs/` is absent on this branch. The coupling w
 
 - No signal file format (the field list in `AGENTS_base.md` restates A2's), sweep, `knowledge/` entry format beyond the two fields `map.py` reads (`claim`, and `stage` for `status`), or `gh-triage` change (A2). No `knowledge.py` (A2 creates and mirrors it).
 - No CI job in project templates; only the pre-commit shim.
+- No `RELATED.md` for the-grid itself, no auto-generated cross-repo index, no staleness lint (needs network), no machine check of the privacy rule, and no `AGENTS_base.md` text for it (trailhead only; lean project agents get the trailhead).
 - No lint beyond `map.py --check` drift; no stage-enum or address validation, no Stop hook, no CODEOWNERS, no eval cases (A3).
 - No merge of `LEARNINGS.md` into `knowledge/`; `mine-learnings` unchanged.
 - No file-tree index in `MAP.md`; it indexes charter files, roles, skills and knowledge only.
@@ -79,6 +82,7 @@ The operator can veto any of these; each is a "Decided:" in design.md.
 
 8. **Per-agent injected cost (vetoable).** The `AGENTS_base.md` block adds 1670 bytes (cap 2000) to every full-profile composed agent, about 1.5-2 KB each, on top of a 2907-byte base. `openspec/config.yaml` says: "anything that injects text into context or calls a model must be opt-in and budgeted." This block is not opt-in (it is in every agent, whether or not the repo has charter files) and its budget is the 2000-byte cap. Accepted by the operator (D8); veto here means dropping the sections from `AGENTS_base.md` and relying on `signals/README.md` plus the trailhead for all agents.
 9. **Project templates get a pre-commit gate only (D12).** A bypassable hook (`--no-verify`) running `map.py --check`; no CI job.
+10. **`RELATED.md` is opt-in, offered by a flag.** Smallest mechanism that fits `cut-project.sh` (copy-if-absent, positional args): a `--with-related` flag copies `project-factory/related.md` to `RELATED.md` under the same never-overwrite rule. Alternative rejected: a prompt (the script is non-interactive). The privacy rule (same or greater privacy) is `check: human`; nothing verifies it. Cross-repo requests are GitHub issues in the neighbour's repo; an agent never pushes into another repo and the loop works only in its own.
 
 ## Open questions (not decided here)
 

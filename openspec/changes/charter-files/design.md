@@ -32,6 +32,11 @@ Verified in this worktree (branch `spec/epistemics-and-loop`, cut from `next` at
 - Decided (operator D7): this change owns the whole `AGENTS_base.md` block, so `knowledge-signals` does not edit it. Final wording is below. An agent may file any of the four claimable stages (`wip`, `provisional`, `established`, `canonical`) as a proposal; the stage filed is not the outcome, and `canonical`, supersession and contradiction are always decided by a human. `superseded` and `retired` are not claimable stages (A2: invalid in a signal); they are set by a human PR and expressed in a signal through `supersedes`. Signal fields are as `knowledge-signals` defines them: `filed_by`, `claim`, `stage`, `warrant`, `status: pending`, optional `supersedes`, `contradicts`, `confirms` (each `K-<hash8>`), `guardrail` (`GUARDRAILS#Gn`); file name `YYYYMMDDTHHMMSSZ-<filer>-<hash6>.md`; helper `scripts/knowledge.py file` (A2; mirrored into `_common/scripts/` by A2, with its own `cmp` test; this change's `cmp` test covers `map.py` only).
 - Decided: AGENTS_base additions are capped at 2000 bytes (operator D7, was 1600). Measured on the real text: the block below is 1670 bytes (`wc -c`), so the file grows by 1671 (block plus one blank-line separator), 2907 to 4578. New headings are `## Evidence and Stages`, `## Memory`, `## Filing a Knowledge Signal`; none exists in any role `AGENTS.md` (grep at build time, since merge unifies shared headings).
 - Decided (operator D9): knowledge signals and the existing `signals/→<agent>.md` handoffs coexist in `signals/`; the handoff section is untouched.
+- Decided (operator): `RELATED.md` is optional and not seeded by default. Mechanism: `cut-project.sh --with-related` (flag accepted anywhere among the arguments; `usage()` documents it) copies `project-factory/related.md` to `<target>/RELATED.md` by the existing copy-if-absent rule; a differing existing file is SKIPPED and reported, never overwritten. The template lives outside `templates/` (like `trailhead.md`) so `_common` seeding cannot copy it by accident. Reason for a flag over a prompt: the script is non-interactive and positional.
+- Decided: `RELATED.md` shape (about 40 lines max when filled; template is a header plus one example entry). Header: not exhaustive, search if unsure; name only repos at the same or greater privacy than this one (a public repo never names a private one); a wrong entry is filed as a signal; to ask for something, file an issue in that repo, never push to it. Per entry: `repo:`, `owns:` (one line from its PURPOSE.md), `provides to us / we provide to it:`, `don't build here:`, `reach:` (file an issue in that repo), `verified: YYYY-MM-DD`.
+- Decided: read trigger is the trailhead only: "Before building a new capability or adding a dependency: read `RELATED.md` if it exists." Not at session start. `map.py`'s registry lists `RELATED.md` only when present, with the same read-when text. The `AGENTS_base.md` block is not changed for it (it has 330 bytes of room under the 2000 cap, but lean project agents never see the base and do get the trailhead).
+- Decided: the privacy rule is `check: human`; no gate check, no staleness lint (verifying `verified:` dates or owners needs network).
+- Decided: the-grid gets no `RELATED.md` in this change.
 - Decided: gate check is named `map` (`python3 scripts/map.py --check`); skipped with a notice and recorded in `SKIPPED` if `python3` or the script is absent, same pattern as `run_shellcheck`.
 
 ## GUARDRAILS.md for the-grid (draft; HUMAN approves)
@@ -96,6 +101,7 @@ The Files registry (path, what, read-when) is a constant in `map.py`:
 | `SPECS.md` | before proposing or implementing a non-trivial change |
 | `openspec/` | before implementing: specs and in-flight changes |
 | `SKILLS.md` | choosing a skill (the-grid only) |
+| `RELATED.md` | before building a new capability or adding a dependency (only if present) |
 | `handoffs/` | resuming earlier work |
 | `signals/` | filing a signal |
 | `knowledge/` | you need a claim below canon |
@@ -144,11 +150,28 @@ This change owns the block. If a later change alters a signal field, it edits th
 - Session start: read `PURPOSE.md` and `MAP.md`.
 - Before acting (editing, committing, opening a PR): read `GUARDRAILS.md`.
 - Recording a claim or filing a signal: read `signals/README.md` (stages, warrant rule, file format).
+- Before building a new capability or adding a dependency: read `RELATED.md` if it exists.
 - Everything else: find it through `MAP.md` ("Read when" column); do not read what it does not point you to.
 <!-- /charter-trailhead -->
 ```
 
 In the-grid's `CLAUDE.md` the block goes at the very top, above the existing first heading.
+
+## related.md template (`project-factory/related.md`, copied only with `--with-related`)
+
+```markdown
+# RELATED
+<!-- Optional. Read before building a new capability or adding a dependency. -->
+Not exhaustive: if unsure, search. Name only repos at the same or greater privacy than this one (a public repo never names a private one; checked by a human). Wrong or stale entry: file a signal (`signals/README.md`). To ask another project for something, file an issue in its repo; never push to it.
+
+## <name>
+- repo: <owner/name>
+- owns: <one line, taken from its PURPOSE.md>
+- provides to us / we provide to it: <what flows each way>
+- don't build here: <what to use, or ask for there, instead>
+- reach: file an issue in <owner/name>
+- verified: YYYY-MM-DD
+```
 
 ## Alternatives rejected
 
@@ -158,6 +181,7 @@ In the-grid's `CLAUDE.md` the block goes at the very top, above the existing fir
 - **Guardrails inside `PURPOSE.md`.** Costs tokens every session. Rejected (brief).
 - **Hand-written map with a lint.** Drifts. Rejected (brief): generated, `--check` like `catalog.sh`.
 - **New compose fragment for the vocabulary.** Needs a `compose.py` change; `AGENTS_base.md` already has the SPECS.md precedent. Rejected (brief).
+- **Auto-generated cross-repo index** (a `RELATED.md` built from other repos' PURPOSE.md). Needs network or local clones on every generation, goes stale between runs, and cannot honour the privacy rule by itself. Rejected for a hand-kept opt-in file whose wrong entries are filed as signals.
 - **Listing every file in `MAP.md`.** Unbounded token cost; the registry lists only charter files.
 
 ## Risks
@@ -170,4 +194,5 @@ In the-grid's `CLAUDE.md` the block goes at the very top, above the existing fir
 - **`signals/` collision (Open assumption 3).** An agent following the old handoff text and one following the new filing text write different shapes into one directory. Mitigated by the `→` prefix and the explicit last line of the filing section.
 - **`front-door` doc-drift test** (task 2.6b) fails until `docs/architecture.md` lists `signals/` and `knowledge/`. Handled by the unconditional rule in the tasks.md preamble (and the sweep in 6.3): every new tracked script or top-level directory this change adds is listed in `docs/architecture.md` in the same PR that adds it, or, if that file does not exist yet, in the PR description for `front-door` task 2.3.
 - **Python on a project machine.** `map.py` needs `python3`; `cut-project.sh` degrades to a printed instruction without it.
+- **`RELATED.md` rots.** `verified:` dates are the only staleness signal and nothing lints them; an agent that finds an entry wrong files a signal. Accepted: no network in the gate. A public repo naming a private one is a leak no tool here catches (`check: human`).
 - **Trailhead is advisory (L0).** Nothing forces a read. Enforcement is A3.
