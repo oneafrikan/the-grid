@@ -53,9 +53,12 @@ paths:
   glob and 12 alternatives per group, and one rule file may expand to at most 64 globs in
   all. Write `**/*.py` and `**/*.pyi` as two entries rather than `**/*.py{,i}`.
 - Rule files are untrusted text: an HTML comment marker (`<!--`, `-->`), an invisible or
-  bidi character (zero-width, tag, variation selector, BOM) or a word mixing ASCII with
-  Cyrillic or Greek letters is `E_STYLE`, fenced or not. The denylist is matched after
-  NFKC folding, dropping invisible characters and collapsing whitespace.
+  bidi character (zero-width, tag, variation selector, BOM, a combining mark, a blank
+  look-alike such as U+3164 or U+2800), a control character (ESC, NUL, DEL; a tab is fine)
+  or a word mixing ASCII with a look-alike letter of another script (Cyrillic, Greek,
+  Armenian, dotless i; an accented Latin letter such as e-acute is fine) is `E_STYLE`,
+  fenced or not. The denylist is matched after NFKC folding, dropping invisible
+  characters (blank look-alikes become a space) and collapsing whitespace.
 - Files must be UTF-8 (`E_ENCODING`) and readable (`E_UNREADABLE`); neither is ever a
   traceback. An empty `denylist.txt` with packs present is `E_OPINION` (fails closed).
 - Lint is a format and hygiene check, not a security control. A merged pack is loaded as
@@ -205,12 +208,19 @@ fidelity: fetches every cited URL and quotes support for each bullet) and
   line, matched whole-line (a CR before the newline is allowed). A user note that merely
   starts like a marker, or quotes one marker, is user text. Markers are exact-line matches,
   so a hand-edited BEGIN line is treated as user text and the next emit appends a fresh
-  block (decision D20). Residual: a user fence that
+  block (decision D20). A lone END line (BEGIN deleted or edited) is refused with a message
+  that says so; restore the BEGIN line or delete the END line by hand. Residual: a user fence that
   quotes our complete BEGIN and END lines is still treated as our block.
+- **Marker spellings:** `scripts/lib/rules-markers.txt` is the one list of BEGIN/END lines,
+  read by `rules.py` and by `wire.sh` (via `scripts/lib/harness.sh`). The first of each is
+  what `emit` writes; to reword a marker put the new line first and keep the old one below
+  it, so blocks written under the old wording are still found and replaced. A spelling not
+  listed there is user text and is never removed automatically.
 - **Re-validated delivery:** `emit` lints the rule files of every selected pack first
   (frontmatter, paths, title, style, size, denylist and marker text). A failing pack is
   excluded and named on stderr, the clean packs are still delivered, and the exit is 2 so
-  `wire.sh` shows red. If every selected pack fails, nothing is written.
+  `wire.sh` shows red. If every selected pack fails, nothing is written. A missing, empty
+  or partly invalid `denylist.txt` stops delivery of any pack (exit 2); removal needs no denylist.
 - **Exit codes:** 0 done or no drift, 1 drift (`--check` only; it prints `would write` /
   `would remove`), 2 refusal or I/O error, 3 block over the 12288-byte cap (nothing
   written, an existing block untouched). `wire.sh` treats 3 as a visible skip, not a failure.

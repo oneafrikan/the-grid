@@ -36,6 +36,9 @@ teardown() {
 make_pack() {
   local name="$1" t; shift
   mkdir -p "$MOCK_GRID/rules/$name"
+  # emit refuses to deliver without the denylist (it fails closed), so the mock grid carries
+  # the real one, as a real tree does.
+  cp "$REPO_ROOT/rules/denylist.txt" "$MOCK_GRID/rules/"
   printf 'name: %s\n' "$name" > "$MOCK_GRID/rules/$name/pack.yaml"
   printf '# %s\n' "$name" > "$MOCK_GRID/rules/$name/README.md"
   for t in "$@"; do

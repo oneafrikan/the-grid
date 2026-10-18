@@ -21,6 +21,8 @@ setup() {
   # A throwaway rule pack with one rule file (format per rule-packs: paths: frontmatter,
   # an H1, then bullets).
   mkdir -p "$MOCK_GRID/rules/fx"
+  # emit fails closed without the denylist, so the mock grid carries the real one.
+  cp "$REPO_ROOT/rules/denylist.txt" "$MOCK_GRID/rules/"
   printf 'name: fx\n' > "$MOCK_GRID/rules/fx/pack.yaml"
   printf -- '---\npaths:\n  - "**/*.sh"\n---\n# Shell\n\n- Quote every expansion.\n' \
     > "$MOCK_GRID/rules/fx/shell.md"
@@ -475,4 +477,57 @@ pad_packs() {
   sh="$(bash -c ". '$REPO_ROOT/scripts/lib/harness.sh'; printf '%s' \"\$HARNESS_BLOCK_BEGIN\"")"
   [ -n "$sh" ]
   [ "$py" = "$sh" ]
+}
+
+# ---------------------------------------------------------------- H-13: path allowlist and exact grep
+
+# action FILE ACTIVE CSV RAW: harness_rules_action in a fresh shell (the decision wire.sh makes).
+action() {
+  bash -c ". '$REPO_ROOT/scripts/lib/harness.sh'; harness_rules_action \"\$@\"" _ "$@"
+}
+
+@test "VS3 harness_rules_action: dot, dot-dot, empty and absolute rules_file segments are not allowed" {
+  local f="$BATS_TEST_TMPDIR/AGENTS.md" raw
+  printf 'notes\n' > "$f"
+  # The control: a plain ~/ instruction file is delivered.
+  [ "$(action "$f" 1 fx '~/.codex/AGENTS.md')" = emit ]
+  for raw in '~/../../etc/AGENTS.md' '~/a/../AGENTS.md' '~/..' '~/.codex/./AGENTS.md' \
+             '~/./AGENTS.md' '~/.codex//AGENTS.md' '~//AGENTS.md' '/etc/AGENTS.md' 'AGENTS.md' '~/.codex/AGENTS.md/'; do
+    [ "$(action "$f" 1 fx "$raw")" = skip:rules-file-not-allowed ] || { echo "not refused: $raw"; return 1; }
+  done
+  # Removal is refused for such a row as well, even for a file that holds our exact block.
+  printf '%s\nx\n<!-- END the-grid rules -->\n' "$BEGIN_LINE" > "$f"
+  [ "$(action "$f" 0 "" '~/.codex/AGENTS.md')" = remove ]
+  for raw in '~/../../etc/AGENTS.md' '~/.codex/./AGENTS.md' '~/.codex//AGENTS.md'; do
+    [ "$(action "$f" 0 "" "$raw")" = none ] || { echo "removal not refused: $raw"; return 1; }
+  done
+}
+
+@test "VS3 registry: a rules_file with a dot or empty segment exits 2 before any write" {
+  local raw
+  for raw in '~/.codex/./AGENTS.md' '~/.codex//AGENTS.md' '~/../AGENTS.md'; do
+    registry_copy
+    # gemini now points at the same file as codex by another spelling: the duplicate check
+    # must not be defeatable by it.
+    sed -i "s#~/.gemini/GEMINI.md#$raw#" "$HARNESS_REGISTRY"
+    printf 'rules:fx\nharness:codex\n' > "$OVERLAY"
+    wire
+    [ "$status" -eq 2 ] || { echo "not refused: $raw"; return 1; }
+    [[ "$stderr" == *"registry"* ]]
+    [[ "$stderr" == *"gemini"* ]]
+    [ ! -e "$GRID_HARNESS_HOME/.codex/AGENTS.md" ]
+  done
+}
+
+@test "VS4 harness_rules_action: removal needs the COMPLETE BEGIN line (a prefix, a suffix or an indent is user text)" {
+  local f="$BATS_TEST_TMPDIR/AGENTS.md" l
+  for l in '<!-- BEGIN the-grid rules -->' '<!-- BEGIN the-grid rules' "$BEGIN_LINE extra" " $BEGIN_LINE" \
+           "${BEGIN_LINE%-->}" "${BEGIN_LINE}x"; do
+    printf 'notes\n%s\nmore\n' "$l" > "$f"
+    [ "$(action "$f" 0 "" '~/.codex/AGENTS.md')" = none ] || { echo "removed for: $l"; return 1; }
+  done
+  printf 'notes\n%s\nmore\n' "$BEGIN_LINE" > "$f"
+  [ "$(action "$f" 0 "" '~/.codex/AGENTS.md')" = remove ]
+  printf 'notes\r\n%s\r\nmore\r\n' "$BEGIN_LINE" > "$f"
+  [ "$(action "$f" 0 "" '~/.codex/AGENTS.md')" = remove ]
 }
