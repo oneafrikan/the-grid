@@ -473,7 +473,10 @@ STUB
   # The tokenizer reads through a sliding window; a quote, an escape or && landing on
   # the window refill boundary must not change the result.
   for len in 2036 2040 2043 2044 2045 2046 2047 2048 2049 2052; do
-    pad="$(rep a "$len")"
+    # H-15: `rep` is a 2,000-iteration bash loop, and bats' DEBUG trap (inherited by $(...))
+    # charged it ~0.8 ms a command: ~2 s a length, most of this test's 9.6 s on CI. The trap
+    # is cleared in this one substitution only. The 40 cases below are unchanged.
+    pad="$(trap - DEBUG; rep a "$len")"
     expect_block "git commit -m x$pad --no-verify" || { echo "len $len: bare flag after padding" >&2; false; }
     expect_pass "git commit -m \"$pad --no-verify\"" || { echo "len $len: quoted mention" >&2; false; }
     expect_block "echo $pad && git commit --no-verify -m x" || { echo "len $len: && at boundary" >&2; false; }
