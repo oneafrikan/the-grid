@@ -100,3 +100,57 @@ teardown() { PATH="$OLDPATH"; }
   [ ! -e "$b/basename" ]
   [ -e "$a/basename" ]
 }
+
+# H-15 (NF-014/NF-055 VF7): the cost was one `ln` fork per executable on PATH (~4 s per call on
+# a typical box, 13 s on a CI runner). Links are now made in one `ln` call per PATH dir.
+# Counting forks is the deterministic check; the wall-clock test below only guards against a
+# gross regression, with a wide margin.
+@test "path_without forks ln once per PATH dir, not once per executable" {
+  local n i d
+  mkdir -p "$BATS_TEST_TMPDIR/bin2" "$BATS_TEST_TMPDIR/bin3"
+  for i in $(seq 1 150); do
+    printf '#!/bin/sh\n:\n' > "$BATS_TEST_TMPDIR/bin2/tool$i"
+    printf '#!/bin/sh\n:\n' > "$BATS_TEST_TMPDIR/bin3/other$i"
+  done
+  chmod +x "$BATS_TEST_TMPDIR"/bin2/* "$BATS_TEST_TMPDIR"/bin3/*
+  # an `ln` stub that logs each fork, then runs the real one
+  rm "$BIN/ln"
+  printf '#!/bin/sh\necho x >> "%s/ln.log"\nexec "%s" "$@"\n' "$BATS_TEST_TMPDIR" "$(command -v ln)" > "$BIN/ln"
+  chmod +x "$BIN/ln"
+  : > "$BATS_TEST_TMPDIR/ln.log"
+  PATH="$BIN:$BATS_TEST_TMPDIR/bin2:$BATS_TEST_TMPDIR/bin3"
+  d="$(path_without jq)"
+  PATH="$OLDPATH"
+  [ -e "$d/tool150" ]
+  [ -e "$d/other150" ]
+  n="$(wc -l < "$BATS_TEST_TMPDIR/ln.log")"
+  # 3 PATH dirs, ~310 executables: allow a small constant on top of one call per dir.
+  [ "$n" -le 6 ] || { echo "ln forked $n times for 3 PATH dirs"; false; }
+}
+
+@test "path_without: the earliest PATH entry wins on a duplicate name, and a skipped name stays skipped" {
+  mkdir -p "$BATS_TEST_TMPDIR/early" "$BATS_TEST_TMPDIR/late"
+  printf '#!/bin/sh\necho early\n' > "$BATS_TEST_TMPDIR/early/dup"
+  printf '#!/bin/sh\necho late\n' > "$BATS_TEST_TMPDIR/late/dup"
+  printf '#!/bin/sh\n:\n' > "$BATS_TEST_TMPDIR/late/dropme"
+  chmod +x "$BATS_TEST_TMPDIR/early/dup" "$BATS_TEST_TMPDIR/late/dup" "$BATS_TEST_TMPDIR/late/dropme"
+  PATH="$BIN:$BATS_TEST_TMPDIR/early:$BATS_TEST_TMPDIR/late"
+  local d
+  d="$(path_without dropme)"
+  PATH="$OLDPATH"
+  [ "$("$d/dup")" = early ]
+  [ ! -e "$d/dropme" ]
+}
+
+@test "path_without: a 3000-executable PATH is built in well under 5 s" {
+  local i start d
+  mkdir -p "$BATS_TEST_TMPDIR/big"
+  for i in $(seq 1 3000); do : > "$BATS_TEST_TMPDIR/big/t$i"; done
+  chmod +x "$BATS_TEST_TMPDIR"/big/*
+  PATH="$BIN:$BATS_TEST_TMPDIR/big"
+  start=$SECONDS
+  d="$(path_without jq)"
+  PATH="$OLDPATH"
+  [ -e "$d/t3000" ]
+  [ $((SECONDS - start)) -lt 5 ] || { echo "took $((SECONDS - start)) s"; false; }
+}

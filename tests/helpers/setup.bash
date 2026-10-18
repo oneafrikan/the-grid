@@ -217,9 +217,26 @@ path_without() {
   else
     dir="$(mktemp -d "${BATS_TEST_TMPDIR:-${TMPDIR:-/tmp}}/pathwithout.XXXXXX")"
   fi
+  # Speed (H-15): one `ln` per PATH dir (chunked), not one per executable (that fork was ~4 s
+  # per call, 13 s on a CI runner). To keep "earlier PATH entry wins" without a seen-set
+  # (no associative arrays in bash 3.2) the dirs are walked LAST to FIRST and `ln -sf` lets an
+  # earlier dir overwrite a later one's link. Names are unique within one dir, so no single
+  # `ln` call ever sees the same link name twice (GNU ln refuses that).
+  # The walk runs in a subshell with the DEBUG trap cleared: bats installs one (functrace is
+  # on) that costs ~0.8 ms per command, so a few thousand loop iterations took 10+ s even
+  # with no fork in them. Cleared only in the subshell; bats' own tracking is untouched.
+  (
+  trap - DEBUG
+  local dirs i n chunk=500
+  local -a batch
+  IFS=: read -r -a dirs <<< "$PATH"
   local IFS=:
-  for d in $PATH; do
+  i=${#dirs[@]}
+  while [ "$i" -gt 0 ]; do
+    i=$((i - 1))
+    d="${dirs[$i]}"
     [ -d "$d" ] || continue
+    batch=()
     for f in "$d"/*; do
       [ -f "$f" ] && [ -x "$f" ] || continue
       base="${f##*/}"
@@ -231,9 +248,15 @@ path_without() {
       done
       if [ "$pyfam" = 1 ]; then case "$base" in python*|pydoc*) skip=1 ;; esac; fi
       [ "$skip" = 0 ] || continue
-      [ -e "$dir/$base" ] || [ -L "$dir/$base" ] || ln -s "$f" "$dir/$base"
+      batch[${#batch[@]}]="$f"
+    done
+    n=0
+    while [ "$n" -lt "${#batch[@]}" ]; do
+      ln -sf "${batch[@]:$n:$chunk}" "$dir/"
+      n=$((n + chunk))
     done
   done
+  )
   [ -z "$key" ] || : > "$dir/.complete"
   printf '%s\n' "$dir"
 }
