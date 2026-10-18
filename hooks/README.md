@@ -165,13 +165,14 @@ through a float).
 (re-enable with `hook:auto-handoff`). Per session: start `claude` with
 `GRID_DISABLED_HOOKS=auto-handoff` (or `GRID_HOOKS=off` for every hook).
 
-**Turning it on safely (preflight).** Four facts about the real `claude` cannot be seen
-from the stub-based tests, so one script checks them live and only then flips the switch:
+**Turning it on safely (preflight).** Some facts about the real `claude` cannot be seen
+from the stub-based tests, so one script checks them live and only then flips the switch.
+Three checks gate it; a fourth, `b1-rule-form`, is advisory:
 
 ```bash
 bash scripts/auto-handoff-preflight.sh --dry-run     # print the commands, call nothing
-bash scripts/auto-handoff-preflight.sh               # --check: run the four checks, read-only
-bash scripts/auto-handoff-preflight.sh --enable      # checks must pass in the same run, then enable
+bash scripts/auto-handoff-preflight.sh               # --check: run the checks, read-only
+bash scripts/auto-handoff-preflight.sh --enable      # the 3 gating checks must pass in the same run, then enable
 bash scripts/auto-handoff-preflight.sh --disable     # undo (no live check needed)
 ```
 
@@ -180,14 +181,25 @@ so at most USD 0.50 (a subscription plan may not enforce the cap). Every call, `
 --help` included, runs under `timeout` (`GRID_PREFLIGHT_TIMEOUT`, default 180 s); without
 `timeout` the checks still run with a warning but `--enable` refuses. Ctrl-C or SIGTERM
 stops only the probe the script started and removes its scratch dir. One line per check,
-then a verdict; exit 0 only if all four pass. Each probe prints the flags it ran with.
+then a verdict; exit 0 only if all three gating checks pass. Each probe prints the flags it
+ran with.
 
-| Check | What it asserts |
+| Gating check | What it asserts |
 |---|---|
 | `env-propagation` | Whether a project `.claude/settings.json` `env` block reaches hook subprocesses (reported as `PROPAGATES` or `DOES-NOT-PROPAGATE`). `PROPAGATES` does not fail the check but prints a warning: a cloned repo could then set `GRID_HOOKS`, `GRID_PRIVATE_DIR`, `GRID_CLAUDE` or `GRID_AUTOHANDOFF_KEEP_ENV` for the hook, so run auto-handoff only in repos you trust, and `--enable` then needs `--accept-env-risk`. The answer comes from the SessionEnd hook (the event auto-handoff uses), waited for up to `GRID_PREFLIGHT_HOOK_WAIT` seconds (default 10); if it never fires the result is `INCONCLUSIVE`, which fails. This probe runs with `--permission-mode default --strict-mcp-config` but not `--setting-sources user`: its whole point is to load the project's `settings.json`. |
-| `b1-rule-form` | The write rules the worker relies on are enforced: an `Edit(//abs/**)` allow is honoured for Write (`inside.txt` present), a write outside it is blocked, the `Edit(**/.git/**)` deny holds, and a `Bash(ls:*)` allow does not accept a `>` redirect. A file being absent only counts when the model's `--output-format stream-json` output shows it tried the action: one `tool_use` block of an assistant event, parsed as JSON with `python3`, that is a Write/Edit/MultiEdit/NotebookEdit whose `file_path`/`path`/`notebook_path` is exactly the full target path (or, for the redirect, a Bash command redirecting `>`/`>>` to exactly that path). Text blocks, Read/Grep/Glob, tool results, a relative path or the same file name in another directory do not count; neither does anything when `python3` is missing or the stream shape differs from this. Without evidence the result is `INCONCLUSIVE`, which fails, and you rerun. A positive-control file (`ok.txt`) guards the second probe. Runs with all three worker flags. |
 | `wp016-parity` | `claude --help` names `--permission-mode`, `--setting-sources`, `--strict-mcp-config`, and one tiny capped call with them succeeds. |
 | `env-i-auth` | The worker's invocation authenticates under `env -i`. If claude works normally but not under `env -i`, the check fails and prints the remedy: `export GRID_AUTOHANDOFF_KEEP_ENV=ANTHROPIC_API_KEY` in the shell that starts claude. |
+
+**Advisory: `b1-rule-form`.** It runs two capped probes (inside the five-call cap, with the
+worker's three flags) and prints what a model did against the worker's write rules: an
+`Edit(//abs/**)` allow, a write outside it, the `Edit(**/.git/**)` deny, and a `Bash(ls:*)`
+allow with a `>` redirect. It is labelled `ADVISORY` and never counts toward the verdict, the
+exit code or `--enable`; a bad or inconclusive result prints a warning, nothing more. Why:
+it is a heuristic. It depends on what a model chooses to attempt and on a `stream-json`
+shape that has not been verified against the real CLI (it looks for one write-capable
+`tool_use` block on the exact path, parsed with `python3`), so a clean line is not a
+guarantee and a bad one can be noise. Read it yourself. The real backstop is the worker's own
+post-run write confinement (H-02): it is fail-closed and commits only the handoff files.
 
 It also reports, without failing: the hook's manifest state (baseline, `machines/<host>.txt`
 and `machines/<host>.local.txt`), a symlinked watched dotfile (`~/.gitconfig`, `~/.zshrc`,
@@ -201,7 +213,7 @@ file goes to `${GRID_STATE_DIR:-~/.grid}/preflight-backups/` first; the new file
 to a temp file in `machines/` and renamed over it) and runs `scripts/wire.sh`; it never
 writes under `~/.claude` itself. Lines are read the way `wire.sh` reads them (comment cut,
 all whitespace dropped, an unterminated last line ignored). It refuses, changing nothing, if:
-a check failed; env `PROPAGATES` without `--accept-env-risk`; a watched dotfile is a symlink
+a gating check failed (b1-rule-form never counts); env `PROPAGATES` without `--accept-env-risk`; a watched dotfile is a symlink
 or `~/.bash_aliases` is writable without `--accept-dotfile-risk` (H-02); there is no
 `timeout`; the overlay is a symlink or not writable; or the baseline or the `.local` overlay
 also says `-hook:auto-handoff` (it does not edit those). A failed write or backup is an error

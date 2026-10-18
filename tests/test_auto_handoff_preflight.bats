@@ -149,7 +149,7 @@ case "$prompt" in
       bad-outside)       echo x > LOGS/inside.txt; echo x > outside.txt ;;
       bad-inside)        : ;;
     esac
-    exit 0 ;;
+    exit "${STUB_B1_EXIT:-0}" ;;
   *ok.txt*)
     # B1 second probe: .git deny and the Bash(ls:*) redirect question.
     tool_use Write file_path "$PWD/ok.txt"
@@ -218,12 +218,12 @@ fake_settings() {
 # --check (default): read-only
 # ---------------------------------------------------------------------------
 
-@test "all pass: four PASS lines, a PASS verdict, exit 0, and nothing is changed" {
+@test "all pass: three gating PASS lines plus the advisory b1 line, a PASS verdict, exit 0, nothing changed" {
   local before; before="$(overlay)"
   pf
   [ "$status" -eq 0 ]
   [[ "$output" =~ PASS\ +env-propagation\ +DOES-NOT-PROPAGATE ]]
-  [[ "$output" =~ PASS\ +b1-rule-form ]]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form ]]
   [[ "$output" =~ PASS\ +wp016-parity ]]
   [[ "$output" =~ PASS\ +env-i-auth ]]
   [[ "$output" =~ VERDICT:\ PASS ]]
@@ -280,34 +280,34 @@ fake_settings() {
   [[ "$output" =~ VERDICT:\ FAIL ]]
 }
 
-@test "b1: a write outside the allowed dir -> FAIL" {
+@test "b1: a write outside the allowed dir -> ADVISORY line, exit unchanged" {
   STUB_B1_MODE=bad-outside pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*outside\.txt ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*outside\.txt ]]
 }
 
-@test "b1: the allowed write missing -> FAIL" {
+@test "b1: the allowed write missing -> ADVISORY line, exit unchanged" {
   STUB_B1_MODE=bad-inside pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*inside\.txt ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*inside\.txt ]]
 }
 
-@test "b1: a write under .git despite the deny -> FAIL" {
+@test "b1: a write under .git despite the deny -> ADVISORY line, exit unchanged" {
   STUB_B1B_MODE=bad-git pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*\.git ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*\.git ]]
 }
 
-@test "b1: Bash(ls:*) accepting a redirect -> FAIL" {
+@test "b1: Bash(ls:*) accepting a redirect -> ADVISORY line, exit unchanged" {
   STUB_B1B_MODE=bad-redirect pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*redirect ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*redirect ]]
 }
 
-@test "b1: positive control missing (ok.txt not written) -> FAIL, absences prove nothing" {
+@test "b1: positive control missing (ok.txt not written) -> ADVISORY line, exit unchanged, absences prove nothing" {
   STUB_B1B_MODE=bad-nothing pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*ok\.txt ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*ok\.txt ]]
 }
 
 @test "wp016: claude rejecting the worker's flags -> FAIL" {
@@ -360,7 +360,7 @@ fake_settings() {
   GRID_PREFLIGHT_CLAUDE=/nonexistent/claude pf
   [ "$status" -eq 1 ]
   [[ "$output" =~ FAIL\ +env-propagation ]]
-  [[ "$output" =~ FAIL\ +b1-rule-form ]]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form ]]
   [[ "$output" =~ FAIL\ +wp016-parity ]]
   [[ "$output" =~ FAIL\ +env-i-auth ]]
 }
@@ -671,33 +671,30 @@ fake_settings() {
 
 # --- SEC VS1 / QA VF2: absent files only count when the attempt is evidenced -------------
 
-@test "VS1: a model that never attempts the outside write -> INCONCLUSIVE, FAIL, with a rerun hint" {
+@test "VS1: a model that never attempts the outside write -> INCONCLUSIVE (advisory), with a rerun hint" {
   STUB_B1_MODE=skip-outside pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
   [[ "$output" =~ rerun ]]
 }
 
 @test "VS1: no .git write attempted -> INCONCLUSIVE" {
   STUB_B1B_MODE=skip-git pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*\.git ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*INCONCLUSIVE.*\.git ]]
 }
 
 @test "VS1: no redirect attempted -> INCONCLUSIVE" {
   STUB_B1B_MODE=skip-redirect pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*redirect ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*INCONCLUSIVE.*redirect ]]
 }
 
-@test "VS1: the lazy stub (writes only inside.txt and ok.txt) can no longer PASS or enable" {
-  local before; before="$(overlay)"
-  STUB_B1_MODE=skip-outside STUB_B1B_MODE=lazy pf --enable
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE ]]
-  [[ "$output" =~ enable\ refused ]]
-  [ "$(overlay)" = "$before" ]
-  [ "$(n_wire)" -eq 0 ]
+@test "VS1: the lazy stub (writes only inside.txt and ok.txt) is reported INCONCLUSIVE, loudly, but does not gate" {
+  STUB_B1_MODE=skip-outside STUB_B1B_MODE=lazy pf
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*INCONCLUSIVE ]]
+  [[ "$output" =~ WARN.*b1-rule-form ]]
 }
 
 @test "VS1: the b1 probes ask for stream-json so attempts are visible" {
@@ -857,38 +854,38 @@ fake_settings() {
 
 @test "N1: a Read tool_use naming outside.txt is not an attempt -> INCONCLUSIVE" {
   STUB_B1_EVENTS=reads pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
 }
 
 @test "N1: a text block naming the path plus an unrelated tool_use is not an attempt" {
   STUB_B1_EVENTS=text-plus-tool pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
 }
 
 @test "N1: a Write to the same basename in ANOTHER directory is not an attempt" {
   STUB_B1_EVENTS=other-dir pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*INCONCLUSIVE.*outside\.txt ]]
 }
 
 @test "N1: a relative path is not an attempt on the exact path (fail safe)" {
   STUB_B1_EVENTS=relative pf
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
   [[ "$output" =~ INCONCLUSIVE.*outside\.txt ]]
 }
 
 @test "N1: a tool_result echo of the path is not an attempt" {
   STUB_B1_EVENTS=echoes pf
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
   [[ "$output" =~ INCONCLUSIVE.*outside\.txt ]]
 }
 
-@test "N1: a Write tool_use on the exact path, file absent -> PASS" {
+@test "N1: a Write tool_use on the exact path, file absent -> observed clean (advisory)" {
   STUB_B1_EVENTS=writes pf
   [ "$status" -eq 0 ]
-  [[ "$output" =~ PASS\ +b1-rule-form ]]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form ]]
 }
 
 @test "N1: Edit and MultiEdit tool_use on the exact path count too" {
@@ -903,13 +900,13 @@ fake_settings() {
 @test "N1: malformed JSON lines mixed into the stream are ignored" {
   STUB_B1_EVENTS=malformed pf
   [ "$status" -eq 0 ]
-  [[ "$output" =~ PASS\ +b1-rule-form ]]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form ]]
 }
 
 @test "N1: the path written despite the tool_use -> still a FAIL (violation, not inconclusive)" {
   STUB_B1_MODE=bad-outside STUB_B1_EVENTS=reads pf
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*outside\.txt\ written ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*outside\.txt\ written ]]
 }
 
 @test "N1: redirect probe: a Bash command with > to the exact path counts, >> with quotes too" {
@@ -921,44 +918,42 @@ fake_settings() {
 
 @test "N1: redirect probe: ls of the file without a redirect is not an attempt" {
   STUB_REDIR_EVENTS=ls-only pf
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
   [[ "$output" =~ INCONCLUSIVE.*redirect ]]
 }
 
 @test "N1: redirect probe: a Write tool_use (not Bash) for redirect.txt is not the redirect attempt" {
   STUB_REDIR_EVENTS=writes pf
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
   [[ "$output" =~ INCONCLUSIVE.*redirect ]]
 }
 
 @test "N1: redirect probe: a redirect to another directory's redirect.txt is not an attempt" {
   STUB_REDIR_EVENTS=other-dir pf
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
   [[ "$output" =~ INCONCLUSIVE.*redirect ]]
 }
 
 @test "N1: .git probe: Read or a Bash echo are not the write attempt" {
   STUB_GIT_EVENTS=reads pf
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
   [[ "$output" =~ INCONCLUSIVE.*\.git ]]
   STUB_GIT_EVENTS=bash pf
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
   [[ "$output" =~ INCONCLUSIVE.*\.git ]]
 }
 
 @test "N1: the evidence is per action: a missing .git attempt does not hide a proven redirect" {
   STUB_B1B_MODE=skip-git pf
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
   [[ "$output" =~ INCONCLUSIVE.*\.git ]]
   [[ ! "$output" =~ attempted\ the\ \'ls ]]
 }
 
-@test "N1: no python3 to parse the stream -> INCONCLUSIVE with a clear message, never PASS" {
-  GRID_PREFLIGHT_PYTHON=/nonexistent/python3 pf --enable
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ FAIL\ +b1-rule-form.*INCONCLUSIVE.*python3 ]]
-  [[ "$output" =~ enable\ refused ]]
-  [ "$(n_wire)" -eq 0 ]
+@test "N1: no python3 to parse the stream -> advisory INCONCLUSIVE with a clear message, never a clean observation" {
+  GRID_PREFLIGHT_PYTHON=/nonexistent/python3 pf
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*INCONCLUSIVE.*python3 ]]
 }
 
 # --- N3: refuse a pathological overlay line before any spend; N4: stale temp file ----------
@@ -980,4 +975,89 @@ fake_settings() {
   [ "$status" -eq 0 ]
   [ ! -e "$PF_GRID/machines/testhost.txt.preflight.AbC123" ]
   [[ "$output" =~ leftover ]]
+}
+
+# ---------------------------------------------------------------------------
+# operator decision: b1-rule-form is ADVISORY. Three probes gate --enable; b1 only reports.
+# ---------------------------------------------------------------------------
+
+@test "ADVISORY: b1 output is labelled advisory, says to read it yourself and names the real backstop" {
+  pf
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form ]]
+  [[ "$output" =~ read\ this\ yourself ]]
+  [[ "$output" =~ H-02 ]]
+  [[ "$output" =~ fail-closed ]]
+  [[ "$output" =~ VERDICT:\ PASS\ \(3/3\ gating ]]
+  # honest wording: no claim that the probe proves anything
+  [[ ! "$output" =~ [Pp]roves ]]
+  [[ ! "$output" =~ blocked\) ]]
+}
+
+@test "ADVISORY: a clean b1 observation is still worded as a heuristic" {
+  pf
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*heuristic ]]
+}
+
+@test "ADVISORY: dry-run labels it too" {
+  pf --dry-run
+  [[ "$output" =~ SKIP\ +b1-rule-form.*advisory ]]
+}
+
+@test "ADVISORY: b1 saying a rule was violated does not change the exit code and prints a visible WARN" {
+  STUB_B1_MODE=bad-outside pf
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*outside\.txt\ written ]]
+  [[ "$output" =~ WARN.*b1-rule-form.*does\ not\ block ]]
+  [[ "$output" =~ VERDICT:\ PASS ]]
+}
+
+@test "ADVISORY: b1 claude call failing (exit 3) is advisory too" {
+  STUB_B1_EXIT=3 pf
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ADVISORY\ +b1-rule-form.*cannot\ judge ]]
+}
+
+@test "ADVISORY: --enable proceeds and exits 0 when b1 is violated or inconclusive and the three gating probes pass" {
+  STUB_B1_MODE=bad-outside STUB_B1B_MODE=bad-git pf --enable
+  [ "$status" -eq 0 ]
+  [ "$(n_wire)" -eq 1 ]
+  [[ ! "$(overlay)" =~ hook:auto-handoff ]]
+  STUB_B1_MODE=skip-outside STUB_B1B_MODE=lazy pf --enable
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ WARN.*b1-rule-form ]]
+}
+
+@test "GATE: env-propagation failing (hook never fired) still blocks --enable" {
+  local before; before="$(overlay)"
+  GRID_PREFLIGHT_HOOK_WAIT=1 STUB_ENV_MODE=nohook pf --enable
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ enable\ refused ]]
+  [ "$(overlay)" = "$before" ]
+  [ "$(n_wire)" -eq 0 ]
+}
+
+@test "GATE: wp016-parity failing still blocks --enable" {
+  local before; before="$(overlay)"
+  STUB_FAIL_FLAGS=1 pf --enable
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ enable\ refused ]]
+  [ "$(overlay)" = "$before" ]
+  [ "$(n_wire)" -eq 0 ]
+}
+
+@test "GATE: env-i-auth failing still blocks --enable" {
+  local before; before="$(overlay)"
+  export ANTHROPIC_API_KEY=k STUB_NEEDS_KEY=1
+  pf --enable
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ enable\ refused ]]
+  [ "$(overlay)" = "$before" ]
+  [ "$(n_wire)" -eq 0 ]
+}
+
+@test "GATE: the verdict counts three gating checks, so one failing gate reads 1 of 3" {
+  STUB_FAIL_FLAGS=1 pf
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ VERDICT:\ FAIL\ \(1\ of\ 3\ gating ]]
 }

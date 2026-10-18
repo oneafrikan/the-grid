@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # auto-handoff-preflight.sh — run the live checks that gate the auto-handoff hook, report
-# PASS/FAIL per check, and (only when every check passes and you ask) switch the hook on.
+# PASS/FAIL per check, and (only when every gating check passes and you ask) switch the hook on.
 #
 # Why: the hook runs `claude -p` unattended at the end of every qualifying session. The code
-# side is tested with a stub claude; four facts about the REAL claude can only be observed
-# live. This script runs those probes in one go instead of by hand.
+# side is tested with a stub claude; facts about the REAL claude can only be observed live.
+# This script runs those probes in one go instead of by hand. Three gate --enable
+# (env-propagation, wp016-parity, env-i-auth); a fourth (b1-rule-form) is ADVISORY.
 #
 # Usage:
 #   bash scripts/auto-handoff-preflight.sh [--check]     run the checks (default); read-only
@@ -19,23 +20,26 @@
 #   --dry-run           print the commands and planned edits; no claude call, no file change
 #   --help
 #
-# The checks (one result line each, then a verdict; exit 0 only if all pass):
+# The gating checks (one result line each, then a verdict; exit 0 only if all three pass):
 #   env-propagation  (R02.sec.F1) does a project .claude/settings.json `env` block reach hook
 #                    subprocesses? Reported as PROPAGATES / DOES-NOT-PROPAGATE; neither fails
 #                    the check, but PROPAGATES prints a WARN and makes --enable demand
 #                    --accept-env-risk. The answer rests on the SessionEnd hook (the event
 #                    auto-handoff uses): if it does not fire within GRID_PREFLIGHT_HOOK_WAIT
 #                    seconds the result is INCONCLUSIVE = FAIL.
-#   b1-rule-form     the path-scoped write rules the worker relies on are enforced: an
-#                    `Edit(//abs/**)` allow is honoured for Write, a write outside it is not
-#                    done, `Edit(**/.git/**)` deny holds, and `Bash(ls:*)` does not accept `>`.
-#                    A denied write only counts as "blocked" when the stream-json output shows
-#                    the model ATTEMPTED it; otherwise the result is INCONCLUSIVE = FAIL.
-#   wp016-parity     the real claude accepts `--permission-mode default --setting-sources user
+#   wp016-parity    the real claude accepts `--permission-mode default --setting-sources user
 #                    --strict-mcp-config` (named in --help, and one tiny capped call works).
 #   env-i-auth       the worker's minimal invocation authenticates under `env -i`. If it
 #                    fails while the plain run works, the remedy is
 #                    GRID_AUTOHANDOFF_KEEP_ENV=ANTHROPIC_API_KEY.
+# ADVISORY (printed, never counted: not in the verdict, the exit code or --enable):
+#   b1-rule-form     what a model did against the worker's path-scoped write rules: an
+#                    `Edit(//abs/**)` allow, a write outside it, the `Edit(**/.git/**)` deny and
+#                    a `Bash(ls:*)` allow with a `>` redirect. A heuristic over a stream-json
+#                    format that has not been verified against the real CLI, so a clean line is
+#                    not a guarantee and a bad one may be noise: read it yourself. The real
+#                    backstop is the H-02 worker's post-run write confinement (fail-closed,
+#                    commits only the handoff files).
 # Also reported, never failing: the manifest state of the hook, symlinked watched dotfiles
 # (H-02 VS1), a writable ~/.bash_aliases (H-02 VS2), and the user's permission defaults.
 #
@@ -105,6 +109,9 @@ FAILS=0
 pass() { printf 'PASS  %-16s %s\n' "$1" "$2"; }
 fail() { printf 'FAIL  %-16s %s\n' "$1" "$2"; FAILS=$((FAILS + 1)); }
 skip() { printf 'SKIP  %-16s %s\n' "$1" "$2"; }
+# advise: an ADVISORY result. Printed like a check line but NEVER counted in FAILS, so it
+# cannot change the exit code or block --enable.
+advise() { printf 'ADVISORY  %-12s %s\n' "$1" "$2"; }
 warn() { printf 'WARN  %s\n' "$*"; }
 info() { printf 'INFO  %s\n' "$*"; }
 more() { printf '        %s\n' "$*"; }
@@ -268,20 +275,26 @@ EOF
   fi
 }
 
-# ---- check b: B1 rule form ------------------------------------------------------------
+# ---- check b: B1 rule form (ADVISORY: never gates) ------------------------------------
+# Operator decision: this probe is a heuristic. It reads a model's behaviour and a stream-json
+# format nobody has verified against the real CLI, so a clean result is not a guarantee and a
+# bad one may be noise. It prints what it observed and NEVER counts toward the verdict, the
+# exit code or --enable (everything below reports with advise(), not fail()). The real
+# backstop is the H-02 worker's own post-run write confinement: fail-closed, it commits only
+# the handoff files.
 # Probe 1 is the operator's command (OPERATOR-TASKS B1) with the same allow/deny shape the
-# worker uses. Probe 2 asks the other mechanical questions: the .git deny and whether a
-# `Bash(ls:*)` allow accepts a `>` redirect. A file that is absent only proves the rule if
-# the model tried, so probe 2 also asks for a file the rules DO allow (ok.txt): it is the
-# positive control.
+# worker uses. Probe 2 asks about the .git deny and whether a `Bash(ls:*)` allow accepts a
+# `>` redirect, plus a file the rules DO allow (ok.txt) as a positive control. An absent
+# denied file only means something if the model tried, so attempted() looks for that.
 check_b1() {
   local n=b1-rule-form d d2 problems=()
-  have_claude || { no_claude $n; return; }
-  command -v git >/dev/null 2>&1 || { fail $n "git not found (the probes need a scratch repo)"; return; }
-  d="$(scratch b1a)" && d2="$(scratch b1b)" || { fail $n "cannot create a scratch dir"; return; }
+  info "b1-rule-form is ADVISORY: a heuristic over unverified stream-json output, it never changes the verdict, the exit code or --enable; read this yourself. The real backstop is the H-02 worker's post-run write confinement (fail-closed, commits only the handoff files)."
+  have_claude || { advise $n "not run: claude not found ($CLAUDE_NAME)"; return; }
+  command -v git >/dev/null 2>&1 || { advise $n "not run: git not found (the probes need a scratch repo)"; return; }
+  d="$(scratch b1a)" && d2="$(scratch b1b)" || { advise $n "not run: cannot create a scratch dir"; return; }
   if [ "$DRY" = 0 ]; then
-    safe_path "$d" && safe_path "$d2" || { fail $n "scratch path has unsupported characters"; return; }
-    mkdir -p "$d/LOGS" && git -C "$d" init -q && git -C "$d2" init -q || { fail $n "git init failed in the scratch dir"; return; }
+    safe_path "$d" && safe_path "$d2" || { advise $n "not run: scratch path has unsupported characters"; return; }
+    mkdir -p "$d/LOGS" && git -C "$d" init -q && git -C "$d2" init -q || { advise $n "not run: git init failed in the scratch dir"; return; }
   fi
   # All three worker flags apply here: the rules are passed on the command line, so
   # --setting-sources user (no project/local settings) costs the probe nothing.
@@ -300,45 +313,48 @@ check_b1() {
     --output-format stream-json --verbose \
     --allowedTools "Read" "Edit(/$d2/**)" "Bash(ls:*)" --disallowedTools "Edit(**/.git/**)" "Bash(git:*)"
   local rc2=$PROBE_RC
-  [ "$DRY" = 1 ] && { skip $n "dry-run: would run two capped probes and assert on the files they leave and on the attempts they made"; return; }
+  [ "$DRY" = 1 ] && { skip $n "(advisory) dry-run: would run two capped probes and report the files they leave and the attempts they made"; return; }
   if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ]; then
-    fail $n "claude $(rc_desc "$rc1") / $(rc_desc "$rc2") (probe 1 / probe 2); cannot judge the rules"
-    show_tail "$d/out.txt"; show_tail "$d2/out.txt"; return
+    advise $n "claude $(rc_desc "$rc1") / $(rc_desc "$rc2") (probe 1 / probe 2); cannot judge the rules"
+    show_tail "$d/out.txt"; show_tail "$d2/out.txt"
+    warn "b1-rule-form (advisory) gave no result; this does not block --enable. Read the output above."
+    return
   fi
-  # problems = a rule did not hold; unproven = a denied action was never attempted, so its
-  # absence proves nothing.
+  # problems = a rule did not hold; unproven = a denied action was never seen attempted, so
+  # its absence says nothing.
   local unproven=()
   [ -f "$d/LOGS/inside.txt" ] || problems+=("inside.txt missing: Edit(//abs/**) allow was not honoured for Write")
   if [ -e "$d/outside.txt" ]; then
     problems+=("outside.txt written: a write outside the allowed dir was not blocked")
   elif ! attempted "$d/out.txt" write "$d/outside.txt"; then
-    unproven+=("$(no_evidence "the write to outside.txt" "so its absence proves nothing")")
+    unproven+=("$(no_evidence "the write to outside.txt" "so its absence says nothing")")
   fi
   if [ ! -f "$d2/ok.txt" ]; then
-    problems+=("ok.txt missing: positive control failed, so the .git and redirect results prove nothing")
+    problems+=("ok.txt missing: positive control failed, so the .git and redirect results mean nothing")
   else
     if [ -e "$d2/.git/probe.txt" ]; then
       problems+=(".git/probe.txt written: Edit(**/.git/**) deny not enforced")
     elif ! attempted "$d2/out.txt" write "$d2/.git/probe.txt"; then
-      unproven+=("$(no_evidence "the .git/probe.txt write" "so the .git deny is unproven")")
+      unproven+=("$(no_evidence "the .git/probe.txt write" "so nothing is known about the .git deny")")
     fi
     if [ -e "$d2/redirect.txt" ]; then
       problems+=("redirect.txt written: Bash(ls:*) accepted a '>' redirect")
     elif ! attempted "$d2/out.txt" redirect "$d2/redirect.txt"; then
-      unproven+=("$(no_evidence "the 'ls >' redirect (redirect.txt)" "so Bash(ls:*) is unproven")")
+      unproven+=("$(no_evidence "the 'ls >' redirect (redirect.txt)" "so nothing is known about Bash(ls:*)")")
     fi
   fi
   if [ "${#problems[@]}" -eq 0 ] && [ "${#unproven[@]}" -eq 0 ]; then
-    pass $n "inside.txt present; outside.txt, .git write and 'ls >' redirect attempted and blocked"
+    advise $n "observed (heuristic, not a guarantee): inside.txt present; outside.txt, .git write and 'ls >' redirect absent, with a matching attempt seen in the stream"
     return
   fi
   local all=() p first=1
   [ "${#problems[@]}" -eq 0 ] || all+=("${problems[@]}")
   for p in ${unproven[@]+"${unproven[@]}"}; do all+=("INCONCLUSIVE: $p"); done
   for p in "${all[@]}"; do
-    if [ "$first" = 1 ]; then fail $n "$p"; first=0; else more "$p"; fi
+    if [ "$first" = 1 ]; then advise $n "$p"; first=0; else more "$p"; fi
   done
-  [ "${#unproven[@]}" -eq 0 ] || more "rerun the script (model behaviour varies); a rule is only proven when the model tried the action and it was blocked"
+  [ "${#unproven[@]}" -eq 0 ] || more "rerun the script if you want a clearer picture (model behaviour varies)"
+  warn "b1-rule-form (advisory) did not come back clean; this does not block --enable. Read the lines above."
 }
 # attempted <stream-json out file> <write|redirect> <absolute path>: did the model ATTEMPT
 # the denied action? Yes only when ONE tool_use block of an assistant event is
@@ -763,9 +779,9 @@ echo
 if [ "$DRY" = 1 ]; then
   echo "VERDICT: not run (dry-run)"
 elif [ "$FAILS" -eq 0 ]; then
-  echo "VERDICT: PASS (4/4 checks)"
+  echo "VERDICT: PASS (3/3 gating checks; b1-rule-form is advisory and not counted)"
 else
-  echo "VERDICT: FAIL ($FAILS of 4 checks failed)"
+  echo "VERDICT: FAIL ($FAILS of 3 gating checks failed; b1-rule-form is advisory and not counted)"
 fi
 
 if [ "$MODE" = enable ]; then
