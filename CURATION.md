@@ -104,7 +104,7 @@ Skills, agents and roles authored in this repo (`skills/`, `agents/`, `agent-fac
 | What | Why left out | Revisit when |
 |---|---|---|
 | `openspec/release-openspec` | maintainer-only release skill of the openspec repo; it sits under the upstream `.agents/skills/` directory, which skill discovery skips, so it is never wired | never |
-| gstack OpenClaw and GBrain tools (`gstack-openclaw-*`, `setup-gbrain`, `sync-gbrain`) and `open-gstack-browser`, `benchmark-models` | not in `baseline-submodules.example.txt`; left to per-machine overlays (`machines/<host>.txt`). They live in the curated `repos/gstack` checkout, but they are NOT individually reviewed here, and the scanner will still scan them on a machine that wires them | an overlay entry is promoted to the baseline |
+| gstack OpenClaw and GBrain tools (`gstack-openclaw-*`, `setup-gbrain`, `sync-gbrain`) and `open-gstack-browser`, `benchmark-models`, `gstack-upgrade` | not in `baseline-submodules.example.txt`; left to per-machine overlays (`machines/<host>.txt`). They live in the curated `repos/gstack` checkout; their audit findings were triaged on 2026-10-18 for the sole trusted operator and allowlisted below (enrolled by machine overlay only, not in the baseline; the source was not fully read), and the scanner still scans them on any machine that wires them | an overlay entry is promoted to the baseline |
 | `repos/ecc` (whole repo) | library tier, not wired anywhere in the baseline; 17 unpinned `npx -y` lines plus 1 `@latest` and 1 `prompt-injection` high in its skills, and 19 more in its MCP config (16 unpinned `npx -y`, 3 `@latest`), all true positives under this policy; see the note below | an ECC skill, hook or MCP config is promoted to wired: pin, exclude or allowlist it with a reason first |
 | Everything else under `repos/` | library tier: indexed in `SKILLS.md`, not wired, so not scanned and not curated | the repo is added to the baseline or an overlay |
 
@@ -481,4 +481,92 @@ Every entry is a line the scanner flags that was read in context and judged to b
   path: hooks/README.md
   contains: 'fallback repo; or to shell startup files, `~/.ssh/{authorized_keys,config,config.d,rc}`,'
   reason: documentation of which paths the auto-handoff guard watches (a brace-expanded list that names the ssh files); prose in the hooks README, not a command, pinned by this whole-line entry so any change to the line is flagged again
+- rule: unscannable-file
+  path: repos/anthropic/skills/web-artifacts-builder/scripts/shadcn-components.tar.gz
+  sha256: 1296f069e825de7933de7e8ac63672495cacce3f88f2dc45554dbcddbcbca60f
+  reason: gzip tarball of 45 shadcn/ui component source files (.tsx/.ts) that init-artifact.sh unpacks into the new artifact's src/; listed with tar -tzf, no absolute or .. paths, no scripts; pinned by file hash so any upstream change re-triggers review
+- rule: allowed-tools-bash
+  path: repos/gstack/benchmark-models/SKILL.md
+  contains: 'allowed-tools: Bash, Read, AskUserQuestion'
+  reason: gstack benchmark-models skill pre-approves Bash because its job is to run shell commands on the operator's own machine (runs the gstack model-benchmark CLI against Claude/GPT/Gemini); accepted for the sole trusted operator, enrolled by machine overlay only, not in the baseline
+- rule: allowed-tools-bash
+  path: repos/gstack/gstack-upgrade/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, AskUserQuestion'
+  reason: gstack gstack-upgrade skill pre-approves Bash because its job is to run shell commands on the operator's own machine (git pull / clone and ./setup of gstack itself, plus its migrations); accepted for the sole trusted operator, enrolled by machine overlay only, not in the baseline
+- rule: runner-unpinned
+  path: repos/gstack/gstack-upgrade/migrations/v1.65.0.0.sh
+  contains: 'echo "  [v1.65.0.0] re-fetching a clean Chromium (bunx playwright install chromium)..." >&2'
+  reason: echo/message line in the v1.65.0.0 upgrade migration that names the `bunx playwright install chromium` command for the human; prints text, runs nothing
+- rule: runner-unpinned
+  path: repos/gstack/gstack-upgrade/migrations/v1.65.0.0.sh
+  contains: 'if command -v bunx >/dev/null 2>&1 && (cd "${SCRIPT_DIR}" && bunx playwright install chromium >&2); then'
+  reason: upgrade-migration script line that re-fetches the Chromium bundle gstack pins via `bunx playwright install chromium` from the gstack install root (or an echo naming that command); runs only from gstack-upgrade, resolves the repo-pinned playwright; accepted with the gstack source trust
+- rule: runner-unpinned
+  path: repos/gstack/gstack-upgrade/migrations/v1.65.0.0.sh
+  contains: 'echo "  [v1.65.0.0]   cd ${SCRIPT_DIR} && bunx playwright install chromium" >&2'
+  reason: echo/message line in the v1.65.0.0 upgrade migration that names the `bunx playwright install chromium` command for the human; prints text, runs nothing
+- rule: allowed-tools-bash
+  path: repos/gstack/open-gstack-browser/SKILL.md
+  contains: 'allowed-tools: Bash, Read, AskUserQuestion'
+  reason: gstack open-gstack-browser skill pre-approves Bash because its job is to run shell commands on the operator's own machine (launches the local GStack Browser and may install bun via a checksum-verified download); accepted for the sole trusted operator, enrolled by machine overlay only, not in the baseline
+- rule: allowed-tools-bash
+  path: repos/gstack/setup-gbrain/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion'
+  reason: gstack setup-gbrain skill pre-approves Bash because its job is to run shell commands on the operator's own machine (installs and configures the gbrain CLI and registers its MCP server); accepted for the sole trusted operator, enrolled by machine overlay only, not in the baseline
+- rule: allowed-tools-bash
+  path: repos/gstack/sync-gbrain/SKILL.md
+  contains: 'allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion'
+  reason: gstack sync-gbrain skill pre-approves Bash because its job is to run shell commands on the operator's own machine (runs gbrain indexing and memory sync over the current repo); accepted for the sole trusted operator, enrolled by machine overlay only, not in the baseline
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/playwright-expert/references/configuration.md
+  contains: '- run: npx playwright install --with-deps'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/playwright-expert/references/configuration.md
+  contains: '- run: npx playwright test'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/playwright-expert/references/debugging-flaky.md
+  contains: 'npx playwright test --headed'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/playwright-expert/references/debugging-flaky.md
+  contains: 'npx playwright show-trace trace.zip'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/playwright-expert/references/debugging-flaky.md
+  contains: 'npx playwright test --ui'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/vue-expert/references/mobile-hybrid.md
+  contains: 'npx cap init "App Name" "com.example.app"'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/vue-expert/references/mobile-hybrid.md
+  contains: 'npx cap add android'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/vue-expert/references/mobile-hybrid.md
+  contains: 'npx cap add ios'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/vue-expert/references/mobile-hybrid.md
+  contains: 'npx cap sync'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/vue-expert/references/mobile-hybrid.md
+  contains: 'npx cap open android'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/wordpress-pro/references/gutenberg-blocks.md
+  contains: 'npx @wordpress/create-block my-block --namespace my-plugin'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/wordpress-pro/references/gutenberg-blocks.md
+  contains: 'npx @wordpress/create-block my-block --template @wordpress/create-block-interactive-template'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: runner-unpinned
+  path: repos/jeffallan/skills/wordpress-pro/references/gutenberg-blocks.md
+  contains: 'npx @wordpress/create-block my-block --variant dynamic'
+  reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
 ```
