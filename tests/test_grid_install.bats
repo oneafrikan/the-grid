@@ -1839,7 +1839,8 @@ except g.GridError as exc:
 }
 
 @test "H-12: BOOTSTRAP.md does not claim a scheduled drift only reads, and says where it writes" {
-  ! grep -q "only reads" "$REPO_ROOT/BOOTSTRAP.md"
+  run grep -c "only reads" "$REPO_ROOT/BOOTSTRAP.md"
+  [ "$output" = "0" ]
   grep -q "writes its reports under the state dir" "$REPO_ROOT/BOOTSTRAP.md"
   grep -q "committed .repos. symlink" "$REPO_ROOT/BOOTSTRAP.md"
 }
