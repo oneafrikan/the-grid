@@ -472,13 +472,22 @@ STUB
 @test "no-bypass: tokenizer is correct across its window refill boundary" {
   # The tokenizer reads through a sliding window; a quote, an escape or && landing on
   # the window refill boundary must not change the result.
+  # H-15: 40 launcher runs, each about 0.25-0.5 s, made this one of the slowest tests. The
+  # runs share no state, so each length is a parallel job (4 checks each); the cases and
+  # assertions are unchanged. A job's output goes to its own file and any failure fails the test.
+  local len pid failed=0 pids=()
   for len in 2036 2040 2043 2044 2045 2046 2047 2048 2049 2052; do
-    pad="$(rep a "$len")"
-    expect_block "git commit -m x$pad --no-verify" || { echo "len $len: bare flag after padding" >&2; false; }
-    expect_pass "git commit -m \"$pad --no-verify\"" || { echo "len $len: quoted mention" >&2; false; }
-    expect_block "echo $pad && git commit --no-verify -m x" || { echo "len $len: && at boundary" >&2; false; }
-    expect_block "echo \"$pad\" && git push -f" || { echo "len $len: close quote at boundary" >&2; false; }
+    (
+      pad="$(rep a "$len")"
+      expect_block "git commit -m x$pad --no-verify" || { echo "len $len: bare flag after padding" >&2; exit 1; }
+      expect_pass "git commit -m \"$pad --no-verify\"" || { echo "len $len: quoted mention" >&2; exit 1; }
+      expect_block "echo $pad && git commit --no-verify -m x" || { echo "len $len: && at boundary" >&2; exit 1; }
+      expect_block "echo \"$pad\" && git push -f" || { echo "len $len: close quote at boundary" >&2; exit 1; }
+    ) > "$MOCK_HOOK_ROOT/refill.$len.out" 2>&1 &
+    pids+=($!)
   done
+  for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+  if [ "$failed" -ne 0 ]; then cat "$MOCK_HOOK_ROOT"/refill.*.out >&2; false; fi
 }
 
 @test "no-bypass: a command over GRID_GUARD_MAX_CMD that mentions git exits 2 with the file hint" {

@@ -115,10 +115,12 @@ check_fixture() { # $1 = repo dir
 
 @test "real repos/ecc: only skills/ paths, count equals tracked skills/ SKILL.md" {
   [ -e "$REPO_ROOT/repos/ecc/.git" ] || skip "repos/ecc not initialised"
-  # shellcheck source=../scripts/lib/find-skill-mds.sh
-  . "$REPO_ROOT/scripts/lib/find-skill-mds.sh"
   local out n want
-  out="$(find_skill_mds "$REPO_ROOT/repos/ecc")"
+  # H-15: discovery is a pure-bash loop over ~1000 tracked paths. Inside bats' shell every one of
+  # its commands pays the DEBUG trap (~0.8 ms), which made this ~8 s on CI; a child bash has no
+  # trap. Same function, same inputs, same assertions below.
+  out="$(bash -c '. "$1/scripts/lib/find-skill-mds.sh" && find_skill_mds "$2"' _ \
+    "$REPO_ROOT" "$REPO_ROOT/repos/ecc")"
   n="$(printf '%s\n' "$out" | grep -c '')"
   want="$(git -C "$REPO_ROOT/repos/ecc" ls-files -- 'skills/*SKILL.md' | wc -l | tr -d ' ')"
   # No literal count: it moves with every ECC bump. Must be non-empty though.

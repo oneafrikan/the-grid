@@ -3,8 +3,8 @@
 #
 # Most tests run against a mock grid (mktemp -d, GRID_DIR override, `compose: []`) so
 # they need no agent-factory venv and never touch ~/.claude. Test (j) exercises the real
-# repo and compose, and skips when the venv is absent. (k) runs the real catalog.sh into
-# a temp output path; it never reads or rewrites the committed SKILLS.md.
+# repo and compose, and skips when the venv is absent. (k) runs the real catalog.sh against
+# the mock grid into a temp output path; it never reads or rewrites the committed SKILLS.md.
 
 load helpers/setup
 load helpers/venv
@@ -251,10 +251,20 @@ EOF
 }
 
 @test "(k) catalog.sh never lists anything from plugins/" {
+  # H-15: this ran catalog.sh over the real repo (every initialised submodule: ~16 s on CI) to
+  # prove one thing, that plugins/ is never scanned. A mock grid proves the same thing: the
+  # real catalog.sh against a grid whose plugins/ bundles hold skills that exist nowhere
+  # else, so a scan of plugins/ would show their names. The path grep below is the original
+  # assertion; the name check is added because catalog output carries names, not paths.
   tmp="$(mktemp -d)"
-  unset GRID_DIR
+  make_skill "$MOCK_GRID/plugins/grid-core/skills/bundle-only-core" "bundle-only-core"
+  make_skill "$MOCK_GRID/plugins/grid-agents/skills/bundle-only-agents" "bundle-only-agents"
   run bash "$REPO_ROOT/scripts/catalog.sh" "$tmp/SKILLS.md"
   [ "$status" -eq 0 ]
+  # The mock's own root-owned skills are listed, so the catalogue ran over this grid.
+  grep -q '\*\*alpha\*\*' "$tmp/SKILLS.md"
+  run grep -c 'bundle-only' "$tmp/SKILLS.md"
+  [ "$output" = "0" ]
   # Match only this repo's own bundle dirs. A bare 'plugins/' also matches upstream skill
   # paths under repos/ (for example a library repo's own plugins/ tree) on a machine or CI
   # runner where the submodules are initialised.
