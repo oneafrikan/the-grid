@@ -2694,3 +2694,135 @@ STUB
     secret_match_long "$line" && echo "past:$SECRET_MATCH_NAME" || echo "past:clean"' _ "$REPO_ROOT" "$t"
   [ "${lines[0]}" = "tail:github-token" ] && [ "${lines[1]}" = "max:clean" ] && [ "${lines[2]}" = "over:oversize-line" ] && [ "${lines[3]}" = "past:oversize-line" ] || { echo "$output" >&2; false; }
 }
+
+# ===========================================================================
+# H-09: guard-hooks bypass residuals (NF-030 VS11/VS12/VS14/VS15, NF-039 VD3/VD6)
+# ===========================================================================
+
+# ex_ghp: a documentation-style token. Its own text holds "example", so it is exempt.
+ex_ghp() { printf '%s' "gh""p_exampleexampleexampleexampleexample12"; }
+
+# --- VS12: the exemption applies to one token, not to the rest of the row --------------
+
+@test "H-09 exempt: an exempt token earlier on the line does not hide a later real one of the same kind" {
+  mkrepo
+  local aws_ex='AKIAIOSFODNN7EXAMPLE' row
+  for row in \
+    "a = \"$(ex_ghp)\" b = \"$(tok_ghp)\"" \
+    "$(ex_ghp) $(ex_ghp) $(ex_ghp) $(tok_ghp)" \
+    "$aws_ex,$(tok_aws)" \
+    "$aws_ex $aws_ex $(tok_aws)" \
+    "https://user:examplepass1@h.test/ https://user:Zq8rT5wKm3@h.test/"; do
+    stage_line "$row"
+    scan 'git commit -m x'
+    [ "$status" -eq 2 ] || { echo "expected BLOCK for: $row" >&2; echo "$output" >&2; false; }
+  done
+  # only exempt tokens, however many: still passes
+  stage_line "$(ex_ghp) $(ex_ghp) $aws_ex $aws_ex"
+  scan 'git commit -m x'
+  [ "$status" -eq 0 ] || { echo "$output" >&2; false; }
+  # the library says the same
+  expect_plain github-token "$(ex_ghp) $(tok_ghp)"
+  expect_plain clean "$(ex_ghp) $(ex_ghp)"
+  # strict mode never exempts, so it is unchanged
+  expect_strict github-token "$(ex_ghp) $(tok_ghp)"
+}
+
+@test "H-09 exempt: a line of many exempt tokens is bounded in time and blocks instead of timing out" {
+  local line t0 ms
+  line="$(rep "$(ex_ghp) " 300)$(tok_ghp)"
+  t0=$(date +%s%N)
+  expect_plain key-dense-line "$line"
+  ms=$((($(date +%s%N) - t0) / 1000000))
+  [ "$ms" -lt 5000 ] || { echo "took $ms ms" >&2; false; }
+}
+
+# --- VS14 (D38 = remove from the README): the pragma lives in the spec and in code comments,
+# --- and is never in a block message
+
+@test "H-09 pragma: documented in the spec and the lib comment, not the README; whole-line skip; message hides it" {
+  grep -qF 'grid:allow-secret' "$REPO_ROOT/openspec/changes/hook-profiles/specs/git-guard-hooks/spec.md"
+  grep -qF 'NOT documented in the README' "$REPO_ROOT/hooks/lib/secret-patterns.sh"
+  ! grep -qi 'allow-secret' "$REPO_ROOT/hooks/README.md" || false
+  # a whole line is skipped by the commit guard; the strict scan ignores it (see the strict tests)
+  mkrepo
+  stage_line "key = \"$(tok_ghp)\" # grid:allow-secret"
+  scan 'git commit -m x'
+  [ "$status" -eq 0 ]
+  stage_line "key = \"$(tok_ghp)\""
+  scan 'git commit -m x'
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"allow-secret"* ]] || false
+}
+
+# --- VS15: unknown working directory, files made by the command itself -------------------
+
+@test "H-09 cwd: a payload with no usable cwd fails closed for a call that can commit or add" {
+  local row
+  for row in 'git commit -m x' 'git add f.txt' 'git add -A && git commit -m x' 'git -c alias.zz=commit zz'; do
+    run_hook pre-bash-secret-scan "$(hook_payload "$row" | jq 'del(.cwd)')"
+    [ "$status" -eq 2 ] || { echo "no cwd, expected BLOCK for: $row" >&2; echo "$output" >&2; false; }
+    [[ "$output" == *"working directory"* ]] || { echo "$output" >&2; false; }
+    run_hook pre-bash-secret-scan "$(hook_payload "$row" "$MOCK_HOOK_ROOT/no/such/dir")"
+    [ "$status" -eq 2 ] || { echo "bad cwd, expected BLOCK for: $row" >&2; echo "$output" >&2; false; }
+  done
+  # an empty string is no directory either
+  run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x' | jq '.cwd = ""')"
+  [ "$status" -eq 2 ]
+}
+
+@test "H-09 cwd: without a cwd, commands that cannot commit or add, and commands without git, pass" {
+  local row
+  for row in 'git status' 'git log --oneline -3' 'git diff' 'ls -la' 'echo hello' 'npm test'; do
+    run_hook pre-bash-secret-scan "$(hook_payload "$row" | jq 'del(.cwd)')"
+    [ "$status" -eq 0 ] || { echo "no cwd, expected PASS for: $row" >&2; echo "$output" >&2; false; }
+  done
+}
+
+@test "H-09 cwd: the human override still works with no cwd" {
+  GRID_DISABLED_HOOKS=pre-bash-secret-scan run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x' | jq 'del(.cwd)')"
+  [ "$status" -eq 0 ]
+}
+
+# Pins a documented gap (hooks/README.md "Known gaps"): the hook runs BEFORE the command, so a
+# file the same command creates (cp, curl, a build step) does not exist yet when a chained
+# add is read. A secret inside it is not seen.
+@test "H-09 known gap: a file created by the same command and added in it is not content-scanned" {
+  mkrepo
+  printf 'key = "%s"\n' "$(tok_ghp)" > "$R/outside.txt"
+  scan "cp $R/outside.txt $R/created.txt && git add created.txt && git commit -m x"
+  [ "$status" -eq 0 ] || { echo "$output" >&2; false; }
+  # control: the same file already on disk is found
+  cp "$R/outside.txt" "$R/created.txt"
+  scan 'git add created.txt && git commit -m x'
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
+  grep -qF 'created by the same command' "$REPO_ROOT/hooks/README.md"
+}
+
+# --- VD3 / VD6 and the nested-wrapper limit ---------------------------------------------
+
+@test "H-09 VD3: a heredoc whose delimiter is written with quotes or escapes cannot hide a later git call" {
+  local nl=$'\n' row
+  for row in \
+    "cat <<E\\OF${nl}EOF${nl}git commit -n${nl}E" \
+    "cat <<EO'F'${nl}EOF${nl}git commit -n${nl}EO" \
+    "cat <<E\\OF | cat${nl}a${nl}EOF${nl}git commit --no-verify"; do
+    expect_block "$row"
+  done
+}
+
+# Pins a documented gap (hooks/README.md "Known gaps"). If one of these starts blocking, the
+# gap is closed: move the case to a block test and drop the README line.
+@test "H-09 known gap: nested escaped backticks and a wrapper nested more than one level are not read" {
+  expect_pass 'echo `echo \`git commit -n\``'
+  expect_pass "bash -c \"bash -c 'git commit -n'\""
+  # one level is read (control)
+  expect_block "bash -c 'git commit -n'"
+  grep -qF 'nested escaped backticks' "$REPO_ROOT/hooks/README.md"
+  grep -qF 'nested more than one level deep' "$REPO_ROOT/hooks/README.md"
+}
+
+@test "H-09 known gap: no-bypass does not read a one-shot -c alias value" {
+  expect_pass "git -c alias.x='commit -n' x"
+  grep -qF 'one-shot' "$REPO_ROOT/hooks/README.md"
+}
