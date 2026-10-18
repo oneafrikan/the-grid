@@ -79,7 +79,7 @@ force_fixture() {
   cp "$REPO_ROOT/policy.yaml" "$MOCK_GRID/policy.yaml"
   printf '```audit-allow\n```\n' > "$MOCK_GRID/CURATION.md"
   : > "$MOCK_GRID/.gitmodules"
-  unset GRID_SKIP_AUDIT
+  enable_audit
   mkdir -p "$BATS_TEST_TMPDIR/bin"
   printf '#!/bin/sh\necho "$@" >> "%s/sudo.log"\nexit 1\n' "$BATS_TEST_TMPDIR" > "$BATS_TEST_TMPDIR/bin/sudo"
   chmod +x "$BATS_TEST_TMPDIR/bin/sudo"
@@ -166,4 +166,29 @@ force_fixture() {
   [ "$output" = "$first" ]
   [ "$(snapshot "$MOCK_SKILLS")" = "$snap" ]
   [ "$(find "$MOCK_SKILLS" -type l | wc -l | tr -d ' ')" -eq 0 ]   # still nothing linked
+}
+
+# --- H-10: the backup dir name must be unique even when the clock does not move -----------
+
+@test "two --force runs in the same second use separate backup dirs and nest nothing" {
+  # A date stub that always answers the same second: the dated name alone used to collide, and
+  # the second run's shadow was moved INTO the first run's backup of the same name.
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/sh\necho 20260101T000000Z\n' > "$BATS_TEST_TMPDIR/bin/date"
+  chmod +x "$BATS_TEST_TMPDIR/bin/date"
+  mkdir -p "$MOCK_SKILLS/skill-alpha"
+  printf 'one\n' > "$MOCK_SKILLS/skill-alpha/stale.txt"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" reconcile --force
+  [ "$status" -eq 0 ]
+  # The first run re-wired the slot to a link; the operator installs another real dir there.
+  rm "$MOCK_SKILLS/skill-alpha"
+  mkdir -p "$MOCK_SKILLS/skill-alpha"
+  printf 'two\n' > "$MOCK_SKILLS/skill-alpha/stale.txt"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" reconcile --force
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/skill-alpha" ]
+  # Two backup dirs, each holding exactly its own copy directly (no skill-alpha/skill-alpha).
+  [ "$(ls -d "$MOCK_SKILLS"/.grid-reconcile-backup-* | wc -l | tr -d ' ')" -eq 2 ]
+  [ "$(cat "$MOCK_SKILLS"/.grid-reconcile-backup-*/skill-alpha/stale.txt | LC_ALL=C sort | paste -sd, -)" = "one,two" ]
+  [ -z "$(find "$MOCK_SKILLS"/.grid-reconcile-backup-* -mindepth 2 -maxdepth 2 -name skill-alpha)" ]
 }

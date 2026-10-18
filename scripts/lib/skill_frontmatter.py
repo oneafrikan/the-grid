@@ -72,8 +72,11 @@ def scalar(lines, key):
 
 def claude_only_keys(lines):
     """The CLAUDE_ONLY_KEYS present as TOP-LEVEL keys (column 0) of the frontmatter."""
+    # A YAML key may be quoted ("hooks": x, 'allowed-tools': Bash); the quote must be the same
+    # on both sides, so "hooks' is not a guard key. Unquoted is the common case.
     return [k for k in CLAUDE_ONLY_KEYS
-            if any(re.match(r"^" + re.escape(k) + r"\s*:", line) for line in lines)]
+            if any(re.match(r"^(?:" + re.escape(k) + r"|\"" + re.escape(k) + r"\"|'" + re.escape(k) + r"')\s*:", line)
+                   for line in lines)]
 
 
 def escaping_link(root):

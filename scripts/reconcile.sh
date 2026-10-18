@@ -102,7 +102,7 @@ fi
 # Move each shadow aside into one dated backup dir instead of deleting it: the user's data stays
 # recoverable, and so does the state if the re-wire fails. The dir is a dot-dir inside SKILLS_DIR
 # (same filesystem, so a rename), outside the set of links wire.sh manages.
-backup="$SKILLS_DIR/.grid-reconcile-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+backup=""   # created below by mktemp -d: the second-resolution date alone is not unique
 moved=""
 restore_moved() {
   local n
@@ -114,8 +114,11 @@ restore_moved() {
   done <<< "$moved"
 }
 echo
+# mktemp -d appends a random suffix and fails if the dir exists, so two --force runs in the
+# same second get two dirs. (A plain `mkdir -p` of the dated name reused the first run's dir,
+# and `mv dir existing-dir` then nested the new shadow inside the old backup of the same name.)
+backup="$(mktemp -d "$SKILLS_DIR/.grid-reconcile-backup-$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")"
 echo "Moving shadows aside to $backup (sudo only where needed)…"
-mkdir -p "$backup"
 while IFS= read -r name; do
   [ -n "$name" ] || continue
   target="$SKILLS_DIR/$name"
