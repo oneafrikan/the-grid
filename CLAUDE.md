@@ -92,6 +92,9 @@ submodules into two tiers:
 - `docs/model-selection.md` — which model for which job, with prices, independent
   benchmarks, worked cost maths, and a dated expiry watchlist. Refreshed on demand
   via the `core-researcher` subagent using the brief at the bottom of the file.
+- `docs/business-tier/` — design for giving non-terminal colleagues the grid through a
+  business repo (`the-grid-<business>`) published as a plugin marketplace. Unbuilt; gated on
+  whether Cowork delegates to plugin subagents. Start at its `README.md`; issue #274.
 - `evals/` + `agent-factory/run_evals.py` — golden cases for roles (opt-in, capped, tool-less runs; `--validate` runs in the gate). See `evals/README.md`.
 - **RETIRED, do not deploy:** the-grid's own issue-loop instance (`loop/`, `scripts/instantiate.sh`, `scripts/lib/gh-app-token.sh`, its four bats files) is quarantined under `_retired/issue-loop/` and excluded from the gate, CI and bats; see `_retired/issue-loop/RETIRED.md` (why, known defects, GitHub-side cleanup). Uplift is built by worktree agents and PRs to `next`. Not retired: the factory pattern `automation-factory/patterns/issue-loop/` and `scripts/lib/render-schedule.sh` (shared by the usage and instincts schedulers).
 - `scripts/instincts.sh` — habit learning from your own sessions (opt-in per project with `learning: on`): capture, weekly analysis, injection, `clusters` for tank `evolve`. Data stays in `${GRID_STATE_DIR:-~/.grid}` and the private repo. See `docs/instincts.md`.
