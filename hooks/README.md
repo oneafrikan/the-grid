@@ -120,10 +120,10 @@ absent guard. Both guards therefore bound their work with caps rather than rely 
 tokenizer being fast on every input: a command over the byte or token cap, or with
 substitutions nested deeper than 16, is refused instead of tokenized (the cost at the caps is about 1 to 2 s of CPU on a busy machine, not zero);
 the secret scan stops at its line cap, its 1 MB matcher-input cap (`oversize-scan`) or a 3 s
-wall-clock budget (`scan-budget`). The budget is checked before every pattern row and every
-`key =` candidate, so one hostile or dense line cannot run past it; a single regex call
-cannot be interrupted, so the scan can overshoot by the cost of one row on one piece (under
-0.1 s on the worst lines tried, 20 to 40 ms measured). Ten crafted 258 KB lines took 4.1 s
+wall-clock budget (`scan-budget`). The budget is checked once per 32 units of work (a call of the matcher is 26, each
+`key =` candidate one more), so one hostile or dense line cannot run past it (reading it on every row would cost about 65% more per candidate line); a single regex call
+cannot be interrupted, so the scan can overshoot by the work between two reads, one or two pieces (under
+0.1 s on the worst lines tried, 23 to 47 ms measured). Ten crafted 258 KB lines took 4.1 s
 in the hook before the budget was checked inside a line and 3.3 s after; it is the budget,
 not the speed of the matcher, that keeps the hook inside its timeout, and a loaded machine
 reaches the budget sooner and blocks with `scan-budget` instead of timing out. The text of

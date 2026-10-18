@@ -2374,40 +2374,65 @@ _lib() {
 
 @test "budget: a spent budget stops a scan inside ONE long line, after a counted number of clock reads" {
   # fake clock: every read is one second later than the last. secret_budget_start 3 reads the
-  # clock once, so the 4th read after it is the deadline. A 40 KB line has dozens of pieces
-  # and hundreds of row checks; the scan must stop within a handful of reads.
-  _lib 'reads=0
+  # clock once, so the 4th read after it is the deadline. A 40 KB line has ten pieces; the
+  # clock is read every 32 units of work (a piece is 26), so the scan must stop at the 5th
+  # piece: this bounds the overshoot past the budget to about one piece of work.
+  _lib 'reads=0; calls=0
     _secret_now_us() { reads=$((reads + 1)); _NOW_US=$((reads * 1000000)); }
+    eval "$(declare -f _secret_match | sed "1s/.*/_real_secret_match()/")"
+    _secret_match() { calls=$((calls + 1)); _real_secret_match "$@"; }
     secret_budget_start 3
     line="$(head -c 40000 /dev/zero | tr "\0" ".")"
-    if secret_match_long "$line"; then echo "$SECRET_MATCH_NAME reads=$reads"; else echo "clean reads=$reads"; fi'
+    if secret_match_long "$line"; then echo "$SECRET_MATCH_NAME reads=$reads calls=$calls"; else echo "clean reads=$reads calls=$calls"; fi'
   [ "$status" -eq 0 ]
-  [[ "$output" == "scan-budget reads="* ]] || { echo "$output" >&2; false; }
-  [ "${output#*reads=}" -le 6 ] || { echo "$output" >&2; false; }
+  [ "$output" = "scan-budget reads=4 calls=5" ] || { echo "$output" >&2; false; }
+}
+
+# Capacity (H-05 review VF1): reading the clock for every pattern row cost about 65% more per
+# candidate line, so the default 3 s budget refused benign diffs of ~1000 candidate lines that
+# the old scan passed. The check now counts rows and reads the clock about every 32nd one.
+# Counted in clock reads, not seconds: the result does not depend on the machine's load.
+@test "budget: the clock is read about once per candidate line, not once per pattern row (capacity)" {
+  _lib 'ulimit -t 60          # a generous CPU bound on top of the count
+    reads=0
+    _secret_now_us() { reads=$((reads + 1)); _NOW_US=1; }   # time stands still: never over budget
+    secret_budget_start 600
+    for ((k = 0; k < 1000; k++)); do
+      secret_match_long "self.token = get_token(request, scope=$k)  # refresh the token if expired" && { echo "HIT $SECRET_MATCH_NAME"; exit 1; }
+    done
+    echo "reads=$reads"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "reads="* ]] || { echo "$output" >&2; false; }
+  # about 0.5 reads per line (it was 27 per line, one per pattern row): at most 0.65 per line
+  [ "${output#reads=}" -le 650 ] || { echo "$output" >&2; false; }
 }
 
 @test "budget: the per-key loop of one short line is checked too (a line with 150 keys)" {
   # the 150 keys are all under SECRET_MAX_KEYS, so only a clock check inside the key loop can
-  # stop this scan. The budget lets every table row start (they come first), plus 5 more reads.
+  # stop this scan: the call itself reads the clock once at its start (read 2), the key loop
+  # again after 32 keys (read 3), and a budget of 2 s ends at that read.
   _lib 'reads=0
     _secret_now_us() { reads=$((reads + 1)); _NOW_US=$((reads * 1000000)); }
-    secret_budget_start $((${#SECRET_NAMES[@]} + 5))
+    secret_budget_start 2
     line="$(for ((k = 0; k < 150; k++)); do printf "token=1 "; done)"
     if secret_match_line "$line" >/dev/null; then echo "$SECRET_MATCH_NAME reads=$reads"; else echo "clean reads=$reads"; fi'
   [ "$status" -eq 0 ]
-  [[ "$output" == "scan-budget reads="* ]] || { echo "$output" >&2; false; }
-  [ "${output#*reads=}" -le $((26 + 5 + 3)) ] || { echo "$output" >&2; false; }
+  [ "$output" = "scan-budget reads=3" ] || { echo "$output" >&2; false; }
 }
 
-@test "budget: strict mode checks the clock in its extra rows as well" {
-  # the default rows find nothing in a line of dots; the strict rows are the last place work is done
+@test "budget: strict mode is bounded the same way, and a spent budget stays spent for the next lines" {
+  # each call is 26 units of work and the clock is read every 32: the third call reads it a second time
   _lib 'reads=0
     _secret_now_us() { reads=$((reads + 1)); _NOW_US=$((reads * 1000000)); }
     SECRET_STRICT=1
-    secret_budget_start $((${#SECRET_NAMES[@]} + 3))
-    if secret_match_line "..........." >/dev/null; then echo "$SECRET_MATCH_NAME reads=$reads"; else echo "clean reads=$reads"; fi'
+    secret_budget_start 2
+    for k in 1 2 3 4 5; do
+      if secret_match_line "..........." >/dev/null; then echo "call $k: $SECRET_MATCH_NAME reads=$reads"; else echo "call $k: clean"; fi
+    done'
   [ "$status" -eq 0 ]
-  [[ "$output" == "scan-budget reads="* ]] || { echo "$output" >&2; false; }
+  [ "${lines[0]}" = "call 1: clean" ] && [ "${lines[1]}" = "call 2: clean" ] \
+    && [ "${lines[2]}" = "call 3: scan-budget reads=3" ] \
+    && [ "${lines[3]}" = "call 4: scan-budget reads=4" ] || { echo "$output" >&2; false; }
 }
 
 @test "budget: the entry points report scan-budget as a finding (line, file, redaction, stream)" {
@@ -2449,9 +2474,11 @@ _lib() {
     echo "seconds spent: $(secret_match_line "just words")"
     SECONDS=100; secret_budget_start 5       # the shell clock is settable: no sleeping needed
     SECONDS=102; secret_match_line "just words" || echo "before: clean"
+    SECONDS=100; secret_budget_start 5       # (a start makes the next call read the clock)
     SECONDS=105; echo "at: $(secret_match_line "just words")"
     SECONDS=100; secret_budget_start 008     # not an octal number: a budget of 8 s, not no budget
     SECONDS=107; secret_match_line "just words" || echo "008 before: clean"
+    SECONDS=100; secret_budget_start 008
     SECONDS=108; echo "008 at: $(secret_match_line "just words")"
     secret_budget_start 12345678901          # too many digits: fails closed too
     echo "long: $(secret_match_line "just words")"'
