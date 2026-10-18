@@ -1651,3 +1651,462 @@ sys.exit(3)
   [ "$status" -eq 0 ]
   [[ "$output" == *"repos/up is a symlink"* ]]
 }
+
+# --- H-12 hardening (private H-12): FIFO readers, check-to-use windows, small findings ------------
+# Self-checks of my own work; independent verification is for qa-engineer / sdet. Every swap
+# below happens inside a wrapped function, i.e. in the window, on fixtures under $T only.
+
+# fifo_install REL: replace the (committed) file REL in the install grid with a FIFO and run
+# install under a hard timeout. A hang shows as status 124 (timeout kills the child).
+fifo_install() {
+  rm -f "${GREAL:?}/$1"
+  mkdir -p "$(dirname "${GREAL:?}/$1")"
+  mkfifo "${GREAL:?}/$1"
+  run timeout 20 python3 -B "$G/scripts/grid" --grid-dir "$G" install
+}
+
+@test "H-12: a FIFO at baseline-submodules.example.txt exits 2 naming it and never hangs" {
+  build_grids
+  fifo_install baseline-submodules.example.txt
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$GREAL/baseline-submodules.example.txt"* ]]
+  [[ "$output" == *"not a regular file"* ]]
+  [[ "$output" != *"Traceback"* ]]
+}
+
+@test "H-12: a FIFO at machines/<host>.txt exits 2 naming it and never hangs" {
+  build_grids
+  fifo_install machines/testhost.txt
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$GREAL/machines/testhost.txt"* ]]
+  [[ "$output" == *"not a regular file"* ]]
+  [[ "$output" != *"Traceback"* ]]
+}
+
+@test "H-12: a FIFO at machines/<host>.local.txt exits 2 naming it and never hangs" {
+  build_grids
+  fifo_install machines/testhost.local.txt
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$GREAL/machines/testhost.local.txt"* ]]
+  [[ "$output" == *"not a regular file"* ]]
+  [[ "$output" != *"Traceback"* ]]
+}
+
+@test "H-12: a FIFO at baseline-submodules.txt never hangs (the tracked example is read instead)" {
+  build_grids
+  fifo_install baseline-submodules.txt
+  [ "$status" -ne 124 ]
+  [[ "$output" != *"Traceback"* ]]
+}
+
+@test "H-12: doctor, repair and uninstall also return, not hang, on a FIFO overlay" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  mkdir -p "$GREAL/machines"
+  mkfifo "$GREAL/machines/testhost.txt"
+  for cmd in doctor "repair" "uninstall --yes"; do
+    # shellcheck disable=SC2086  # $cmd is a fixed word list
+    run timeout 20 python3 -B "$G/scripts/grid" --grid-dir "$G" $cmd
+    echo "$cmd -> $status: $output"
+    [ "$status" -ne 124 ]
+    [[ "$output" != *"Traceback"* ]]
+  done
+}
+
+@test "H-12: machines as a regular file exits 2 saying it is not a directory, not a raw errno" {
+  build_grids
+  printf 'x\n' > "$GREAL/machines"
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$GREAL/machines"* ]]
+  [[ "$output" == *"not a directory"* ]]
+  [[ "$output" != *"Errno"* ]]
+  [ "$(cat "$GREAL/machines")" = "x" ]
+}
+
+@test "H-12: a read-only grid dir exits 2 with the ABSOLUTE path of the file it could not seed" {
+  [ "$(id -u)" -ne 0 ]
+  build_grids
+  rm -f "${GREAL:?}/baseline-submodules.txt"
+  chmod 555 "$GREAL"
+  run install
+  chmod 755 "$GREAL"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$GREAL/baseline-submodules.txt"* ]]
+  [[ "$output" != *"Traceback"* ]]
+}
+
+@test "H-12: a symlinked baseline example is refused by _seed_copy itself (VH2 part 3, called directly)" {
+  build_grids
+  mkdir -p "$T/outside"
+  printf 'up\n' > "$T/outside/secret"
+  rm -f "${GREAL:?}/baseline-submodules.txt" "${GREAL:?}/baseline-submodules.example.txt"
+  ln -s "$T/outside/secret" "$GREAL/baseline-submodules.example.txt"
+  # Through install the grid.yaml baseline check exits 2 first, and that is the assertion here:
+  # the vacuous version of this check only looked at the absence of the seeded file.
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"wired.baseline"* ]]
+  [ ! -e "$GREAL/baseline-submodules.txt" ]
+  # The seeding step is exercised on its own, so the O_NOFOLLOW on the example is what is tested.
+  run python3 -B -c '
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+grid = sys.argv[1]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+g.seed_wired_files(grid, "testhost")
+print("seeded" if os.path.lexists(grid + "/baseline-submodules.txt") else "not seeded")
+' "$GREAL"
+  [ "$status" -eq 0 ]
+  [ "$output" = "not seeded" ]
+}
+
+@test "H-12: ledger rows differing only in case: the error names both rows, both lines and the case problem" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  python3 -B -c '
+import sys
+p = sys.argv[1]
+cols = open(p).read().split("\n")[0].split("\t")
+cols[1] = cols[1] + "-copy"
+cols[4] = cols[4].upper()
+cols[5] = "repos/" + cols[2] + "/" + cols[4]
+open(p, "a").write("\t".join(cols) + "\n")
+' "$(LEDGER)"
+  run install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"repos/up/skills/alpha"* ]]
+  [[ "$output" == *"repos/up/SKILLS/ALPHA"* ]]
+  [[ "$output" == *"only in case"* ]]
+  [[ "$output" == *"line 1"* ]]
+  [[ "$output" == *"line 3"* ]]
+  [[ "$output" != *"Traceback"* ]]
+}
+
+@test "H-12: a ledger error shows the ABSOLUTE ledger path even when GRID_STATE_DIR is relative" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  cp -R "$GRID_STATE_DIR" "$T/rel-state"
+  printf 'skill\tonly-two-columns\n' >> "$T/rel-state/installed.manifest"
+  cd "$T"
+  GRID_STATE_DIR=rel-state run python3 -B "$G/scripts/grid" --grid-dir "$G" install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$T/rel-state/installed.manifest"* ]]
+}
+
+@test "H-12: names that differ only by sharp s / ss are not duplicates, Foo / foo still are" {
+  build_grids
+  run python3 -B -c '
+import importlib.util, json, sys
+from importlib.machinery import SourceFileLoader
+grid = sys.argv[1]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+sha = "a" * 40
+def entry(name, path):
+    return {"hash": "sha256:" + "b" * 64, "kind": "skill", "name": name, "path": path,
+            "sha": sha, "source": "up", "tree": "c" * 40}
+def read(entries):
+    open(grid + "/grid.lock", "w").write(json.dumps({"lockVersion": 1, "entries": entries}))
+    return g.read_grid_lock(grid, g.load_grid_yaml(grid)["sources"])
+print("sharp s ok: %d entries" % len(read([entry("Straße", "skills/one"), entry("strasse", "skills/two")])))
+try:
+    read([entry("Foo", "skills/one"), entry("foo", "skills/two")])
+except g.GridError as exc:
+    print("Foo/foo refused")
+' "$GREAL"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sharp s ok: 2 entries"* ]]
+  [[ "$output" == *"Foo/foo refused"* ]]
+}
+
+@test "H-12: a foreign ledger kind with control characters is printed escaped, and the row is kept" {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  printf 'we\033[2Jird\tx\n' >> "$(LEDGER)"
+  run install
+  [ "$status" -eq 0 ]
+  [[ "$output" != *$'\033'* ]]
+  [[ "$output" == *"we"*"ird"* ]]
+  grep -q "$(printf 'we\033\[2Jird')" "$(LEDGER)"
+}
+
+@test "H-12: BOOTSTRAP.md does not claim a scheduled drift only reads, and says where it writes" {
+  run grep -c "only reads" "$REPO_ROOT/BOOTSTRAP.md"
+  [ "$output" = "0" ]
+  grep -q "writes its reports under the state dir" "$REPO_ROOT/BOOTSTRAP.md"
+  grep -q "committed .repos. symlink" "$REPO_ROOT/BOOTSTRAP.md"
+}
+
+@test "H-12: escape_hint names repos/ when it is a symlink and no deeper link explains the escape" {
+  build_grids
+  mkdir -p "$T/realrepos"
+  mv "$GREAL/repos/up" "$T/realrepos/up"
+  rm -rf "${GREAL:?}/repos"
+  ln -s "$T/realrepos" "$GREAL/repos"
+  run python3 -B -c '
+import importlib.util, sys
+from importlib.machinery import SourceFileLoader
+grid = sys.argv[1]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+print("hint=[%s]" % g.escape_hint(grid, "repos/up/skills/alpha"))
+' "$GREAL"
+  [ "$status" -eq 0 ]
+  [ "$output" = "hint=[ (repos is a symlink)]" ]
+}
+
+# SWAP_PRELUDE: python source shared by the window tests below. It loads scripts/grid as `g` and
+# defines `caller(name, depth)`: True when the function `depth` frames above the wrapper is `name`.
+SWAP_PRELUDE='
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+grid, outside = sys.argv[1], sys.argv[2]
+loader = SourceFileLoader("gridmod", grid + "/scripts/grid")
+spec = importlib.util.spec_from_loader("gridmod", loader)
+g = importlib.util.module_from_spec(spec); loader.exec_module(g)
+def caller(name, depth=1):
+    return sys._getframe(depth + 1).f_code.co_name == name
+'
+
+# placed_install: build, install once, and leave a copy of the placed skills under $T/outside so a
+# delete that lands there is visible.
+placed_install() {
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  mkdir -p "$T/outside"
+  cp -R "$GREAL/repos/up/skills" "$T/outside/skills"
+}
+
+@test "H-12 remove_placed_dir: the realpath/commonpath guard alone refuses a parent swapped after the last re-check" {
+  placed_install
+  run python3 -B -c "$SWAP_PRELUDE"'
+rows, _f = g.read_ledger()
+row = [r for r in rows if r["name"] == "alpha"][0]
+real = g.source_root
+calls = []
+def hooked(grid_dir, source):
+    res = real(grid_dir, source)
+    if caller("remove_placed_dir"):
+        calls.append(1)
+        # remove_placed_dir calls source_root before the check, at the re-check and after the
+        # delete; the second is the last guard before the realpath: swap right after it.
+        if len(calls) == 2:
+            os.rename(grid + "/repos/up/skills", grid + "/repos/up/skills.moved")
+            os.symlink(outside + "/skills", grid + "/repos/up/skills")
+    return res
+g.source_root = hooked
+status, detail = g.remove_placed_dir(grid, row, True)
+print("status=%s detail=%s" % (status, detail))
+' "$GREAL" "$T/outside"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=refused"* ]]
+  [[ "$output" == *"resolves outside"* ]]
+  [ -f "$T/outside/skills/alpha/SKILL.md" ]
+}
+
+@test "H-12 remove_placed_dir: the root re-compare alone refuses repos/ swapped after the chain re-check" {
+  placed_install
+  mkdir -p "$T/elsewhere"
+  cp -R "$GREAL/repos/up" "$T/elsewhere/up"
+  run python3 -B -c "$SWAP_PRELUDE"'
+rows, _f = g.read_ledger()
+row = [r for r in rows if r["name"] == "alpha"][0]
+real = g.dest_chain_link
+def hooked(grid_dir, dest, include_leaf):
+    res = real(grid_dir, dest, include_leaf)
+    if caller("remove_placed_dir") and not os.path.islink(grid + "/repos"):
+        os.rename(grid + "/repos", grid + "/repos.moved")
+        os.symlink(outside, grid + "/repos")
+    return res
+g.dest_chain_link = hooked
+status, detail = g.remove_placed_dir(grid, row, True)
+print("status=%s detail=%s" % (status, detail))
+' "$GREAL" "$T/elsewhere"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=refused"* ]]
+  [[ "$output" == *"repos changed during the removal"* ]]
+  [ -f "$T/elsewhere/up/skills/alpha/SKILL.md" ]
+}
+
+@test "H-12 remove_placed_dir: a parent swapped AFTER every path check still deletes nothing outside" {
+  placed_install
+  run python3 -B -c "$SWAP_PRELUDE"'
+rows, _f = g.read_ledger()
+row = [r for r in rows if r["name"] == "alpha"][0]
+real = os.path.commonpath
+def hooked(paths):
+    res = real(paths)
+    # The last path check in remove_placed_dir: swap a parent for a link in the gap before the delete.
+    if caller("remove_placed_dir") and not os.path.islink(grid + "/repos/up/skills"):
+        os.rename(grid + "/repos/up/skills", grid + "/repos/up/skills.moved")
+        os.symlink(outside + "/skills", grid + "/repos/up/skills")
+    return res
+os.path.commonpath = hooked
+status, detail = g.remove_placed_dir(grid, row, True)
+print("status=%s detail=%s" % (status, detail))
+' "$GREAL" "$T/outside"
+  [ "$status" -eq 0 ]
+  [ -f "$T/outside/skills/alpha/SKILL.md" ]
+  [ -f "$T/outside/skills/alpha/run.sh" ]
+}
+
+@test "H-12 remove_placed_dir: a parent swapped after the chain is OPEN deletes the original, never the link target" {
+  placed_install
+  run python3 -B -c "$SWAP_PRELUDE"'
+rows, _f = g.read_ledger()
+row = [r for r in rows if r["name"] == "alpha"][0]
+real = g.open_chain
+def hooked(top, names, create=False):
+    fds = real(top, names, create)
+    # The descriptors are held; now a same-user process swaps the parent for a link to a copy.
+    if caller("remove_placed_dir") and not os.path.islink(grid + "/repos/up/skills"):
+        os.rename(grid + "/repos/up/skills", grid + "/repos/up/skills.moved")
+        os.symlink(outside + "/skills", grid + "/repos/up/skills")
+    return fds
+g.open_chain = hooked
+status, detail = g.remove_placed_dir(grid, row, True)
+print("status=%s" % status)
+print("moved-alpha-exists=%s" % os.path.exists(grid + "/repos/up/skills.moved/alpha"))
+' "$GREAL" "$T/outside"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=removed"* ]]
+  [[ "$output" == *"moved-alpha-exists=False"* ]]
+  [ -f "$T/outside/skills/alpha/SKILL.md" ]
+}
+
+@test "H-12 place_staged: the second root compare alone refuses repos/ swapped after the parents were made" {
+  build_grids
+  mkdir -p "$T/outside/up"
+  run python3 -B -c "$SWAP_PRELUDE"'
+real = g.dest_chain_link
+seen = []
+def hooked(grid_dir, dest, include_leaf):
+    res = real(grid_dir, dest, include_leaf)
+    if caller("place_staged") and dest.startswith("repos/up/skills/"):
+        seen.append(1)
+        # the second call is the one right before the renames, after the parents exist
+        if len(seen) == 2 and not os.path.islink(grid + "/repos"):
+            os.rename(grid + "/repos", grid + "/repos.moved")
+            os.symlink(outside, grid + "/repos")
+    return res
+g.dest_chain_link = hooked
+sys.exit(g.main(["--grid-dir", grid, "install"]))
+' "$GREAL" "$T/outside"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repos changed while placing"* ]]
+  # The later entry sees a stable (supported) symlinked repos/ and is placed normally; only the
+  # entry whose second compare saw the swap must not have landed there.
+  [ ! -e "$T/outside/up/skills" ]
+}
+
+@test "H-12 place_staged: a parent swapped AFTER the last check places nothing outside" {
+  build_grids
+  mkdir -p "$T/outside"
+  run python3 -B -c "$SWAP_PRELUDE"'
+real = g.source_root
+seen = []
+def hooked(grid_dir, source):
+    res = real(grid_dir, source)
+    if caller("place_staged"):
+        seen.append(1)
+        # the 3rd call is the last guard (compare #2): swap the parent after it, before the rename
+        if len(seen) == 3 and not os.path.islink(grid + "/repos/up/skills") and os.path.isdir(grid + "/repos/up/skills"):
+            os.rename(grid + "/repos/up/skills", grid + "/repos/up/skills.moved")
+            os.symlink(outside, grid + "/repos/up/skills")
+    return res
+g.source_root = hooked
+g.main(["--grid-dir", grid, "install"])
+' "$GREAL" "$T/outside"
+  [ -z "$(ls -A "$T/outside")" ]
+}
+
+@test "H-12 place_staged: a parent swapped after the first check leaves no directory outside" {
+  build_grids
+  mkdir -p "$T/outside"
+  run python3 -B -c "$SWAP_PRELUDE"'
+real = g.dest_chain_link
+def hooked(grid_dir, dest, include_leaf):
+    res = real(grid_dir, dest, include_leaf)
+    # repos/up/nested does not exist yet (beta lives at nested/cat/beta): swap in a link to
+    # outside right after the check that saw it missing, before the parents are created.
+    if caller("place_staged") and dest.startswith("repos/up/nested/") \
+            and not os.path.lexists(grid + "/repos/up/nested"):
+        os.symlink(outside, grid + "/repos/up/nested")
+    return res
+g.dest_chain_link = hooked
+g.main(["--grid-dir", grid, "install"])
+' "$GREAL" "$T/outside"
+  [ -z "$(ls -A "$T/outside")" ]
+}
+
+@test "H-12 VG9: an empty directory injected into the staged skill after the audit is not placed" {
+  build_grids
+  run python3 -B -c "$SWAP_PRELUDE"'
+real = g.audit_staged
+def injecting(grid_dir, run, source, entries):
+    res = real(grid_dir, run, source, entries)
+    for e in entries:
+        top = os.path.join(run, "repos", source, *e["path"].split("/"))
+        os.makedirs(os.path.join(top, "injected", "deeper"))
+    return res
+g.audit_staged = injecting
+sys.exit(g.main(["--grid-dir", grid, "install"]))
+' "$GREAL" "$T/outside"
+  [ "$status" -eq 0 ]
+  [ -f "$G/repos/up/skills/alpha/SKILL.md" ]
+  [ ! -e "$G/repos/up/skills/alpha/injected" ]
+  [ ! -e "$G/repos/up/nested/cat/beta/injected" ]
+  # and what is on disk still matches the ledger: the next install is a no-op, doctor is clean.
+  run install
+  [ "$status" -eq 0 ]
+  run python3 -B "$G/scripts/grid" --grid-dir "$G" doctor
+  [ "$status" -eq 0 ]
+}
+
+@test "H-12 VG10: a FIFO injected into the staged skill after the audit is a named refusal, not a raw shutil.Error" {
+  build_grids
+  run timeout 60 python3 -B -c "$SWAP_PRELUDE"'
+real = g.audit_staged
+def injecting(grid_dir, run, source, entries):
+    res = real(grid_dir, run, source, entries)
+    top = os.path.join(run, "repos", source, *entries[0]["path"].split("/"))
+    os.mkfifo(os.path.join(top, "pipe"))
+    return res
+g.audit_staged = injecting
+sys.exit(g.main(["--grid-dir", grid, "install"]))
+' "$GREAL" "$T/outside"
+  [ "$status" -ne 124 ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pipe"* ]]
+  [[ "$output" == *"not a regular file"* ]]
+  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" != *"shutil"* ]]
+  [[ "$output" != *"SpecialFileError"* ]]
+}
+
+@test "H-12 VG8: a read-only subtree moved aside by --force leaves nothing in .grid-tmp" {
+  [ "$(id -u)" -ne 0 ]
+  build_grids
+  run install
+  [ "$status" -eq 0 ]
+  # A modified, read-only placed skill: --force moves it to .grid-tmp/<pid>/old/<n> first.
+  printf 'edit\n' > "$G/repos/up/skills/alpha/extra.txt"
+  mkdir "$G/repos/up/skills/alpha/ro"
+  printf 'x\n' > "$G/repos/up/skills/alpha/ro/f"
+  chmod 555 "$G/repos/up/skills/alpha/ro"
+  run install --force
+  chmod -R u+rwX "$GREAL/.grid-tmp" "$GREAL/repos" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  [ ! -e "$GREAL/.grid-tmp" ]
+  [ ! -e "$G/repos/up/skills/alpha/extra.txt" ]
+}
