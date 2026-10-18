@@ -135,6 +135,43 @@ STRICT_BOUND=(0 0 0 1)
 # handful; a line over this is a data blob or an attack on the matcher's running time.
 SECRET_MAX_KEYS=200
 _SM_KEYS_LEFT=""
+# H-05 (NF-062): _secret_match starts every call with a full key count, except while
+# _match_pieces runs the pieces of ONE line (it sets this to 1 around each piece), where the
+# count is shared. A direct caller of _secret_match no longer has to reset anything.
+_SM_KEYS_SHARED=0
+
+# H-05: the wall-clock budget of a scan. A caller (the commit guard) starts it with
+# secret_budget_start <whole seconds>; _secret_match then checks it before every table row and
+# every `key =` candidate, so a single dense or hostile line cannot run past it, and
+# secret_match_long reports scan-budget (a finding, like oversize-line: a scan that cannot
+# finish must block, not pass). Not started (SECRET_DEADLINE_US empty) means no limit, which
+# is what the other callers (the auto-handoff worker's file scans) get. One regex call is not
+# interruptible, so a scan can overshoot by the cost of one table row on one piece.
+SECRET_DEADLINE_US=""
+_NOW_US=0
+# _secret_now_us: sets _NOW_US to microseconds since the epoch (bash 5: EPOCHREALTIME, whose
+# decimal mark follows the locale), else to whole seconds since the shell started. The tests
+# replace this function with a counter, so no test depends on how busy the machine is.
+_secret_now_us() {
+  if [ -n "${EPOCHREALTIME:-}" ]; then _NOW_US="${EPOCHREALTIME//[.,]/}"; else _NOW_US=$((SECONDS * 1000000)); fi
+}
+# secret_budget_start <seconds>: the scan has this many whole seconds from now. Anything but 1
+# to 9 digits counts as 0, which fails closed (a budget that fails to start would be no budget).
+# 10# keeps 008 a decimal number: bash would read it as a bad octal and the assignment fail.
+secret_budget_start() {
+  local s="$1"
+  [[ "$s" =~ ^[0-9]{1,9}$ ]] || s=0
+  s=$((10#$s))
+  _secret_now_us
+  SECRET_DEADLINE_US=$((_NOW_US + s * 1000000))
+}
+secret_budget_stop() { SECRET_DEADLINE_US=""; }
+# _secret_over_budget: true when a budget is running and spent.
+_secret_over_budget() {
+  [ -n "$SECRET_DEADLINE_US" ] || return 1
+  _secret_now_us
+  [ "$_NOW_US" -ge "$SECRET_DEADLINE_US" ]
+}
 # A cut inside this is a cut inside a long identifier run (see secret_match_long): 200
 # identifier characters, then at most 16 characters that are not.
 _IDRUN_RE='[[:alnum:]_]{200}[^[:alnum:]_]{0,16}$'
@@ -284,7 +321,7 @@ _secret_exempt() {
 #       reported as key-dense-line: a scan that cannot finish must block, not pass.
 _secret_match() {
   local line="$1" i name re hit="" text="" was=0 tail key after tok
-  : "${_SM_KEYS_LEFT:=$SECRET_MAX_KEYS}"
+  [ "$_SM_KEYS_SHARED" = 1 ] || _SM_KEYS_LEFT=$SECRET_MAX_KEYS   # H-05: see _SM_KEYS_SHARED
   shopt -q nocasematch && was=1
   shopt -u nocasematch
   if [ "${SECRET_STRICT:-0}" != 1 ] && [[ "$line" == *"$_SECRET_PRAGMA"* ]]; then
@@ -293,11 +330,14 @@ _secret_match() {
   fi
   for ((i = 0; i < ${#SECRET_NAMES[@]}; i++)); do
     name="${SECRET_NAMES[$i]}"; re="${SECRET_RES[$i]}"
+    # H-05: the wall-clock budget, checked per row (see secret_budget_start)
+    if [ -n "$SECRET_DEADLINE_US" ] && _secret_over_budget; then hit="scan-budget"; text=""; break; fi
     if [ "$name" = "assigned-secret" ]; then
       shopt -s nocasematch
       tail="$line"
       while [[ "$tail" =~ $re ]]; do
         if [ "$_SM_KEYS_LEFT" -le 0 ]; then hit="key-dense-line"; text=""; break; fi
+        if [ -n "$SECRET_DEADLINE_US" ] && _secret_over_budget; then hit="scan-budget"; text=""; break; fi
         _SM_KEYS_LEFT=$((_SM_KEYS_LEFT - 1))
         key="${BASH_REMATCH[0]}"
         after="${tail#*"$key"}"
@@ -319,6 +359,7 @@ _secret_match() {
     shopt -s nocasematch   # only password-assigned needs it; the others spell their classes out
     for ((i = 0; i < ${#STRICT_NAMES[@]}; i++)); do
       re="${STRICT_RES[$i]}"
+      if [ -n "$SECRET_DEADLINE_US" ] && _secret_over_budget; then hit="scan-budget"; text=""; break; fi
       if [[ "$line" =~ $re ]]; then
         hit="${STRICT_NAMES[$i]}"
         text="${BASH_REMATCH[0]}"
@@ -468,7 +509,10 @@ _match_pieces() {
       fi
     fi
     cur="${t:$off:$((end - off))}"
-    _secret_match "$cur" && return 0
+    # the pieces of one line share one key count (H-05, see _SM_KEYS_SHARED)
+    _SM_KEYS_SHARED=1
+    if _secret_match "$cur"; then _SM_KEYS_SHARED=0; return 0; fi
+    _SM_KEYS_SHARED=0
     next=$((off + 4096))
     if [ "$end" -lt "$tlen" ]; then
       # H-01: a key word whose filler run, = and value are still open when the piece ends

@@ -2357,3 +2357,313 @@ _mbpad() { yes $'\xe3\x80\x80' | head -n "$1" | tr -d '\n'; }
   ms=$((($(date +%s%N) - t0) / 1000000))
   [ "$ms" -lt 3000 ] || { echo "took $ms ms" >&2; false; }
 }
+
+# ===========================================================================
+# H-05 (hardening, refs private H-05): cost bounds of the secret scan. A scan that cannot
+# finish inside the hook timeout is a blocked command, so the work is bounded in wall-clock
+# time, inside a line as well as between lines. The time-based tests below never depend on
+# how busy the machine is: the clock is replaced by a counter (operations are counted), or
+# the check is a CPU-time limit (ulimit -t) with a bound several times above the fixed cost
+# and several times below the old cost.
+# ===========================================================================
+
+# _lib <script>: run <script> in a C-locale shell that has sourced the secret table.
+_lib() {
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/secret-patterns.sh"; shift; eval "$1"' _ "$REPO_ROOT" "$1"
+}
+
+@test "budget: a spent budget stops a scan inside ONE long line, after a counted number of clock reads" {
+  # fake clock: every read is one second later than the last. secret_budget_start 3 reads the
+  # clock once, so the 4th read after it is the deadline. A 40 KB line has dozens of pieces
+  # and hundreds of row checks; the scan must stop within a handful of reads.
+  _lib 'reads=0
+    _secret_now_us() { reads=$((reads + 1)); _NOW_US=$((reads * 1000000)); }
+    secret_budget_start 3
+    line="$(head -c 40000 /dev/zero | tr "\0" ".")"
+    if secret_match_long "$line"; then echo "$SECRET_MATCH_NAME reads=$reads"; else echo "clean reads=$reads"; fi'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "scan-budget reads="* ]] || { echo "$output" >&2; false; }
+  [ "${output#*reads=}" -le 6 ] || { echo "$output" >&2; false; }
+}
+
+@test "budget: the per-key loop of one short line is checked too (a line with 150 keys)" {
+  # the 150 keys are all under SECRET_MAX_KEYS, so only a clock check inside the key loop can
+  # stop this scan. The budget lets every table row start (they come first), plus 5 more reads.
+  _lib 'reads=0
+    _secret_now_us() { reads=$((reads + 1)); _NOW_US=$((reads * 1000000)); }
+    secret_budget_start $((${#SECRET_NAMES[@]} + 5))
+    line="$(for ((k = 0; k < 150; k++)); do printf "token=1 "; done)"
+    if secret_match_line "$line" >/dev/null; then echo "$SECRET_MATCH_NAME reads=$reads"; else echo "clean reads=$reads"; fi'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "scan-budget reads="* ]] || { echo "$output" >&2; false; }
+  [ "${output#*reads=}" -le $((26 + 5 + 3)) ] || { echo "$output" >&2; false; }
+}
+
+@test "budget: strict mode checks the clock in its extra rows as well" {
+  # the default rows find nothing in a line of dots; the strict rows are the last place work is done
+  _lib 'reads=0
+    _secret_now_us() { reads=$((reads + 1)); _NOW_US=$((reads * 1000000)); }
+    SECRET_STRICT=1
+    secret_budget_start $((${#SECRET_NAMES[@]} + 3))
+    if secret_match_line "..........." >/dev/null; then echo "$SECRET_MATCH_NAME reads=$reads"; else echo "clean reads=$reads"; fi'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "scan-budget reads="* ]] || { echo "$output" >&2; false; }
+}
+
+@test "budget: the entry points report scan-budget as a finding (line, file, redaction, stream)" {
+  printf 'clean text\nmore text\n' > "$BATS_TEST_TMPDIR/b.txt"
+  # a deadline in the past: every scan is over budget at its first check
+  _lib 'SECRET_DEADLINE_US=1
+    echo "line: $(secret_match_line "text")"
+    secret_scan_file "'"$BATS_TEST_TMPDIR"'/b.txt" | head -1
+    printf "a\nb\n" | secret_mask_stream | head -1
+    echo "redacted: $(secret_redact_file "'"$BATS_TEST_TMPDIR"'/b.txt")"
+    head -1 "'"$BATS_TEST_TMPDIR"'/b.txt"'
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == "line: scan-budget" ]] || { echo "$output" >&2; false; }
+  [[ "${lines[1]}" == *"b.txt:1: scan-budget ("* ]] || { echo "$output" >&2; false; }
+  [ "${lines[2]}" = "[masked: scan-budget]" ] || { echo "$output" >&2; false; }
+  [ "${lines[3]}" = "redacted: 2" ] || { echo "$output" >&2; false; }
+  [ "${lines[4]}" = "[line redacted: scan-budget]" ] || { echo "$output" >&2; false; }
+}
+
+@test "budget: no budget started means no limit, and secret_budget_stop lifts one" {
+  _lib 'SECRET_DEADLINE_US=1
+    secret_budget_stop
+    secret_match_line "just words" || echo clean-after-stop
+    unset SECRET_DEADLINE_US
+    secret_match_line "just words" || echo clean-unset'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"clean-after-stop"* && "$output" == *"clean-unset"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "budget: a budget that is not a number fails closed, and a bash without EPOCHREALTIME counts whole seconds" {
+  _lib 'secret_budget_start abc
+    echo "nan: $(secret_match_line "just words")"
+    secret_budget_start 600
+    secret_match_line "just words" || echo "ample: clean"
+    unset EPOCHREALTIME            # what bash 3.2 and 4.x look like
+    secret_budget_start 600
+    secret_match_line "just words" || echo "seconds ample: clean"
+    secret_budget_start 0
+    echo "seconds spent: $(secret_match_line "just words")"
+    SECONDS=100; secret_budget_start 5       # the shell clock is settable: no sleeping needed
+    SECONDS=102; secret_match_line "just words" || echo "before: clean"
+    SECONDS=105; echo "at: $(secret_match_line "just words")"
+    SECONDS=100; secret_budget_start 008     # not an octal number: a budget of 8 s, not no budget
+    SECONDS=107; secret_match_line "just words" || echo "008 before: clean"
+    SECONDS=108; echo "008 at: $(secret_match_line "just words")"
+    secret_budget_start 12345678901          # too many digits: fails closed too
+    echo "long: $(secret_match_line "just words")"'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "nan: scan-budget" ] && [ "${lines[1]}" = "ample: clean" ] \
+    && [ "${lines[2]}" = "seconds ample: clean" ] && [ "${lines[3]}" = "seconds spent: scan-budget" ] \
+    && [ "${lines[4]}" = "before: clean" ] && [ "${lines[5]}" = "at: scan-budget" ] \
+    && [ "${lines[6]}" = "008 before: clean" ] && [ "${lines[7]}" = "008 at: scan-budget" ] \
+    && [ "${lines[8]}" = "long: scan-budget" ] || { echo "$output" >&2; false; }
+}
+
+@test "budget: an ample budget changes no verdict over the whole pattern table (recall)" {
+  local name samples=() s out
+  for name in aws asia pem ghp ghpat glpat npm stripe anthropic sk slack google jwt azure bearer dburl \
+              sendgrid twilio mailgun hf do shopify stripetest whsec slackhook ya29 pgp; do
+    samples+=("x $("tok_$name") y" "key=\"$("tok_$name")\"")
+  done
+  samples+=('token = "Ab3dEf9Gh2Jk4Lm6Np8Q"' 'password: Zk3mPq8rTv2wXy9a' 'token=short' 'just words')
+  # with and without an ample budget, in default and in strict mode, long and short entry points
+  for s in "${samples[@]}"; do
+    printf '%s\n' "$s"
+  done > "$BATS_TEST_TMPDIR/corpus.txt"
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/secret-patterns.sh"; corpus="$2"
+    verdicts() {
+      while IFS= read -r l; do
+        secret_match_long "$l" && printf "%s|" "$SECRET_MATCH_NAME" || printf "clean|"
+        secret_match_line "$l" >/dev/null && printf "%s|" "$SECRET_MATCH_NAME" || printf "clean|"
+        (SECRET_STRICT=1; secret_match_long "$l" && printf "%s;" "$SECRET_MATCH_NAME" || printf "clean;")
+      done < "$corpus"
+    }
+    a="$(verdicts)"
+    secret_budget_start 600
+    b="$(verdicts)"
+    [ "$a" = "$b" ] || { echo "DIFFER"; echo "$a"; echo "$b"; exit 1; }
+    echo "same: $(wc -l < "$2") lines"' _ "$REPO_ROOT" "$BATS_TEST_TMPDIR/corpus.txt"
+  [ "$status" -eq 0 ] || { echo "$output" >&2; false; }
+  [[ "$output" == "same: "* ]] || { echo "$output" >&2; false; }
+}
+
+# NF-062: _SM_KEYS_LEFT was global state that only the public entry points reset, so a second
+# direct call of the core matcher inherited the first call's key count.
+@test "key bound: the core matcher called directly twice does not inherit the first call's key count" {
+  _lib 'line="$(for ((k = 0; k < 150; k++)); do printf "token=1 "; done)"
+    for n in 1 2 3; do
+      _secret_match "$line" && { echo "call $n: $SECRET_MATCH_NAME"; exit 1; }
+    done
+    echo ok'
+  [ "$output" = ok ] || { echo "$output" >&2; false; }
+}
+
+# --- the hook: GRID_SCAN_MAX_SECONDS, the one wall-clock budget of a scan -----------------
+@test "secret: a scan past its time budget blocks with a finding named scan-budget" {
+  mkrepo
+  stage_line 'x_token=a1 line'
+  GRID_SCAN_MAX_SECONDS=0 run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x' "$R")"
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
+  [[ "$output" == *"scan-budget"* ]] || { echo "$output" >&2; false; }
+  [[ "$output" == *"past the scan budget"* ]] || { echo "$output" >&2; false; }
+  # the default budget (3 s) lets the same commit through, and so does a value that is not a number
+  run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x' "$R")"
+  [ "$status" -eq 0 ] || { echo "$output" >&2; false; }
+  GRID_SCAN_MAX_SECONDS=abc run_hook pre-bash-secret-scan "$(hook_payload 'git commit -m x' "$R")"
+  [ "$status" -eq 0 ] || { echo "$output" >&2; false; }
+}
+
+@test "secret: the text of the commit command has a budget of its own (a spent diff budget does not hide it)" {
+  mkrepo
+  stage_line 'plain text'
+  # nothing in the diff reaches the matcher, and the diff budget is zero; the command text is
+  # still scanned (with a budget of its own) and holds a token
+  GRID_SCAN_MAX_SECONDS=0 run_hook pre-bash-secret-scan "$(hook_payload "git commit -m \"k=$(tok_ghp)\"" "$R")"
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
+  [[ "$output" == *"commit command text: github-token"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "secret: 70 lines of dense JSON keys are decided inside the CPU budget, whatever the load" {
+  mkrepo
+  local one i
+  one="$(rep '"token":"abc",' 199)"       # under the 200-key bound: each line costs real matcher time
+  for ((i = 0; i < 70; i++)); do printf '%s\n' "$one"; done > "$R/dense.json"
+  git -C "$R" add dense.json
+  run_hook_cpu 5 pre-bash-secret-scan 'git commit -m x' "$R"
+  # 0 when the machine is fast enough to finish, 2 (named) when the budget stopped it; never killed
+  case "$status" in
+    0) ;;
+    2) [[ "$output" == *"scan-budget"* ]] || { echo "$output" >&2; false; } ;;
+    *) echo "status $status (137 or 152 = CPU limit)" >&2; echo "$output" >&2; false ;;
+  esac
+}
+
+# --- VD8: a chained add must not read every byte of its files just to count them --------
+@test "secret: a chained git add of a huge file is refused after counting at most the cap plus one byte" {
+  mkrepo
+  # 64 MB staged by the add; the cap is 5 MB. A counting `wc` records how many bytes the hook
+  # counted: operations are counted, not seconds, so the result does not depend on the load.
+  head -c 67108864 /dev/zero > "$R/big.bin"
+  local stubdir="$MOCK_HOOK_ROOT/wcstub" real_wc
+  real_wc="$(command -v wc)"
+  mkdir -p "$stubdir"
+  cat > "$stubdir/wc" <<STUB
+#!/usr/bin/env bash
+out="\$("$real_wc" "\$@")"
+printf '%s\n' "\$out" >> "$stubdir/wc.log"
+printf '%s\n' "\$out"
+STUB
+  chmod +x "$stubdir/wc"
+  PATH="$stubdir:$PATH" run_hook pre-bash-secret-scan "$(hook_payload 'git add big.bin && git commit -m x' "$R")"
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
+  [[ "$output" == *"stage in a separate call"* ]] || { echo "$output" >&2; false; }
+  # the byte count `wc` printed: the default cap (5242880) plus the one byte that proves "over"
+  grep -qx '[[:space:]]*5242881' "$stubdir/wc.log" || { echo "wc counted:" >&2; cat "$stubdir/wc.log" >&2; false; }
+}
+
+# --- VD8: a command with $ or a backtick goes to the tokenizer, so it is capped like a git one
+@test "guards: a big non-git command with a dollar sign is refused at the cap, not tokenized (CPU-limited)" {
+  local big id
+  big="$(rep 'x=$((1+2)); ' 4300)"          # about 60 KB, 12,900 tokens: tokenizing it costs ~10 s of CPU
+  for id in pre-bash-secret-scan pre-bash-no-bypass; do
+    run_hook_cpu 4 "$id" "$big" "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 2 ] || { echo "$id: status $status (137 or 152 = CPU limit)" >&2; false; }
+    [[ "$output" == *"too long to inspect"* ]] || { echo "$id: $output" >&2; false; }
+  done
+}
+
+@test "guards: the same holds for backticks, and for a command that only mentions another hook tool" {
+  local big id
+  big="$(rep 'x=`echo 1`; ' 4300)"
+  for id in pre-bash-secret-scan pre-bash-no-bypass; do
+    run_hook_cpu 4 "$id" "$big" "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 2 ] || { echo "$id: status $status (137 or 152 = CPU limit)" >&2; false; }
+    [[ "$output" == *"too long to inspect"* ]] || { echo "$id: $output" >&2; false; }
+  done
+  # no-bypass also reads LEFTHOOK / PRE_COMMIT assignments: that text reaches the tokenizer too
+  big="LEFTHOOK=1 $(rep 'a b ' 5000)"
+  run_hook_cpu 4 pre-bash-no-bypass "$big" "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 2 ] || { echo "status $status (137 or 152 = CPU limit)" >&2; false; }
+  [[ "$output" == *"too long to inspect"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "guards: commands that never reach the tokenizer, or are under the cap, are not refused" {
+  local id
+  for id in pre-bash-secret-scan pre-bash-no-bypass; do
+    # big, no git, no dollar sign, no backtick: the fast path
+    run_hook_cpu 4 "$id" "echo $(rep 'abcdefghi ' 6000)" "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 0 ] || { echo "$id big: status $status: $output" >&2; false; }
+    # a small command with substitutions
+    run_hook_cpu 4 "$id" 'echo "$HOME" $(date) `id`' "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 0 ] || { echo "$id small: status $status: $output" >&2; false; }
+  done
+}
+
+# --- VD8 survivors: the default caps and the base-name limit, pinned at their edges ------
+# (M10 byte cap, M11 token cap, M19 _grid_base limit)
+@test "cap defaults: 20000 bytes and 2500 tokens pass, one more of either is refused (M10, M11)" {
+  local at over
+  at="git $(_fill 19996 a)"; over="git $(_fill 19997 a)"
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/common.sh"; grid_check_cmd_cap t "$2"; echo passed' _ "$REPO_ROOT" "$at"
+  [ "$status" -eq 0 ] && [ "$output" = passed ] || { echo "20000 bytes: $status $output" >&2; false; }
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/common.sh"; grid_check_cmd_cap t "$2"; echo passed' _ "$REPO_ROOT" "$over"
+  [ "$status" -eq 2 ] && [[ "$output" == *"too long to inspect"* ]] || { echo "20001 bytes: $status $output" >&2; false; }
+  at="git$(_fill 2500 ' ')x"; over="git$(_fill 2501 ' ')x"
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/common.sh"; grid_check_cmd_cap t "$2"; echo passed' _ "$REPO_ROOT" "$at"
+  [ "$status" -eq 0 ] && [ "$output" = passed ] || { echo "2500 tokens: $status $output" >&2; false; }
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/common.sh"; grid_check_cmd_cap t "$2"; echo passed' _ "$REPO_ROOT" "$over"
+  [ "$status" -eq 2 ] && [[ "$output" == *"too long to inspect"* ]] || { echo "2501 tokens: $status $output" >&2; false; }
+}
+
+@test "_grid_base: a word under 4096 bytes keeps its base name, one of 4096 or more has none (M19)" {
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/common.sh"
+    w="$(head -c 4091 /dev/zero | tr "\0" a)/git"; _grid_base "$w"; echo "4095:[$_GB]"
+    w="$(head -c 4092 /dev/zero | tr "\0" a)/git"; _grid_base "$w"; echo "4096:[$_GB]"
+    _grid_base "/usr/bin/git"; echo "short:[$_GB]"' _ "$REPO_ROOT"
+  [ "${lines[0]}" = "4095:[git]" ] && [ "${lines[1]}" = "4096:[]" ] && [ "${lines[2]}" = "short:[git]" ] || { echo "$output" >&2; false; }
+}
+
+@test "secret: a git path word of 4095 bytes is still seen as git (the base-name limit is PATH_MAX)" {
+  mkrepo
+  stage_line "key = \"$(tok_ghp)\""
+  run_hook pre-bash-secret-scan "$(hook_payload "$(_fill 4091 a)/git commit -m x" "$R")"
+  [ "$status" -eq 2 ] || { echo "$output" >&2; false; }
+  [[ "$output" == *"github-token"* ]] || { echo "$output" >&2; false; }
+}
+
+# --- VD8 survivor M09: the piece splitting of secret_match_long, at every edge -----------
+# Pieces are 4352 characters long and start every 4096; at most 64 of them. A token that
+# straddles the end of a piece must be whole in the next one.
+@test "long line: a token anywhere near a piece edge is found (stride, overlap and piece length, M09)" {
+  local t; t="$(tok_ghp)"
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/secret-patterns.sh"
+    # offsets around the first three piece starts (4096, 8192, 12288) and ends (4352, 8448, 12544)
+    for off in 4000 4060 4070 4080 4090 4096 4100 4200 4310 4320 4330 4340 4351 4352 4353 4400 \
+               5000 6000 7000 8150 8190 8192 8300 8400 8440 8447 8450 12250 12290 12500 12540 12544 13000; do
+      line="$(head -c "$off" /dev/zero | tr "\0" ".")$2$(head -c 6000 /dev/zero | tr "\0" ".")"
+      secret_match_long "$line" && [ "$SECRET_MATCH_NAME" = github-token ] || { echo "MISSED at offset $off"; exit 1; }
+    done
+    echo ok' _ "$REPO_ROOT" "$t"
+  [ "$output" = ok ] || { echo "$output" >&2; false; }
+}
+
+@test "long line: a token in the 64th piece is found, a line past 262144 characters is oversize-line (M09)" {
+  local t; t="$(tok_ghp)"
+  run env LC_ALL=C bash -c '. "$1/hooks/lib/secret-patterns.sh"
+    # the last piece starts at 63 * 4096 = 258048 and ends with the line at 262144
+    pre="$(head -c 262000 /dev/zero | tr "\0" ".")"
+    line="$pre$2"; line="${line:0:262144}"
+    secret_match_long "$line" && echo "tail:$SECRET_MATCH_NAME" || echo "tail:clean"
+    line="$(head -c 262144 /dev/zero | tr "\0" ".")"
+    secret_match_long "$line" && echo "max:$SECRET_MATCH_NAME" || echo "max:clean"
+    line="$(head -c 262145 /dev/zero | tr "\0" ".")"
+    secret_match_long "$line" && echo "over:$SECRET_MATCH_NAME" || echo "over:clean"
+    # a token beyond the end of the 64th piece (262400) is never reached: the piece cap answers first
+    line="$(head -c 262410 /dev/zero | tr "\0" ".")$2"
+    secret_match_long "$line" && echo "past:$SECRET_MATCH_NAME" || echo "past:clean"' _ "$REPO_ROOT" "$t"
+  [ "${lines[0]}" = "tail:github-token" ] && [ "${lines[1]}" = "max:clean" ] && [ "${lines[2]}" = "over:oversize-line" ] && [ "${lines[3]}" = "past:oversize-line" ] || { echo "$output" >&2; false; }
+}
