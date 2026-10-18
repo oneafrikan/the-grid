@@ -1059,3 +1059,75 @@ disable-model-invocation: true'
   done
   grep -qF 'compatibility check, not a security control' "$REPO_ROOT/docs/harnesses.md"
 }
+
+# ---------------------------------------------------------------- H-10: fan-out listing, quoted guard keys
+
+@test "H-10: a foreign symlink with a line break or TAB in its name does not break the fan-out" {
+  # The listing used to be split per line: readlink of the first half failed and the run died
+  # (rc 1) with the shared dir never populated.
+  local nl=$'\n' tab=$'\t'
+  mkdir -p "$OTHER_DIR/ext"
+  ln -s "$OTHER_DIR/ext" "$MOCK_SKILLS/foo${nl}bar"
+  ln -s "$OTHER_DIR/ext" "$MOCK_SKILLS/tab${tab}name"
+  GRID_HARNESS=codex wire
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"restored"* ]]
+  [ -L "$HS/skill-alpha" ]
+  [ -L "$HS/skill-beta" ]
+  # The foreign links stay exactly as they were, and nothing was fanned out under their names.
+  [ -L "$MOCK_SKILLS/foo${nl}bar" ]
+  [ -L "$MOCK_SKILLS/tab${tab}name" ]
+  [ "$(ls "$HS" | LC_ALL=C sort | paste -sd, -)" = "skill-alpha,skill-beta" ]
+  [ "$(awk -F'\t' 'NF != 5' "$MANIFEST" | wc -l | tr -d ' ')" -eq 0 ]
+}
+
+@test "H-10: a grid-owned link with a control character in its name that teardown cannot remove is not fanned out" {
+  # PATH-stub rm refuses exactly these links, so they survive teardown and reach the fan-out
+  # listing as grid-owned links; a name like that would fake manifest columns or rows.
+  local nl=$'\n' tab=$'\t' stubs="$BATS_TEST_TMPDIR/rmstub" real_rm
+  real_rm="$(command -v rm)"
+  mkdir -p "$stubs"
+  cat > "$stubs/rm" <<STUB
+#!/usr/bin/env bash
+case "\$*" in *stuck-link*) exit 1 ;; esac
+exec "$real_rm" "\$@"
+STUB
+  chmod +x "$stubs/rm"
+  ln -s "$MOCK_GRID/skills/skill-alpha" "$MOCK_SKILLS/stuck-link${nl}name"
+  ln -s "$MOCK_GRID/skills/skill-alpha" "$MOCK_SKILLS/stuck-link${tab}name"
+  PATH="$stubs:$PATH" GRID_HARNESS=codex wire
+  # Exit 1 is the existing "stale link could not be removed" outcome; what matters is below.
+  [ "$status" -eq 1 ]
+  [ -L "$HS/skill-alpha" ]
+  [ "$(ls "$HS" | LC_ALL=C sort | paste -sd, -)" = "skill-alpha,skill-beta" ]
+  [ "$(awk -F'\t' 'NF != 5' "$MANIFEST" | wc -l | tr -d ' ')" -eq 0 ]
+}
+
+@test "H-10: skill_portable sees a Claude-only guard key written with quotes" {
+  . "$REPO_ROOT/scripts/lib/skill-portable.sh"
+  local d="$BATS_TEST_TMPDIR/q" i=0 line
+  # Valid YAML for the same top-level keys; an unquoted-only matcher missed all of these.
+  for line in '"disable-model-invocation": true' "'allowed-tools': Bash" '"hooks":
+  PreToolUse: x' "'context' : fork" '"allowed-tools" : Read' "\"disable-model-invocation\":true"; do
+    i=$((i + 1))
+    fm_skill "$d/q$i" "name: q$i
+$line"
+    portable_fails "$d/q$i" claude-only-guard
+  done
+  # Still only TOP-LEVEL keys, and a quote that does not match its partner is not a key.
+  fm_skill "$d/nested" 'name: nested
+metadata:
+  "context": x
+  '"'"'hooks'"'"': y'
+  run skill_portable "$d/nested"
+  [ "$status" -eq 0 ]
+  fm_skill "$d/mixed" 'name: mixed
+"hooks'"'"': y'
+  run skill_portable "$d/mixed"
+  [ "$status" -eq 0 ]
+  # A key that merely starts with a guard name is another key.
+  fm_skill "$d/prefix" 'name: prefix
+"contexts": y'
+  run skill_portable "$d/prefix"
+  [ "$status" -eq 0 ]
+}

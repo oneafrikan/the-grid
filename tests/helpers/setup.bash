@@ -76,6 +76,14 @@ common_setup() {
   assert_sandboxed
 }
 
+# enable_audit: turn the audit back on for a test that exercises it (wire.sh step 0, reconcile's
+# pre-flight gate). common_setup skips it by default, so a test that asserts "the audit blocked
+# this" but forgets to call this passes or fails for the wrong reason: with the audit skipped
+# wire.sh only prints a notice and continues. Prefer this over a bare `unset GRID_SKIP_AUDIT`.
+enable_audit() {
+  unset GRID_SKIP_AUDIT
+}
+
 # Abort the test (loudly) if a wire/catalog/hook target points at the real ~/.claude,
 # ~/.grid or ~/.the-grid-private, or if the claude tripwire has been unset.
 assert_sandboxed() {
