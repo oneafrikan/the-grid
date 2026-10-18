@@ -513,13 +513,19 @@ The guards do not inspect:
   is called),
 - scripts that call git,
 - variables expanded at run time (`$CMD`),
-- `git -c alias.x=...` one-shot aliases,
+- `git -c alias.x=...` one-shot aliases (the secret scan looks up a repo alias one level
+  deep only and does not resolve alias definitions, alias chains or shell aliases),
 - a bash/sh/eval payload nested more than one level deep (`bash -c "bash -c '...'"`),
 - ANSI-C escape decoding (`$'\x2d\x2dno-verify'`) and names spliced from `${x}`,
 - other shell expansions that build a word: brace expansion (`{git,commit,-n}`,
   `--no-{verify,x}`), pathname globs in a command word (`/usr/bin/g?t commit -n`), and
   `${x}` / `$((..))` results,
 - nested escaped backticks (`` `echo \`git commit -n\`` ``),
+- file content created by the same command and added in it: the guards run before the
+  command, so in `cp other.txt new.txt && git add new.txt && git commit` the file `new.txt`
+  does not exist yet and the secret scan cannot read it (a secret echoed into a file by the
+  same command is covered through the command text; a copy, a download or a generator is
+  not). Stage in a separate call so the scan can see it,
 - data written to a file and executed later (`printf '%s\n' 'git commit -n' > run.sh; sh run.sh`):
   the same hole as a script written with the Write tool. (A heredoc is not an example:
   its body is read as code, so `cat > run.sh <<EOF` holding a git flag blocks.)
@@ -598,12 +604,16 @@ strict scan flags it). An assignment value counts when it is quoted and
 that starts with `$`, `<` or `{` is a template and is skipped (the strict scan does not skip it, see
 the auto-handoff section). A match is passed over
 when the matched token itself holds a placeholder word such as `example` or `changeme`;
-a placeholder word elsewhere on the line does not exempt a real token. What it reads for
-a command:
+a placeholder word elsewhere on the line does not exempt a real token, and each token on
+a line is judged on its own, so an exempt one in front of a real one of the same kind does
+not hide it. What it reads for a command:
 
 - the repository the command targets: `-C <dir>`, `--git-dir`, `--work-tree` and a
   preceding `cd <dir>` are followed (a `cd` that cannot be known, such as `cd $VAR`, falls
-  back to the payload's `cwd`; the `cwd` repo is also scanned after any `cd`),
+  back to the payload's `cwd`; the `cwd` repo is also scanned after any `cd`). A payload
+  with no usable `cwd` (missing, empty or not a directory) blocks a call that could commit
+  or add, because the repository cannot be found; `git status`, `git log` and the like, and
+  commands without git, still pass,
 - the staged diff for `git commit`, `commit-tree`, `merge`, `cherry-pick`, `revert`, `am`,
   `rebase` and a git alias for `commit`; the working-tree diff too for `-a`, `-i`, `-o`,
   `-p`, `--interactive`, `--pathspec-from-file` or named pathspecs,
@@ -612,7 +622,8 @@ a command:
 - a `git add ... && git commit` in one command: the add has not run when the hook runs, so
   the files the add would stage are listed (`git status` for its pathspecs) and read from
   the working tree. `git add -f` of an ignored file is not listed (the literal name is still
-  checked),
+  checked). A file created by the same command (`cp`, a download, a build step) does not exist
+  yet when the hook runs and is not content-scanned: see "Known gaps",
 - the text of a commit command, which covers the message and a same-command
   `echo key=... >> file && git commit -am x`.
 
