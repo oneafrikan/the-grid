@@ -538,3 +538,107 @@ SEPS=('\t' '\v' '\f' '\302\240' '\343\200\200' '\342\200\250' '\342\200\251' '\3
   absent "$f" hunter2x
   [ "$(field "$f" 1 in)" = "mysql -p [REDACTED]" ]
 }
+
+# --- H-14: short secrets in tools outside the first list, separators, fail-safe default ----------
+# S is letters only and short, so neither the line drop nor the long-run rule can save it:
+# only the scrubber or the fail-safe rule keeps it out. Built at runtime from parts.
+
+# h14_cmds — one command per line, each holding $S; `\n` stands for a newline, `<ZW>` for U+200B.
+h14_cmds() {
+  cat <<EOF
+7z a -p $S out.7z in
+7z a -p$S out.7z in
+rar a -hp$S out.rar in
+vault login $S
+twine upload -p $S dist/*
+twine upload dist/* --password $S
+az login --service-principal -u x -p $S --tenant t
+ldapsearch -x -D cn=admin -w $S -b dc=x
+smbclient //srv/share -U user%$S
+xfreerdp /v:srv /u:bob /p:$S
+sudo -S ls <<<$S
+sudo -S ls <<< $S
+echo $S | sudo -S ls
+export session=$S
+dbpw=$S make
+git clone https://$S@host/x
+DOCKER login -p $S
+Docker Login --password $S
+docker login <BSNL> -p $S
+docker login -u me <BSNL><BSNL> -p $S
+mysql<ZW>-p<ZW>$S db
+docker<ZW>login<ZW>-p<ZW>$S
+vault<ESC>login<DEL>$S
+pa<ACUTE>ssword=$S
+tok<ACUTE>en=$S
+acme-tool -p $S
+acme-tool -w $S
+acme-tool -p$S
+FOO=1 acme-tool -P $S
+EOF
+}
+
+# h14_expand <line> — turn the placeholders into the real characters.
+h14_expand() {
+  python3 -c 'import sys
+s = sys.argv[1]
+for k, v in {"<BSNL>": "\\\n", "<ZW>": "\u200b", "<ESC>": "\x1b", "<DEL>": "\x7f", "<ACUTE>": "\u0301"}.items():
+    s = s.replace(k, v)
+print(s, end="")' "$1"
+}
+
+@test "H-14: short secrets of unlisted tools, separator tricks and combining marks never reach the stored line" {
+  S="sword""fishq"
+  local line n=0
+  while IFS= read -r line; do
+    capture "$(bash_payload "$(h14_expand "$line")")"
+    n=$((n + 1))
+  done < <(h14_cmds)
+  [ "$n" -gt 25 ]
+  # a canary proves the file exists and capture still records ordinary calls
+  capture "$(bash_payload 'git status')"
+  f="$(only_file)"
+  [ "$(wc -l < "$f")" -gt 1 ]
+  absent "$f" "$S"
+  grep -q 'git status' "$f"
+}
+
+@test "H-14: the stored forms are redacted in place (exact)" {
+  S="sword""fishq"
+  capture "$(bash_payload "vault login $S")"
+  capture "$(bash_payload "7z a -p $S out.7z")"
+  capture "$(bash_payload "xfreerdp /v:srv /p:$S")"
+  capture "$(bash_payload "ldapsearch -x -w $S -b dc=x")"
+  f="$(only_file)"
+  [ "$(field "$f" 1 in)" = "vault login [REDACTED]" ]
+  [ "$(field "$f" 2 in)" = "7z a -p [REDACTED] out.7z" ]
+  [ "$(field "$f" 3 in)" = "xfreerdp (outside)/v:srv (outside)/p:[REDACTED]" ]
+  [ "$(field "$f" 4 in)" = "ldapsearch -x -w [REDACTED] -b dc=x" ]
+}
+
+@test "H-14: an unlisted tool with a -p/-w style flag value records nothing at all" {
+  S="sword""fishq"
+  local c
+  for c in "acme-tool -p $S" "acme-tool -w $S" "acme-tool -p$S" "acme-tool run -P $S --x" \
+           "cd x && acme-tool -p $S" "sudo acme-tool -w $S" "bash -c 'acme-tool -p $S'"; do
+    capture "$(bash_payload "$c")"
+  done
+  assert_no_file
+}
+
+@test "H-14: ordinary -p, -P and -w uses are still recorded" {
+  local c
+  for c in "mkdir -p newdir" "psql -p 5432 db" "pytest -p no:cacheprovider" "ssh -p 22 host" \
+           "docker run -p 8080:80 img" "grep -w word f" "git commit -m 'bump -w width'"; do
+    capture "$(bash_payload "$c")"
+  done
+  f="$(only_file)"
+  [ "$(wc -l < "$f")" -eq 7 ]
+  [ "$(field "$f" 1 in)" = "mkdir -p newdir" ]
+}
+
+@test "H-14: a Write, Edit or prompt is not subject to the command flag rule" {
+  capture "$(payload PostToolUse Edit 'tool_input={"file_path":"src/acme -p x.py"}')"
+  capture "$(payload UserPromptSubmit - 'prompt="please run mkdir -p out then acme-tool -p 5432"')"
+  [ "$(wc -l < "$(only_file)")" -eq 2 ]
+}
