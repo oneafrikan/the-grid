@@ -71,7 +71,12 @@ Notes:
 - `grid uninstall --yes` and `grid repair` also run `wire.sh` (with
   `GRID_NO_CATALOG=1`) to refresh the links and `.wired.manifest`.
 - Use `grid` as a single writer: it takes no lock, so do not run two `grid`
-  commands that write at the same time (a scheduled `grid drift` only reads).
+  commands that write at the same time. A scheduled `grid drift` never touches `repos/`,
+  but it is not read-only: it stages fetches in a temporary `.grid-tmp` inside the clone
+  and writes its reports under the state dir (`~/.grid/reports`).
+- A `repos` symlink that arrives inside a clone is accepted like one you made: `grid install`
+  then places the reviewed `grid.lock` content under the link's target. Check `ls -ld repos`
+  after cloning a grid you did not write (a committed `repos` symlink is content you did not review).
 - The ledger is trusted same-user state, not an authenticated record:
   `grid uninstall --force` removes any directory under `repos/<source>/` that a
   ledger row names. Keep `~/.grid` writable only by you.
