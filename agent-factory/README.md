@@ -95,6 +95,25 @@ produces byte-identical files (each target's output dir is rebuilt in a `.tmp` d
 into place, so a failed run leaves the previous output intact). Each `.tmp`/`.old` dir is paired
 with a `<name>.compose-owned` marker file; compose.py only clears leftovers it marked, and refuses
 (never deletes) a `.tmp`/`.old` dir without one.
+
+- **Interrupted swaps.** Ctrl-C or a failed rename rolls the previous output back. If the rollback
+  itself fails, the previous output is left in `<name>.old` and the error names it; the next run
+  refuses that unmarked dir, so move it back (or delete it) by hand. A run killed outright
+  (`SIGKILL`, power loss) leaves marked `.tmp`/`.old` debris that the next run clears.
+- **Markers are a convention, not a defence.** Anyone who can write to the output dir can plant a
+  `<name>.compose-owned` file (or link) and so authorise compose.py to delete the dir at that name;
+  a marker left by a killed run has the same effect if you later create your own dir at that name.
+  Leave `*.tmp`, `*.old` and `*.compose-owned` names to compose.py.
+- **Unmarked debris.** A `.tmp`/`.old` dir with no marker (older output, or yours) is refused with
+  "refusing to delete ..."; move or remove it and re-run.
+- **One writer per project.** A swap holds a lock on `<out>/<project>/`; a second run on the same
+  project exits with "another compose run is writing ...". Re-run once the first has finished.
+- **Reused project dirs.** A project name may only reuse an existing `<out>/<project>/` that looks like
+  compose output: empty, or holding only dotfiles, `_<target>` dirs, the legacy target's
+  `agents.yaml` and role dirs of identity files. Any other dir of that name (say `skills/`) is
+  refused, never emptied.
+- **Linked stacks and skills.** A `stacks:`/`skills:` entry that is, or sits under, a symlink is refused.
+
 `projects/` output is gitignored — the compose config is the tracked artefact.
 
 > **On a machine that just pulled new source, recompose before wiring.** A `git

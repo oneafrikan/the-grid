@@ -44,6 +44,9 @@ Requires PyYAML — install into the project venv:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import errno
+import fcntl
 import functools
 import json
 import os
@@ -377,6 +380,11 @@ def load_config(path: Path) -> dict:
                 if not (isinstance(name, str) and PROJECT_RE.fullmatch(name)):
                     errors.append(f"{where}: {code}: {key} entry {name!r} must be lowercase "
                                   f"kebab-case, at most 64 chars (no paths, '..' or control characters)")
+                elif (base / name).is_symlink() or base.is_symlink():
+                    # a linked stack/skill dir would read (and bundle) content from outside the repo
+                    errors.append(f"{where}: {code}: {key[:-1]} '{name}' is reached through a symlink "
+                                  f"at {base / name if (base / name).is_symlink() else base}; "
+                                  f"refusing to follow it")
                 elif not (base / name).is_dir():
                     errors.append(f"{where}: {key[:-1]} '{name}' has no dir at {base / name}")
 
@@ -928,8 +936,9 @@ def _claim(p: Path, claimed: list) -> None:
     if os.path.lexists(m) and not (m.is_symlink() or m.is_file()):
         sys.exit(f"error: refusing to touch {m}: not a plain file")
     if os.path.lexists(p) and not marked:
-        sys.exit(f"error: refusing to delete {p}: it was not created by compose.py "
-                 f"(no {m.name} beside it); move or remove it and re-run")
+        sys.exit(f"error: refusing to delete {p}: there is no {m.name} beside it, so it cannot be "
+                 f"told from your own files (it may be the previous output kept by an interrupted "
+                 f"run); move or remove it and re-run")
     _remove(p)
     _unmark(p)                                # stale marker: a link is unlinked, never followed
     p.parent.mkdir(parents=True, exist_ok=True)   # the marker is a sibling; its dir may not exist yet
@@ -939,13 +948,30 @@ def _claim(p: Path, claimed: list) -> None:
 
 
 def _release(p: Path, strict: bool = True) -> None:
-    """Delete a dir we claimed, and its marker. Only ever called on a path _claim()ed first."""
-    _remove(p, strict)
+    """Delete a dir we claimed, and its marker. Only ever called on a path _claim()ed first.
+    strict=False swallows errors, but never drops the marker of a dir it failed to delete: the
+    marker is what lets the next run clear the debris instead of refusing it as a user's."""
     try:
+        _remove(p, strict=True)
         _unmark(p)
     except OSError:
         if strict:
             raise
+
+
+IDENTITY_FILES = {"SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md", "AGENTS.md"}   # render_agent()
+
+
+def _is_own_output(entry: Path) -> bool:
+    """A top-level entry the legacy target writes: agents.yaml, or a real role dir that holds
+    only the identity files (links and anything else are not ours)."""
+    if entry.is_symlink():
+        return False
+    if entry.name == "agents.yaml":
+        return entry.is_file()
+    return entry.is_dir() and all(
+        f in IDENTITY_FILES and (entry / f).is_file() and not (entry / f).is_symlink()
+        for f in os.listdir(entry))
 
 
 def vet_target(out_dir: Path, name, sub: str | None = None) -> Path:
@@ -966,7 +992,45 @@ def vet_target(out_dir: Path, name, sub: str | None = None) -> Path:
     root, resolved = out_dir.resolve(), target.resolve()
     if resolved == root or root not in resolved.parents:
         sys.exit(f"error: refusing to write: {target} resolves outside {out_dir}")
+    # A project name can equal some other dir that already sits under --out (e.g. `skills`).
+    # install_project() moves every top-level non-'_' entry of the project dir aside and deletes
+    # it, so only a dir that looks like compose output may be reused: every entry is a dotfile, a
+    # `_<target>` dir, the legacy target's agents.yaml, or a role dir holding only the identity
+    # files render_agent() writes. Ownership of the project dir is not otherwise recorded, hence
+    # this shape test.
+    if os.path.lexists(project):
+        for entry in sorted(os.listdir(project)):
+            if entry.startswith((".", "_")) or _is_own_output(project / entry):
+                continue
+            sys.exit(f"error: refusing to write: {project} already exists and does not look like "
+                     f"compose output (it holds {entry!r}); use another project name or --out")
     return target
+
+
+@contextlib.contextmanager
+def _swap_lock(project: Path):
+    """Exclusive, non-blocking lock on the project dir for the length of one swap. Two runs
+    swapping the same project would otherwise clear each other's .tmp/.old and die with a
+    traceback; now the second exits with a message. The kernel drops the lock if the holder dies
+    (SIGKILL included). The dir is opened O_NOFOLLOW, so a link swapped in after vet_target()
+    is refused here too. A filesystem that cannot lock (ENOLCK/EOPNOTSUPP...) runs unlocked,
+    as it did before this lock existed."""
+    try:
+        project.mkdir(parents=True, exist_ok=True)
+        fd = os.open(project, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
+        sys.exit(f"error: refusing to write: cannot open {project} as a plain dir "
+                 f"(a symlink after it was vetted?): {exc}")
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
+                sys.exit(f"error: another compose run is writing {project}; "
+                         f"wait for it to finish and re-run")
+        yield
+    finally:
+        os.close(fd)
 
 
 def _materialise(root: Path, files: dict[str, str], dirs=()) -> None:
@@ -987,44 +1051,60 @@ def _materialise(root: Path, files: dict[str, str], dirs=()) -> None:
 def install_tree(target: Path, files: dict[str, str], dirs=()) -> None:
     """Replace `target` with the rendered tree: build in <target>.tmp, rename the old tree to
     <target>.old, rename tmp into place, delete old. os.replace cannot replace a non-empty
-    dir, hence the two renames. Any failure restores the old tree and exits with an error."""
+    dir, hence the two renames. Any failure restores the old tree and exits with an error.
+    Held under the project dir's lock, so concurrent runs cannot clear each other's scratch."""
+    with _swap_lock(target.parent):
+        _install_tree(target, files, dirs)
+
+
+def _install_tree(target: Path, files: dict[str, str], dirs=()) -> None:
     tmp = target.with_name(target.name + ".tmp")
     old = target.with_name(target.name + ".old")
     claimed: list[Path] = []
+    committed = False                        # True once tmp is in place: old is only leftovers
     try:
         for leftover in (tmp, old):          # a crashed earlier run's own debris is ours to clear
             _claim(leftover, claimed)        # (anything unmarked is a user's: refused, untouched)
         tmp.mkdir(parents=True)
         _materialise(tmp, files, dirs)
         _recheck_not_link(target.parent, target)
-        if os.path.lexists(target):
-            os.rename(target, old)
         try:
+            if os.path.lexists(target):
+                os.rename(target, old)
             os.rename(tmp, target)
-        except OSError:
-            if os.path.lexists(old):
+        except BaseException:
+            # Whatever interrupted the swap (an OSError, Ctrl-C, SystemExit), put the previous tree
+            # back if it was moved aside and nothing took its place. If the restore itself fails,
+            # that OSError propagates and the previous tree stays in `old`, named by the handler.
+            if os.path.lexists(old) and not os.path.lexists(target):
                 os.rename(old, target)
             raise
+        committed = True
         _release(tmp, strict=False)          # tmp was renamed into place; this drops its marker
         _release(old, strict=False)
     except OSError as exc:
-        kept = _abort_swap(tmp, old, claimed)
+        kept = _abort_swap(tmp, old, claimed, committed)
         sys.exit(f"error: could not write {target}: {exc}"
                  + (f" (the previous tree is kept at {kept})" if kept else ""))
     except BaseException:
-        _abort_swap(tmp, old, claimed)
+        kept = _abort_swap(tmp, old, claimed, committed)
+        if kept:
+            print(f"error: interrupted while writing {target}: the previous tree is kept at {kept}",
+                  file=sys.stderr)
         raise
 
 
-def _abort_swap(tmp: Path, old: Path, claimed: list) -> Path | None:
+def _abort_swap(tmp: Path, old: Path, claimed: list, committed: bool = False) -> Path | None:
     """Failure cleanup. Releases only paths in `claimed` (so a refused _claim() of a user's dir
     deletes nothing). `tmp` is ours and is dropped. `old` is dropped only if it is gone or an
     empty dir; if it still holds anything it may be the only copy of the previous output, so it
     is kept, its marker removed (the next run then refuses it instead of clearing it), and its
-    path returned for the error message."""
+    path returned for the error message. Once `committed` the new tree is in place and `old` is
+    just the previous one being deleted: it is left alone, marker included, so the next run
+    clears whatever remains."""
     if tmp in claimed:
         _release(tmp, strict=False)
-    if old not in claimed:
+    if old not in claimed or committed:
         return None
     if os.path.lexists(old) and not (old.is_dir() and not old.is_symlink() and not os.listdir(old)):
         try:
@@ -1040,12 +1120,17 @@ def install_project(project_dir: Path, files: dict[str, str]) -> None:
     """Legacy (default target) writer: replace only this target's own output, i.e. every
     top-level entry of the project dir NOT starting with '_'. The _<target> dirs that the other
     targets write (and wire.sh symlinks) are never touched. New entries are built in
-    <project>.tmp first; old own-output is moved to <project>.old and put back on failure."""
+    <project>.tmp first; old own-output is moved to <project>.old and put back on failure.
+    Held under the project dir's lock, like install_tree."""
+    with _swap_lock(project_dir):
+        _install_project(project_dir, files)
+
+
+def _install_project(project_dir: Path, files: dict[str, str]) -> None:
     tmp = project_dir.with_name(project_dir.name + ".tmp")
     old = project_dir.with_name(project_dir.name + ".old")
-    moved_old: list[str] = []
-    moved_new: list[str] = []
     claimed: list[Path] = []
+    committed = False
     try:
         for leftover in (tmp, old):          # only compose.py's own marked debris is cleared
             _claim(leftover, claimed)
@@ -1054,30 +1139,38 @@ def install_project(project_dir: Path, files: dict[str, str]) -> None:
         old.mkdir()
         _recheck_not_link(project_dir)
         project_dir.mkdir(parents=True, exist_ok=True)
+        own = sorted(e for e in os.listdir(project_dir) if not e.startswith("_"))
+        new = sorted(os.listdir(tmp))
         try:
-            for entry in sorted(os.listdir(project_dir)):
-                if not entry.startswith("_"):
-                    os.rename(project_dir / entry, old / entry)
-                    moved_old.append(entry)
-            for entry in sorted(os.listdir(tmp)):
+            for entry in own:
+                os.rename(project_dir / entry, old / entry)
+            for entry in new:
                 os.rename(tmp / entry, project_dir / entry)
-                moved_new.append(entry)
-        except OSError:
-            for entry in moved_new:                  # undo: new entries out, old entries back
-                _remove(project_dir / entry, strict=False)
-            for entry in moved_old:
-                os.rename(old / entry, project_dir / entry)
+        except BaseException:
+            # Undo from what is on disk, not from bookkeeping an interrupt could outrun: a new
+            # entry no longer in tmp was moved in (out it goes); an old entry still in `old` and
+            # not back in the project dir is put back.
+            for entry in new:
+                if not os.path.lexists(tmp / entry):
+                    _remove(project_dir / entry, strict=False)
+            for entry in own:
+                if os.path.lexists(old / entry) and not os.path.lexists(project_dir / entry):
+                    os.rename(old / entry, project_dir / entry)
             raise
+        committed = True
         _release(tmp, strict=False)
         _release(old, strict=False)
     except OSError as exc:
         # old is emptied by a clean rollback; if the rollback itself failed it still holds the
         # previous own-output, which _abort_swap keeps (and names here) instead of deleting.
-        kept = _abort_swap(tmp, old, claimed)
+        kept = _abort_swap(tmp, old, claimed, committed)
         sys.exit(f"error: could not write {project_dir}: {exc}"
                  + (f" (the previous output is kept at {kept})" if kept else ""))
     except BaseException:
-        _abort_swap(tmp, old, claimed)
+        kept = _abort_swap(tmp, old, claimed, committed)
+        if kept:
+            print(f"error: interrupted while writing {project_dir}: the previous output is kept "
+                  f"at {kept}", file=sys.stderr)
         raise
 
 

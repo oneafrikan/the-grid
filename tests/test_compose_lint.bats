@@ -566,6 +566,64 @@ print(compose.render_stack_overlay(["evil"]))'
   rm -rf "$sb"
 }
 
+# A stacks:/skills: value that is not a list is reported (with the stable code), never iterated:
+# a bare string would otherwise be walked character by character, a number would crash.
+@test "H-08: a non-list stacks:/skills: value is refused with a message, not iterated or crashed on" {
+  local key bad out; out=$(mktemp -d)
+  for key in stacks skills; do
+    for bad in lamp 5 '{a: b}' 'true'; do
+      cfg_with_list "$key" "$bad"
+      run "$PY" "$COMPOSE" "$CFG" --check --out "$out"
+      echo "$key=$bad: $output"
+      [ "$status" -ne 0 ]
+      [[ "$output" != *"Traceback"* ]]
+      [[ "$output" == *"\`$key\` must be a list of names"* ]]
+      if [ "$key" = stacks ]; then [[ "$output" == *"E_STACK_NAME"* ]]; else [[ "$output" == *"E_SKILL_NAME"* ]]; fi
+      [[ "$output" != *"has no dir at"* ]]
+      rm -rf "$(dirname "$CFG")"
+    done
+  done
+  rm -rf "$out"
+}
+
+# A stack or skill dir that is (or sits under) a symlink would pull content from outside the repo.
+@test "H-08: a symlinked stack dir, skills dir, or stacks/ root is refused, not followed" {
+  local sb; sb=$(mktemp -d)
+  mkdir -p "$sb/real/lamp" "$sb/stacks" "$sb/skills/ok"
+  printf 'name: lamp\n' > "$sb/real/lamp/stack.yaml"
+  ln -s "$sb/real/lamp" "$sb/stacks/lnk"             # one linked stack dir
+  mkdir "$sb/stacks/plain"
+  ln -s "$sb/real" "$sb/stacks-root"                 # a linked stacks/ root
+  ln -s "$sb/skills/ok" "$sb/skills/lnk"             # one linked skill dir
+  run env SB="$sb" REPO_ROOT="$REPO_ROOT" "$PY" - <<'PYEOF'
+import os, sys, tempfile
+from pathlib import Path
+sys.path.insert(0, os.environ["REPO_ROOT"] + "/agent-factory")
+import compose
+sb = Path(os.environ["SB"])
+def verdict(key, base, name):
+    compose.STACKS_DIR, compose.SKILLS_DIR = (base, compose.SKILLS_DIR) if key == "stacks" else (compose.STACKS_DIR, base)
+    cfg = Path(tempfile.mkdtemp()) / "c.yaml"
+    cfg.write_text(f"project: zz\nslug: zz\nagents:\n  - role: morpheus\n    {key}: [{name}]\n")
+    try:
+        compose.load_config(cfg)
+    except ValueError as e:
+        return str(e)
+    return "ACCEPTED"
+real_stacks, real_skills = compose.STACKS_DIR, compose.SKILLS_DIR
+(sb / "stacks" / "plain").joinpath("stack.yaml").write_text("name: plain\n")
+assert "symlink" in verdict("stacks", sb / "stacks", "lnk"), "linked stack dir accepted"
+assert "symlink" in verdict("skills", sb / "skills", "lnk"), "linked skill dir accepted"
+assert "symlink" in verdict("stacks", sb / "stacks-root", "lamp"), "linked stacks/ root accepted"
+assert verdict("stacks", sb / "stacks", "plain") == "ACCEPTED", "a plain stack dir is refused"
+assert verdict("skills", sb / "skills", "ok") == "ACCEPTED", "a plain skill dir is refused"
+print("ok")
+PYEOF
+  echo "$output"
+  [ "$status" -eq 0 ]
+  rm -rf "$sb"
+}
+
 # tank: the Hard rules list is imperatives only; the instinct definition lives in Scope (R24.qa.F13).
 @test "tank AGENTS.md: the Hard rules list holds no definition, and lint-roles still passes" {
   local f="$REPO_ROOT/agent-factory/roles/tank/AGENTS.md" hard

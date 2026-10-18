@@ -1100,3 +1100,287 @@ print("kept")'
   [ "$status" -eq 0 ]
   [[ "$output" == *"kept"* ]]
 }
+
+# ============================== H-08: interrupted swaps, concurrency, project-name collisions ====
+# Author's own checks, not independent verification.
+
+# Interrupting a swap (Ctrl-C, SystemExit, an OSError) at EVERY rename/rmtree of both writers must
+# end in one of three named states: rolled back (previous content at its original path), committed
+# (new content in place; leftover .old still marked so the next run clears it), or kept (previous
+# content in <name>.old AND that path named in what the caller sees). Never a missing target with
+# the previous tree silently in .old, never a half-swapped project dir, never a leaked tmp/marker.
+@test "H-08: an interruption at each rename/rmtree of both writers rolls back, commits, or names the kept path" {
+  run env REPO_ROOT="$REPO_ROOT" TMP="$TMP" "$PY" - <<'PYEOF'
+import contextlib, io, os, shutil, sys
+from pathlib import Path
+sys.path.insert(0, os.environ["REPO_ROOT"] + "/agent-factory")
+import compose
+
+real_rename, real_rmtree = os.rename, shutil.rmtree
+PREV = {"prev.txt": "P", "prev2.txt": "P2"}
+
+def build(kind, tag):
+    out = Path(os.environ["TMP"]) / tag / "out"
+    files = {"new.txt": "n", "d/n2.txt": "n2"}
+    if kind == "tree":
+        target = out / "fx" / "_claude-code"
+        target.mkdir(parents=True)
+        return target, (lambda: compose.install_tree(target, files))
+    proj = out / "fx"
+    (proj / "_keep").mkdir(parents=True)          # another target's dir: never touched
+    (proj / "_keep" / "k.txt").write_text("K")
+    return proj, (lambda: compose.install_project(proj, files))
+
+def run_case(kind, exc, k):
+    tag = f"{kind}-{exc.__name__}-{k}"
+    holder, call = build(kind, tag)
+    for f, c in PREV.items():
+        (holder / f).write_text(c)
+    n, fired = [0], [False]
+    def hit():
+        n[0] += 1
+        if n[0] == k:
+            fired[0] = True
+            raise (exc(5, "injected") if exc is OSError else exc())
+    def rename(s, d, *a, **kw):
+        hit(); return real_rename(s, d, *a, **kw)
+    def rmtree(p, *a, **kw):
+        hit(); return real_rmtree(p, *a, **kw)
+    os.rename, shutil.rmtree = rename, rmtree
+    err, raised = io.StringIO(), None
+    try:
+        with contextlib.redirect_stderr(err):
+            call()
+    except BaseException as e:
+        raised = e
+    finally:
+        os.rename, shutil.rmtree = real_rename, real_rmtree
+    if not fired[0]:
+        return False
+    msg = err.getvalue() + (str(raised.code) if isinstance(raised, SystemExit) else str(raised))
+    if exc is KeyboardInterrupt:
+        assert isinstance(raised, KeyboardInterrupt), (tag, raised)
+    elif exc is SystemExit:
+        assert isinstance(raised, SystemExit), (tag, raised)
+    elif raised is not None:
+        assert isinstance(raised, SystemExit) and "could not write" in msg, (tag, raised)
+    old = Path(str(holder) + ".old")
+    tmp = Path(str(holder) + ".tmp")
+    here = lambda rel: (holder / rel).is_file()
+    prev_ok = all(here(f) and (holder / f).read_text() == c for f, c in PREV.items())
+    new_in = here("new.txt") or (holder / "d").exists()
+    rolled_back = prev_ok and not new_in
+    committed = (not any(here(f) for f in PREV)) and here("new.txt") and here("d/n2.txt")
+    # kept: ALL the previous content sits in old (none half-way in the project dir), and it is named
+    kept = (old.is_dir() and all((old / f).is_file() for f in PREV)
+            and not any(here(f) for f in PREV) and not new_in and str(old) in msg)
+    ctx = (tag, "rolled_back", rolled_back, "committed", committed, "kept", kept, msg,
+           sorted(p.name for p in holder.parent.iterdir()), sorted(os.listdir(holder)))
+    assert rolled_back or committed or kept, ctx
+    if kind == "project":
+        assert (holder / "_keep" / "k.txt").read_text() == "K", ctx
+    # the failed run's own scratch is gone, and its tmp marker with it; after commit a tmp that
+    # could not be deleted may remain, but only still marked (so the next run clears it)
+    tmp_marked = Path(str(tmp) + ".compose-owned").exists()
+    assert (not tmp.exists() and not tmp_marked) or (committed and tmp_marked), ctx
+    if not kept:
+        # recoverable: leftover old is either gone or still marked (the next run clears it)
+        assert (not old.exists()) or Path(str(old) + ".compose-owned").exists(), ctx
+        call()
+        assert here("new.txt") and here("d/n2.txt") and not any(here(f) for f in PREV), ctx
+        assert not old.exists() and not Path(str(old) + ".compose-owned").exists(), ctx
+        assert not tmp.exists() and not Path(str(tmp) + ".compose-owned").exists(), ctx
+    else:
+        assert not Path(str(old) + ".compose-owned").exists(), ctx   # the next claim refuses it, never clears it
+    return True
+
+total = 0
+for kind in ("tree", "project"):
+    for exc in (OSError, KeyboardInterrupt, SystemExit):
+        k = 1
+        while run_case(kind, exc, k):
+            k += 1; total += 1
+print("injection points covered:", total)
+assert total >= 18, total
+PYEOF
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+# _release(strict=False) must not drop the ownership marker of a dir it failed to delete: the
+# marker is what lets the next run clear the debris (without it the dir is refused as a user's).
+@test "H-08: _release keeps the marker when the dir could not be deleted (strict=False)" {
+  run env REPO_ROOT="$REPO_ROOT" TMP="$TMP" "$PY" - <<'PYEOF'
+import os, shutil, sys
+from pathlib import Path
+sys.path.insert(0, os.environ["REPO_ROOT"] + "/agent-factory")
+import compose
+d = Path(os.environ["TMP"]) / "x.old"
+compose._claim(d, [])
+d.mkdir(); (d / "f").write_text("x")
+real = shutil.rmtree
+def boom(*a, **k): raise OSError(13, "injected")
+shutil.rmtree = boom
+try:
+    compose._release(d, strict=False)            # swallowed
+    try:
+        compose._release(d, strict=True)
+    except OSError:
+        pass
+    else:
+        raise SystemExit("strict release swallowed the failure")
+finally:
+    shutil.rmtree = real
+assert d.is_dir() and Path(str(d) + ".compose-owned").is_file(), "marker dropped with the dir still there"
+compose._release(d)                              # works now: dir and marker both go
+assert not d.exists() and not Path(str(d) + ".compose-owned").exists()
+print("ok")
+PYEOF
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+# A failed swap leaves neither the tmp dir nor its marker (kills "tmp never released on abort"),
+# and a user's EMPTY dir at the .old name is as untouchable as a full one (kills "release an
+# unclaimed old"), including when another name is what made the run abort.
+@test "H-08: failed swap leaves no tmp or marker; an empty user dir at .old survives; wording is accurate" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out"
+  # (a) empty user dir at .old, nothing at .tmp: refused, dir survives, no tmp/marker leaked
+  mkdir -p "$out/fx/_claude-code.old" "$out/fx.old"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$out"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"refusing to delete"* ]]
+  [[ "$output" == *"interrupted run"* ]]
+  [[ "$output" != *"not created by compose.py"* ]]
+  [[ "$output" != *"Traceback"* ]]
+  [ -d "$out/fx/_claude-code.old" ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+  [ "$status" -ne 0 ]
+  [ -d "$out/fx.old" ]
+  [ -z "$(find "$out" -name '*.tmp' -o -name '*compose-owned*')" ]
+  # (b) user dirs (one empty) at BOTH names: .tmp is refused first, .old was never claimed
+  rm -rf "$out"; mkdir -p "$out/fx/_claude-code.tmp" "$out/fx/_claude-code.old"
+  printf 'mine\n' > "$out/fx/_claude-code.tmp/canary.txt"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$out"
+  [ "$status" -ne 0 ]
+  [ "$(cat "$out/fx/_claude-code.tmp/canary.txt")" = mine ]
+  [ -d "$out/fx/_claude-code.old" ]
+}
+
+# ---- concurrency: the writers take a lock on the project dir; the loser exits with a message ----
+@test "H-08: a compose run that finds the project dir locked exits non-zero with a message and no traceback" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out" holder i st1 st2 o1 o2
+  mkdir -p "$out/fx"
+  # stand in for a concurrent run: hold the lock the writers take on the project dir
+  "$PY" -c 'import fcntl, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)
+fcntl.flock(fd, fcntl.LOCK_EX)
+open(sys.argv[2], "w").close()
+time.sleep(30)' "$out/fx" "$TMP/locked" &
+  holder=$!
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    [ -e "$TMP/locked" ] && break; sleep 0.25
+  done
+  [ -e "$TMP/locked" ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$out"
+  st1=$status; o1=$output
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+  st2=$status; o2=$output
+  kill "$holder"; wait "$holder" 2>/dev/null || true
+  echo "$o1"; echo "$o2"
+  [ "$st1" -ne 0 ]
+  [ "$st2" -ne 0 ]
+  [[ "$o1" == *"another compose run"* ]]
+  [[ "$o2" == *"another compose run"* ]]
+  [[ "$o1$o2" != *"Traceback"* ]]
+  [ ! -e "$out/fx/_claude-code" ]
+  # lock released: the same command now succeeds
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$out"
+  [ "$status" -eq 0 ]
+}
+
+@test "H-08: parallel compose runs on one output dir: no traceback, at least one wins, tree intact, no debris" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out" i won=0 pids="" pid
+  mkdir -p "$out"
+  for i in 1 2 3 4 5 6; do
+    "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$out" > "$TMP/par$i.log" 2>&1 &
+    pids="$pids $!"
+  done
+  i=0
+  for pid in $pids; do
+    i=$((i + 1))
+    if wait "$pid"; then won=$((won + 1)); fi
+    cat "$TMP/par$i.log"
+    ! grep -q Traceback "$TMP/par$i.log"
+  done
+  [ "$won" -ge 1 ]
+  "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$TMP/ref" > /dev/null
+  diff -r "$TMP/ref/fx/_claude-code" "$out/fx/_claude-code"
+  [ -z "$(find "$out" -name '*.tmp' -o -name '*.old' -o -name '*compose-owned*')" ]
+}
+
+# ---- a project name that collides with an existing non-compose dir under --out ----
+@test "H-08: a project named after an existing non-compose dir under --out is refused, every writer" {
+  gemini_env
+  local out="$TMP/sb/deep/out" cfg t
+  mkdir -p "$out/skills/mine" "$out/skills/_tpl"
+  printf 'precious\n' > "$out/skills/mine/SKILL.md"
+  printf 'precious\n' > "$out/skills/top.txt"
+  sed 's/^project: fx$/project: skills/; s/^slug: fx$/slug: skills/' \
+    "$REPO_ROOT/tests/fixtures/compose/fixture.yaml" > "$TMP/skills.yaml"
+  cfg="$TMP/skills.yaml"
+  grep -q '^project: skills$' "$cfg"
+  for t in default claude-code portable paperclip codex; do
+    if [ "$t" = default ]; then
+      run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+    else
+      run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$out"
+    fi
+    echo "$t: $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"refusing to write"* ]]
+    [[ "$output" != *"Traceback"* ]]
+    [ "$(cat "$out/skills/mine/SKILL.md")" = precious ]
+    [ "$(cat "$out/skills/top.txt")" = precious ]
+    [ ! -e "$out/skills/_claude-code" ]
+  done
+  [ -z "$(find "$out" -name '*.tmp' -o -name '*.old' -o -name '*compose-owned*')" ]
+}
+
+@test "H-08: re-running over a real compose output dir (legacy, per-target, dotfile debris) is still accepted" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+  [ "$status" -eq 0 ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$out"
+  [ "$status" -eq 0 ]
+  : > "$out/fx/.DS_Store"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$out"
+  [ "$status" -eq 0 ]
+}
+
+# Shape-test variants: a role-looking dir with a stray file, and a linked entry, are not compose output.
+@test "H-08: a project dir holding a role dir with a foreign file, or a linked entry, is refused untouched" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" out="$TMP/sb/deep/out" v
+  for v in stray link; do
+    rm -rf "$out"; mkdir -p "$out/fx/some-role" "$TMP/sb/deep/elsewhere"
+    printf 'x\n' > "$out/fx/some-role/SOUL.md"
+    printf 'agents: []\n' > "$out/fx/agents.yaml"
+    if [ "$v" = stray ]; then printf 'mine\n' > "$out/fx/some-role/notes.txt"
+    else ln -s "$TMP/sb/deep/elsewhere" "$out/fx/linked-role"; fi
+    run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --out "$out"
+    echo "$v: $output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"does not look like compose output"* ]]
+    [ -f "$out/fx/some-role/SOUL.md" ]
+    [ ! -e "$out/fx.old" ]
+  done
+}
