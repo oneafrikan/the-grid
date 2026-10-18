@@ -199,7 +199,10 @@ it is a heuristic. It depends on what a model chooses to attempt and on a `strea
 shape that has not been verified against the real CLI (it looks for one write-capable
 `tool_use` block on the exact path, parsed with `python3`), so a clean line is not a
 guarantee and a bad one can be noise. Read it yourself. The real backstop is the worker's own
-post-run write confinement (H-02): it is fail-closed and commits only the handoff files.
+post-run detection (H-02, see Confinement below): it is fail-closed (it aborts without
+committing if a watched path changed or an unexpected file appears) and commits only the
+handoff files. It never reverts anything, and it cannot see writes outside the directories
+and files it watches.
 
 It also reports, without failing: the hook's manifest state (baseline, `machines/<host>.txt`
 and `machines/<host>.local.txt`), a symlinked watched dotfile (`~/.gitconfig`, `~/.zshrc`,

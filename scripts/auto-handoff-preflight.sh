@@ -27,7 +27,7 @@
 #                    --accept-env-risk. The answer rests on the SessionEnd hook (the event
 #                    auto-handoff uses): if it does not fire within GRID_PREFLIGHT_HOOK_WAIT
 #                    seconds the result is INCONCLUSIVE = FAIL.
-#   wp016-parity    the real claude accepts `--permission-mode default --setting-sources user
+#   wp016-parity     the real claude accepts `--permission-mode default --setting-sources user
 #                    --strict-mcp-config` (named in --help, and one tiny capped call works).
 #   env-i-auth       the worker's minimal invocation authenticates under `env -i`. If it
 #                    fails while the plain run works, the remedy is
@@ -38,8 +38,10 @@
 #                    a `Bash(ls:*)` allow with a `>` redirect. A heuristic over a stream-json
 #                    format that has not been verified against the real CLI, so a clean line is
 #                    not a guarantee and a bad one may be noise: read it yourself. The real
-#                    backstop is the H-02 worker's post-run write confinement (fail-closed,
-#                    commits only the handoff files).
+#                    backstop is the H-02 worker's post-run detection (fail-closed: it aborts
+#                    without committing if a watched path changed or an unexpected file
+#                    appears, and it commits only the handoff files; it never reverts, and it
+#                    cannot see writes outside the directories and files it watches).
 # Also reported, never failing: the manifest state of the hook, symlinked watched dotfiles
 # (H-02 VS1), a writable ~/.bash_aliases (H-02 VS2), and the user's permission defaults.
 #
@@ -280,15 +282,16 @@ EOF
 # format nobody has verified against the real CLI, so a clean result is not a guarantee and a
 # bad one may be noise. It prints what it observed and NEVER counts toward the verdict, the
 # exit code or --enable (everything below reports with advise(), not fail()). The real
-# backstop is the H-02 worker's own post-run write confinement: fail-closed, it commits only
-# the handoff files.
+# backstop is the H-02 worker's own post-run detection: fail-closed (it aborts without
+# committing if a watched path changed or an unexpected file appears) and it commits only the
+# handoff files; it never reverts, and it cannot see writes outside what it watches.
 # Probe 1 is the operator's command (OPERATOR-TASKS B1) with the same allow/deny shape the
 # worker uses. Probe 2 asks about the .git deny and whether a `Bash(ls:*)` allow accepts a
 # `>` redirect, plus a file the rules DO allow (ok.txt) as a positive control. An absent
 # denied file only means something if the model tried, so attempted() looks for that.
 check_b1() {
   local n=b1-rule-form d d2 problems=()
-  info "b1-rule-form is ADVISORY: a heuristic over unverified stream-json output, it never changes the verdict, the exit code or --enable; read this yourself. The real backstop is the H-02 worker's post-run write confinement (fail-closed, commits only the handoff files)."
+  info "b1-rule-form is ADVISORY: a heuristic over unverified stream-json output, it never changes the verdict, the exit code or --enable; read this yourself. The real backstop is the H-02 worker's post-run detection (fail-closed: it aborts without committing if a watched path changed or an unexpected file appears, and it commits only the handoff files; it never reverts, and it cannot see writes outside the directories and files it watches)."
   have_claude || { advise $n "not run: claude not found ($CLAUDE_NAME)"; return; }
   command -v git >/dev/null 2>&1 || { advise $n "not run: git not found (the probes need a scratch repo)"; return; }
   d="$(scratch b1a)" && d2="$(scratch b1b)" || { advise $n "not run: cannot create a scratch dir"; return; }
