@@ -83,9 +83,49 @@ TITLE_RE = re.compile(r"^# \S")
 HEADING_RE = re.compile(r"^#{2,3} \S")                    # ## and ### only
 PATH_LINE_RE = re.compile(r'^  - "([^"]+)"$')             # one frontmatter glob
 PACK_KEYS = ("summary", "tier", "adapted_from")           # the only pack.yaml keys
+# Every BEGIN/END spelling the managed block has ever carried lives in ONE data file that
+# scripts/lib/harness.sh (wire's "is there a block to remove" grep) reads as well, so a
+# reword is a one-line edit that neither side can miss. Format: `BEGIN <line>` / `END <line>`,
+# `#` comment lines; the FIRST of each kind is the current spelling (written by emit), the
+# rest are retired spellings that are still recognised (and removed) in an old block.
+MARKERS_FILE = os.path.join(HERE, "lib", "rules-markers.txt")
+
+
+def load_marker_spellings(path=MARKERS_FILE):
+    """Return (begin_spellings, end_spellings) from `path`; exit 2 with one line if unusable.
+
+    Fail loud: a silently empty list would make every block "user text" and stop removal.
+    """
+    def die(why):
+        sys.stderr.write("rules.py: %s: %s\n" % (path, why))
+        sys.exit(2)
+
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.read().split("\n")
+    except (OSError, UnicodeDecodeError) as exc:
+        die("cannot read the marker spellings (%s)" % (getattr(exc, "strerror", None) or exc.__class__.__name__))
+    found = {"BEGIN": [], "END": []}
+    for no, line in enumerate(lines, start=1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        kind, _, text = line.partition(" ")
+        # An HTML comment of printable ASCII: nothing else is a marker shape wire can grep for.
+        if kind not in found or not re.match(r"^<!-- [ -~]* -->$", text) or text in found[kind]:
+            die("line %d is not a new `BEGIN <!-- ... -->` or `END <!-- ... -->` line" % no)
+        found[kind].append(text)
+    if not found["BEGIN"] or not found["END"]:
+        die("needs at least one BEGIN and one END spelling")
+    return tuple(found["BEGIN"]), tuple(found["END"])
+
+
+BLOCK_BEGIN_HISTORY, BLOCK_END_HISTORY = load_marker_spellings()
+
 # Marker text that must never appear in a rule file: the managed-block BEGIN/END lines
 # (line-start test, so prose such as "the-grid rules" is fine) and the .mdc marker token.
-MARKER_PREFIXES = ("<!-- BEGIN the-grid rules", "<!-- END the-grid rules")
+# Retired spellings count too: a rule file must not imitate a line an old block was closed with.
+MARKER_PREFIXES = (("<!-- BEGIN the-grid rules", "<!-- END the-grid rules")
+                   + BLOCK_BEGIN_HISTORY + BLOCK_END_HISTORY)
 MARKER_TOKEN = "the-grid:rules"
 # Lint findings that stop a pack from being delivered by emit (rule-file checks only:
 # pack metadata, Sources and notices findings do not change what a rule file says).
@@ -108,34 +148,80 @@ def is_marker_line(line):
     return line.lstrip().startswith(MARKER_PREFIXES) or MARKER_TOKEN in line
 
 
+# Letters and symbols that render as a blank but are NOT whitespace, so NFKC and \s leave them
+# alone: the Hangul fillers (NFKC folds U+3164 and U+FFA0 to U+1160) and the braille blank.
+BLANK_LOOKALIKES = frozenset(chr(cp) for cp in (0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800))
+
+
 def is_invisible(ch):
-    """True for characters that render as nothing (or reorder text): category Cf (zero-width,
-    bidi controls, BOM, soft hyphen), line/paragraph separators, tag characters and variation
-    selectors. None of them has a place in a rule file."""
+    """True for characters that render as nothing (or reorder text, or look like a blank):
+    category Cf (zero-width, bidi controls, BOM, soft hyphen), line/paragraph separators, tag
+    characters, variation selectors, the blank look-alikes above and every combining mark
+    (Mn/Me: grapheme joiner, Khmer inherent vowels, Mongolian selectors, a stray accent).
+    None of them has a place in a rule file."""
     cp = ord(ch)
-    return (unicodedata.category(ch) == "Cf" or cp in (0x2028, 0x2029)
+    return (unicodedata.category(ch) in ("Cf", "Mn", "Me") or cp in (0x2028, 0x2029)
+            or ch in BLANK_LOOKALIKES
             or 0xE0000 <= cp <= 0xE007F or 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF)
 
 
+def is_combining_mark(ch):
+    """True for a combining mark (Mn/Me) other than a variation selector, which is reported as
+    an invisible character. A mark is refused because it either hides (grapheme joiner) or
+    decorates a letter so it escapes the denylist; precomposed letters are the way to write
+    accents."""
+    cp = ord(ch)
+    return (unicodedata.category(ch) in ("Mn", "Me")
+            and not (0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF))
+
+
+def is_control(ch):
+    """True for a control character (category Cc: ESC, NUL, DEL, VT, FF, NEL...). A tab is
+    layout and stays legal; a newline never reaches a single line."""
+    return unicodedata.category(ch) == "Cc" and ch != "\t"
+
+
 def normalize_for_match(line):
-    """Fold a line for denylist matching: NFKC, invisible characters dropped, whitespace
-    runs (tab, NBSP, double space) collapsed to one space, so spacing tricks cannot dodge a
-    pattern. Mixed-script homoglyphs are NFKC-stable and are caught by mixed_script_words."""
-    text = unicodedata.normalize("NFKC", line)
-    text = "".join(ch for ch in text if not is_invisible(ch))
-    return re.sub(r"\s+", " ", text)
+    """Fold a line for denylist matching: NFKC; blank look-alikes become a space (they render
+    as a blank, so dropping them would glue two words together); other invisible characters
+    and non-whitespace control characters are dropped; whitespace runs (tab, NBSP, VT,
+    double space) collapse to one space. So spacing tricks cannot dodge a pattern.
+    Mixed-script homoglyphs are NFKC-stable and are caught by mixed_script_words."""
+    out = []
+    for ch in unicodedata.normalize("NFKC", line):
+        if ch in BLANK_LOOKALIKES:
+            out.append(" ")
+        elif is_invisible(ch) or (is_control(ch) and not ch.isspace()):
+            continue
+        else:
+            out.append(ch)
+    return re.sub(r"\s+", " ", "".join(out))
+
+
+def is_lookalike_letter(ch):
+    """True for a non-ASCII letter that could pass for an ASCII one inside an ASCII word.
+
+    The rule is deliberately broad (no list of scripts or code points to keep current): ANY
+    non-ASCII letter is flagged, except an accented Latin letter, i.e. a Latin letter that
+    NFD-decomposes to an ASCII base plus marks (e-acute, n-tilde). So sharp s, o-slash,
+    l-stroke, the micro sign and CJK next to ASCII letters are flagged too; non-English text
+    belongs in a code span or outside rule text."""
+    if not ch.isalpha() or ord(ch) < 128:
+        return False
+    if unicodedata.name(ch, "").startswith("LATIN"):
+        base = unicodedata.normalize("NFD", ch)
+        return not (len(base) > 1 and base[0].isascii() and base[0].isalpha())
+    return True
 
 
 def mixed_script_words(line):
-    """Words that mix ASCII letters with Cyrillic or Greek letters (look-alike spoofing)."""
+    """Words that mix ASCII letters with a non-ASCII letter other than an accented Latin one."""
     out = []
     for word in re.findall(r"\w+", line):
         if not any("a" <= c.lower() <= "z" for c in word):
             continue
-        for c in word:
-            if c.isalpha() and ord(c) > 127 and unicodedata.name(c, "").startswith(("CYRILLIC", "GREEK")):
-                out.append(word)
-                break
+        if any(is_lookalike_letter(c) for c in word):
+            out.append(word)
     return out
 
 
@@ -524,16 +610,26 @@ def lint_rule_file(rel, path, denylist, f):
 
     # Hidden text, on every line of the file (frontmatter and fences included): an HTML
     # comment hides text from a rendered view, an invisible character hides it from any view,
-    # and a Cyrillic/Greek look-alike inside an ASCII word dodges the denylist.
+    # and a look-alike letter of another script inside an ASCII word dodges the denylist.
     for i, line in enumerate(lines, start=1):
         if "<!--" in line or "-->" in line:
             f.add("E_STYLE", rel, "line %d: HTML comment markers are not allowed" % i)
         scan = line[1:] if (bom and i == 1) else line     # the BOM has its own finding
-        hidden = sorted(set("U+%04X" % ord(ch) for ch in scan if is_invisible(ch)))
+        hidden = sorted(set("U+%04X" % ord(ch) for ch in scan
+                            if is_invisible(ch) and not is_combining_mark(ch)))
         if hidden:
             f.add("E_STYLE", rel, "line %d: invisible character %s" % (i, ", ".join(hidden)))
+        marks = sorted(set("U+%04X" % ord(ch) for ch in scan if is_combining_mark(ch)))
+        if marks:
+            f.add("E_STYLE", rel, "line %d: combining mark %s (use the precomposed letter)"
+                  % (i, ", ".join(marks)))
+        # Control characters (ESC sequences can conceal text in a terminal view) are refused
+        # outright; a tab is layout and stays legal.
+        ctl = sorted(set("U+%04X" % ord(ch) for ch in scan if is_control(ch)))
+        if ctl:
+            f.add("E_STYLE", rel, "line %d: control character %s" % (i, ", ".join(ctl)))
         for word in mixed_script_words(line):
-            f.add("E_STYLE", rel, "line %d: word %r mixes ASCII with Cyrillic or Greek letters" % (i, word))
+            f.add("E_STYLE", rel, "line %d: word %r mixes ASCII letters with a non-ASCII letter (only accented Latin letters are allowed)" % (i, word))
 
     # Marker text anywhere (fenced or not) would corrupt the managed block or the .mdc
     # generated-file detection once delivered, so it is refused at the source.
@@ -956,17 +1052,16 @@ def plan_cursor(root, packs, out):
 # constant, not a flag) and an over-cap selection is refused rather than truncated,
 # because silent truncation would drop rules without notice.
 BLOCK_CAP = 12288
-BLOCK_BEGIN = "<!-- BEGIN the-grid rules (generated by scripts/rules.py; edits inside are overwritten) -->"
-BLOCK_END = "<!-- END the-grid rules -->"
+# The spellings come from scripts/lib/rules-markers.txt (loaded at the top): the first of each
+# is the one emit writes.
+BLOCK_BEGIN = BLOCK_BEGIN_HISTORY[0]
+BLOCK_END = BLOCK_END_HISTORY[0]
 BLOCK_INTRO = ("## Coding rules (the-grid)\n\n"
                "Apply each rule only when working on files matching its globs.\n")
 # Marker lines are matched as COMPLETE lines (optional trailing CR), never by prefix: a user
 # note that merely starts like a marker is user text, not ours. Every BEGIN/END spelling
-# ever shipped is listed so a future rewording keeps migrating old blocks (the commit
-# history shows only the current spelling has shipped). Bytes, because the file is handled
-# as raw bytes.
-BLOCK_BEGIN_HISTORY = (BLOCK_BEGIN,)
-BLOCK_END_HISTORY = (BLOCK_END,)
+# ever shipped is listed in rules-markers.txt (BLOCK_*_HISTORY) so a future rewording keeps
+# migrating old blocks. Bytes, because the file is handled as raw bytes.
 
 
 def _marker_re(spellings):
@@ -1056,8 +1151,17 @@ def plan_block(root, packs, out):
         # the markers, so the exact END beside it is quoted text as well, not a damaged block.
         ends = []
     if len(begins) != len(ends) or len(begins) > 1:
+        # Say which half is missing: a lone END usually means the BEGIN line was edited or
+        # deleted by hand (wire.sh keys its warning on the leading "expected exactly one BEGIN").
+        if not begins:
+            hint = "found an END line but no BEGIN line (was the BEGIN line edited or deleted?): " \
+                   "restore it or delete the stray END line by hand"
+        elif not ends:
+            hint = "found a BEGIN line but no END line: restore the END line or delete the block by hand"
+        else:
+            hint = "fix the markers by hand"
         raise Refusal("%s: expected exactly one BEGIN and one END marker, BEGIN first "
-                      "(found %d BEGIN, %d END); fix the markers by hand" % (out, len(begins), len(ends)))
+                      "(found %d BEGIN, %d END); %s" % (out, len(begins), len(ends), hint))
     block = render_block(root, packs)
     # The block takes the file's line ending, so a CRLF file stays uniformly CRLF and
     # --check compares like with like after an editor re-save.
@@ -1113,7 +1217,16 @@ def validate_packs(root, packs):
     """
     base = rules_dir(root)
     deny_path = os.path.join(base, "denylist.txt")
-    denylist = load_denylist(deny_path)[0] if os.path.isfile(deny_path) else []
+    denylist = []
+    if any(NAME_RE.match(p) and os.path.isdir(os.path.join(base, p)) for p in packs):
+        # Fail closed, as lint does: with a pack to deliver, a missing, empty or partly broken
+        # denylist must stop delivery, not quietly turn the opinion check off. (Removal, the
+        # empty selection, delivers nothing and needs no denylist.)
+        denylist, deny_errs = load_denylist(deny_path)
+        problems = [msg for _, msg in deny_errs] or ([] if denylist else ["denylist has no patterns"])
+        if problems:
+            raise Refusal("rules/denylist.txt cannot be used (%s); nothing delivered (run `rules.py lint`)"
+                          % "; ".join(problems))
     good, bad = [], {}
     for pack in packs:
         pdir = os.path.join(base, pack)
@@ -1141,7 +1254,7 @@ def cmd_emit(root, harness, packs_arg, out, check):
     # otherwise strip the rules that are already delivered).
     try:
         packs, bad = validate_packs(root, packs)
-    except (OSError, UnicodeDecodeError) as exc:
+    except (Refusal, OSError, UnicodeDecodeError) as exc:
         sys.stderr.write("rules.py emit: %s\n" % exc)
         return 2
     for pack in sorted(bad):
