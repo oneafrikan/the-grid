@@ -146,7 +146,15 @@ _SM_KEYS_SHARED=0
 # secret_match_long reports scan-budget (a finding, like oversize-line: a scan that cannot
 # finish must block, not pass). Not started (SECRET_DEADLINE_US empty) means no limit, which
 # is what the other callers (the auto-handoff worker's file scans) get. One regex call is not
-# interruptible, so a scan can overshoot by the cost of one table row on one piece.
+# interruptible, so a scan can overshoot by the work between two clock reads.
+# The clock is read once per 32 units of work, not on every table row: a call of _secret_match
+# is _SM_ROWS units (one per row) and each `key =` candidate is one more. Reading it per row
+# cost about 65% more per candidate line, and the default 3 s budget then refused benign diffs
+# that the unbudgeted scan passed. The countdown is global and runs on across lines (about 0.8
+# reads per candidate line); secret_budget_start zeroes it, so the first call checks at once.
+_SM_ROWS=${#SECRET_NAMES[@]}
+_SM_CLOCK_EVERY=32
+_SM_CLOCK_LEFT=0
 SECRET_DEADLINE_US=""
 _NOW_US=0
 # _secret_now_us: sets _NOW_US to microseconds since the epoch (bash 5: EPOCHREALTIME, whose
@@ -164,8 +172,16 @@ secret_budget_start() {
   s=$((10#$s))
   _secret_now_us
   SECRET_DEADLINE_US=$((_NOW_US + s * 1000000))
+  _SM_CLOCK_LEFT=0
 }
 secret_budget_stop() { SECRET_DEADLINE_US=""; }
+# _secret_tick: the countdown ran out; start the next 32 units and report whether the budget is spent.
+_secret_tick() {
+  _SM_CLOCK_LEFT=$_SM_CLOCK_EVERY
+  # a spent budget stays spent: the next call reads the clock again at once
+  if _secret_over_budget; then _SM_CLOCK_LEFT=0; return 0; fi
+  return 1
+}
 # _secret_over_budget: true when a budget is running and spent.
 _secret_over_budget() {
   [ -n "$SECRET_DEADLINE_US" ] || return 1
@@ -324,20 +340,24 @@ _secret_match() {
   [ "$_SM_KEYS_SHARED" = 1 ] || _SM_KEYS_LEFT=$SECRET_MAX_KEYS   # H-05: see _SM_KEYS_SHARED
   shopt -q nocasematch && was=1
   shopt -u nocasematch
+  # H-05: the wall-clock budget, read once per 32 units of work (see secret_budget_start)
+  if (( (_SM_CLOCK_LEFT -= _SM_ROWS) <= 0 )) && _secret_tick; then
+    if [ "$was" = 1 ]; then shopt -s nocasematch; fi
+    SECRET_MATCH_NAME="scan-budget"; SECRET_MATCH_TEXT=""
+    return 0
+  fi
   if [ "${SECRET_STRICT:-0}" != 1 ] && [[ "$line" == *"$_SECRET_PRAGMA"* ]]; then
     if [ "$was" = 1 ]; then shopt -s nocasematch; fi
     return 1
   fi
   for ((i = 0; i < ${#SECRET_NAMES[@]}; i++)); do
     name="${SECRET_NAMES[$i]}"; re="${SECRET_RES[$i]}"
-    # H-05: the wall-clock budget, checked per row (see secret_budget_start)
-    if [ -n "$SECRET_DEADLINE_US" ] && _secret_over_budget; then hit="scan-budget"; text=""; break; fi
     if [ "$name" = "assigned-secret" ]; then
       shopt -s nocasematch
       tail="$line"
       while [[ "$tail" =~ $re ]]; do
         if [ "$_SM_KEYS_LEFT" -le 0 ]; then hit="key-dense-line"; text=""; break; fi
-        if [ -n "$SECRET_DEADLINE_US" ] && _secret_over_budget; then hit="scan-budget"; text=""; break; fi
+        if (( --_SM_CLOCK_LEFT <= 0 )) && _secret_tick; then hit="scan-budget"; text=""; break; fi
         _SM_KEYS_LEFT=$((_SM_KEYS_LEFT - 1))
         key="${BASH_REMATCH[0]}"
         after="${tail#*"$key"}"
@@ -359,7 +379,6 @@ _secret_match() {
     shopt -s nocasematch   # only password-assigned needs it; the others spell their classes out
     for ((i = 0; i < ${#STRICT_NAMES[@]}; i++)); do
       re="${STRICT_RES[$i]}"
-      if [ -n "$SECRET_DEADLINE_US" ] && _secret_over_budget; then hit="scan-budget"; text=""; break; fi
       if [[ "$line" =~ $re ]]; then
         hit="${STRICT_NAMES[$i]}"
         text="${BASH_REMATCH[0]}"
