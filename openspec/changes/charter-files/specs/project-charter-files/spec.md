@@ -64,11 +64,15 @@ Each guardrail in `GUARDRAILS.md` SHALL be one line of the form `- G<n>: <must-n
 - **THEN** it says files starting `→` are agent handoffs and are not knowledge signals
 
 ### Requirement: CLAUDE.md trailhead
-The trailhead block in `project-factory/trailhead.md` SHALL tell the reader to read `PURPOSE.md` and `MAP.md` at session start, `GUARDRAILS.md` before editing, committing or opening a PR, `signals/README.md` before recording a claim or filing a signal, and to find everything else through `MAP.md`. The block SHALL be byte-identical, between `<!-- charter-trailhead -->` and `<!-- /charter-trailhead -->`, in the four template `CLAUDE.md` files and in the-grid `CLAUDE.md`.
+The trailhead block in `project-factory/trailhead.md` SHALL tell the reader to read `PURPOSE.md` and `MAP.md` at session start, `GUARDRAILS.md` before editing, committing or opening a PR, `signals/README.md` before recording a claim or filing a signal, `RELATED.md` (if it exists) before building a new capability or adding a dependency, and to find everything else through `MAP.md`. The block SHALL be byte-identical, between `<!-- charter-trailhead -->` and `<!-- /charter-trailhead -->`, in the four template `CLAUDE.md` files and in the-grid `CLAUDE.md`.
 
 #### Scenario: Blocks identical
 - **WHEN** the block is extracted from each of those five files
 - **THEN** all five equal `trailhead.md`
+
+#### Scenario: Related line
+- **WHEN** the trailhead block is read
+- **THEN** it contains the line telling the reader to read `RELATED.md` if it exists before building a new capability or adding a dependency, and does not tell the reader to read it at session start
 
 #### Scenario: Retrofit with an existing CLAUDE.md
 - **WHEN** `cut-project.sh` runs against a target whose `CLAUDE.md` lacks the marker
@@ -105,6 +109,29 @@ The trailhead block in `project-factory/trailhead.md` SHALL tell the reader to r
 #### Scenario: No python3
 - **WHEN** `python3` is not on PATH during the cut
 - **THEN** the cut still exits 0 and prints `run: python3 scripts/map.py`
+
+### Requirement: Optional RELATED.md
+`RELATED.md` SHALL NOT be in `templates/_common/` or any template and SHALL NOT be created by a default cut. `cut-project.sh --with-related` SHALL copy `project-factory/related.md` to `<target>/RELATED.md` under the copy-if-absent rule, in seed and retrofit mode alike. The template SHALL open with a header stating that the list is not exhaustive (search if unsure), that a repo names only repos at the same or greater privacy than itself, that a wrong entry is filed as a signal, and that cross-project requests are issues filed in the other repo, and SHALL define per entry the fields `repo`, `owns`, `provides to us / we provide to it`, `don't build here`, `reach` and `verified` (`YYYY-MM-DD`). The template SHALL be at most 25 lines. The privacy rule SHALL be documented as `check: human`; no gate or hook SHALL check `RELATED.md`.
+
+#### Scenario: Default cut has none
+- **WHEN** `cut-project.sh python-agents-base <empty dir>` runs without the flag
+- **THEN** no `RELATED.md` exists in the target
+
+#### Scenario: Offered with the flag
+- **WHEN** `cut-project.sh --with-related python-agents-base <empty dir>` runs (flag before, between or after the positional arguments)
+- **THEN** `RELATED.md` exists, equals `project-factory/related.md`, and has the six entry fields and the privacy sentence
+
+#### Scenario: Retrofit never overwrites
+- **WHEN** the target already has a `RELATED.md` whose content differs and the flag is given
+- **THEN** that file is unchanged and appears in the SKIPPED list
+
+#### Scenario: Re-run is a no-op
+- **WHEN** the same cut with the flag runs twice
+- **THEN** the second run writes 0 files
+
+#### Scenario: the-grid has none
+- **WHEN** the repo root is listed after this change
+- **THEN** there is no `RELATED.md`
 
 ### Requirement: Dogfood on the-grid
 The-grid repo SHALL carry `PURPOSE.md`, `GUARDRAILS.md`, `BEHAVIOUR.md`, `MAP.md`, `signals/README.md`, `knowledge/README.md`, `knowledge/canon/.gitkeep` and the trailhead at the top of `CLAUDE.md` before the project templates are changed, and its `GUARDRAILS.md` and `PURPOSE.md` text SHALL be approved by the operator.

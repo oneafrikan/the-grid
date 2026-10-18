@@ -26,6 +26,11 @@ The Ontology section SHALL contain a table `| Path | What | Read when |` listing
 - **WHEN** the root contains `PURPOSE.md`, `GUARDRAILS.md` and `signals/`
 - **THEN** those three rows appear, `GUARDRAILS.md` reads "before editing, committing or opening a PR", and no row appears for `CONTEXT.md`
 
+#### Scenario: RELATED.md only when present
+- **WHEN** the root contains `RELATED.md`
+- **THEN** a row for it appears with Read when "before building a new capability or adding a dependency"
+- **AND** with no `RELATED.md` there is no such row and the-grid's `MAP.md` has none
+
 #### Scenario: Read-when cells
 - **WHEN** any generated row is inspected
 - **THEN** its Read when cell is not empty
