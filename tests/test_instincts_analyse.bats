@@ -1394,3 +1394,21 @@ PY
   contains "$output" "never use one two three four five six seven"
   lacks "$output" "eight"
 }
+
+@test "digest (H-14): a continuation between a flag and its value, stored in plaintext, never reaches the digest" {
+  local S="sword""fishq"
+  {
+    printf 's1|tool|Bash|0|%s\n' \
+      "docker login -u me -p \\\\n$S" "docker login -u me \\\\n-p \\\\n$S" "mysql -u root \\\\n -p \\\\n$S db" \
+      "mysql -p\\\\n$S" "rar a -p\\\\n$S a b" "acme-tool -p \\\\n$S" "TOKEN=\\\\n$S run" \
+      "mysql -p ${S:0:5}\\\\n${S:5} db" "make check-h14"
+    printf 's2|tool|Bash|0|%s\n' "make check-h14"
+  } | obs
+  neutral 40
+  analyse_run --dry-run
+  [ "$status" -eq 0 ]
+  lacks "$output" "$S"
+  lacks "$output" "${S:0:5}"
+  lacks "$output" "${S:5}"
+  contains "$output" "make check-h14"
+}

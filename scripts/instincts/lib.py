@@ -203,14 +203,20 @@ _SECRET_KEY = (r"(?:api[_-]?key|access[_-]?key|token|secret|passw(?:or)?d|passph
 # quote is never closed, e.g. cut off by truncation) or a bare word. Quoted values
 # must be redacted whole: `--password "my pass phrase"` leaks all but the first
 # word if only a bare word is taken.
-_VALUE = r"""(?P<v>"[^"\n]*"?|'[^'\n]*'?|[^\s'"]+)"""
+# A backslash-newline INSIDE a value is a shell line continuation: `-p AB\<nl>CD` is the word
+# `ABCD`, so it belongs to the value and both halves must go.
+_VALUE = r"""(?P<v>"(?:\\\n|[^"\n])*"?|'[^'\n]*'?|(?:\\\n|[^\s'"])+)"""
+# Between a flag (or `=`/`:`) and its value: whitespace, or a backslash-newline continuation.
+# Without it the backslash itself was taken as the value and the real value was left in the clear.
+_GAP = r"(?:\s|\\\n)"
 
 
 def _redact_value(m: re.Match) -> str:
     """Keep everything before the value, redact the value, keep its quote style."""
     v = m.group("v")
     q = v[0] if v[0] in "\"'" else ""
-    return m.group("pre") + q + REDACTED + q
+    # A continuation inside the prefix (`-p \<nl>VALUE`) is dropped: the redacted form stays one line.
+    return m.group("pre").replace("\\\n", "") + q + REDACTED + q
 
 
 # Secret-taking flags of commands that take the secret as the NEXT word (`docker login
@@ -244,8 +250,8 @@ _CMD_SHORT_EXTRA = {"rar": ("hp",), "unrar": ("hp",)}
 _CMD_FLAG_RES = {
     cmd: re.compile(
         r"(?P<pre>(?<![\w-])(?:" + "|".join(
-            ([f"-(?:[{short}]" + "".join(f"|{x}" for x in _CMD_SHORT_EXTRA.get(cmd, ())) + r")\s*"] if short else [])
-            + [f"(?i:--{re.escape(n)})(?:=|\\s+)" for n in longs]) + r"))" + _VALUE)
+            ([f"-(?:[{short}]" + "".join(f"|{x}" for x in _CMD_SHORT_EXTRA.get(cmd, ())) + ")" + _GAP + "*"] if short else [])
+            + [f"(?i:--{re.escape(n)})(?:={_GAP}*|{_GAP}+)" for n in longs]) + r"))" + _VALUE)
     for cmd, (short, longs) in _CMD_FLAGS.items()
 }
 # A command word, then its argument words up to a shell separator. Separators inside
@@ -260,7 +266,7 @@ _CMD_SEGMENT = re.compile(
     r"|sshpass|redis-cli|u?n?zip|gpg2?|curl|ssh-keygen|openssl|htpasswd"
     r"|7z[arz]?|(?:un)?rar|twine|rdesktop"
     r"|ldap(?:search|modify|add|delete|modrdn|whoami|compare|passwd)))"
-    r"(?P<rest>(?:(?:[ \t]|\\\n)(?:\\\n|\"[^\"\n]*\"|'[^'\n]*'|[^\n;&|\"'])*)?)")
+    r"(?P<rest>(?:(?:[ \t]|\\\n)(?:\\\n|\"(?:\\\n|[^\"\n])*\"|'[^'\n]*'|[^\n;&|\"'])*)?)")
 
 # Words of a command tail: a quoted run or a bare run, backslash and whitespace excluded.
 _TAIL_WORD = re.compile(r"""(?:"[^"]*"|'[^']*'|[^\s\\])+""")
@@ -395,13 +401,13 @@ _SCRUB_RULES: list[tuple[re.Pattern, object]] = [
     # value, so they stay out: a name must be followed by `=` or whitespace.
     (re.compile(
         r"(?i)(?P<pre>(?<![A-Za-z0-9-])--?(?:(?!(?:with|no|skip|ask|prompt|use|stdin)-)[a-z0-9]+-){0,3}"
-        r"(?:password|passwd|passphrase|pass|pw|token|secret|api-?key|access-?key|auth-?token)(?:=|\s+))"
-        + _VALUE), _redact_value),
+        r"(?:password|passwd|passphrase|pass|pw|token|secret|api-?key|access-?key|auth-?token)"
+        r"(?:=" + _GAP + r"*|" + _GAP + r"+))" + _VALUE), _redact_value),
     # `-pSECRET` (mysql style). Attached form only: `-p dir` (mkdir -p dir) and
     # `-p no:cache` (pytest) must be left alone. Cost accepted: `docker -p8080:80`.
     # `-pass`/`-passin`/`-passout` (openssl) are not attached secrets.
-    (re.compile(r"((?<=\s)-p)(?!ass(?:in|out)?(?:\s|=|$))\S+"), r"\1" + REDACTED),
-    (re.compile(r"((?<![A-Za-z0-9-])-u\s+)\S+:\S+"), r"\1" + REDACTED),
+    (re.compile(r"((?<=\s)-p)(?!ass(?:in|out)?(?:\s|=|$))(?:\\\n|\S)+"), r"\1" + REDACTED),
+    (re.compile(r"((?<![A-Za-z0-9-])-u" + _GAP + r"+)\S+:\S+"), r"\1" + REDACTED),
     # key=value / key: value where the KEY names a secret; also JSON `"key": "v"`.
     # No leading `[\w.-]*`: the prefix is kept anyway, and that unbounded leading run made
     # this rule quadratic (64 KB of `a.a.a.` took minutes). The trailing run is capped.

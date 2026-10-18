@@ -642,3 +642,43 @@ print(s, end="")' "$1"
   capture "$(payload UserPromptSubmit - 'prompt="please run mkdir -p out then acme-tool -p 5432"')"
   [ "$(wc -l < "$(only_file)")" -eq 2 ]
 }
+
+# --- H-14 fix round 1: a backslash-newline between a flag and its value (full capture path) -----
+
+@test "H-14: a continuation between a flag and its value never leaves the value in the stored line" {
+  S="sword""fishq"
+  local bs='\' lf=$'\n' cr=$'\r' nl cmd n=0
+  for nl in "${bs}${lf}" "${bs}${cr}${lf}" "${bs}${lf}${bs}${lf}"; do
+    for cmd in "docker login -u me -p ${nl}${S}" "docker login -u me ${nl}-p ${nl}${S}" \
+               "mysql -u root ${nl} -p ${nl}${S} db" "mysql -p${nl}${S}" "rar a -p${nl}${S} a b" \
+               "acme-tool -p ${nl}${S}" "acme-tool ${nl}-w${nl}${S}" "TOKEN=${nl}${S} run" \
+               "mysql -p ${S:0:5}${nl}${S:5} db"; do
+      capture "$(bash_payload "$cmd")"
+      n=$((n + 1))
+    done
+  done
+  capture "$(bash_payload 'git status')"
+  f="$(only_file)"
+  [ "$(wc -l < "$f")" -gt 1 ]
+  absent "$f" "$S"
+  absent "$f" "${S:0:5}"
+  absent "$f" "${S:5}"
+  [ "$n" -eq 27 ]
+}
+
+@test "H-14: a continuation after a redacted flag is stored clean (exact)" {
+  S="sword""fishq"
+  capture "$(bash_payload "$(printf 'docker login -u me -p \\\n%s' "$S")")"
+  capture "$(bash_payload "$(printf 'mysql -p\\\r\n%s db' "$S")")"
+  f="$(only_file)"
+  [ "$(field "$f" 1 in)" = "docker login -u me -p [REDACTED]" ]
+  [ "$(field "$f" 2 in)" = "mysql -p[REDACTED] db" ]
+}
+
+@test "H-14: a continuation that precedes no value is stored as before" {
+  capture "$(bash_payload "$(printf 'ls \\\n-p')")"
+  capture "$(bash_payload "$(printf 'mkdir -p \\\n out')")"
+  capture "$(bash_payload "$(printf 'mkdir \\\n-p \\\nout')")"
+  f="$(only_file)"
+  [ "$(wc -l < "$f")" -eq 3 ]
+}
