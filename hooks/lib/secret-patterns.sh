@@ -326,9 +326,10 @@ _secret_exempt() {
 #   row whose match is a real secret, returns 1 otherwise. Runs in the caller's shell (no
 #   subshell) so the globals survive.
 #     - a line carrying the allow pragma is skipped whole (human override);
-#     - a row whose matched token is exempt (placeholder word in the TOKEN, not the line)
-#       is passed over and later rows are still tried, so an example key next to a real
-#       one does not hide the real one;
+#     - a matched token that is exempt (placeholder word in the TOKEN, not the line) is
+#       passed over: the rest of the line is searched for another match of the same row
+#       (H-09) and later rows are still tried, so an example key next to a real one does
+#       not hide the real one, before it or after it;
 #     - assigned-secret matches the key side by regex, then judges the value in bash
 #       (_assigned_value); every `key =` on the line is tried in turn, but at most
 #       SECRET_MAX_KEYS of them per scanned line (_SM_KEYS_LEFT, reset by the public entry
@@ -336,7 +337,7 @@ _secret_exempt() {
 #       (about 20 s on a 240 KB line of keys). A line with more keys than the bound is
 #       reported as key-dense-line: a scan that cannot finish must block, not pass.
 _secret_match() {
-  local line="$1" i name re hit="" text="" was=0 tail key after tok
+  local line="$1" i name re hit="" text="" was=0 tail key after tok full
   [ "$_SM_KEYS_SHARED" = 1 ] || _SM_KEYS_LEFT=$SECRET_MAX_KEYS   # H-05: see _SM_KEYS_SHARED
   shopt -q nocasematch && was=1
   shopt -u nocasematch
@@ -368,10 +369,23 @@ _secret_match() {
         tail="$after"
       done
       shopt -u nocasematch
-    elif [[ "$line" =~ $re ]]; then
-      tok="${BASH_REMATCH[0]}"
-      if [ "${SECRET_BOUND[$i]}" = 1 ]; then tok="${tok#"${BASH_REMATCH[1]}"}"; fi
-      if ! _secret_exempt "$tok"; then hit="$name"; text="$tok"; fi
+    else
+      # H-09: every token the row matches is judged on its own. An exempt one is passed over
+      # and the rest of the line is searched again, so an example key in front of a real one
+      # of the same kind does not hide it. The key count and the clock budget of the
+      # assigned-secret loop above bound the work (each pass re-reads the rest of the line);
+      # only a token that is passed over costs a unit, so a line with no exempt token is
+      # judged exactly as before.
+      tail="$line"
+      while [[ "$tail" =~ $re ]]; do
+        full="${BASH_REMATCH[0]}"; tok="$full"
+        if [ "${SECRET_BOUND[$i]}" = 1 ]; then tok="${tok#"${BASH_REMATCH[1]}"}"; fi
+        if ! _secret_exempt "$tok"; then hit="$name"; text="$tok"; break; fi
+        if [ "$_SM_KEYS_LEFT" -le 0 ]; then hit="key-dense-line"; text=""; break; fi
+        if (( --_SM_CLOCK_LEFT <= 0 )) && _secret_tick; then hit="scan-budget"; text=""; break; fi
+        _SM_KEYS_LEFT=$((_SM_KEYS_LEFT - 1))
+        tail="${tail#*"$full"}"
+      done
     fi
     [ -z "$hit" ] || break
   done

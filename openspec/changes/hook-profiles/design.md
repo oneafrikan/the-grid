@@ -310,7 +310,7 @@ Known gaps, stated in `hooks/README.md`: wrappers nested more than one level, sh
 | jwt | `(^\|[^A-Za-z0-9])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}` |
 | assigned-secret (case-insensitive, `grep -iE`) | `(api[_-]?key\|secret\|token\|passw(or)?d)[[:space:]]*[:=][[:space:]]*['"]?[^'"[:space:]$<{][^'"[:space:]]{15,}` |
 
-A line is exempt when it also matches `grid:allow-secret`, or (case-insensitive) `example\|placeholder\|changeme\|your[_-]\|xxxxxxxx\|redacted`. The block message lists findings (file, line, pattern name, first 4 chars; never the full value), names `GRID_DISABLED_HOOKS=pre-bash-secret-scan` as the human bypass, and never mentions the pragma (an agent that reads the message must not learn how to silence it; the pragma is documented for humans in `hooks/README.md` only).
+A line is exempt when it also matches `grid:allow-secret`, or (case-insensitive) `example\|placeholder\|changeme\|your[_-]\|xxxxxxxx\|redacted`. The block message lists findings (file, line, pattern name, first 4 chars; never the full value), names `GRID_DISABLED_HOOKS=pre-bash-secret-scan` as the human bypass, and never mentions the pragma (an agent that reads the message must not learn how to silence it; the pragma is documented in this spec and in code comments, not in `hooks/README.md`: D38).
 
 The prefix set is a superset of the vetting `secret-shape` rule's prefixes in `policy.yaml` (`AKIA`, `ghp_`, `github_pat_`, `sk-`, `xox`, `AIza`, `PRIVATE KEY`, `eyJ`); a bats test holds that list, asserts each literal still appears in the `secret-shape` regex of the real `policy.yaml` and that a token built with it is flagged by `secret_match_line`.
 

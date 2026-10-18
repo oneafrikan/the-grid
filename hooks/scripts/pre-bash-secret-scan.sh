@@ -22,7 +22,8 @@
 #     never mentions the allow pragma in its message.
 #   - Exit 0 on non-JSON stdin, a non-Bash tool, no command, a command with no git commit
 #     or add in it, or a target that is not inside a git repository.
-#   - Exit 2 when jq is missing (fail closed).
+#   - Exit 2 when jq is missing (fail closed), and when the payload has no usable cwd and the
+#     command has a git call that could commit or add.
 #
 # A mistake-catcher for an agent, not a security boundary.
 
@@ -68,9 +69,6 @@ if [ "$hit" = 0 ]; then
 fi
 
 grid_check_cmd_cap pre-bash-secret-scan "$command"
-
-# Everything below needs a directory to start from.
-[ -n "$cwd" ] && [ -d "$cwd" ] || exit 0
 
 grid_git_segments "$command"
 grid_check_balanced pre-bash-secret-scan "$command"
@@ -310,6 +308,19 @@ is_plain_sub() {
 # Chained adds seen so far in this command, one entry per (add segment, target).
 ADD_ENC=(); ADD_SPECS=(); ADD_UPD=()
 handled_commit=0     # a commit-making segment was seen (the command text is scanned then)
+
+# H-09 (VS15): the payload cwd anchors every relative path and is the fallback repository.
+# Without a usable one the hook cannot tell which repository a call hits, so a call that
+# may commit or add is blocked rather than waved through (it used to exit 0). Calls that
+# cannot (status, log, ...) and commands without git still pass.
+if [ -z "$cwd" ] || [ ! -d "$cwd" ]; then
+  for sub in "${GIT_SUB[@]}"; do
+    is_plain_sub "$sub" && continue
+    echo "BLOCKED by the-grid hook pre-bash-secret-scan: the working directory in the hook payload is missing or is not a directory, so the repository this git call acts on cannot be found and its commit cannot be scanned. Human override: launch claude with GRID_DISABLED_HOOKS=pre-bash-secret-scan" >&2
+    exit 2
+  done
+  exit 0
+fi
 
 for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
   sub="${GIT_SUB[$i]}"; start="${GIT_START[$i]}"; len="${GIT_LEN[$i]}"
