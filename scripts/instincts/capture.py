@@ -83,14 +83,18 @@ def rewrite_paths(text: str, root: str) -> str:
     return lib.outside_paths(text)
 
 
-def clean(text: str, root: str, limit: int, paths: bool = True) -> str:
+def clean(text: str, root: str, limit: int, paths: bool = True, command: bool = False) -> str:
     """Rewrite paths, drop sensitive lines, scrub secrets, flatten to one line, cap at `limit`.
 
     "" means nothing is left to record (every line held a secret keyword with a value,
     a long token-like run, an email, a host, an IP...): the caller records no observation.
     Dropping happens BEFORE redaction because redaction leaks the shape of a secret.
+    A Bash command (`command=True`) is also dropped when an unlisted tool takes a value for
+    `-p`/`-w` style flags (lib.unlisted_secret_flag): redaction only covers tools somebody listed.
     """
     text = text[:MAX_RAW]
+    if command and lib.unlisted_secret_flag(text):
+        return ""
     kept = lib.drop_sensitive_lines(rewrite_paths(text, root) if paths else text)
     return lib.sanitize(lib.scrub(kept), limit) if kept.strip() else ""
 
@@ -149,7 +153,7 @@ def build_observation(payload: dict, root: str) -> dict | None:
     # from tool_response; its output is never touched.
     text = target if tool == "Bash" else relative_path(target, root)
     response = payload.get("tool_response")
-    cleaned = clean(text, root, MAX_BASH)
+    cleaned = clean(text, root, MAX_BASH, command=tool == "Bash")
     if not cleaned:
         return None
     obs.update({

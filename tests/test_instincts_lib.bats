@@ -958,3 +958,345 @@ print("ok")'
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
 }
+
+# --- H-14: short secrets in tools outside the first list, separators, fail-safe default ----------
+# Each table is Python run through lib directly; the first leak (or wrong form) is named in the
+# output. $H14_S is a short, letters-only value built at runtime (no digit: the line-drop layer
+# cannot save it, so only the scrubber or the fail-safe rule can).
+
+H14_S="sword""fishq"
+
+# h14py '<python body>' — body sees `S` and runs after `import lib`; prints "ok" when it passes.
+h14py() { pylib 'S = sys.argv[2]
+'"$1"'
+print("ok")' "$H14_S"; }
+
+@test "scrub (H-14): short secrets of tools outside the first list never survive" {
+  run h14py '
+cases = [
+ "7z a -p %s out.7z in", "7z a -p%s out.7z in", "7za x -p %s a.7z", "7zz a -p %s o.7z i",
+ "rar a -hp%s out.rar in", "rar a -hp %s out.rar in", "rar a -p%s o.rar i", "unrar x -p %s a.rar",
+ "vault login %s", "vault login -method=token %s", "vault login -no-print %s",
+ "vault login -method=userpass username=bob password=%s",
+ "twine upload -p %s dist/*", "twine upload --password %s dist/*", "twine upload dist/* -p %s",
+ "twine upload -u me -p%s dist/*",
+ "az login -p %s", "az login --service-principal -u x -p %s --tenant t", "az login --password=%s",
+ "oc login -u me -p %s", "cf login -u me -p %s",
+ "ldapsearch -x -D cn=admin -w %s -b dc=x", "ldapsearch -w%s -x", "ldapmodify -w %s -f a.ldif",
+ "ldappasswd -w %s -a %s -s %s",
+ "smbclient //srv/share -U user%%%s", "smbclient -U bob%%%s //srv/share -c ls",
+ "smbclient //srv/share %s -U bob", "rpcclient -U bob%%%s srv",
+ "xfreerdp /v:srv /u:bob /p:%s", "xfreerdp /p:%s /v:srv", "xfreerdp /v:srv /gp:%s", "xfreerdp /pth:%s",
+ "sudo -S ls <<<%s", "sudo -S ls <<< %s", "sudo -S -u bob ls <<<%s", "echo %s | sudo -S ls",
+ "printf \x27%%s\\n\x27 %s | sudo -S ls", "sudo --stdin ls <<< %s", "SUDO -S ls <<<%s", "cat <<< %s | sudo -S ls",
+ "sudo -S ls <<EOF\n%s\nEOF", "echo %s | sudo --stdin ls", "xfreerdp /v:s /p:\"two %s\"",
+ "export session=%s", "session=%s run", "SESSION_ID=%s run", "dbpw=%s run", "DB_PW=%s make", "mypwd=%s x",
+ "git clone https://%s@host/x", "git clone http://tok1%s@localhost/x", "curl ftp://%s@h/x",
+]
+for c in cases:
+    t = c.replace("%%", "\0").replace("%s", S).replace("\0", "%")
+    out = lib.scrub(t)
+    assert S not in out and "[REDACTED]" in out, (t, out)
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): exact redacted forms keep the command readable" {
+  run h14py '
+want = {
+ "vault login %s": "vault login [REDACTED]",
+ "7z a -p %s out.7z": "7z a -p [REDACTED] out.7z",
+ "rar a -hp%s o.rar": "rar a -hp[REDACTED] o.rar",
+ "smbclient //srv/share -U bob%%%s -c ls": "smbclient //srv/share -U bob%%[REDACTED] -c ls",
+ "ldapsearch -x -w %s -b dc=x": "ldapsearch -x -w [REDACTED] -b dc=x",
+ "xfreerdp /v:srv /p:%s": "xfreerdp /v:srv /p:[REDACTED]",
+ "sudo -S ls <<< %s": "sudo -S ls <<< [REDACTED]",
+ "az login -u me -p %s": "az login -u me -p [REDACTED]",
+ "git clone https://%s@host/x": "git clone https://[REDACTED]@host/x",
+}
+for k, v in want.items():
+    k = k.replace("%%", "\0").replace("%s", S).replace("\0", "%")
+    v = v.replace("%%", "%")
+    got = lib.scrub(k)
+    assert got == v, (k, got, v)
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): command names in any letter case" {
+  run h14py '
+for c in ["DOCKER login -p %s", "Docker Login -p %s", "DOCKER LOGIN --PASSWORD %s", "docker  \tlogin -p %s",
+          "MYSQL -p %s db", "Sshpass -p %s ssh h", "HELM Registry Login -p %s", "VAULT login %s", "AZ LOGIN -p %s"]:
+    t = c.replace("%s", S)
+    out = lib.scrub(t)
+    assert S not in out, (t, out)
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): backslash-newline between command words and flags, LF or CRLF" {
+  run h14py '
+for c in ["docker login \\\n -p %s", "docker \\\n login -p %s", "docker login -u me \\\n\\\n -p %s",
+          "docker login \\\r\n -p %s", "docker login\\\n-p %s", "docker login \\\n\t-p %s",
+          "DOCKER login \\\n -p %s", "helm registry \\\n login -p %s", "mysql -u r \\\r\n -p %s db",
+          "az login \\\n -p %s", "vault \\\n login %s"]:
+    t = c.replace("%s", S)
+    out = lib.scrub(t)
+    assert S not in out, (t, out)
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): composed combining marks cannot hide a key name" {
+  run h14py '
+for c in ["pa\u0301ssword=%s", "\u1e55assword=%s", "pa\u0301ss=%s", "toke\u0301n=%s", "secre\u0301t: %s",
+          "api_ke\u0301y=%s", "passwo\u0308rd=%s", "p\u0301w=%s", "pa\u0301\u0302ssword=%s", "export AUTH_TOKE\u0301N=%s"]:
+    t = c.replace("%s", S)
+    out = lib.scrub(t)
+    assert S not in out, (t, out)
+# the line-drop layer folds them too
+for c in ["my pa\u0301ssword is %s", "toke\u0301n=%s", "\u1e55assphrase: %s"]:
+    t = c.replace("%s", S)
+    assert lib.drop_sensitive_lines(t) == "", (t, lib.drop_sensitive_lines(t))
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): every str.isspace() character separates words, none glues them" {
+  # U+1680 survived NFKC and was not a hidden character, so it reached the rules as a letter.
+  run h14py '
+spaces = [chr(i) for i in range(0x110000) if chr(i).isspace() and chr(i) not in "\n\t"]
+assert "\u1680" in spaces and len(spaces) > 20
+for sp in spaces:
+    for c in ["mysql%s-p%s%s db", "docker%slogin%s-p%s%s", "vault%slogin%s%s"]:
+        t = c.replace("%s", sp, c.count("%s") - 1).replace("%s", S)
+        out = lib.scrub(t)
+        assert S not in out, (hex(ord(sp)), t, out)
+        assert not any(ch.isspace() and ch not in " \n\t" for ch in out), (hex(ord(sp)), out)
+        d = lib.drop_sensitive_lines(t)
+        assert not any(ch.isspace() and ch not in " \n\t" for ch in d), (hex(ord(sp)), d)
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): a zero-width, format, NUL, ESC or DEL character as the only glue between words" {
+  # No shell reads these as separators, but a pasted or generated command can carry them
+  # between words; deleting them glued `mysql -p x` into `mysql-px`.
+  run h14py '
+import unicodedata
+hidden = [chr(i) for i in range(0x110000) if unicodedata.category(chr(i)) in ("Cc", "Cf") and not chr(i).isspace()]
+assert "\x00" in hidden and "\x1b" in hidden and "\x7f" in hidden and "\u200b" in hidden and len(hidden) > 100
+shapes = ["mysql%s-p%s%s db", "docker%slogin%s-p%s%s", "vault%slogin%s%s", "7z%sa%s-p%s%s", "ldapsearch%s-w%s%s",
+          "sudo%s-S%sls <<<%s%s"]
+for h in hidden:
+    for c in shapes:
+        n = c.count("%s")
+        t = c.replace("%s", h, n - 1).replace("%s", S)
+        out = lib.scrub(t)
+        assert S not in out, (hex(ord(h)), t, out)
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): hidden glue in one place and a split key in another: neither secret survives" {
+  run h14py '
+z = "\u200b"
+t = "pass" + z + "word=ONEVAL1 && mysql" + z + "-p" + z + S + " db"
+out = lib.scrub(t)
+assert "ONEVAL1" not in out and S not in out, out
+# ordinary text with a zero-width joiner and a normal secret keeps its redaction form
+out = lib.scrub("a" + z + "b TOKEN=abc123xyz")
+assert "abc123xyz" not in out and "TOKEN=[REDACTED]" in out, out
+# and text with a joiner but no secret is unchanged apart from the hidden character
+assert lib.scrub("fam\u200dily ls -la") == "family ls -la"
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "drop_sensitive_lines (H-14): hidden glue before a short key drops the line, the rest stays" {
+  run h14py '
+z = "\u200b"
+for t in ["my" + z + "pw=" + S, "the" + z + "pwd" + z + "is " + S, "x\x00password\x1b=" + S]:
+    assert lib.drop_sensitive_lines(t) == "", (t, lib.drop_sensitive_lines(t))
+assert lib.drop_sensitive_lines("ls -la\nmy" + z + "pw=" + S + "\ngit status") == "ls -la\ngit status"
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): ordinary commands of the newly listed tools, and ssh account names, are unchanged" {
+  run h14py '
+for t in ["vault status", "vault kv get secret/app", "az account show", "az login", "twine check dist/*",
+          "7z a out.7z in", "7z x out.7z", "rar x a.rar", "unrar l a.rar", "smbclient -L //srv -N",
+          "ldapsearch -x -b dc=x", "sudo ls", "sudo -u bob ls", "sudo -S ls", "xfreerdp /v:srv /u:bob",
+          "echo hi <<< foo", "tmux new-session -s work", "tmux attach -t session", "git commit -m \"fix session handling\"",
+          "git clone ssh://git@host.test/o/r", "git clone sftp://bob@h/x", "docker run -p 8080:80 img",
+          "mkdir -p a/b", "ssh -p 22 host", "ls -la", "echo done | tee log"]:
+    assert lib.scrub(t) == t, (t, lib.scrub(t))
+# accents on Latin letters are folded away on purpose (they can hide a key name); other scripts are not touched
+assert lib.scrub("caf\u00e9") == "cafe"
+assert lib.scrub("\u0928\u092e\u0938\u094d\u0924\u0947") == "\u0928\u092e\u0938\u094d\u0924\u0947"
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): idempotent for the new shapes" {
+  run h14py '
+t = "vault login " + S + "\nrar a -hp" + S + " o \\\n x; az login -p " + S + " && echo " + S + " | sudo -S ls\nsession=" + S + " https://tok1@h/x"
+once = lib.scrub(t)
+assert S not in once, once
+assert lib.scrub(once) == once, (once, lib.scrub(once))
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub and drop (H-14): stay linear on 64 KB of adversarial text for the new rules" {
+  start=$SECONDS
+  run h14py '
+import time
+z = "\u200b"
+inputs = ["7z -p " * 11000, "vault login " * 5500, "echo " * 13000, "docker \\\n" * 8000, "https://a@" * 6500,
+          "az login " * 7000, "sudo -S " * 8000, "smbclient //a " * 4500, "/p:" * 21000, "session=" * 8000,
+          z * 60000 + "mysql -p x", "mysql" + z + "-p" + z * 30000, "pa\u0301" * 20000, "\u1680" * 60000,
+          "echo " + "a" * 60000 + " | sudo -S", "x -p " * 16000, "sudo -S <<EOF\n" * 4500, "<<< a " * 10000,
+          "mysql -p \"\\\n" * 5000, "mysql " + "-p \\\n" * 10000, "TOKEN=\\\n" * 8000, "--password \\\n" * 5000,
+          "mysql -p \"" + "\\\n" * 30000, "\\\n" * 30000, "sudo " + " " * 60000 + "-S", "sudo --stdin " * 5000, "ssh -p 1 " * 7000, "bash -c \x27x\x27 " * 5000, "(" * 60000, "\\" * 60000, "\"" * 60000]
+for t in inputs:
+    s = time.time()
+    lib.scrub(t); lib.drop_sensitive_lines(t); lib.unlisted_secret_flag(t)
+    assert time.time() - s < 5, (t[:20], time.time() - s)
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+  [ $((SECONDS - start)) -lt 60 ]
+}
+
+# --- the fail-safe default: an unlisted tool with a -p/-w style flag value is dropped ---------
+
+@test "unlisted_secret_flag (H-14): an unlisted tool with a -p, -P or -w value is flagged" {
+  run h14py '
+z = "\u200b"
+for c in ["acme -p %s", "acme -P %s", "acme -w %s", "acme -p%s", "acme -w%s", "acme -hp%s", "acme run -p %s --x",
+          "ls && acme -p %s", "acme x | acme -w %s", "FOO=1 acme -p %s", "sudo acme -p %s", "sudo -u bob acme -w %s",
+          "env A=b acme -p %s", "/usr/local/bin/acme -p %s", "nohup acme -p %s &", "time acme -p %s",
+          "bash -c \"acme -p %s\"", "sh -c \x27acme -w %s\x27", "eval acme -p %s",
+          "acme \\\n -p %s", "acme" + z + "-p" + z + "%s", "acme\x00-w\x00%s", "ACME -p %s", "acme -p \"%s\"",
+          "xargs -n1 acme -p %s", "ssh -p 22 host \"acme -p %s\"", "ssh host acme -w %s", "acme -p\\ %s",
+          "acme -p=%s", "acme \"-p\" %s", "echo $(acme -p %s)"]:
+    t = c.replace("%s", S)
+    assert lib.unlisted_secret_flag(t) is True, t
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "unlisted_secret_flag (H-14): ordinary uses of -p and -w, and listed tools, are not flagged" {
+  run h14py '
+for t in ["mkdir -p a/b", "psql -p 5432 db", "pytest -p no:cacheprovider", "ssh -p 22 host", "scp -P 22 f h:/x",
+          "docker run -p 8080:80 img", "git commit -m \"bump -w width\"", "grep -w word file", "ls -p", "cp -p a b",
+          "acme -p", "acme -p --verbose", "acme -w -x", "acme -p [REDACTED]", "acme --port 80", "acme -v",
+          "echo \"x -p y\"", "mysql -p x", "7z a -p x", "vault login x", "ldapsearch -w x", "python3 -m pytest -p x",
+          "sudo -S ls", "sudo -p prompt ls", "xargs -P 4 ls", "find . -perm 644 -print", "npm install -w pkg",
+          "git status", "ls", "", "make -p", "gunicorn -w 4 app", "nc -w 5 h 80", "ssh -p 22 host", "ssh host ls -p",
+          "acme -p $PASS", "acme -w \"$(cat f)\""]:
+    assert lib.unlisted_secret_flag(t) is False, t
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "docs (H-14): the stems cap, the fail-safe rule and the denylist limit are stated" {
+  d="$REPO_ROOT/docs/instincts.md"
+  grep -q 'up to 8 plain lowercase words' "$d"
+  grep -q 'unlisted tool' "$d"
+  grep -q 'semantic variants' "$d"
+  # the digest also carries commands and paths, so the 8 words must not be called the only text sent
+  grep -q 'only free text taken from prompts' "$d"
+  if grep -q 'only free text that leaves the machine' "$d"; then return 1; fi
+  grep -q 'up to 120 characters' "$d"
+  grep -q 'up to 200 characters' "$d"
+  # the documented cap is the code's cap
+  grep -q 'len(words) >= 8' "$REPO_ROOT/scripts/instincts/analyse.py"
+}
+
+# --- H-14 fix round 1: a backslash-newline between a flag and its value ------------------------
+# {N} is the continuation (backslash-LF, backslash-CRLF, or two in a row), {S} the secret value.
+# Before the fix the value word was never reached: the backslash itself was taken as the value and
+# redacted, leaving `[REDACTED]` as false assurance next to the real secret.
+
+@test "scrub (H-14): a continuation between a secret flag and its value redacts the value" {
+  run h14py '
+shapes = [
+ "docker login -u me -p {N}{S}", "docker login -u me {N}-p {N}{S}", "docker login -u me -p {N}{N}{S}",
+ "mysql -u root {N} -p {N}{S} db", "mysql -p{N}{S} db", "rar a -p{N}{S} a b", "mysql -p {N}{S}",
+ "unzip -P{N}{S} f", "sshpass -p {N}{S} ssh h", "twine upload --password {N}{S} dist/*",
+ "az login --password={N}{S}", "curl -u {N}bob:{S} h", "rar a -hp{N}{S} x", "ldapsearch -w {N}{S} -b x",
+ "gpg --passphrase {N}{S} -d f", "acme --password {N}{S} run", "acme --token={N}{S} run",
+ "acme -u {N}bob:{S} h", "acme -p{N}{S}", "TOKEN={N}{S} run", "export API_KEY={N}{S}",
+ "session={N}{S} run", "vault login {N}{S}", "smbclient //h/s {N}{S} -N",
+ # the secret itself continued over a line break: both halves go
+ "mysql -p {S1}{N}{S2} db", "docker login -p {S1}{N}{S2}", "mysql -p\"{S1}{N}{S2}\" db",
+ "mysql -p \"{S1}{N}{S2}\" db", "TOKEN={S1}{N}{S2} run",
+]
+S1, S2 = "zebra", "quilt"   # not a slice of S: "sword" is inside the flag name "password"
+for nl in ("\\\n", "\\\r\n", "\\\n\\\n"):
+    for shape in shapes:
+        text = shape.replace("{N}", nl).replace("{S1}", S1).replace("{S2}", S2).replace("{S}", S)
+        out = lib.scrub(text)
+        flat = "".join(out.replace("\r", "").split()).replace("\\", "")
+        assert S not in flat and S1 not in flat and S2 not in flat, (text, out)
+        assert "[REDACTED]" in out, (text, out)
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): a continuation after a redacted flag leaves a clean form" {
+  run h14py '
+assert lib.scrub("docker login -u me -p \\\n" + S) == "docker login -u me -p [REDACTED]", lib.scrub("docker login -u me -p \\\n" + S)
+assert lib.scrub("mysql -u root \\\n -p \\\n" + S + " db") == "mysql -u root \\\n -p [REDACTED] db"
+assert lib.scrub("mysql -p\\\r\n" + S + " db") == "mysql -p[REDACTED] db", lib.scrub("mysql -p\\\r\n" + S + " db")
+once = lib.scrub("docker login -p \\\n\\\n" + S + " \\\n -u me")
+assert lib.scrub(once) == once and S not in once, once
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): a continuation that precedes no value changes nothing and breaks nothing" {
+  run h14py '
+for t in ["ls \\\n-p", "mkdir \\\n-p \\\ndir", "mkdir -p \\\n dir", "acme -v \\\n-p", "psql -p \\\n 5432 db",
+          "echo hi \\\n", "ls \\\n", "\\\n", "\\", "mysql -p \\\n", "docker login -p \\\n", "docker login \\\n-u me \\\n"]:
+    out = lib.scrub(t)
+    assert isinstance(out, str)
+    assert S not in out
+for t in ["ls \\\n-p", "mkdir \\\n-p \\\ndir", "mkdir -p \\\n dir", "echo hi \\\n", "ls \\\n"]:
+    assert lib.scrub(t) == t, (t, lib.scrub(t))
+# and none of them is dropped or flagged by the fail-safe rule
+for t in ["ls \\\n-p", "mkdir \\\n-p \\\ndir", "mkdir -p \\\n dir", "acme -v \\\n-p", "acme \\\n-p", "psql -p \\\n 5432 db"]:
+    assert lib.unlisted_secret_flag(t) is False, t
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "unlisted_secret_flag (H-14): a continuation between an unlisted flag and its value is seen" {
+  run h14py '
+for nl in ("\\\n", "\\\r\n", "\\\n\\\n"):
+    for t in ["acme -p " + nl + S, "acme " + nl + "-p " + nl + S, "acme -p" + nl + S, "acme -w " + nl + " " + S,
+              "cd x && acme -P " + nl + S]:
+        assert lib.unlisted_secret_flag(t) is True, t
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
