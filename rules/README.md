@@ -53,11 +53,17 @@ paths:
   glob and 12 alternatives per group, and one rule file may expand to at most 64 globs in
   all. Write `**/*.py` and `**/*.pyi` as two entries rather than `**/*.py{,i}`.
 - Rule files are untrusted text: an HTML comment marker (`<!--`, `-->`), an invisible or
-  bidi character (zero-width, tag, variation selector, BOM, a combining mark, a blank
-  look-alike such as U+3164 or U+2800), a control character (ESC, NUL, DEL; a tab is fine)
-  or a word mixing ASCII with a look-alike letter of another script (Cyrillic, Greek,
-  Armenian, dotless i; an accented Latin letter such as e-acute is fine) is `E_STYLE`,
-  fenced or not. The denylist is matched after NFKC folding, dropping invisible
+  bidi character (zero-width, tag, variation selector, BOM, a blank look-alike such as
+  U+3164 or U+2800), a combining mark (any Mn/Me character, so decomposed `e` + U+0301 is
+  refused; write the precomposed letter), a control character (ESC, NUL, DEL; a tab is
+  fine) or a word mixing ASCII letters with a confusable non-ASCII letter is `E_STYLE`,
+  fenced or not. A confusable letter is one that (a) NFKC folds to ASCII letters (fullwidth,
+  ligatures such as U+FB01, mathematical alphanumerics), (b) belongs to a script with ASCII
+  look-alikes other than Latin or CJK (Cyrillic, Greek, Armenian, Cherokee, Coptic, Lisu,
+  Osage, Canadian syllabics), or (c) is one of a few Latin look-alikes (dotless i U+0131,
+  Latin alpha U+0251, script g U+0261, small capitals U+026A U+1D04 U+1D0F U+1D1C U+1D20
+  U+1D21 U+1D22). Accented Latin letters (precomposed), sharp s, o-slash, l-stroke, the
+  micro sign and CJK next to ASCII are fine. The denylist is matched after NFKC folding, dropping invisible
   characters (blank look-alikes become a space) and collapsing whitespace.
 - Files must be UTF-8 (`E_ENCODING`) and readable (`E_UNREADABLE`); neither is ever a
   traceback. An empty `denylist.txt` with packs present is `E_OPINION` (fails closed).
@@ -78,7 +84,8 @@ paths:
   output name (`a-b` + `c.md` and `a` + `b-c.md` both give `grid-a-b-c.mdc`) collide.
 - A pack with no rule files is `E_PACK_META`.
 - No line, fenced or not, may start with `<!-- BEGIN the-grid rules` or `<!-- END the-grid rules`
-  or contain `the-grid:rules` (`E_MARKER`): those strings delimit the managed block and the
+  or contain `the-grid:rules` (`E_MARKER`), nor start with any retired marker spelling listed in
+  `scripts/lib/rules-markers.txt`: those strings delimit the managed block and the
   generated Cursor files, and a copy inside a rule body would wedge delivery and removal.
   Plain prose such as "the-grid rules" is fine.
 
@@ -208,8 +215,11 @@ fidelity: fetches every cited URL and quotes support for each bullet) and
   line, matched whole-line (a CR before the newline is allowed). A user note that merely
   starts like a marker, or quotes one marker, is user text. Markers are exact-line matches,
   so a hand-edited BEGIN line is treated as user text and the next emit appends a fresh
-  block (decision D20). A lone END line (BEGIN deleted or edited) is refused with a message
-  that says so; restore the BEGIN line or delete the END line by hand. Residual: a user fence that
+  block (decision D20). An exact END line with no BEGIN line at all (the BEGIN was deleted, or
+  edited so it no longer starts `<!-- BEGIN the-grid rules`) is refused with a message that says
+  so; restore the BEGIN line or delete the END line by hand. If the edited BEGIN still starts
+  `<!-- BEGIN the-grid rules`, it and the END beside it are taken for a quoted fence: emit
+  appends a fresh block and the stale END line stays. Residual: a user fence that
   quotes our complete BEGIN and END lines is still treated as our block.
 - **Marker spellings:** `scripts/lib/rules-markers.txt` is the one list of BEGIN/END lines,
   read by `rules.py` and by `wire.sh` (via `scripts/lib/harness.sh`). The first of each is

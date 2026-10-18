@@ -1711,9 +1711,8 @@ print('\n'.join(rules.lint('$R', check_urls=True).lines()))"
 @test "VS1 E_STYLE: look-alike blanks and combining marks that NFKC leaves visible are rejected" {
   PK=g; make_pack g
   local v
-  # U+3164 U+2800 U+115F U+1160 U+FFA0 (blank letters/symbols), U+17B4 U+034F U+180B U+0301 (marks)
-  for v in $'\xe3\x85\xa4' $'\xe2\xa0\x80' $'\xe1\x85\x9f' $'\xe1\x85\xa0' $'\xef\xbe\xa0' \
-           $'\xe1\x9e\xb4' $'\xcd\x8f' $'\xe1\xa0\x8b' $'\xcc\x81'; do
+  # U+3164 U+2800 U+115F U+1160 U+FFA0: blank letters/symbols
+  for v in $'\xe3\x85\xa4' $'\xe2\xa0\x80' $'\xe1\x85\x9f' $'\xe1\x85\xa0' $'\xef\xbe\xa0'; do
     rule_with '**/*.sql' "- Use \`foo\` for${v}bar."
     run lint
     [ "$status" -eq 1 ]
@@ -1723,6 +1722,26 @@ print('\n'.join(rules.lint('$R', check_urls=True).lines()))"
     [ "$status" -eq 1 ]
     [[ "$output" == *"invisible character"* ]]
   done
+  # U+17B4 U+034F U+180B U+0301: combining marks, named as such
+  for v in $'\xe1\x9e\xb4' $'\xcd\x8f' $'\xe1\xa0\x8b' $'\xcc\x81'; do
+    rule_with '**/*.sql' "- Use \`foo\` for${v}bar."
+    run lint
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"E_STYLE rules/g/style.md: line 7: combining mark U+"* ]]
+    rule_with '**/*.sql' "- Use \`foo\`${v}${v}${v} for bar."     # padding form
+    run lint
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"combining mark"* ]]
+  done
+  # Decomposed text (`e` + U+0301) is refused as a combining mark; the precomposed letter passes.
+  rule_with '**/*.sql' $'- Use `foo` in the cafe\xcc\x81 module.'
+  run lint
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"combining mark U+0301"* ]]
+  [[ "$output" != *"invisible character"* ]]
+  rule_with '**/*.sql' $'- Use `foo` in the caf\xc3\xa9 module.'
+  run lint
+  [ "$status" -eq 0 ]
   # Emit refuses them too (the pack is excluded, nothing is written).
   rule_with '**/*.sql' $'- Use `foo` for\xe3\x85\xa4bar.'
   run emit --harness agents-md --packs g --out "$R/AGENTS.md"
@@ -1730,19 +1749,45 @@ print('\n'.join(rules.lint('$R', check_urls=True).lines()))"
   [ ! -e "$R/AGENTS.md" ]
 }
 
-@test "VS1 E_STYLE: a letter from another script inside an ASCII word is rejected, an accented Latin letter is not" {
+@test "VS1 E_STYLE: a confusable letter inside an ASCII word is rejected" {
   PK=g; make_pack g
   local v
-  # Armenian oh, Latin alpha, dotless i, Cherokee A: none of them is Cyrillic or Greek.
-  for v in $'w\xd6\x85rd' $'w\xc9\x91rd' $'w\xc4\xb1rd' $'w\xe1\x8e\xa0rd'; do
+  # (b) other look-alike scripts: Armenian oh, Cherokee A, Coptic ei, Cyrillic a, Greek omicron.
+  # (c) Latin look-alikes: Latin alpha, dotless i, script g, small-cap c.
+  # (a) NFKC folds to ASCII: fullwidth w, fi ligature, mathematical bold a.
+  for v in $'w\xd6\x85rd' $'w\xe1\x8e\xa0rd' $'w\xcf\xa9rd' $'w\xd0\xb0rd' $'w\xce\xbfrd' \
+           $'w\xc9\x91rd' $'w\xc4\xb1rd' $'w\xc9\xa1rd' $'w\xe1\xb4\x84rd' \
+           $'\xef\xbd\x97ith' $'\xef\xac\x81le' $'x\xf0\x9d\x90\x9ay'; do
     rule_with '**/*.sql' "- Use \`foo\` ${v} first."
     run lint
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"E_STYLE rules/g/style.md: line 7: word"*"mixes ASCII with"* ]]
+    [ "$status" -eq 1 ] || { echo "accepted: $v"; return 1; }
+    [[ "$output" == *"E_STYLE rules/g/style.md: line 7: word"*"mixes ASCII letters with"* ]]
   done
-  rule_with '**/*.sql' $'- Use `foo` in the caf\xc3\xa9 module.'
-  run lint
+}
+
+@test "VS1 E_STYLE: ordinary non-ASCII text next to ASCII letters is NOT flagged" {
+  PK=g; make_pack g
+  local v
+  # accented Latin, micro sign, sharp s, o-slash, l-stroke, o-acute/z-acute, CJK next to ASCII,
+  # and a word with no ASCII letter at all (fullwidth only).
+  for v in $'caf\xc3\xa9' $'5\xc2\xb5s' $'Stra\xc3\x9fe' $'S\xc3\xb8ren' $'\xc5\x81\xc3\xb3d\xc5\xba' \
+           $'API\xe7\x94\xa8' $'\xe7\x94\xa8API' $'na\xc3\xafve' $'\xef\xbd\x97\xef\xbd\x89\xef\xbd\x8e'; do
+    rule_with '**/*.sql' "- Use \`foo\` ${v} first."
+    run lint
+    [ "$status" -eq 0 ] || { echo "rejected: $v: $output"; return 1; }
+  done
+}
+
+@test "VF1 emit: a BEGIN edited to still start like the marker is quoted text, a deleted BEGIN is a refusal" {
+  make_pack sql
+  printf 'notes\n<!-- BEGIN the-grid rules (edited by me) -->\n%s\n' "$END_LINE" > "$R/AGENTS.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
   [ "$status" -eq 0 ]
+  grep -qx '<!-- BEGIN the-grid rules (edited by me) -->' "$R/AGENTS.md"
+  [ "$(grep -c '^### sql / style' "$R/AGENTS.md")" -eq 1 ]
+  printf 'notes\n%s\n' "$END_LINE" > "$R/AGENTS.md"
+  run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
+  [ "$status" -eq 2 ]
 }
 
 @test "VS1: normalisation folds blank look-alikes to a space and drops marks, zero-width and control characters" {
