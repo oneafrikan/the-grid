@@ -3,6 +3,8 @@
 
 load helpers/setup
 
+bats_require_minimum_version 1.5.0   # `run --separate-stderr` in the H-10 tests
+
 setup() {
   common_setup
   make_skill "$MOCK_GRID/skills/skill-alpha" "skill-alpha"
@@ -606,4 +608,133 @@ links_of() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"manifest"* ]]
   ! grep -q '^manifest	' "$MOCK_GRID/.wired.manifest"
+}
+
+# --- H-10: composed-project loops, HOME preflight, deny-predicate guards -----------------
+
+@test "H-10: a composed skill/agent path with a line break links nothing outside the project and is a named skip" {
+  # The part after the line break is an absolute path into OTHER_DIR: a line-split listing
+  # used to treat that directory as a skill dir / agent file.
+  local nl=$'\n' cr=$'\r' base="$MOCK_GRID/agent-factory/projects/p/_claude-code"
+  make_skill "$base/skills/good" "good"
+  mkdir -p "$OTHER_DIR/payload"
+  make_skill "$base/skills/x${nl}$OTHER_DIR/payload" "payload"
+  make_skill "$base/skills/cr${cr}skill" "crskill"
+  mkdir -p "$base/agents/a${nl}$OTHER_DIR"
+  printf -- '---\nname: good\n---\n' > "$base/agents/good.md"
+  printf -- '---\nname: evil\n---\n' > "$base/agents/a${nl}$OTHER_DIR/evil.md"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skip (invalid name)"* ]]
+  [ -L "$MOCK_SKILLS/good" ]
+  # Exactly the two root skills and the one good composed skill: no "skills", "payload" or CR link.
+  [ "$(ls "$MOCK_SKILLS" | LC_ALL=C sort | paste -sd, -)" = "good,skill-alpha,skill-beta" ]
+  [ "$(ls "$MOCK_AGENTS" | LC_ALL=C sort | paste -sd, -)" = "good.md" ]
+  # The skips are recorded, and no forged column or row appears in the manifest.
+  [ "$(awk -F'\t' 'NF != 5' "$MOCK_GRID/.wired.manifest" | wc -l | tr -d ' ')" -eq 0 ]
+  grep -q "	skipped	invalid name$" "$MOCK_GRID/.wired.manifest"
+}
+
+@test "H-10: a composed tree that resolves outside the project dir is skipped, not linked" {
+  # _claude-code is a symlink to a tree elsewhere: find follows a symlinked middle component,
+  # so the old loop linked skills whose real location is outside the project.
+  local proj="$MOCK_GRID/agent-factory/projects/p"
+  mkdir -p "$proj" "$OTHER_DIR/cc/skills" "$OTHER_DIR/cc/agents"
+  make_skill "$OTHER_DIR/cc/skills/outside" "outside"
+  printf -- '---\nname: o\n---\n' > "$OTHER_DIR/cc/agents/o.md"
+  ln -s "$OTHER_DIR/cc" "$proj/_claude-code"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  # One check per line: a failing non-final `[ ] && [ ]` operand does not fail a bats test.
+  [ ! -e "$MOCK_SKILLS/outside" ]
+  [ ! -L "$MOCK_SKILLS/outside" ]
+  [ ! -e "$MOCK_AGENTS/o.md" ]
+  [ ! -L "$MOCK_AGENTS/o.md" ]
+  [[ "$output" == *"skip (outside project dir)"* ]]
+  grep -q "	skipped	outside project dir$" "$MOCK_GRID/.wired.manifest"
+}
+
+@test "H-10: a composed tree inside the project (nested dirs) still wires" {
+  local base="$MOCK_GRID/agent-factory/projects/p/_claude-code"
+  make_skill "$base/skills/cat/deep" "deep"
+  mkdir -p "$base/agents"
+  printf -- '---\nname: ag\n---\n' > "$base/agents/ag.md"
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/deep" ]
+  [ -L "$MOCK_AGENTS/ag.md" ]
+}
+
+@test "H-10: HOME and CLAUDE_CONFIG_DIR both unset: --check and a real wire exit 2 with a named message and touch nothing" {
+  local before_s before_a before_g
+  before_s="$(find "$MOCK_SKILLS" | LC_ALL=C sort)"; before_a="$(find "$MOCK_AGENTS" | LC_ALL=C sort)"
+  before_g="$(find "$MOCK_GRID" | LC_ALL=C sort)"
+  GRID_DIR="$MOCK_GRID" run --separate-stderr env -u HOME -u CLAUDE_CONFIG_DIR \
+    bash "$REPO_ROOT/scripts/wire.sh" --check
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"HOME"* && "$stderr" == *"CLAUDE_CONFIG_DIR"* && "$stderr" == *"nothing was changed"* ]]
+  GRID_DIR="$MOCK_GRID" run --separate-stderr env -u HOME -u CLAUDE_CONFIG_DIR \
+    bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"nothing was changed"* ]]
+  [ "$(find "$MOCK_SKILLS" | LC_ALL=C sort)" = "$before_s" ]
+  [ "$(find "$MOCK_AGENTS" | LC_ALL=C sort)" = "$before_a" ]
+  [ "$(find "$MOCK_GRID" | LC_ALL=C sort)" = "$before_g" ]
+}
+
+@test "H-10: HOME empty or unset with a home-derived dir unset exits 2 naming it, not an unbound-variable crash" {
+  local v
+  for v in SKILLS_DIR AGENTS_DIR RULES_DIR; do
+    GRID_DIR="$MOCK_GRID" run --separate-stderr env -u "$v" HOME= bash "$REPO_ROOT/scripts/wire.sh" --check
+    [ "$status" -eq 2 ]
+    [[ "$stderr" == *"$v"* ]]
+    [[ "$stderr" != *"unbound variable"* ]]
+    GRID_DIR="$MOCK_GRID" run --separate-stderr env -u "$v" -u HOME bash "$REPO_ROOT/scripts/wire.sh" --check
+    [ "$status" -eq 2 ]
+    [[ "$stderr" == *"$v"* ]]
+    [[ "$stderr" != *"unbound variable"* ]]
+  done
+}
+
+@test "H-10: HOME unset but every Claude dir given explicitly still wires (the preflight is not over-strict)" {
+  GRID_DIR="$MOCK_GRID" run env -u HOME bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/skill-alpha" ]
+}
+
+# deny_pred_run <bash snippet>: runs the snippet against the four -repo predicates lifted out of
+# wire.sh, so each guard is exercised ALONE. Through a whole wire, repo_has_skill_entries and
+# skill_is_wired mask each other (either one keeps a denied repo's skill unwired), so removing
+# ONE guard from wire.sh changed no observable result.
+deny_pred_run() {
+  local src
+  src="$(sed -n '/^repo_is_denied()/,/^# Is a composed agent-factory project wired/p' "$REPO_ROOT/scripts/wire.sh")"
+  bash -c '
+    set -u
+    DENY_REPOS=(anthropic); DENY_SKILLS=()
+    WIRED_REPOS=(anthropic other); WIRED_SKILLS=(anthropic/docx other/pdf); wire_all_repos=0
+    eval "$1"
+    eval "$2"
+  ' _ "$src" "$1"
+}
+
+@test "H-10: -repo wins in every predicate on its own (a single-guard mutation is caught)" {
+  run deny_pred_run 'repo_is_wired anthropic && echo WIRED-WHOLE; skill_is_wired anthropic docx && echo WIRED-SKILL; repo_has_skill_entries anthropic && echo HAS-ENTRIES; echo end'
+  [ "$status" -eq 0 ]
+  [ "$output" = "end" ]
+  # Control: a repo that is not denied is seen by all three, so the test cannot pass vacuously.
+  run deny_pred_run 'repo_is_wired other && echo WIRED-WHOLE; skill_is_wired other pdf && echo WIRED-SKILL; repo_has_skill_entries other && echo HAS-ENTRIES'
+  [ "$output" = "$(printf 'WIRED-WHOLE\nWIRED-SKILL\nHAS-ENTRIES')" ]
+}
+
+@test "H-10: common_setup skips the audit by default and enable_audit really turns it on" {
+  # The mock grid has no policy.yaml: with the audit skipped wire.sh continues, with it on the
+  # missing policy blocks (exit 3). A test that means to exercise the audit must call enable_audit.
+  [ "${GRID_SKIP_AUDIT:-}" = 1 ]
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  enable_audit
+  [ -z "${GRID_SKIP_AUDIT+x}" ]
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 3 ]
 }
