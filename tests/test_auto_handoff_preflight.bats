@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# Tests for scripts/auto-handoff-preflight.sh — the four live checks that gate turning
-# auto-handoff on (env propagation, B1 rule form, WP-016 flag parity, env -i auth) and the
+# Tests for scripts/auto-handoff-preflight.sh — three gating live checks (env propagation,
+# WP-016 flag parity, env -i auth) plus one advisory check (B1 rule form), and the
 # --enable / --disable switch.
 #
 # Safety: `claude` is ALWAYS the local stub below (GRID_PREFLIGHT_CLAUDE); a tripwire
@@ -988,6 +988,11 @@ fake_settings() {
   [[ "$output" =~ read\ this\ yourself ]]
   [[ "$output" =~ H-02 ]]
   [[ "$output" =~ fail-closed ]]
+  # the backstop is described as detection, with its limits, not as confinement
+  [[ "$output" =~ post-run\ detection ]]
+  [[ "$output" =~ never\ reverts ]]
+  [[ "$output" =~ cannot\ see\ writes\ outside ]]
+  [[ ! "$output" =~ confinement ]]
   [[ "$output" =~ VERDICT:\ PASS\ \(3/3\ gating ]]
   # honest wording: no claim that the probe proves anything
   [[ ! "$output" =~ [Pp]roves ]]
