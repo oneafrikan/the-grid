@@ -1169,7 +1169,8 @@ inputs = ["7z -p " * 11000, "vault login " * 5500, "echo " * 13000, "docker \\\n
           "az login " * 7000, "sudo -S " * 8000, "smbclient //a " * 4500, "/p:" * 21000, "session=" * 8000,
           z * 60000 + "mysql -p x", "mysql" + z + "-p" + z * 30000, "pa\u0301" * 20000, "\u1680" * 60000,
           "echo " + "a" * 60000 + " | sudo -S", "x -p " * 16000, "sudo -S <<EOF\n" * 4500, "<<< a " * 10000,
-          "sudo " + " " * 60000 + "-S", "sudo --stdin " * 5000, "ssh -p 1 " * 7000, "bash -c \x27x\x27 " * 5000, "(" * 60000, "\\" * 60000, "\"" * 60000]
+          "mysql -p \"\\\n" * 5000, "mysql " + "-p \\\n" * 10000, "TOKEN=\\\n" * 8000, "--password \\\n" * 5000,
+          "mysql -p \"" + "\\\n" * 30000, "\\\n" * 30000, "sudo " + " " * 60000 + "-S", "sudo --stdin " * 5000, "ssh -p 1 " * 7000, "bash -c \x27x\x27 " * 5000, "(" * 60000, "\\" * 60000, "\"" * 60000]
 for t in inputs:
     s = time.time()
     lib.scrub(t); lib.drop_sensitive_lines(t); lib.unlisted_secret_flag(t)
@@ -1219,6 +1220,83 @@ for t in ["mkdir -p a/b", "psql -p 5432 db", "pytest -p no:cacheprovider", "ssh 
   grep -q 'up to 8 plain lowercase words' "$d"
   grep -q 'unlisted tool' "$d"
   grep -q 'semantic variants' "$d"
+  # the digest also carries commands and paths, so the 8 words must not be called the only text sent
+  grep -q 'only free text taken from prompts' "$d"
+  if grep -q 'only free text that leaves the machine' "$d"; then return 1; fi
+  grep -q 'up to 120 characters' "$d"
+  grep -q 'up to 200 characters' "$d"
   # the documented cap is the code's cap
   grep -q 'len(words) >= 8' "$REPO_ROOT/scripts/instincts/analyse.py"
+}
+
+# --- H-14 fix round 1: a backslash-newline between a flag and its value ------------------------
+# {N} is the continuation (backslash-LF, backslash-CRLF, or two in a row), {S} the secret value.
+# Before the fix the value word was never reached: the backslash itself was taken as the value and
+# redacted, leaving `[REDACTED]` as false assurance next to the real secret.
+
+@test "scrub (H-14): a continuation between a secret flag and its value redacts the value" {
+  run h14py '
+shapes = [
+ "docker login -u me -p {N}{S}", "docker login -u me {N}-p {N}{S}", "docker login -u me -p {N}{N}{S}",
+ "mysql -u root {N} -p {N}{S} db", "mysql -p{N}{S} db", "rar a -p{N}{S} a b", "mysql -p {N}{S}",
+ "unzip -P{N}{S} f", "sshpass -p {N}{S} ssh h", "twine upload --password {N}{S} dist/*",
+ "az login --password={N}{S}", "curl -u {N}bob:{S} h", "rar a -hp{N}{S} x", "ldapsearch -w {N}{S} -b x",
+ "gpg --passphrase {N}{S} -d f", "acme --password {N}{S} run", "acme --token={N}{S} run",
+ "acme -u {N}bob:{S} h", "acme -p{N}{S}", "TOKEN={N}{S} run", "export API_KEY={N}{S}",
+ "session={N}{S} run", "vault login {N}{S}", "smbclient //h/s {N}{S} -N",
+ # the secret itself continued over a line break: both halves go
+ "mysql -p {S1}{N}{S2} db", "docker login -p {S1}{N}{S2}", "mysql -p\"{S1}{N}{S2}\" db",
+ "mysql -p \"{S1}{N}{S2}\" db", "TOKEN={S1}{N}{S2} run",
+]
+S1, S2 = "zebra", "quilt"   # not a slice of S: "sword" is inside the flag name "password"
+for nl in ("\\\n", "\\\r\n", "\\\n\\\n"):
+    for shape in shapes:
+        text = shape.replace("{N}", nl).replace("{S1}", S1).replace("{S2}", S2).replace("{S}", S)
+        out = lib.scrub(text)
+        flat = "".join(out.replace("\r", "").split()).replace("\\", "")
+        assert S not in flat and S1 not in flat and S2 not in flat, (text, out)
+        assert "[REDACTED]" in out, (text, out)
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): a continuation after a redacted flag leaves a clean form" {
+  run h14py '
+assert lib.scrub("docker login -u me -p \\\n" + S) == "docker login -u me -p [REDACTED]", lib.scrub("docker login -u me -p \\\n" + S)
+assert lib.scrub("mysql -u root \\\n -p \\\n" + S + " db") == "mysql -u root \\\n -p [REDACTED] db"
+assert lib.scrub("mysql -p\\\r\n" + S + " db") == "mysql -p[REDACTED] db", lib.scrub("mysql -p\\\r\n" + S + " db")
+once = lib.scrub("docker login -p \\\n\\\n" + S + " \\\n -u me")
+assert lib.scrub(once) == once and S not in once, once
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "scrub (H-14): a continuation that precedes no value changes nothing and breaks nothing" {
+  run h14py '
+for t in ["ls \\\n-p", "mkdir \\\n-p \\\ndir", "mkdir -p \\\n dir", "acme -v \\\n-p", "psql -p \\\n 5432 db",
+          "echo hi \\\n", "ls \\\n", "\\\n", "\\", "mysql -p \\\n", "docker login -p \\\n", "docker login \\\n-u me \\\n"]:
+    out = lib.scrub(t)
+    assert isinstance(out, str)
+    assert S not in out
+for t in ["ls \\\n-p", "mkdir \\\n-p \\\ndir", "mkdir -p \\\n dir", "echo hi \\\n", "ls \\\n"]:
+    assert lib.scrub(t) == t, (t, lib.scrub(t))
+# and none of them is dropped or flagged by the fail-safe rule
+for t in ["ls \\\n-p", "mkdir \\\n-p \\\ndir", "mkdir -p \\\n dir", "acme -v \\\n-p", "acme \\\n-p", "psql -p \\\n 5432 db"]:
+    assert lib.unlisted_secret_flag(t) is False, t
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
+}
+
+@test "unlisted_secret_flag (H-14): a continuation between an unlisted flag and its value is seen" {
+  run h14py '
+for nl in ("\\\n", "\\\r\n", "\\\n\\\n"):
+    for t in ["acme -p " + nl + S, "acme " + nl + "-p " + nl + S, "acme -p" + nl + S, "acme -w " + nl + " " + S,
+              "cd x && acme -P " + nl + S]:
+        assert lib.unlisted_secret_flag(t) is True, t
+'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "ok" ]
 }
