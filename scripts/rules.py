@@ -165,6 +165,16 @@ def is_invisible(ch):
             or 0xE0000 <= cp <= 0xE007F or 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF)
 
 
+def is_combining_mark(ch):
+    """True for a combining mark (Mn/Me) other than a variation selector, which is reported as
+    an invisible character. A mark is refused because it either hides (grapheme joiner) or
+    decorates a letter so it escapes the denylist; precomposed letters are the way to write
+    accents."""
+    cp = ord(ch)
+    return (unicodedata.category(ch) in ("Mn", "Me")
+            and not (0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF))
+
+
 def is_control(ch):
     """True for a control character (category Cc: ESC, NUL, DEL, VT, FF, NEL...). A tab is
     layout and stays legal; a newline never reaches a single line."""
@@ -188,17 +198,28 @@ def normalize_for_match(line):
     return re.sub(r"\s+", " ", "".join(out))
 
 
+# Scripts with letters that pass for ASCII ones (matched on the Unicode name). Latin and CJK
+# are deliberately absent: accented Latin, sharp s, o-slash, l-stroke and CJK text are ordinary.
+LOOKALIKE_SCRIPTS = ("CYRILLIC", "GREEK", "ARMENIAN", "CHEROKEE", "COPTIC", "LISU", "OSAGE",
+                     "CANADIAN SYLLABICS")
+# Latin-script letters that pass for an ASCII one but are not accented forms of it:
+# dotless i, Latin alpha, script g, and the small capitals i c o u v w z.
+LATIN_LOOKALIKES = frozenset(chr(cp) for cp in (0x0131, 0x0251, 0x0261, 0x026A, 0x1D04, 0x1D0F,
+                                                0x1D1C, 0x1D20, 0x1D21, 0x1D22))
+
+
 def is_lookalike_letter(ch):
     """True for a non-ASCII letter that could pass for an ASCII one inside an ASCII word:
-    any Cyrillic, Greek, Armenian, Cherokee... letter, and a Latin letter that does not
-    decompose to an ASCII base plus marks (dotless i, Latin alpha). An accented letter such
-    as the e-acute of `café` does decompose, so ordinary accented text is not flagged."""
+    (a) one NFKC folds to ASCII letters (fullwidth, ligatures, mathematical alphanumerics),
+    (b) one of a script with ASCII look-alikes (LOOKALIKE_SCRIPTS), or (c) one of the few
+    Latin look-alikes. Everything else (accented Latin, sharp s, o-slash, the micro sign,
+    CJK) is ordinary text and is not flagged."""
     if not ch.isalpha() or ord(ch) < 128:
         return False
-    if unicodedata.name(ch, "").startswith("LATIN"):
-        base = unicodedata.normalize("NFD", ch)
-        return not (len(base) > 1 and base[0].isascii() and base[0].isalpha())
-    return True
+    folded = unicodedata.normalize("NFKC", ch)
+    if folded != ch and folded.isascii() and any(c.isalpha() for c in folded):
+        return True
+    return unicodedata.name(ch, "").startswith(LOOKALIKE_SCRIPTS) or ch in LATIN_LOOKALIKES
 
 
 def mixed_script_words(line):
@@ -602,16 +623,21 @@ def lint_rule_file(rel, path, denylist, f):
         if "<!--" in line or "-->" in line:
             f.add("E_STYLE", rel, "line %d: HTML comment markers are not allowed" % i)
         scan = line[1:] if (bom and i == 1) else line     # the BOM has its own finding
-        hidden = sorted(set("U+%04X" % ord(ch) for ch in scan if is_invisible(ch)))
+        hidden = sorted(set("U+%04X" % ord(ch) for ch in scan
+                            if is_invisible(ch) and not is_combining_mark(ch)))
         if hidden:
             f.add("E_STYLE", rel, "line %d: invisible character %s" % (i, ", ".join(hidden)))
+        marks = sorted(set("U+%04X" % ord(ch) for ch in scan if is_combining_mark(ch)))
+        if marks:
+            f.add("E_STYLE", rel, "line %d: combining mark %s (use the precomposed letter)"
+                  % (i, ", ".join(marks)))
         # Control characters (ESC sequences can conceal text in a terminal view) are refused
         # outright; a tab is layout and stays legal.
         ctl = sorted(set("U+%04X" % ord(ch) for ch in scan if is_control(ch)))
         if ctl:
             f.add("E_STYLE", rel, "line %d: control character %s" % (i, ", ".join(ctl)))
         for word in mixed_script_words(line):
-            f.add("E_STYLE", rel, "line %d: word %r mixes ASCII with look-alike letters of another script" % (i, word))
+            f.add("E_STYLE", rel, "line %d: word %r mixes ASCII letters with a confusable non-ASCII letter" % (i, word))
 
     # Marker text anywhere (fenced or not) would corrupt the managed block or the .mdc
     # generated-file detection once delivered, so it is refused at the source.
