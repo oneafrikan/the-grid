@@ -32,6 +32,7 @@ import argparse
 import atexit
 import contextlib
 import datetime
+import errno
 import hashlib
 import json
 import os
@@ -90,7 +91,7 @@ def state_dir():
     """Machine-local state dir: GRID_STATE_DIR, else $HOME/.grid."""
     env = os.environ.get("GRID_STATE_DIR")
     if env:
-        return env
+        return os.path.abspath(env)             # messages that name a state file show a full path
     return os.path.join(os.environ.get("HOME") or os.path.expanduser("~"), ".grid")
 
 
@@ -371,6 +372,41 @@ def load_grid_yaml(grid_dir):
 
 # --- typed entries (design.md "Typed entries") -----------------------------------
 
+def read_regular_file(path):
+    """Text of the regular file at `path`; None when it does not exist.
+
+    A FIFO (or any other non-regular file) at a path grid reads must not block it: a plain
+    open() of a FIFO waits for a writer for ever, which hung every command that reads the
+    wired-set files (private H-12). The file is opened O_NONBLOCK and the type is checked with
+    an fstat on the descriptor already held, as _seed_copy does. Symlinks are followed (a
+    user may keep machines/ in a private repo); only the TYPE of what is finally opened
+    matters. A non-regular file, or a parent that is not a directory, is a GridError naming
+    the absolute path (exit 2) instead of a hang or a raw errno.
+    """
+    shown = os.path.abspath(path)
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    except FileNotFoundError:
+        return None
+    except NotADirectoryError:
+        culprit = os.path.dirname(shown)
+        while culprit != os.path.dirname(culprit) and not (os.path.lexists(culprit)
+                                                           and not os.path.isdir(culprit)):
+            culprit = os.path.dirname(culprit)
+        raise GridError("grid: cannot read %s: %s is not a directory (remove or rename it)"
+                        % (shown, culprit))
+    except OSError as exc:
+        raise GridError("grid: cannot read %s: %s" % (shown, exc.strerror or exc))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise GridError("grid: %s is not a regular file; refusing to read it (remove it and "
+                            "re-run)" % shown)
+        with os.fdopen(fd, "rb", closefd=False) as fh:
+            return fh.read().decode("utf-8")
+    finally:
+        os.close(fd)
+
+
 def read_wired_entries(paths):
     """Read wired-set files; return (adds, denies) of UNTYPED entries only.
 
@@ -379,15 +415,15 @@ def read_wired_entries(paths):
     contains `:` is typed (`project:x`, `-rules:sql`, `harness:codex`, any kind,
     known or not): grid ignores every typed entry and leaves it to wire.sh, so a
     new kind needs no change here. `adds` are `repo` / `repo/skill`; `denies`
-    are the same with the leading `-` removed. Missing files are skipped.
+    are the same with the leading `-` removed. Missing files are skipped; a file that
+    is not a regular file is exit 2 (see read_regular_file), never a hang.
     """
     adds, denies = [], []
     for path in paths:
-        try:
-            with open(path, encoding="utf-8") as fh:
-                lines = fh.read().splitlines()
-        except FileNotFoundError:
+        text = read_regular_file(path)
+        if text is None:
             continue
+        lines = text.splitlines()
         for line in lines:
             entry = "".join(line.split("#", 1)[0].split())
             if not entry:
@@ -467,6 +503,17 @@ def _printable(value):
     return ascii(str(value))[1:-1]
 
 
+def _fold(text):
+    """`text` case-folded the way a case-insensitive filesystem folds names: ONE character to one.
+
+    str.casefold() is a FULL fold (the sharp s becomes "ss"), which would call two names that
+    no filesystem equates duplicates. Characters whose full fold is longer than one character
+    are kept as they are, which leaves the simple folds (Foo / foo, and the rest) that a
+    case-insensitive volume applies.
+    """
+    return "".join(c.casefold() if len(c.casefold()) == 1 else c for c in text)
+
+
 def dest_for(source, path):
     """Grid-relative destination of a placed skill: repos/<source>/<path>."""
     return "repos/%s/%s" % (source, path)
@@ -480,6 +527,11 @@ def source_root(grid_dir, source):
     on the same filesystem as the grid: install and repair rename staged copies into
     place and fail with EXDEV across filesystems. A symlinked repos/<source> must stay
     refused, and resolving it here would make it contain its own target (see is_contained).
+
+    Trust note: a `repos` symlink that arrives with a cloned grid (it is committed content) is
+    accepted like one the user made. What install places is still only the reviewed grid.lock
+    content, but it lands under the link's target; check `ls -ld repos` after cloning a grid you
+    do not own.
     """
     return os.path.join(os.path.realpath(os.path.join(grid_dir, "repos")), source)
 
@@ -511,11 +563,12 @@ def dest_chain_link(grid_dir, dest, include_leaf):
     lstat on each prefix, so nothing is followed. Meant to be called IMMEDIATELY
     before an rmtree or rename: is_contained is a check on an earlier moment, and
     a same-user process could have swapped a parent for a symlink since. This
-    re-check narrows that window to the gap between this lstat and the syscall;
-    it does not close it (an O_NOFOLLOW dir_fd walk would). Chosen over the fd
-    walk because it is a small change and the threat needs a concurrent process
-    of the same user, so this is hardening, not a boundary. A component that does
-    not exist ends the walk (the caller creates or has already removed it).
+    gives the friendly error and narrows the window; the delete and the rename
+    themselves then go through an O_NOFOLLOW descriptor walk (open_chain), which
+    closes the gap between this lstat and the syscall. The threat needs a
+    concurrent process of the same user, so this is hardening, not a boundary.
+    A component that does not exist ends the walk (the caller creates or has
+    already removed it).
     """
     parts = dest.split("/")
     upto = len(parts) if include_leaf else len(parts) - 1
@@ -543,6 +596,73 @@ def escape_hint(grid_dir, dest):
     if link is None and os.path.islink(os.path.join(grid_dir, "repos")):
         link = "repos"
     return " (%s is a symlink)" % link if link else ""
+
+
+# --- no-follow directory walk (closes the check-to-use window of dest_chain_link) -------------
+# dest_chain_link re-checks the path with lstat just before a delete or rename, which leaves
+# the gap between that check and the syscall. These helpers close it for the parent chain:
+# every directory is opened with O_NOFOLLOW relative to the previous one, and the delete or
+# rename then goes through the final descriptor, so a parent swapped for a symlink after the
+# check fails the open (or is never looked at again) instead of redirecting the operation.
+
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+
+
+def open_chain(top, names, create=False):
+    """Open `top`, then each of `names` below it with O_NOFOLLOW; return the descriptors.
+
+    The result has len(names) + 1 descriptors, [0] being `top` itself and [-1] the deepest
+    directory; the caller closes them all (close_chain). A name that is a symlink, or not a
+    directory, raises OSError (ELOOP or ENOTDIR). With `create`, a missing directory is made
+    with mkdir relative to its parent's descriptor, so nothing can be created outside the
+    chain that was opened. `top` is a path, so it must be a realpath the caller already
+    vetted (the realpath of repos/); its own ancestors are not protected.
+    """
+    fds = [os.open(top, os.O_RDONLY | os.O_DIRECTORY)]
+    try:
+        for name in names:
+            try:
+                fd = os.open(name, _DIR_FLAGS, dir_fd=fds[-1])
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(name, 0o777, dir_fd=fds[-1])
+                fd = os.open(name, _DIR_FLAGS, dir_fd=fds[-1])
+            fds.append(fd)
+    except BaseException:
+        close_chain(fds)
+        raise
+    return fds
+
+
+def close_chain(fds):
+    for fd in fds:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def rmtree_at(dir_fd, name):
+    """Remove directory `name` below `dir_fd` and everything in it, never following a link.
+
+    Every directory is opened O_NOFOLLOW relative to its parent; files and links (also links to
+    directories) are unlinked, never entered. shutil.rmtree resolves each path from the top
+    again, so a parent swapped for a link mid-way would redirect it (before Python 3.11 it
+    had no dir_fd at all). OSError on any failure; the tree may then be partly deleted.
+    """
+    fd = os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
+    try:
+        with os.scandir(fd) as it:
+            entries = [(e.name, e.is_dir(follow_symlinks=False)) for e in it]
+        for entry_name, is_dir in entries:
+            if is_dir:
+                rmtree_at(fd, entry_name)
+            else:
+                os.unlink(entry_name, dir_fd=fd)
+    finally:
+        os.close(fd)
+    os.rmdir(name, dir_fd=dir_fd)
 
 
 def source_dir_is_link(grid_dir, source):
@@ -629,7 +749,7 @@ def read_grid_lock(grid_dir, sources):
         # casefold: names and destinations that differ only in case are one directory (or
         # one link) on a case-insensitive filesystem, so they clash (private NF-066 J3).
         for what, key in (("destination", ("dest", dest.casefold())),
-                          ("name and source", ("name", entry["name"].casefold(),
+                          ("name and source", ("name", _fold(entry["name"]),
                                                entry["source"].casefold()))):
             if key in seen_by:
                 raise GridError("grid: grid.lock %s duplicates %s (same %s)"
@@ -1290,7 +1410,7 @@ def read_ledger(path=None):
     except FileNotFoundError:
         return [], []
     rows, foreign, seen = [], [], set()
-    first_line = {}                                 # casefolded dest -> line of its first row
+    first_line = {}                                 # casefolded dest -> (line, dest) of its first row
     for lineno, line in enumerate(text.split("\n"), 1):
         if not line:
             continue
@@ -1302,7 +1422,7 @@ def read_ledger(path=None):
             if kind not in seen:
                 seen.add(kind)
                 notice("grid: %s has rows of kind '%s', which this version does not handle; kept as they are"
-                       % (LEDGER_NAME, kind))
+                       % (LEDGER_NAME, _printable(kind)))
             foreign.append(line)
             continue
         if len(cols) != len(LEDGER_COLS):
@@ -1326,9 +1446,16 @@ def read_ledger(path=None):
         # case-insensitive filesystem.
         folded = row["dest"].casefold()
         if folded in first_line:
-            raise _ledger_error(path, lineno, "duplicate row for %s (first on line %d)"
-                                % (row["dest"], first_line[folded]))
-        first_line[folded] = lineno
+            first_no, first_dest = first_line[folded]
+            if first_dest == row["dest"]:
+                raise _ledger_error(path, lineno, "duplicate row for %s (first on line %d)"
+                                    % (row["dest"], first_no))
+            # Foo / foo: distinct on Linux, one directory on a case-insensitive volume. Say which
+            # two rows clash, so the one to delete is obvious.
+            raise _ledger_error(path, lineno, "duplicate row: %s (line %d) and %s (line %d) differ "
+                                "only in case, which is one directory on a case-insensitive "
+                                "filesystem" % (first_dest, first_no, row["dest"], lineno))
+        first_line[folded] = (lineno, row["dest"])
         rows.append(row)
     return rows, foreign
 
@@ -1438,21 +1565,38 @@ def remove_placed_dir(grid_dir, row, force=False):
     if source_root(grid_dir, row["source"]) != expected_root:
         return "refused", "repos changed during the removal"
     target = os.path.realpath(os.path.join(grid_dir, row["dest"]))
-    if os.path.commonpath([expected_root, target]) != expected_root:
+    if os.path.commonpath([expected_root, target]) != expected_root or target == expected_root:
         return "refused", "%s resolves outside repos/%s" % (row["dest"], row["source"])
+    # The delete itself walks down from realpath(repos) one O_NOFOLLOW step at a time and removes
+    # the leaf through its parent's descriptor, so a parent swapped for a link after the checks
+    # above fails the walk instead of redirecting the delete (private H-12, VG2).
+    below = os.path.relpath(target, os.path.dirname(expected_root)).split(os.sep)
+    fds = []
     try:
-        shutil.rmtree(target)
-    except OSError as exc:
-        # No traceback and no silent success: the caller keeps the ledger row.
-        return "failed", "%s: %s" % (row["dest"], exc.strerror or exc)
-    root = source_root(grid_dir, row["source"])          # target is a realpath, so is the root
-    parent = os.path.dirname(target)
-    while parent != root and parent.startswith(root + os.sep):
         try:
-            os.rmdir(parent)                       # only succeeds while empty
-        except OSError:
-            break
-        parent = os.path.dirname(parent)
+            fds = open_chain(os.path.dirname(expected_root), below[:-1])
+        except OSError as exc:
+            if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                return "refused", "%s changed under the removal (a parent is no longer a plain " \
+                                  "directory)" % row["dest"]
+            return "failed", "%s: %s" % (row["dest"], exc.strerror or exc)
+        try:
+            rmtree_at(fds[-1], below[-1])
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                return "refused", "%s changed under the removal (a link appeared)" % row["dest"]
+            # No traceback and no silent success: the caller keeps the ledger row.
+            return "failed", "%s: %s" % (row["dest"], exc.strerror or exc)
+        except RecursionError:
+            return "failed", "%s: directory tree is nested too deeply to delete" % row["dest"]
+        # Now-empty parents, deepest first, up to but not including repos/<source> (fds[1]).
+        for i in range(len(fds) - 1, 1, -1):
+            try:
+                os.rmdir(below[i - 1], dir_fd=fds[i - 1])    # only succeeds while empty
+            except OSError:
+                break
+    finally:
+        close_chain(fds)
     return "removed", row["dest"]
 
 
@@ -1690,6 +1834,11 @@ def _seed_copy(grid_dir, src, rel):
         except BaseException:
             os.unlink(parts[-1], dir_fd=dirfd)    # no half-written seed file left behind
             raise
+    except OSError as exc:
+        # The dir_fd calls above report only the last path component ("baseline-submodules.txt"
+        # for a read-only grid); name the file that was being seeded, with its full path.
+        raise GridError("grid: cannot seed %s: %s" % (os.path.join(grid_dir, rel),
+                                                      exc.strerror or exc))
     finally:
         os.close(sfd)
         if dirfd is not None:
@@ -1785,6 +1934,30 @@ def require_staging_top(grid_dir):
                         % (grid_dir, TMP_DIRNAME, problem))
 
 
+def rmtree_force(path):
+    """Delete the staging dir `path`, including subtrees a user left read-only.
+
+    A placed skill the user made read-only (chmod -R a-w) is moved into <run>/old/ by a
+    replacing install, and shutil.rmtree(ignore_errors=True) could not empty it: the tree
+    stayed until the 24 h sweep, which failed the same way (private H-12, VG8). Every real
+    directory is made owner-writable first, without following a link; then the plain delete.
+    Used only inside our own staging dir, where a chmod by path has nothing to race against.
+    """
+    stack = [path]
+    while stack:
+        top = stack.pop()
+        try:
+            mode = os.lstat(top).st_mode
+            if not stat.S_ISDIR(mode):
+                continue
+            os.chmod(top, mode | stat.S_IRWXU)
+            with os.scandir(top) as it:
+                stack.extend(e.path for e in it if e.is_dir(follow_symlinks=False))
+        except OSError:
+            continue
+    shutil.rmtree(path, ignore_errors=True)
+
+
 def sweep_stale_staging(grid_dir):
     """Delete <grid>/.grid-tmp/* entries older than a day (leftovers of a SIGKILL).
 
@@ -1809,7 +1982,7 @@ def sweep_stale_staging(grid_dir):
             if os.lstat(full).st_mtime >= cutoff:
                 continue
             if os.path.isdir(full) and not os.path.islink(full):
-                shutil.rmtree(full, ignore_errors=True)
+                rmtree_force(full)
             else:
                 os.unlink(full)
         except OSError:
@@ -1832,12 +2005,12 @@ def staging_run(grid_dir):
     top = os.path.join(grid_dir, TMP_DIRNAME)
     run = os.path.join(top, str(os.getpid()))
     if os.path.lexists(run):
-        shutil.rmtree(run, ignore_errors=True)                 # a dead process's pid, reused
+        rmtree_force(run)                                      # a dead process's pid, reused
     os.makedirs(run)
     try:
         yield run
     finally:
-        shutil.rmtree(run, ignore_errors=True)
+        rmtree_force(run)
         try:
             os.rmdir(top)
         except OSError:
@@ -1940,6 +2113,24 @@ def audit_staged(grid_dir, run, source, entries):
     return failed or everything
 
 
+def _prune_empty_dirs(top):
+    """Remove every empty directory below `top` (deepest first); `top` itself stays.
+
+    The content hash does not cover directories, and a checkout cannot hold an empty one, so
+    an empty directory in the copy is never part of what was verified: it can only have been
+    added to the staged tree after the audit. Dropping it keeps "what is placed is what was
+    hashed", the same rule the excluded names follow.
+    """
+    for root, dirnames, _files in os.walk(top, topdown=False):
+        for name in dirnames:
+            full = os.path.join(root, name)
+            if not os.path.islink(full):
+                try:
+                    os.rmdir(full)                  # only succeeds while empty
+                except OSError:
+                    pass
+
+
 def place_staged(grid_dir, run, repo, entry, counter):
     """Copy a verified staged dir into place (SEC15). Raises GridError naming the entry.
 
@@ -1960,7 +2151,23 @@ def place_staged(grid_dir, run, repo, entry, counter):
         reldir = os.path.relpath(src, staged).replace(os.sep, "/")
         prefix = "" if reldir == "." else reldir + "/"
         return [n for n in names if is_excluded(prefix + n)]
-    shutil.copytree(staged, copy, symlinks=True, ignore=skip_excluded)
+    try:
+        shutil.copytree(staged, copy, symlinks=True, ignore=skip_excluded)
+    except shutil.Error as exc:
+        # Something appeared in the staged dir after verification that cannot be copied (a FIFO is
+        # the case that raises): name it instead of printing shutil's list of tuples.
+        bad = []
+        for src, _dst, why in exc.args[0][:3]:
+            name = os.path.relpath(src, staged).replace(os.sep, "/")
+            try:
+                mode = os.lstat(src).st_mode
+                special = not (stat.S_ISREG(mode) or stat.S_ISDIR(mode) or stat.S_ISLNK(mode))
+            except OSError:
+                special = False
+            bad.append("%s is not a regular file or symlink" % name if special
+                       else "%s: %s" % (name, why))
+        raise _entry_error(entry, "cannot place it, the staged copy holds: " + _printable("; ".join(bad)))
+    _prune_empty_dirs(copy)
     try:
         got = disk_content_hash(copy, check_escape=True)
     except GridError as exc:
@@ -1977,31 +2184,47 @@ def place_staged(grid_dir, run, repo, entry, counter):
     if not is_contained(grid_dir, entry["source"], entry["dest"]):
         raise _entry_error(entry, "%s escapes repos/%s%s"
                            % (entry["dest"], entry["source"], escape_hint(grid_dir, entry["dest"])))
-    final = os.path.join(grid_dir, entry["dest"])
     link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
-    if link:                                    # before makedirs, which would follow it
+    if link:                                    # friendly error before the parents are made
         raise _entry_error(entry, "%s became a symlink while placing" % link)
     if source_root(grid_dir, entry["source"]) != expected_root:
         raise _entry_error(entry, "repos changed while placing")
-    os.makedirs(os.path.dirname(final), exist_ok=True)
-    # Re-check after the parents exist and right before the renames (see dest_chain_link):
-    # a parent swapped for a symlink since is_contained ran would redirect them.
-    link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
-    if link:
-        raise _entry_error(entry, "%s became a symlink while placing" % link)
-    if source_root(grid_dir, entry["source"]) != expected_root:
-        raise _entry_error(entry, "repos changed while placing")
-    moved = None
-    if os.path.lexists(final):
-        moved = os.path.join(run, "old", str(next(counter)))
-        os.makedirs(os.path.dirname(moved), exist_ok=True)
-        os.rename(final, moved)
+    # The parents are made, and the renames done, through one O_NOFOLLOW descriptor walk from
+    # realpath(repos): a parent swapped for a link after the checks above fails the walk (and
+    # nothing is created outside), and one swapped after it cannot redirect the renames, which
+    # go through the parent's descriptor (private H-12).
+    below = entry["dest"].split("/")[1:]                        # <source>/<path...>/<leaf>
     try:
-        os.rename(copy, final)
+        fds = open_chain(os.path.dirname(expected_root), below[:-1], create=True)
     except OSError as exc:
-        if moved is not None:
-            os.rename(moved, final)                             # put the old one back
-        raise _entry_error(entry, "cannot place it: %s" % exc)
+        raise _entry_error(entry, "a parent of the destination became a symlink or is not a "
+                                  "directory while placing (%s)" % (exc.strerror or exc))
+    try:
+        # Re-check with the parents open (see dest_chain_link): these keep the specific errors.
+        link = dest_chain_link(grid_dir, entry["dest"], include_leaf=False)
+        if link:
+            raise _entry_error(entry, "%s became a symlink while placing" % link)
+        if source_root(grid_dir, entry["source"]) != expected_root:
+            raise _entry_error(entry, "repos changed while placing")
+        leaf = below[-1]
+        moved = None
+        try:
+            os.lstat(leaf, dir_fd=fds[-1])
+            exists = True
+        except FileNotFoundError:
+            exists = False
+        if exists:
+            moved = os.path.join(run, "old", str(next(counter)))
+            os.makedirs(os.path.dirname(moved), exist_ok=True)
+            os.rename(leaf, moved, src_dir_fd=fds[-1])
+        try:
+            os.rename(copy, leaf, dst_dir_fd=fds[-1])
+        except OSError as exc:
+            if moved is not None:
+                os.rename(moved, leaf, dst_dir_fd=fds[-1])      # put the old one back
+            raise _entry_error(entry, "cannot place it: %s" % exc)
+    finally:
+        close_chain(fds)
 
 
 def _count():
@@ -2594,7 +2817,7 @@ class StagingRun(object):
 
     def __exit__(self, *exc):
         if self.made:
-            shutil.rmtree(self.path, ignore_errors=True)
+            rmtree_force(self.path)
             try:
                 os.rmdir(self.parent)       # only succeeds when nobody else is staging
             except OSError:
