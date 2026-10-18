@@ -755,3 +755,41 @@ plugin_tree_problems() {
   [[ "$output" == *"git"* ]]
   [ ! -e "$MOCK_GRID/plugins/core" ]
 }
+
+# ---- H-08: git_tracked refusals (author's own checks, not independent verification) ----
+
+# A grid dir that sits INSIDE another checkout (no .git of its own) must be refused: the tracked
+# filter would otherwise be computed against the outer repo.
+@test "H-08: a grid nested inside another git checkout (no .git of its own) exits 2 and builds nothing" {
+  local outer="$OTHER_DIR/outer"
+  mkdir -p "$outer"
+  git -C "$outer" init -q
+  cp -R "$MOCK_GRID" "$outer/grid"
+  rm -rf "$outer/grid/.git"
+  git -C "$outer" add -A
+  GRID_DIR="$outer/grid" PLUGINS_NO_ADD=1 run BUILD
+  echo "$output"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not the top of a git work tree"* ]]
+  [ ! -e "$outer/grid/plugins/core" ]
+}
+
+# git refusing the dir (safe.directory / dubious ownership) is not "not the top of a work tree":
+# the message must carry git's own reason so the fix (trusting the dir) is discoverable.
+@test "H-08: a git failure on the grid dir reports git's own reason, not 'not the top of a work tree'" {
+  mkdir -p "$OTHER_DIR/bin"
+  cat > "$OTHER_DIR/bin/git" <<'FAKE'
+#!/bin/sh
+echo "fatal: detected dubious ownership in repository at 'X'" >&2
+echo "To add an exception for this directory, call: safe.directory X" >&2
+exit 128
+FAKE
+  chmod +x "$OTHER_DIR/bin/git"
+  PATH="$OTHER_DIR/bin:$PATH" PLUGINS_NO_ADD=1 run BUILD
+  echo "$output"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"dubious ownership"* ]]
+  [[ "$output" == *"safe.directory"* ]]
+  [[ "$output" != *"not the top of a git work tree"* ]]
+  [ ! -e "$MOCK_GRID/plugins/core" ]
+}

@@ -215,7 +215,13 @@ def git_tracked(grid):
                            capture_output=True, env=env)
     except OSError as e:
         raise GuardError(f"cannot run git to list tracked files: {e}")
-    if top.returncode != 0 or os.path.realpath(top.stdout.strip()) != os.path.realpath(grid):
+    if top.returncode != 0:
+        # git itself refused (safe.directory / dubious ownership, not a repo, ...): pass its reason
+        # on, since "not the top of a work tree" would send the reader to the wrong fix.
+        reason = top.stderr.strip() or f"exit status {top.returncode}"
+        raise GuardError(f"git cannot read {grid} (only git-tracked files are bundled, so the "
+                         f"builder needs a work tree it may use): {reason}")
+    if os.path.realpath(top.stdout.strip()) != os.path.realpath(grid):
         raise GuardError(f"{grid} is not the top of a git work tree: only git-tracked files "
                          "are bundled, so the builder needs one")
     if r.returncode != 0:
