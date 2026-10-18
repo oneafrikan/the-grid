@@ -406,7 +406,13 @@ def prompt_stems(text: str) -> str:
 
 
 def norm_cmd(text: str, max_len: int = 120) -> str:
-    """Command normalisation: first segment only, digits to N, long tokens to <long>."""
+    """Command normalisation: first segment only, digits to N, long tokens to <long>.
+
+    "" for a command that passes a value to `-p`/`-w` of an unlisted tool (lib.unlisted_secret_flag):
+    capture already refuses those, this covers observation files written before the rule existed.
+    """
+    if lib.unlisted_secret_flag(text):
+        return ""
     seg = strip_delims(_SEGMENT_SPLIT.split(safe(text), maxsplit=1)[0])
     seg = _DIGITS.sub("N", seg)
     # The `<long>` marker is added AFTER the delimiter strip (which blanks every `<` and `>`);
