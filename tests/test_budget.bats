@@ -800,12 +800,14 @@ fence_seps() { printf '%s\n' '\x0b' '\x0c' '\xc2\x85' '\xe2\x80\xa8' '\xe2\x80\x
   skill_raw c2 "name: c2" $'description: keep	# drop this'            # tab before #: "keep" = 4
   skill_raw c3 "name: c3" "description: a#b stays"                     # no space before #     = 9
   skill_raw c4 "name: c4" "description: x   #   # y"                  # first # wins: "x"    = 1
+  skill_raw c5 "name: c5" "description: a#b # c"                       # glued # is skipped, the later " #" ends it: "a#b" = 3
   budget --json
   [ "$status" -eq 0 ]
   [ "$(jget "$output" entries.skills.0.listing_chars)" = "9" ]
   [ "$(jget "$output" entries.skills.1.listing_chars)" = "4" ]
   [ "$(jget "$output" entries.skills.2.listing_chars)" = "9" ]
   [ "$(jget "$output" entries.skills.3.listing_chars)" = "1" ]
+  [ "$(jget "$output" entries.skills.4.listing_chars)" = "3" ]
 }
 
 # --- the real repo --------------------------------------------------------------
