@@ -96,7 +96,7 @@ submodules into two tiers:
   business repo (`the-grid-<business>`) published as a plugin marketplace. Unbuilt; gated on
   whether Cowork delegates to plugin subagents. Start at its `README.md`; issue #274.
 - `evals/` + `agent-factory/run_evals.py` — golden cases for roles (opt-in, capped, tool-less runs; `--validate` runs in the gate). See `evals/README.md`.
-- **RETIRED, do not deploy:** the-grid's own issue-loop instance (`loop/`, `scripts/instantiate.sh`, `scripts/lib/gh-app-token.sh`, its four bats files) is quarantined under `_retired/issue-loop/` and excluded from the gate, CI and bats; see `_retired/issue-loop/RETIRED.md` (why, known defects, GitHub-side cleanup). Uplift is built by worktree agents and PRs to `next`. Not retired: the factory pattern `automation-factory/patterns/issue-loop/` and `scripts/lib/render-schedule.sh` (shared by the usage and instincts schedulers).
+- **RETIRED, do not deploy:** the-grid's own issue-loop instance (`loop/`, `scripts/instantiate.sh`, `scripts/lib/gh-app-token.sh`, its four bats files) is quarantined under `_retired/issue-loop/` and excluded from the gate, CI and bats; see `_retired/issue-loop/RETIRED.md` (why, known defects, GitHub-side cleanup). Uplift is built by worktree agents and PRs to `main`. Not retired: the factory pattern `automation-factory/patterns/issue-loop/` and `scripts/lib/render-schedule.sh` (shared by the usage and instincts schedulers).
 - `scripts/instincts.sh` — habit learning from your own sessions (opt-in per project with `learning: on`): capture, weekly analysis, injection, `clusters` for tank `evolve`. Data stays in `${GRID_STATE_DIR:-~/.grid}` and the private repo. See `docs/instincts.md`.
 - `scripts/run-record.sh` — appends one JSON line per agent run to a local private log (`${GRID_RUN_LOG:-~/.the-grid-private/runs.jsonl}`); `docs/agent-retro.md` is the review loop that starts from it.
 - `policy.yaml` — vetting policy read by `scripts/audit.py`: rule regexes with severities (`high` blocks, `low` warns), file classes, `owned_roots`, and `sources.allowed_repos` (the single source allowlist; no other file carries one). Restricted-YAML subset read by `scripts/lib/miniyaml.py` (it rejects any bare scalar PyYAML would type differently, such as `True`, `010`, `1:30` or a date: quote it; an unknown top-level key is exit 2); every regex is a single-quoted scalar.
@@ -292,7 +292,7 @@ All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: 
 Agents and sessions must not leave stale worktrees or local branches behind.
 
 - Remove what you created before finishing, once its PR is merged or abandoned: `git worktree remove <path>`.
-- Delete the branch with `git branch -D <branch>` only after confirming the PR is MERGED or the branch is fully contained in `origin/next`.
+- Delete the branch with `git branch -D <branch>` only after confirming the PR is MERGED or the branch is fully contained in `origin/main`.
 - Never leave scratch worktrees under `.claude/worktrees` or `/tmp` registered in `git worktree list`; run `git worktree prune`.
 - Session start: run `git worktree list`, report and prune stale entries. Session end: list any worktree left open and why.
 - Untracked `__pycache__` is not a reason to keep a worktree.

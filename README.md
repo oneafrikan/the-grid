@@ -111,9 +111,7 @@ git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid \
   && bash ~/.the-grid/scripts/bootstrap.sh
 ```
 
-Using your own fork? Put its URL in place of `oneafrikan/the-grid`. `scripts/grid`, the
-plugin bundles and `hooks/` exist on the `next` branch only until `next` is promoted to
-`main`, so add `--branch next` to the clone to get them.
+Using your own fork? Put its URL in place of `oneafrikan/the-grid`.
 
 Add `--with-agents` to also compose **and** wire the agent team in the same run:
 
