@@ -9,7 +9,8 @@ One tracked config file drives the loop in any repo, the tool that cuts the patt
 
 | Key | Default | Meaning |
 |---|---|---|
-| `GH_REPO` | detected from `origin` | `owner/name` |
+| `GH_REPO` | detected from `origin` | `owner/name`: code, branches, pushes and PRs |
+| `ISSUE_REPO` | `GH_REPO` | `owner/name` the issues are read from: listing, labels, comments, trust gate. Set it to a private tracker when the issues must not be public. Always `--repo ISSUE_REPO` on issue calls and `--repo GH_REPO` on PR calls |
 | `BASE_BRANCH` | `origin/HEAD` branch, else `main` | PR target and worktree base |
 | `ISSUE_LABEL` | `ready-for-agent` | opt-in label |
 | `MODE` | by profile | `pr` or `direct` (direct is interactive only) |
@@ -35,6 +36,14 @@ There SHALL be no `MAX_TURNS`, `REVIEW_MODEL`, `LABEL_BUDGETS`, `LOOP_TRUSTED_AC
 #### Scenario: Quoting
 - **WHEN** `--verify-cmd 'a && b | c'` and `--project-context "R&D tool (it's ok)"` are given
 - **THEN** sourcing `loop.conf` in a subshell yields exactly those strings
+
+#### Scenario: Issues in a different repo
+- **WHEN** `ISSUE_REPO=owner/tracker` differs from `GH_REPO=owner/code`
+- **THEN** every `gh issue` and issue `gh api` call targets `owner/tracker`, every push and `gh pr` call targets `owner/code`, and the PR title and body carry only `refs <tracker>#N`, never the issue title or body
+
+#### Scenario: ISSUE_REPO unset
+- **WHEN** `ISSUE_REPO` is not set
+- **THEN** it equals `GH_REPO` and behaviour is unchanged
 
 #### Scenario: Environment override
 - **WHEN** `MAX_BUDGET_USD=1` is exported and the runner starts

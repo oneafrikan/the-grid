@@ -42,7 +42,7 @@ Files: new `automation-factory/patterns/issue-loop/run-issue.sh`, new `tests/tes
 Spec: `loop-runner` (everything not marked B3).
 
 - [ ] 3.1 Implement the algorithm in `design.md` steps 1-14. Use `next`'s `run-issues.sh` only as reading material (lock `mkdir` + trap, `run_child` background-and-wait so a trapped signal lands, `cut_bytes`, `subst_all`, PATH append); do not copy its token, App, trust-history, review or multi-issue code.
-- [ ] 3.2 Gates: severity labels, existing PR/branch, trust gate via `gh api repos/R/issues/N` and `.../comments` (`gh issue view --json` has no author association); null or failed API answer = untrusted.
+- [ ] 3.2 Gates: severity labels, existing PR/branch, trust gate via `gh api repos/$ISSUE_REPO/issues/N` (`ISSUE_REPO` defaults to `GH_REPO`; the existing-PR and branch checks use `GH_REPO`) and `.../comments` (`gh issue view --json` has no author association); null or failed API answer = untrusted.
 - [ ] 3.3 Worker: argv as in design step 9 as a non-empty bash array, with `--allowedTools "$WORKER_ALLOWED_TOOLS"` by default and `--dangerously-skip-permissions` only under `WORKER_PERMISSIONS=bypass`; write the per-run `$TMP/worker-settings.json` (guard only), pass it with `--settings`, never touch `.claude/settings.json`; `GRID_LOOP_HEADLESS=1`, `LOOP_OUTCOME_FILE`; stdin `/dev/null`; pid to `lock/worker`; `--session-id` only when a uuid source exists.
 - [ ] 3.4 Runner-side verify, push with explicit refspec, `gh pr create`, label swap, comment, run record, `runs.log`, daily cap, cleanup on every path.
 - [ ] 3.5 `tests/test_issue_loop_runner.bats`: every B1 scenario in `loop-runner`, with stub `claude` (via `GRID_CLAUDE`; it commits a file and writes `done` when `STUB_WORKER_COMMIT=1`), stub `gh`, a temp bare origin with a base branch `next`, a temp clone with the guard entry in `.claude/settings.json`. Must include: red gate with a confident worker (nothing pushed); the F3 invariant on each gate; infra failure keeps the label and exits 1; SIGTERM mid-worker leaves no worktree or lock; `env -i` PATH test; canary `GH_TOKEN` absent from output and comments; lock busy; daily cap; role routing four ways; argv has no `--max-turns`.
@@ -123,7 +123,7 @@ Files: new `automation-factory/patterns/issue-loop/wake.sh`, `scripts/lib/render
 Spec: `loop-waker`.
 
 - [ ] 9.1 `render-schedule.sh`: `_rs_parse_schedule` accepts `every:N` (1..59); `render_crontab_line` emits `*/N`; the systemd and launchd renderers return 2 "every: is cron-only". Daily/weekly output byte-identical.
-- [ ] 9.2 `wake.sh` per spec (lock check without importing the runner; `gh issue list --json number`; `exec bash loop/run-issue.sh`).
+- [ ] 9.2 `wake.sh` per spec (lock check without importing the runner; `gh issue list --repo "$ISSUE_REPO" --json number`; `exec bash loop/run-issue.sh`).
 - [ ] 9.3 `instantiate.sh` (B2 addition): copy `wake.sh` into `loop/`, add `--waker-interval N` (default 15), print the rendered line, the `crontab -e` instruction and the sentence "do not install until B3 passes; until then use an interval of at least 60 minutes"; never run `crontab`.
 - [ ] 9.4 Tests: all `loop-waker` scenarios with stub `gh`, stub `crontab` that fails if called, stub `run-issue.sh` recording its pid; the existing render-schedule, usage and instincts schedule tests pass unmodified.
 - [ ] 9.5 README waker section with the stripped-environment command, the 15-minute target, the 60-minute floor and "uninstalled until B3 passes".
