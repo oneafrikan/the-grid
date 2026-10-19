@@ -56,11 +56,6 @@ teardown() {
   ! grep -n -E '<your-username>|&lt;your-username&gt;' README.md BOOTSTRAP.md index.html || false
 }
 
-@test "F7: BOOTSTRAP and PLUGINS say next content applies until next is promoted to main" {
-  grep -q 'promoted to `main`' BOOTSTRAP.md
-  grep -q 'promoted to `main`' docs/PLUGINS.md
-}
-
 # --- F9 / R18.F14: targets that exist are not described as planned ---
 
 @test "F9: built harness targets are not listed as scoped, planned or not implemented" {

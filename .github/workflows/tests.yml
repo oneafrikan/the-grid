@@ -2,14 +2,14 @@ name: tests
 
 on:
   push:
-    branches: [main, next]
+    branches: [main]
   pull_request:
 
 # Least privilege: the gate only reads the repo.
 permissions:
   contents: read
 
-# A newer push to the same PR supersedes a running gate. Pushes to main/next are NOT
+# A newer push to the same PR supersedes a running gate. Pushes to main are NOT
 # cancelled: a cancelled run is neither pass nor fail, so a superseded merge commit
 # would never get a gate result (an automated merger must treat "cancelled" as not green).
 concurrency:

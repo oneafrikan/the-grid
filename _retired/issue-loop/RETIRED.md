@@ -9,6 +9,7 @@ so a revert is clean and the history stays readable. Nothing under `_retired/` i
 - Retired 2026-10-12 (remediation decision D01 = B, quarantine).
 - Not deployed anywhere. Uplift work is now built by worktree agents that open PRs to `next`,
   which a human merges.
+- The `next` branch itself was retired 2026-10-19 (merged to `main`, PR #286); read `next` as `main`.
 - The factory **pattern** is not retired: `automation-factory/patterns/issue-loop/` and
   `automation-factory/` stay as shipped (they work and are used elsewhere). Only this
   repository's own running instance of the loop is retired.

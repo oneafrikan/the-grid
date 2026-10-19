@@ -6,11 +6,11 @@
 > privately. Add new work as an issue, not here.
 
 **Current focus (2026-10-13):** the-grid is being shared with other people.
-The 13-change uplift (**#55**, one `ws:<change>` label per workstream) is built on
-`next` by worktree agents with PRs a human merges, and review fixes are landing the
+The 13-change uplift (**#55**, one `ws:<change>` label per workstream) is built by
+worktree agents with PRs to `main` that a human merges, and review fixes land the
 same way. **#25** (public-facing README + quickstart) is the remaining gating work for
-the repo being usable by someone who isn't Gareth. Promoting `next` to `main` is a
-separate step, so several things in the docs exist on `next` only until then.
+the repo being usable by someone who isn't Gareth. `next` was merged to `main` on
+2026-10-19 (PR #286) and the branch is retired; `main` is the only long-lived branch.
 
 Behind that: `agent-factory` is a multi-target compiler. The **Claude Code** target is
 live, and the `codex`, `opencode`, `gemini-cli` and `portable` targets are built

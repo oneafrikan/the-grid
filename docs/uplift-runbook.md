@@ -2,6 +2,8 @@
 
 # Uplift runbook: running the-grid's overnight loop
 
+> `next` was merged to `main` on 2026-10-19 (PR #286) and the branch is retired; read every `next` below as `main`. The issue-loop itself is retired (see [_retired/issue-loop/RETIRED.md](../_retired/issue-loop/RETIRED.md)).
+
 How to run the-grid's unattended issue loop on your own Linux box, and the human steps the uplift changes leave to you. Replace every `<placeholder>` with your own value.
 
 For the generic, repo-agnostic version of the isolation and GitHub App setup (and the team/organisation case), see the [secure agent loop playbook](../automation-factory/docs/secure-agent-loop.md).
