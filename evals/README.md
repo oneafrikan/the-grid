@@ -28,11 +28,11 @@ missing, measures reading comprehension, not the role's rules.
 ## Running only what a change touched (`--changed`)
 
 ```bash
-agent-factory/.venv/bin/python agent-factory/run_evals.py --changed origin/next...HEAD --dry-run   # look first
-GRID_EVALS=1 agent-factory/.venv/bin/python agent-factory/run_evals.py --changed origin/next...HEAD --yes
+agent-factory/.venv/bin/python agent-factory/run_evals.py --changed origin/main...HEAD --dry-run   # look first
+GRID_EVALS=1 agent-factory/.venv/bin/python agent-factory/run_evals.py --changed origin/main...HEAD --yes
 ```
 
-- **Callers should run `--changed origin/next...HEAD --dry-run` first**: it prints the selection and the worst-case spend without a model call.
+- **Callers should run `--changed origin/main...HEAD --dry-run` first**: it prints the selection and the worst-case spend without a model call.
 - **Selection.** `git diff --name-only RANGE` in `--repo` (default: this repo) maps each changed file to roles; a bad range is `E_RANGE`, exit 2.
   - `agent-factory/roles/<role>/**` and `evals/cases/<role>/**` select `<role>`.
   - Everything else goes through `evals/touchfiles.yaml`: first matching rule wins per file, `paths` are `fnmatch` patterns (`*` also crosses `/`), `roles` is `all`, `orchestrators` or a list.
