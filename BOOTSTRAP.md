@@ -25,13 +25,11 @@ Prerequisites: `python3` 3.8+, `git` 2.25+. On macOS both come from the Xcode
 Command Line Tools (`xcode-select --install`); `/usr/bin/python3` without them
 opens an installer prompt.
 
-`scripts/grid` exists on the `next` branch only until `next` is promoted to `main`.
-Until then add `--branch next` to the clone. Using your own fork? Put its URL in
-place of `oneafrikan/the-grid`.
+Using your own fork? Put its URL in place of `oneafrikan/the-grid`.
 
 ```bash
 # 1. Clone without blobs (the skill repos are fetched separately by grid)
-git clone --filter=blob:none --branch next https://github.com/oneafrikan/the-grid.git ~/.the-grid
+git clone --filter=blob:none https://github.com/oneafrikan/the-grid.git ~/.the-grid
 
 # 2. Look before you place anything: prints the plan, no network access, no writes
 python3 ~/.the-grid/scripts/grid install --dry-run
