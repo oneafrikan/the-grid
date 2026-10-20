@@ -39,6 +39,8 @@ while [ "$#" -gt 0 ]; do
     --check)   CHECK=1 ;;
     -h|--help) usage; exit 0 ;;
     -*)        echo "catalog.sh: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    # An empty path must not fall through to the default SKILLS.md (OUT="" reads as unset).
+    "")        echo "catalog.sh: empty output path" >&2; usage >&2; exit 2 ;;
     *)         [ -z "$OUT" ] || { echo "catalog.sh: more than one output path" >&2; usage >&2; exit 2; }
                OUT="$1" ;;
   esac
@@ -93,12 +95,33 @@ fi
 #   - a plain (unquoted, non-block) description ends at ` #` (a YAML comment).
 # Not aligned, on purpose (about 1320 python spawns would slow the gate): backslash
 # escapes inside a double-quoted description (the python reader decodes \" and \\, this
-# one keeps them) and a multi-line `name: |` (python folds the continuation lines, this
-# reads the first line only). No wired skill uses either.
+# one keeps them), and the line breaks awk cannot see (a lone CR, U+0085, U+2028: python
+# splits on them, awk does not, so such a file reads as no frontmatter here). No wired
+# skill uses either. tests/test_catalog.bats pins both lists.
 parse_skill() {
   LC_ALL=C awk '
     function trim(s){ sub(/^[[:space:]]+/,"",s); sub(/[[:space:]]+$/,"",s); return s }
-    BEGIN { fm=0; coll=0; gotname=0; gotdesc=0; plain=0; name=""; desc="" }
+    # Start collecting key tgt (name or desc) from the rest of its line. Like the python
+    # reader, a block indicator (>, | with optional +/-/digit) carries no text itself and
+    # the value is the indented lines that follow; the scalar kind is read off its first line.
+    function start(key, v) {
+      tgt=key; coll=1
+      if (v ~ /^[>|][-+0-9]*$/) { kind[key]="block"; val[key]="" }
+      else { kind[key]=(v ~ /^["'\'']/) ? "quoted" : "plain"; val[key]=v }
+    }
+    # Finish one scalar: a plain one ends at " #" (YAML comment); then one level of matching
+    # quotes goes, and in a single-quoted one a doubled quote is a literal quote.
+    function fin(key,   s, q) {
+      s=trim(val[key])
+      if (kind[key]=="plain") { sub(/[[:space:]]+#.*$/,"",s); s=trim(s) }
+      q=substr(s,1,1)
+      if (length(s)>=2 && (q=="\"" || q=="\047") && substr(s,length(s),1)==q) {
+        s=substr(s,2,length(s)-2)
+        if (q=="\047") gsub(/\047\047/,"\047",s)
+      }
+      return s
+    }
+    BEGIN { fm=0; coll=0; gotname=0; gotdesc=0; val["name"]=""; val["desc"]="" }
     {
       if (NR==1) sub(/^(\357\273\277)+/, "")      # leading UTF-8 BOM(s)
       # Frontmatter fence: only line 1 opens (a fence anywhere else leaves fm at 0: no
@@ -109,36 +132,29 @@ parse_skill() {
       }
       if (fm!=1) next
 
-      # Collecting continuation lines of a description block.
+      # Collecting continuation lines of a name or description: indented lines are part of
+      # the value, a blank line is skipped (inside a block it must not end it).
       if (coll==1) {
-        if ($0 ~ /^[[:space:]]/) { desc=desc " " trim($0); next }
-        else { coll=0 }   # de-indented line ends the block; re-parse it below
+        if ($0 ~ /^[[:space:]]*$/) next
+        if ($0 ~ /^[[:space:]]/) { val[tgt]=val[tgt] " " trim($0); next }
+        else { coll=0 }   # de-indented line ends the value; re-parse it below
       }
 
       if ($0 ~ /^name[[:space:]]*:/) {
         if (gotname) next                          # first name: wins
         gotname=1
-        v=$0; sub(/^name[[:space:]]*:[[:space:]]*/,"",v); v=trim(v)
-        if (v !~ /^["'\'']/) { sub(/[[:space:]]+#.*$/,"",v); v=trim(v) }   # plain: " #" is a comment
-        gsub(/^["'\'']|["'\'']$/,"",v); name=v; next
+        v=$0; sub(/^name[[:space:]]*:[[:space:]]*/,"",v); start("name", trim(v)); next
       }
       if ($0 ~ /^description[[:space:]]*:/) {
         if (gotdesc) next                          # first description: wins
         gotdesc=1
-        v=$0; sub(/^description[[:space:]]*:[[:space:]]*/,"",v); v=trim(v)
-        # Block/folded indicators (>, |, with optional +/-/digit) → gather next lines.
-        if (v ~ /^[>|][-+0-9]*$/ || v=="") { coll=1; desc=""; plain=(v=="") }
-        else { plain=(v !~ /^["'\'']/); gsub(/^["'\'']|["'\'']$/,"",v); desc=v; coll=1 }
-        next
+        v=$0; sub(/^description[[:space:]]*:[[:space:]]*/,"",v); start("desc", trim(v)); next
       }
     }
     END {
       # An unclosed fence (or no fence) is no frontmatter: print an empty record, so the
       # caller falls back to the directory name, as it does for skill_frontmatter.py.
-      if (fm!=2) { name=""; desc=""; plain=0 }
-      desc=trim(desc)
-      # A plain scalar ends at " #" (YAML comment); quoted and block scalars keep their #.
-      if (plain) { sub(/[[:space:]]+#.*$/,"",desc); desc=trim(desc) }
+      if (fm!=2) { name=""; desc="" } else { name=fin("name"); desc=fin("desc") }
       # Quick summary = first sentence (up to ". "), else the whole thing.
       summary=desc
       if (match(desc, /\. /)) summary=substr(desc, 1, RSTART)
