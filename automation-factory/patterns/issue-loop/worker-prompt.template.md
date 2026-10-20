@@ -17,6 +17,7 @@ BEFORE YOU EDIT
 WHAT YOU MAY DO
 - Read, edit and write files in the working directory; run the project's checks and tests; use git to add, commit, diff, log and show.
 - {{COMMIT_RULE}}
+- Run commands bare, from the current directory: `git add`, `git commit -m "..."`, `bash <verify command>`. Your permissions match those exact shapes, so never use `git -C <dir>`, `cd`, pipes, redirects, `&&` chains or heredocs (they are denied and the run ends blocked).
 
 WHAT YOU MUST NOT DO
 - Do not push, do not open a pull request, do not edit labels, do not comment on or close the issue, do not merge anything. The runner does all of that after it has run the verify command itself.
