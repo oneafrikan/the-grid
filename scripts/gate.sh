@@ -54,8 +54,13 @@
 #                         venv step or check script cannot silently drop a check. An
 #                         explicit flag, not CI=true detection, so a local run under a
 #                         CI-like environment behaves as before.
-#   (the flags combine, in any order; --pre-commit keeps its fast scope and --strict then
-#   applies to its skips, e.g. a missing shellcheck)
+#   gate.sh --no-bats     every check EXCEPT bats. CI's `checks` job; the suite runs in the shard jobs.
+#   gate.sh --shard <n>   ONLY the bats files listed for shard <n> in tests/shards.txt (same version
+#                         pin, GRID_REQUIRE_VENV and per-run TMPDIR leak check as the full suite).
+#                         CI runs one per matrix entry; tests/test_gate.bats proves the shards
+#                         together are exactly tests/test_*.bats. Not combinable with the others.
+#   (--pre-commit and --strict combine, in any order; --pre-commit keeps its fast scope and
+#   --strict then applies to its skips, e.g. a missing shellcheck)
 #
 # Installing: running this script once sets core.hooksPath=.githooks, so a fresh
 # clone is armed by the first manual run. Git refuses to auto-run versioned hooks.
@@ -72,13 +77,23 @@ cd "$GRID_DIR" || exit 2
 # --- arguments -------------------------------------------------------------------
 PRE_COMMIT=0
 STRICT=0
-for arg in "$@"; do
-  case "$arg" in
+NO_BATS=0
+SHARD=""
+GATE_USAGE="usage: gate.sh [--pre-commit] [--strict] [--no-bats | --shard <name>]"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --pre-commit) PRE_COMMIT=1 ;;
     --strict)     STRICT=1 ;;
-    *) echo "usage: gate.sh [--pre-commit] [--strict]" >&2; exit 2 ;;
+    --no-bats)    NO_BATS=1 ;;
+    --shard)      [ "$#" -ge 2 ] || { echo "$GATE_USAGE" >&2; exit 2; }; SHARD="$2"; shift ;;
+    *) echo "$GATE_USAGE" >&2; exit 2 ;;
   esac
+  shift
 done
+# A shard is the bats stage alone: it excludes the other modes.
+if [ -n "$SHARD" ] && { [ "$PRE_COMMIT" = 1 ] || [ "$NO_BATS" = 1 ]; }; then
+  echo "$GATE_USAGE" >&2; exit 2
+fi
 
 # --- self-install the hook -----------------------------------------------------
 if [ "$(git config --get core.hooksPath || true)" != ".githooks" ]; then
@@ -231,7 +246,8 @@ PYEOF
 
 # The full gate's first two checks; --pre-commit runs its own staged-only versions below
 # (the fast path ends in `summarise`, which exits, so nothing after it runs in that mode).
-if [ "$PRE_COMMIT" = 0 ]; then
+# A shard is the bats stage alone, so it skips these too.
+if [ "$PRE_COMMIT" = 0 ] && [ -z "$SHARD" ]; then
   check shellcheck run_shellcheck
   check pysyntax   run_pysyntax
 fi
@@ -373,6 +389,22 @@ run_bats() {
   return "$rc"
 }
 
+# run_bats_shard — the bats files that tests/shards.txt lists for $SHARD ("<shard> <file>" lines,
+# `#` comments). An unknown or empty shard FAILS: a typo in the CI matrix must not pass by
+# running nothing.
+run_bats_shard() {
+  local s f files=()
+  [ -f tests/shards.txt ] || { echo "    tests/shards.txt missing" >&2; return 1; }
+  while read -r s f; do
+    case "$s" in ''|'#'*) continue ;; esac
+    [ "$s" = "$SHARD" ] && files+=("tests/$f")
+  done < tests/shards.txt
+  if [ "${#files[@]}" -eq 0 ]; then
+    echo "    no bats files listed for shard '$SHARD' in tests/shards.txt" >&2; return 1
+  fi
+  run_bats "${files[@]}"
+}
+
 # --- pre-commit: the fast path ------------------------------------------------------
 # Only what is staged (collected above). Everything else belongs to the full gate, which CI
 # and a plain `bash scripts/gate.sh` run. Same check functions and flags as the full gate.
@@ -395,6 +427,12 @@ if [ "$PRE_COMMIT" = 1 ]; then
   check shellcheck fast_shellcheck
   check pysyntax   fast_pysyntax
   check bats       fast_bats
+  summarise
+fi
+
+# --- shard: the bats stage alone (CI matrix entry) ---------------------------------------
+if [ -n "$SHARD" ]; then
+  check "bats-$SHARD" run_bats_shard
   summarise
 fi
 
@@ -483,6 +521,10 @@ run_map_check() {
   python3 scripts/map.py --check --root "$GRID_DIR"
 }
 check map        run_map_check
-check bats       run_bats
+if [ "$NO_BATS" = 1 ]; then
+  echo "==> bats"; echo "    not run here (--no-bats): CI runs it in the shard jobs"
+else
+  check bats       run_bats
+fi
 
 summarise

@@ -997,3 +997,89 @@ stub_git_with_bats_restore() {
   [[ "$output" != *"SECRET-INNER"* ]] || false
   [[ "$output" != *"SECRET-ARG"* ]] || false
 }
+
+# --- bats shards (CI matrix) ---------------------------------------------------------------------
+# tests/shards.txt maps every bats file to a CI shard. A file in no shard would silently never run
+# in CI, so the real list is held to ls tests/test_*.bats exactly.
+@test "shards: the shard files are exactly tests/test_*.bats, none missing, none in two shards" {
+  local listed expected
+  listed="$(grep -vE '^[[:space:]]*(#|$)' "$REPO_ROOT/tests/shards.txt" | awk '{print $2}' | LC_ALL=C sort)"
+  expected="$(cd "$REPO_ROOT/tests" && ls test_*.bats | LC_ALL=C sort)"
+  # a vacuous pass (both empty) must not count
+  [ -n "$expected" ]
+  [ "$listed" = "$expected" ]
+  # every line is "<shard> <file>" with nothing else on it
+  [ -z "$(grep -vE '^[[:space:]]*(#|$)' "$REPO_ROOT/tests/shards.txt" | awk 'NF != 2')" ]
+}
+
+@test "shards: the workflow matrix lists exactly the shard names in tests/shards.txt" {
+  local wf="$REPO_ROOT/.github/workflows/tests.yml" in_file in_matrix
+  in_file="$(grep -vE '^[[:space:]]*(#|$)' "$REPO_ROOT/tests/shards.txt" | awk '{print $1}' | LC_ALL=C sort -u | tr '\n' ' ')"
+  in_matrix="$(sed -n 's/^[[:space:]]*shard:[[:space:]]*\[\(.*\)\][[:space:]]*$/\1/p' "$wf" | tr -d ' ' | tr ',' '\n' | LC_ALL=C sort -u | tr '\n' ' ')"
+  [ -n "$in_file" ]
+  [ "$in_file" = "$in_matrix" ]
+}
+
+@test "shards: the aggregate job is still named gate, needs every other job and fails on anything but success" {
+  local wf="$REPO_ROOT/.github/workflows/tests.yml"
+  grep -qE '^  gate:[[:space:]]*$' "$wf"
+  grep -qE '^    needs:[[:space:]]*\[checks, bats\]' "$wf"
+  # always(): without it a failed/cancelled/skipped dependency skips gate, which reads as green
+  grep -qE '^    if:.*always\(\)' "$wf"
+  grep -qF '"checks=success bats=success"' "$wf"
+  # a red shard must not cancel its siblings
+  grep -qE '^[[:space:]]*fail-fast:[[:space:]]*false' "$wf"
+}
+
+# stub_shards — a two-shard list and a bats stub that records the files it is handed.
+stub_shards() {
+  printf '# comment\ns1 test_a.bats\ns1 test_b.bats\ns2 test_c.bats\n' > "$G/tests/shards.txt"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/bats.args"\necho "1..0"\nexit 0\n' "$G" > "$G/tests/lib/bats-core/bin/bats"
+  bats_answers_version "$G/tests/lib/bats-core/bin/bats"
+}
+
+@test "--shard runs only that shard's files under the bats pin and skips every other check" {
+  stub_shards
+  run run_gate --shard s1
+  [ "$status" -eq 0 ]
+  [ "$(cat "$G/bats.args")" = "$(printf 'tests/test_a.bats\ntests/test_b.bats')" ]
+  [[ "$output" == *"==> bats-s1"* ]] || false
+  [[ "$output" != *"==> shellcheck"* ]] || false
+  [[ "$output" != *"==> catalog"* ]] || false
+}
+
+@test "--shard keeps the per-shard leak check" {
+  stub_shards
+  printf '#!/usr/bin/env bash\nmkdir -p "$TMPDIR/leaked-dir"\necho "1..0"\nexit 0\n' > "$G/tests/lib/bats-core/bin/bats"
+  bats_answers_version "$G/tests/lib/bats-core/bin/bats"
+  run run_gate --shard s2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tests leaked temp files"* ]] || false
+}
+
+@test "--shard with an unknown name FAILS instead of running nothing" {
+  stub_shards
+  run run_gate --shard nope
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no bats files listed for shard 'nope'"* ]] || false
+  [ ! -e "$G/bats.args" ]
+}
+
+@test "--shard is exclusive: a missing name, --no-bats and --pre-commit are usage errors" {
+  stub_shards
+  run run_gate --shard
+  [ "$status" -eq 2 ]
+  run run_gate --shard s1 --no-bats
+  [ "$status" -eq 2 ]
+  run run_gate --shard s1 --pre-commit
+  [ "$status" -eq 2 ]
+}
+
+@test "--no-bats runs the other checks and never calls bats" {
+  stub_shards
+  run run_gate --no-bats
+  [ "$status" -eq 0 ]
+  [ ! -e "$G/bats.args" ]
+  [[ "$output" == *"--no-bats"* ]] || false
+  [[ "$output" == *"==> catalog"* ]] || false
+}
