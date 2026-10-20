@@ -157,14 +157,7 @@ fi
 GUARD="$LOOP_DIR/hooks/guard-main-push.sh"
 [ -x "$GUARD" ] || die_pre "$GUARD is missing or not executable; re-run instantiate.sh"
 
-# claude must be logged in: `auth status --json` carries .loggedIn (exits non-zero when logged out).
-_auth="$("$CLAUDE_BIN" auth status --json 2>/dev/null || true)"
-printf '%s' "$_auth" | jq -e '.loggedIn == true' >/dev/null 2>&1 || die_pre "claude is not logged in; run 'claude auth login' as this user"
-gh auth status >/dev/null 2>&1 || die_pre "gh is not logged in; run 'gh auth login' as this user"
-
 git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || die_pre "$REPO_ROOT is not a git repository"
-git -C "$REPO_ROOT" ls-remote --exit-code --heads origin "refs/heads/$BASE_BRANCH" >/dev/null 2>&1 \
-  || die_pre "origin/$BASE_BRANCH does not exist on the remote; fix BASE_BRANCH in loop/loop.conf"
 
 # Absolute git common dir (--git-common-dir is relative in a main checkout).
 GIT_COMMON="$(cd "$REPO_ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd -P)"
@@ -175,7 +168,20 @@ mkdir -p "$WT_ROOT" 2>/dev/null || die_pre "cannot create the worktree root $WT_
 STATE="$GIT_COMMON/issue-loop"
 LOCK="$STATE/lock"
 RUNS_LOG="$STATE/runs.log"
+# BACKOFF holds `until=<epoch> fails=<n>` after an infrastructure failure (see infra_fail).
+BACKOFF="$STATE/backoff"
 mkdir -p "$STATE"
+
+# Inside the backoff window a cron tick exits quietly: a persistent outage (logged-out claude, gh
+# down, usage limit) must not be hammered every tick. A run for an explicit issue number is a human
+# asking, so it ignores the window.
+if [ -z "$ARG_ISSUE" ] && [ -f "$BACKOFF" ]; then
+  _until="$(sed -n 's/^until=\([0-9]*\).*/\1/p' "$BACKOFF" 2>/dev/null || true)"
+  if [ -n "$_until" ] && [ "$(date +%s)" -lt "$_until" ]; then
+    log "backing off after infrastructure failures until epoch $_until ($BACKOFF); exiting"
+    exit 0
+  fi
+fi
 
 # --------------------------------------------------------------------------
 # step 3 — cleanup trap and lock
@@ -268,6 +274,16 @@ record_run() {
 infra_fail() {
   echo "run-issue: INFRASTRUCTURE FAILURE${N:+ on #$N}: $1" >&2
   if [ -n "$N" ]; then record_run error "infra: $(cut_bytes 300 "$1")"; fi
+  # Back off: the window starts at 15 minutes and doubles with each consecutive failure, up to 6 hours.
+  # Any issue-level outcome (conclude) or an empty queue clears it.
+  local fails=0 prev win=900
+  prev="$(sed -n 's/.*fails=\([0-9]*\).*/\1/p' "$BACKOFF" 2>/dev/null || true)"
+  case "$prev" in ''|*[!0-9]*) ;; *) fails="$prev" ;; esac
+  fails=$((fails + 1))
+  local i=1
+  while [ "$i" -lt "$fails" ] && [ "$win" -lt 21600 ]; do win=$((win * 2)); i=$((i + 1)); done
+  [ "$win" -le 21600 ] || win=21600
+  printf 'until=%s fails=%s\n' "$(( $(date +%s) + win ))" "$fails" > "$BACKOFF" 2>/dev/null || true
   exit 1
 }
 
@@ -344,6 +360,7 @@ conclude() {
   if ! gh_t issue edit "$N" --repo "$ISSUE_REPO" --remove-label "$ISSUE_LABEL" --add-label "$add" >/dev/null 2>"$TMP/edit.err"; then
     infra_fail "could not relabel $ISSUE_REPO#$N: $(cut_bytes 200 "$(cat "$TMP/edit.err")")"
   fi
+  rm -f "$BACKOFF"   # gh and the issue answered: the infrastructure is fine again
   post_comment "$text"
   record_run "$outcome" "$note"
   log "#$N -> $add ($outcome): $(cut_bytes 160 "$note")"
@@ -376,6 +393,24 @@ if [ "$MAX_ISSUES_PER_DAY" -gt 0 ] && [ "$handled_today" -ge "$MAX_ISSUES_PER_DA
 fi
 
 # --------------------------------------------------------------------------
+# step 4b — logins and the remote. These are infrastructure, not a bad issue or a bad config: a
+# logged-out claude or gh, or a network blip, keeps every issue labelled and backs off (infra_fail),
+# so the next cron tick retries. Only a base branch the remote really lacks is a config error.
+# --------------------------------------------------------------------------
+# claude must be logged in: `auth status --json` carries .loggedIn (exits non-zero when logged out).
+_auth="$("$CLAUDE_BIN" auth status --json 2>/dev/null || true)"
+printf '%s' "$_auth" | jq -e '.loggedIn == true' >/dev/null 2>&1 || infra_fail "claude is not logged in; run 'claude auth login' as this user"
+gh auth status >/dev/null 2>&1 || infra_fail "gh is not logged in (or gh is unreachable); run 'gh auth login' as this user"
+# ls-remote --exit-code: 2 = the ref is absent (config error), any other failure = remote unreachable
+_rc=0
+git_t -C "$REPO_ROOT" ls-remote --exit-code --heads origin "refs/heads/$BASE_BRANCH" >/dev/null 2>&1 || _rc=$?
+case "$_rc" in
+  0) ;;
+  2) die_pre "origin/$BASE_BRANCH does not exist on the remote; fix BASE_BRANCH in loop/loop.conf" ;;
+  *) infra_fail "could not reach origin (git ls-remote exit $_rc)" ;;
+esac
+
+# --------------------------------------------------------------------------
 # step 5 — select the issue and read it
 # --------------------------------------------------------------------------
 if [ -n "$ARG_ISSUE" ]; then
@@ -387,6 +422,7 @@ else
   fi
   N="$(sort -n "$TMP/list.txt" | sed -n '1p')"
   if [ -z "$N" ]; then
+    rm -f "$BACKOFF"
     log "nothing to do: no open issue labelled $ISSUE_LABEL in $ISSUE_REPO"
     exit 0
   fi
@@ -641,7 +677,14 @@ case "$OUTCOME_LINE" in
     [ -n "$reason" ] || reason="the worker reported blocked"
     blocked "$reason" ;;
   done) ;;
-  *) blocked "the worker wrote no recognised outcome line (expected done, needs-human or blocked)" ;;
+  *)
+    # No outcome line can also mean claude itself was cut off (usage or rate limit, login, network).
+    # That is the infrastructure's fault, not the issue's: keep the label and back off.
+    { jq -r '.result // ""' "$TMP/result.json" 2>/dev/null || true; head -c 2000 "$TMP/worker.err" 2>/dev/null || true; } | head -c 4000 > "$TMP/infra-probe.txt" || true
+    if grep -qiE 'usage limit|rate.?limit|limit reached|overloaded_error|credit balance is too low|please run /login|invalid api key|oauth token|econnreset|etimedout|could not resolve host' "$TMP/infra-probe.txt"; then
+      infra_fail "the worker was cut off by the claude service: $(cut_bytes 200 "$(head -n 3 "$TMP/infra-probe.txt")")"
+    fi
+    blocked "the worker wrote no recognised outcome line (expected done, needs-human or blocked)" ;;
 esac
 
 # --------------------------------------------------------------------------
