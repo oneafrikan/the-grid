@@ -653,3 +653,25 @@ sys.exit(1 if bad else 0)
   echo "$output"
   [ "$status" -eq 0 ]
 }
+
+# NF-064: input PyYAML refuses (tab after the colon, a plain scalar starting with ] } or ',',
+# a control character) used to parse here. One table, each row names the line it must fail on.
+@test "text PyYAML refuses is refused here: tab after colon, ] } , at scalar start, control characters" {
+  rejected 'a:\tb\n' 1
+  rejected 'a: \tb\n' 1
+  rejected 'k: 1\nb:\n  c:\td\n' 3
+  rejected 'a: }]\n' 1
+  rejected 'a: ]\n' 1
+  rejected 'a: ,x\n' 1
+  rejected '- }x\n' 1
+  rejected 'a: 1\nb: x\001y\n' 2
+  rejected 'a: x\177\n' 1
+}
+
+# The float regex is [0-9], not \d: an Arabic-Indic float-looking word is a string, as in PyYAML.
+@test "an Arabic-Indic float-looking word is a string, not an ambiguous float" {
+  printf 'a: \xd9\xa1.\xd9\xa5\n' > "$W/t.yaml"
+  run mini_json "$W/t.yaml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"a": "\u0661.\u0665"}' ]
+}

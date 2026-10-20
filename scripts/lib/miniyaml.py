@@ -83,7 +83,15 @@ _BAD_START = {
     "@": "'@' cannot start a bare scalar (quote it)",
     "`": "'`' cannot start a bare scalar (quote it)",
     "%": "'%' cannot start a bare scalar (quote it)",
+    # Flow indicators: PyYAML refuses a plain scalar that starts with one.
+    "]": "']' cannot start a bare scalar (quote it)",
+    "}": "'}' cannot start a bare scalar (quote it)",
+    ",": "',' cannot start a bare scalar (quote it)",
 }
+# Characters PyYAML refuses anywhere in a stream (its reader allows TAB, LF, CR, printable
+# ASCII and most of the rest); C0 controls, DEL, the C1 block (U+0085 is a line break, handled
+# above), lone surrogates and U+FFFE/U+FFFF. VT and FF are caught by the line-break check.
+_NONPRINTABLE_RE = re.compile("[\x00-\x08\x0e-\x1f\x7f-\x84\x86-\x9f\ud800-\udfff\ufffe\uffff]")
 
 
 # Padding is ASCII space and TAB only. str.strip() also removes NBSP, U+3000, U+2003 ...,
@@ -297,6 +305,12 @@ def _parse_value(text, lineno):
 
 # --- block structure ---------------------------------------------------------
 
+def _no_tab_after_colon(rest, lineno):
+    """PyYAML refuses a TAB in the padding between a key's colon and its value."""
+    if "\t" in rest[:len(rest) - len(rest.lstrip(_WS))]:
+        raise ParseError(lineno, "tab after ':' (use a space)")
+
+
 def _split_key(text, lineno):
     """If `text` is `key: rest` (or `key:`) return (key, rest); else None."""
     c = text[:1]
@@ -305,6 +319,7 @@ def _split_key(text, lineno):
         key, end = reader(text, 0, lineno)
         after = text[end:]
         if after.startswith(":") and (len(after) == 1 or after[1] in " \t"):
+            _no_tab_after_colon(after[1:], lineno)
             return key, after[1:]
         return None
     if c in "[{":
@@ -325,6 +340,7 @@ def _split_key(text, lineno):
     if not isinstance(_bare_scalar(key, lineno), str):
         raise ParseError(lineno, "ambiguous bare key %r (quote it to get a string)" % key)
     # Whatever follows the colon, including a trailing comment, is the value text.
+    _no_tab_after_colon(text[m.start() + 1:], lineno)
     return key, text[m.start() + 1:]
 
 
@@ -336,6 +352,10 @@ class _Parser:
         if m:
             raise ParseError(text.count("\n", 0, m.start()) + 1,
                              "line break character %r is not supported (use LF or CRLF)" % m.group())
+        m = _NONPRINTABLE_RE.search(text)
+        if m:
+            raise ParseError(text.count("\n", 0, m.start()) + 1,
+                             "control character %r is not allowed" % m.group())
         self.lineno = 1  # line being parsed, for errors raised far from it (RecursionError)
         # lines: [lineno, indent, text] with blanks and comment-only lines dropped.
         self.lines = []
