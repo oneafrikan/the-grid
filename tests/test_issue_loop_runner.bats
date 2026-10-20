@@ -268,7 +268,9 @@ add_agent() {
 # ======================================================================= lock ===
 
 @test "lock: a second start while the lock is held exits 0 busy, naming the holder, and touches nothing" {
-  sleep 30 &
+  # the holder must look like a runner (its command line names run-issue.sh), else it counts as a reused pid
+  printf '#!/bin/bash\nsleep 30\n' > "$T/run-issue.sh"
+  bash "$T/run-issue.sh" &
   holder=$!
   mkdir -p "$STATE/lock"
   echo "$holder" > "$STATE/lock/pid"
@@ -282,6 +284,29 @@ add_agent() {
   [ "$(claude_calls)" -eq 0 ]
   refute has_gh "gh issue edit"
   [ "$(rr_lines)" -eq 0 ]
+}
+
+@test "lock: a lock whose pid is dead, or reused by something that is not a runner, is taken over and the run proceeds" {
+  happy_env
+  true &
+  dead=$!
+  wait "$dead"
+  mkdir -p "$STATE/lock"
+  echo "$dead" > "$STATE/lock/pid"
+  run_runner
+  [ "$status" -eq 0 ]
+  contains "$output" "took over a stale lock"
+  has_gh "gh pr create"
+  [ ! -d "$STATE/lock" ]
+  # a live pid that is not run-issue.sh (pid reuse after a reboot) is stale too
+  sleep 30 &
+  other=$!
+  mkdir -p "$STATE/lock"
+  echo "$other" > "$STATE/lock/pid"
+  run_runner
+  kill "$other" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  contains "$output" "took over a stale lock"
 }
 
 @test "lock: SIGTERM mid-worker leaves no worktree and no lock" {
@@ -976,9 +1001,13 @@ EOF
   happy_env
   run_runner
   [ "$(rr_lines)" -eq 1 ]
+  printf '#!/bin/bash\nsleep 30\n' > "$T/run-issue.sh"
+  bash "$T/run-issue.sh" &
+  holder=$!
   mkdir -p "$STATE/lock"
-  echo "$$" > "$STATE/lock/pid"
+  echo "$holder" > "$STATE/lock/pid"
   run_runner
+  kill "$holder" 2>/dev/null || true
   [ "$status" -eq 0 ]
   contains "$output" "busy"
   [ "$(rr_lines)" -eq 1 ]

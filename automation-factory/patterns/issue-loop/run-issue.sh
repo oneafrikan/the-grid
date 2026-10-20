@@ -212,8 +212,24 @@ trap 'echo "run-issue: unexpected failure near line $LINENO" >&2; exit 1' ERR
 if ! mkdir "$LOCK" 2>/dev/null; then
   holder=""
   if [ -f "$LOCK/pid" ]; then holder="$(cat "$LOCK/pid" 2>/dev/null || true)"; fi
-  log "busy: another run holds the lock (${holder:+pid $holder, }$LOCK); exiting"
-  exit 0
+  # Stale lock (a crash, SIGKILL or reboot left it): the recorded pid is gone, or was reused by a
+  # process that is not a run-issue.sh. Take it over; a live runner keeps the lock (non-overlap guard).
+  stale=0
+  if [ -n "$holder" ]; then
+    case "$holder" in *[!0-9]*) ;; *)
+      if ! ps -p "$holder" >/dev/null 2>&1; then stale=1
+      else case "$(ps -p "$holder" -o command= 2>/dev/null || true)" in *run-issue.sh*) ;; *) stale=1 ;; esac
+      fi ;;
+    esac
+  fi
+  # mv is atomic: if two runs race for the same stale lock, only one wins the rename and the other sees "busy".
+  if [ "$stale" = 1 ] && mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null && mkdir "$LOCK" 2>/dev/null; then
+    rm -rf "$LOCK.stale.$$"
+    log "took over a stale lock (pid $holder is not a running run-issue.sh)"
+  else
+    log "busy: another run holds the lock (${holder:+pid $holder, }$LOCK); exiting"
+    exit 0
+  fi
 fi
 HAVE_LOCK=1
 printf '%s\n' "$$" > "$LOCK/pid"
