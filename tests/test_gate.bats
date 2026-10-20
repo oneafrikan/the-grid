@@ -408,6 +408,17 @@ mk_plugin_tree() {
   grep -qx 'hooks/scripts/x.sh' "$G/shellcheck.args"
 }
 
+# change charter-files: the pre-commit shim every cut project receives is linted by the gate.
+@test "lint check: shellcheck is given the _common .githooks pre-commit shim" {
+  mkdir -p "$G/project-factory/templates/_common/.githooks"
+  : > "$G/project-factory/templates/_common/.githooks/pre-commit"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/shellcheck.args"\nexit 0\n' "$G" > "$G/stubbin/shellcheck"
+  chmod +x "$G/stubbin/shellcheck"
+  run run_gate
+  [ "$status" -eq 0 ]
+  grep -qx 'project-factory/templates/_common/.githooks/pre-commit' "$G/shellcheck.args"
+}
+
 # --- the quarantined issue-loop is excluded from lint (WP-043) --------------------------------
 # _retired/ holds the abandoned loop, archived byte-for-byte with stale paths. The gate must
 # never hand it to shellcheck (it would be linted at its archived paths and rot the gate), and
