@@ -84,3 +84,4 @@ s4 test_rules_wiring.bats
 s4 test_run_record.bats
 s4 test_submodule_sources.bats
 s4 test_wiring.bats
+s1 test_issue_loop_cron_verify.bats
