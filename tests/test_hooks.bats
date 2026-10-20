@@ -2828,3 +2828,27 @@ ex_ghp() { printf '%s' "gh""p_exampleexampleexampleexampleexample12"; }
   expect_pass "git -c alias.x='commit -n' x"
   grep -qF 'one-shot' "$REPO_ROOT/hooks/README.md"
 }
+
+# H-27 (hardening, refs private issue #100): an unquoted $(...) or backtick substitution used
+# as the value of git -C / -c, or as the subcommand, used to cut the git call in two, so no
+# subcommand was recorded and the secret scan was skipped.
+@test "H-27 secret-scan: an unquoted substitution in a git -C/-c value or subcommand does not skip the scan" {
+  mkrepo
+  stage_line "key = \"$(tok_ghp)\""
+  local row
+  for row in \
+    'git -C $(git rev-parse --show-toplevel) commit -m x' \
+    'git -C $(pwd) commit -m x' \
+    'git -c $(echo a=b) commit -m x' \
+    'git -c `echo a=b` commit -m x' \
+    'git -C `pwd` commit -m x' \
+    'git -c a=b $(echo commit) -m x' \
+    'git -c a=b `echo commit` -m x'; do
+    scan "$row"
+    [ "$status" -eq 2 ] || { echo "expected BLOCK for: $row: $output" >&2; false; }
+  done
+  # benign control: the same shape with no secret staged still passes
+  git -C "$R" reset -q
+  scan 'git -C $(pwd) commit -m x'
+  [ "$status" -eq 0 ] || { echo "$output" >&2; false; }
+}

@@ -278,9 +278,18 @@ _grid_tokenize() {
           # Subshells, command substitution and function bodies: ( and ) end a segment.
           # Inside a $( opened within double quotes the matching ) returns to the quotes.
           '(')
-            _grid_tk_word; _grid_tk_sep
-            if [ "$_CS_N" -gt 0 ] && [ "${_CS_K[$((_CS_N - 1))]}" = p ]; then
-              _CS_D[$((_CS_N - 1))]=$((_CS_D[$((_CS_N - 1))] + 1))
+            if [ "$_TK_DLR" = 1 ]; then
+              # H-27: an unquoted $( is a substitution, not a subshell. Its commands are
+              # deferred like the quoted case, and the OUTER word keeps its place (the $ stays
+              # in it as a stand-in for the output). Treating it as a separator cut `git -C
+              # $(pwd) commit` into `git -C $` + `pwd` + `commit`, so no subcommand was seen.
+              _grid_tk_cs_push 0 p || break
+              _grid_tk_sep
+            else
+              _grid_tk_word; _grid_tk_sep
+              if [ "$_CS_N" -gt 0 ] && [ "${_CS_K[$((_CS_N - 1))]}" = p ]; then
+                _CS_D[$((_CS_N - 1))]=$((_CS_D[$((_CS_N - 1))] + 1))
+              fi
             fi ;;
           ')')
             _grid_tk_word; _grid_tk_sep
@@ -293,9 +302,16 @@ _grid_tokenize() {
             fi ;;
           # An unquoted backtick opens or closes a command substitution: like ( and ).
           '`')
-            _grid_tk_word; _grid_tk_sep
             if [ "$_CS_N" -gt 0 ] && [ "${_CS_K[$((_CS_N - 1))]}" = b ]; then
+              _grid_tk_word; _grid_tk_sep
               _grid_tk_cs_pop; q="$_CS_RESTORE_Q"
+            else
+              # H-27: an opening backtick is a substitution like $( : its commands are deferred
+              # and the outer word stays, with a $ stand-in so the word exists even when the
+              # backticks are all there is (git -c `echo a=b` commit).
+              _TK_RAW+='$'; _TK_MASK+='$'; _TK_FLAG+='$'; _TK_IN=1
+              _grid_tk_cs_push 0 b || break
+              _grid_tk_sep
             fi ;;
           *) _TK_RAW+="$c"; _TK_MASK+="$c"; _TK_FLAG+="$c"; _TK_IN=1 ;;
         esac ;;
