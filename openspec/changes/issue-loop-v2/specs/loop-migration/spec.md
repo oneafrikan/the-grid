@@ -35,7 +35,7 @@ The following SHALL be removed (each by `git rm`, in the PR for group 7): `autom
 
 #### Scenario: Non-loop runbook content survives
 - **WHEN** `docs/uplift-runbook.md` is read
-- **THEN** every `### <change>, group N` heading from `depersonalise, group 1` onward is still present, and no heading or step mentions a loop user, App or linger
+- **THEN** every `### <change>, group N` heading from `depersonalise, group 1` onward is still present, and no heading or step mentions a loop user or a GitHub App (B1: the usage-schedule step 8.3 keeps its `enable-linger` line, which is about the weekly usage job and not the loop)
 
 #### Scenario: Shared stubs still serve other tests
 - **WHEN** `tests/test_auto_handoff.bats`, `test_grid_drift.bats`, `test_instincts_analyse.bats`, `test_instincts_eval.bats`, `test_instincts_schedule.bats`, `test_stubs.bats` run
@@ -76,6 +76,7 @@ Every file that assumes the loop's retirement SHALL be edited so it describes v2
 | `tests/helpers/stubs.bash:425` | minter stub removed per "What is dropped" |
 | `docs/uplift-runbook.md` | per "What is dropped" |
 | `tests/test_depersonalise.bats:15,28` | per "What is restored" |
+| `tests/test_render_schedule.bats` | added in B1: the example script name `run-issues.sh` is replaced by a neutral one (inputs and expected output renamed together), because the old-design grep covers `tests/` |
 | `openspec/changes/loops/` | add `SUPERSEDED.md` pointing at `issue-loop-v2`; do not archive `loops` (its `issue-loop-*` specs would conflict); its unbuilt Phase B (`karpathy-loop`, `cli-agent-cron`, tasks 6-8) is deferred, recorded in `TODO.md`, not deleted |
 | `automation-factory/patterns/issue-loop/.gitignore` | keeps `loop-prompt.md` |
 

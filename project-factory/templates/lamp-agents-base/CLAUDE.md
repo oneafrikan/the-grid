@@ -37,9 +37,10 @@ never hardcode them.
 
 ## Autonomous loop
 
-This repo pairs with automation-factory's `issue-loop` pattern (see
-`prompts/autonomous-coding-loop.template.md`) — its pre-flight step is
-`bash scripts/worktree-setup.sh` above, and its `{{VERIFY_CMD}}` should be:
+This repo can opt in to automation-factory's `issue-loop` pattern (off by default; see
+`loop/ENABLE.md`). Set `VERIFY_CMD` and `SETUP_CMD` in `loop/loop.conf`, seeded from
+`loop/loop.conf.seed`: `SETUP_CMD` is `bash scripts/worktree-setup.sh` (above), and
+`VERIFY_CMD` should be:
 
 ```
 composer validate && php -l $(git diff --name-only -- '*.php') && vendor/bin/phpunit

@@ -419,22 +419,24 @@ mk_plugin_tree() {
   grep -qx 'project-factory/templates/_common/.githooks/pre-commit' "$G/shellcheck.args"
 }
 
-# --- the quarantined issue-loop is excluded from lint (WP-043) --------------------------------
-# _retired/ holds the abandoned loop, archived byte-for-byte with stale paths. The gate must
-# never hand it to shellcheck (it would be linted at its archived paths and rot the gate), and
-# bats only collects tests/, so the archived tests are never run. The factory PATTERN under
-# automation-factory/patterns/ is a live asset and IS still linted.
-@test "lint check: shellcheck is never handed _retired/, the live pattern is still linted" {
-  mkdir -p "$G/_retired/issue-loop/scripts" "$G/_retired/issue-loop/loop/hooks" "$G/automation-factory/patterns/p"
-  : > "$G/_retired/issue-loop/scripts/x.sh"; : > "$G/_retired/issue-loop/loop/run.sh"
-  : > "$G/_retired/issue-loop/loop/hooks/h.sh"; : > "$G/automation-factory/patterns/p/d.sh"
+# --- the live issue-loop pattern is linted ----------------------------------------------------
+# The runner, its setup script and the hook scripts of automation-factory/patterns/ are live
+# assets: the gate hands every one of them to shellcheck.
+@test "lint check: shellcheck is given the issue-loop pattern's runner, setup and hook scripts" {
+  local p="$G/automation-factory/patterns/issue-loop"
+  mkdir -p "$p/hooks"
+  : > "$p/run-issue.sh"; : > "$p/setup.sh"
+  : > "$p/hooks/guard-main-push.sh"; : > "$p/hooks/new-agent-worktree.sh"; : > "$p/hooks/post-commit-review.sh"
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/shellcheck.args"\nexit 0\n' "$G" > "$G/stubbin/shellcheck"
   chmod +x "$G/stubbin/shellcheck"
   run run_gate
   [ "$status" -eq 0 ]
-  grep -qx 'automation-factory/patterns/p/d.sh' "$G/shellcheck.args"
-  # last, so the negation is the test's final (and deciding) command
-  ! grep -q '_retired' "$G/shellcheck.args"
+  # wake.sh arrives with the waker stage (B2) and is added to this list there
+  grep -qx 'automation-factory/patterns/issue-loop/run-issue.sh' "$G/shellcheck.args"
+  grep -qx 'automation-factory/patterns/issue-loop/setup.sh' "$G/shellcheck.args"
+  grep -qx 'automation-factory/patterns/issue-loop/hooks/guard-main-push.sh' "$G/shellcheck.args"
+  grep -qx 'automation-factory/patterns/issue-loop/hooks/new-agent-worktree.sh' "$G/shellcheck.args"
+  grep -qx 'automation-factory/patterns/issue-loop/hooks/post-commit-review.sh' "$G/shellcheck.args"
 }
 
 # NF-027: a glob group with no match (a stub grid, a fork that dropped a dir) must add nothing.

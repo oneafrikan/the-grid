@@ -1,0 +1,22 @@
+# loop/loop.conf.seed — defaults for the issue-loop. The loop is OFF in this project until you enable it
+# (read loop/ENABLE.md). This file is a SEED: it is not loop.conf and it does not make loop/run-issue.sh exist.
+# scripts/instantiate.sh (in the-grid) reads it as the source of defaults when it cuts the loop into this repo
+# and loop/loop.conf is absent; a flag you pass still wins. Blank means "use the default / detect it".
+GH_REPO=''                 # owner/name of the code repo; blank = detected from the git remote
+ISSUE_REPO=''              # owner/name the issues live in; blank = GH_REPO (set a private tracker to keep issue text out of a public repo)
+BASE_BRANCH=''             # PR target and worktree base; blank = the origin/HEAD branch, else main
+ISSUE_LABEL='ready-for-agent'   # the opt-in label: only issues carrying it are worked
+MODE='pr'                  # pr (the loop opens PRs and never merges); direct is for an interactive /loop only
+VERIFY_CMD=''              # REQUIRED: the check the runner runs before it pushes anything; empty = the loop refuses to run
+VERIFY_TIMEOUT='900'       # seconds
+SETUP_CMD=''               # run in each issue worktree before the worker (install deps, create a database, ...)
+PROJECT_CONTEXT=''         # one line: what this project is and its stack
+REVIEW_FOCUS=''            # one line: what the post-commit review should look at
+WORKER_MODEL='sonnet'      # model for the headless worker
+MAX_BUDGET_USD='5'         # spend cap per issue (USD)
+ISSUE_TIMEOUT='1800'       # wall-clock cap per issue (seconds)
+WORKER_PERMISSIONS='allowlist'  # allowlist (default) or bypass (a fallback; read the pattern README first)
+WORKER_ALLOWED_TOOLS=''    # blank = the default allowlist (file tools + git add/commit/status/diff/log/show); add your test commands
+MAX_ISSUES_PER_DAY='5'     # daily cap on issues handled
+TRUST_GATE='on'            # on = only issues and briefs from the owner, members and collaborators are read
+RUN_ROLE='issue-loop'      # run-record role when an issue has no agent:<name> label

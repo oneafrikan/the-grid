@@ -21,9 +21,9 @@ Python 3.x, CLI/build-time tool — no served API, no external services. Reads
 
 ## Autonomous loop
 
-This repo pairs with automation-factory's `issue-loop` pattern (see
-`_common`'s `prompts/autonomous-coding-loop.template.md`) — its
-`{{VERIFY_CMD}}` should be:
+This repo can opt in to automation-factory's `issue-loop` pattern (off by default; see
+`loop/ENABLE.md`). Set `VERIFY_CMD` in `loop/loop.conf`, seeded from
+`loop/loop.conf.seed`, to:
 
 ```
 pytest

@@ -13,8 +13,8 @@ from this template; this README covers only what's LAMP-specific.
 ## Shape
 
 - `CLAUDE.md` — stack conventions the agent must follow (PHP/PDO/Composer, no
-  Node backend), the worktree-isolation rule, and this repo's `{{VERIFY_CMD}}`
-  for the `_common` loop prompt.
+  Node backend), the worktree-isolation rule, and the `VERIFY_CMD` / `SETUP_CMD`
+  to use if you opt in to the issue-loop (`loop/ENABLE.md`).
 - `scripts/worktree-setup.sh` / `worktree-teardown.sh` / `db-migrate.sh` —
   working, idempotent scripts. Each git worktree gets its own MySQL schema and
   port, derived deterministically from the worktree's path, so parallel
@@ -34,10 +34,10 @@ sessions across worktrees, not multiple in-process roles.
 ## Composing this project (after cutting)
 
 1. Run `scripts/worktree-setup.sh` once per worktree before doing any DB work.
-2. Once this repo has a GitHub issue backlog, instantiate
-   `automation-factory`'s `issue-loop` pattern into `loop/`, and fill in
-   `_common`'s `prompts/autonomous-coding-loop.template.md` with the
-   pre-flight step and `{{VERIFY_CMD}}` from this template's `CLAUDE.md`.
+2. Optional: once this repo has a GitHub issue backlog, opt in to
+   `automation-factory`'s `issue-loop` pattern (see `loop/ENABLE.md`): set
+   `VERIFY_CMD` and `SETUP_CMD` in `loop/loop.conf` (seeded from
+   `loop/loop.conf.seed`) from this template's `CLAUDE.md`, then instantiate the loop.
 3. Optional: compose `agent-factory`'s `lamp` stack overlay
    (`agent-factory/stacks/lamp/stack.yaml`) if this project also uses a
    composed persona (e.g. `/backend-dev`), rather than duplicating stack
