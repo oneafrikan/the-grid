@@ -144,11 +144,14 @@ if [[ "$MAP_EXISTED" == 0 ]] && [[ -f "$COMMON_DIR/scripts/map.py" ]] \
    && [[ -f "$TARGET_DIR/scripts/map.py" ]] && cmp -s "$COMMON_DIR/scripts/map.py" "$TARGET_DIR/scripts/map.py"; then
   if ! command -v python3 >/dev/null 2>&1; then
     MAP_NOTE="warning: python3 not found, MAP.md not generated; run: python3 scripts/map.py"
-  elif python3 "$TARGET_DIR/scripts/map.py" --root "$TARGET_DIR" >/dev/null 2>&1; then
+  elif python3 "$TARGET_DIR/scripts/map.py" --include-untracked --root "$TARGET_DIR" >/dev/null 2>&1; then
     WROTE+=("MAP.md")
   else
     MAP_NOTE="warning: scripts/map.py failed, MAP.md not generated; run: python3 scripts/map.py"
   fi
+elif [[ "$MAP_EXISTED" == 0 ]] && [[ -f "$TARGET_DIR/scripts/map.py" ]]; then
+  # The project has its own, different map.py (it sits in SKIPPED): not ours to run.
+  MAP_NOTE="note: scripts/map.py differs from the seeded copy, MAP.md not generated; run: python3 scripts/map.py"
 fi
 
 for f in "${WROTE[@]:-}"; do
@@ -183,6 +186,7 @@ fi
 
 # A retrofit never changes git config. If the shim is there but not armed, print the command.
 if [[ "$MODE" == "retrofit" ]] && [[ -f "$TARGET_DIR/.githooks/pre-commit" ]] \
+   && cmp -s "$COMMON_DIR/.githooks/pre-commit" "$TARGET_DIR/.githooks/pre-commit" \
    && [[ "$(git -C "$TARGET_DIR" config --get core.hooksPath 2>/dev/null || true)" != ".githooks" ]]; then
   echo ""
   echo "To arm the pre-commit MAP.md check, run in the target:"
