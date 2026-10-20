@@ -1961,7 +1961,9 @@ _padded_line() {
   start=$SECONDS
   expect_plain key-dense-line "$line"
   expect_strict key-dense-line "$line"
-  [ $((SECONDS - start)) -le 10 ] || { echo "took $((SECONDS - start)) s" >&2; false; }
+  # Bound: measured idle about 3.5 s for the two calls; 20 s is at least 5x that. The quadratic loop
+  # took about 20 s per call (about 40 s for both), so the bound stays below the pre-fix time.
+  [ $((SECONDS - start)) -le 20 ] || { echo "took $((SECONDS - start)) s" >&2; false; }
 }
 
 @test "key-dense line: ordinary key counts are unaffected, and a real secret after many keys is still found" {
