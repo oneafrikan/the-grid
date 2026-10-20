@@ -41,6 +41,7 @@
 #     STUB_OUTCOME[_N]         line written to $LOOP_OUTCOME_FILE (default "done"); STUB_NO_OUTCOME=1 writes none
 #     STUB_CLAUDE_SLEEP[_N]    seconds a worker call sleeps first; $STUB_STARTED (a path) is touched when it starts
 #     STUB_PLANT_PREPUSH       path: the worker plants a pre-push hook that touches it
+#     STUB_CLAUDE_ARGV         path: the last `-p` call's argv is written there, NUL separated
 #     STUB_STDIN_DUMP          path: the last `-p` call's stdin is copied there
 #     STUB_CLAUDE_STDIN        path: every `-p` call's drained stdin is copied there (same as STUB_STDIN_DUMP)
 #     Every call also records, in $STUB_DIR: claude.cwd, claude.child-env (GRID_AUTOHANDOFF_CHILD),
@@ -71,12 +72,16 @@
 #     stub_issue N ...         fixture file $STUB_DIR/issue-N.json for `gh issue view N` (default:
 #                              title "Issue N", body "Do N", label ready-for-agent)
 #     STUB_PR_EXISTS_FOR       issue numbers that already have an open PR (`gh pr list --head issue-N`)
-#     STUB_NEW_PR              number in the URL `gh pr create` prints (default 101); STUB_PR_CREATE_FAIL=1 fails it
+#     STUB_NEW_PR              number in the URL `gh pr create` prints (default 101); STUB_PR_CREATE_FAIL=1 fails it;
+#                              its --body-file is kept as $STUB_DIR/pr-create.body
 #     STUB_DIFF_LINES          lines `gh pr diff` prints (default 5)
 #     STUB_COMMENTS            file collecting "<cmd> <number>: <body-file text>" for issue/pr comments
 #                              (default $STUB_DIR/comments.log)
 #     STUB_REPO                owner/name in the installation-repositories answer (default owner/name)
-#     STUB_AUTHOR_ASSOC[_N]    `author_association` of issue N (default OWNER)
+#     STUB_AUTHOR_ASSOC[_N]    `author_association` of issue N (default OWNER); `gh api repos/R/issues/N`
+#                              answers the stub_issue fixture (title, body, labels) plus that field;
+#                              STUB_ISSUE_API_FAIL=1 makes it fail
+#     STUB_COMMENTS_JSON[_N]   answer of `gh api repos/R/issues/N/comments` (default []); STUB_COMMENTS_FAIL=1 fails it
 #     STUB_ISSUE_LABEL         the opt-in label in the default `labeled` event (default ready-for-agent)
 #     STUB_EVENTS_JSON[_N]     answer of `gh api --paginate repos/*/issues/N/events`
 #                              (default one `labeled` event by `trusted`)
@@ -168,6 +173,9 @@ case "${1:-}" in
     else echo '{"loggedIn": false}'; exit 1; fi ;;
 esac
 stub_log claude "$@"
+# STUB_CLAUDE_ARGV (a path): the last `-p` call's argv, NUL separated, so a test can read the prompt
+# and each flag value exactly (the one-line log above joins words and flattens newlines).
+if [ -n "${STUB_CLAUDE_ARGV:-}" ]; then printf '%s\0' "$@" > "$STUB_CLAUDE_ARGV"; fi
 # ---- auto-handoff worker call (hook-profiles group 3) ----
 # Facts about this process, recorded on every run for the worker tests: cwd, the
 # recursion-guard env value, the process group (compared with the test's own), the pid
@@ -364,6 +372,8 @@ case "${1:-} ${2:-}" in
     exit 0 ;;
   "pr create")
     if [ "${STUB_PR_CREATE_FAIL:-0}" = 1 ]; then echo "pull request create failed" >&2; exit 1; fi
+    # keep the PR body ($STUB_DIR/pr-create.body) so a test can read what the PR text carries
+    if [ -n "$bodyfile" ] && [ -f "$bodyfile" ]; then cp "$bodyfile" "$STUB_DIR/pr-create.body"; fi
     echo "https://github.com/$repo/pull/${STUB_NEW_PR:-101}"
     exit 0 ;;
   "pr diff")
@@ -402,10 +412,22 @@ if [ "${1:-}" = api ]; then
       default_ev="[{\"event\":\"labeled\",\"label\":{\"name\":\"${STUB_ISSUE_LABEL:-ready-for-agent}\"},\"actor\":{\"login\":\"trusted\"}}]"
       ev="$(pick EVENTS_JSON "$n")"
       printf '%s\n' "${ev:-$default_ev}"; exit 0 ;;
+    */issues/*/comments*)
+      # comments of issue N: STUB_COMMENTS_JSON[_N] (default no comments); STUB_COMMENTS_FAIL=1 fails the call
+      allargs="$*"; n="${allargs%/comments*}"; n="${n##*/}"
+      if [ "${STUB_COMMENTS_FAIL:-0}" = 1 ]; then echo "gh: HTTP 500" >&2; exit 1; fi
+      cj="$(pick COMMENTS_JSON "$n")"
+      printf '%s\n' "${cj:-[]}"; exit 0 ;;
     */issues/*)
+      # the issue itself: the stub_issue fixture (title, body, labels) plus author_association
+      # (STUB_AUTHOR_ASSOC[_N], default OWNER); STUB_ISSUE_API_FAIL=1 fails the call
       allargs="$*"; n="${allargs##*/}"
+      if [ "${STUB_ISSUE_API_FAIL:-0}" = 1 ]; then echo "gh: HTTP 500" >&2; exit 1; fi
       aa="$(pick AUTHOR_ASSOC "$n")"
-      printf '{"author_association":"%s"}\n' "${aa:-OWNER}"; exit 0 ;;
+      if [ -f "$STUB_DIR/issue-$n.json" ]; then base="$(cat "$STUB_DIR/issue-$n.json")"
+      else base="{\"title\":\"Issue $n\",\"body\":\"Do $n\",\"labels\":[{\"name\":\"ready-for-agent\"}]}"; fi
+      printf '%s' "$base" | jq -c --arg a "${aa:-OWNER}" '. + {state: "open", number: 0, author_association: $a}'
+      exit 0 ;;
   esac
 fi
 exit 0
