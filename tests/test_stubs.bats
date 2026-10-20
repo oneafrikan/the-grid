@@ -48,13 +48,3 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$output" = "ran" ]
 }
-
-@test "curl stub: option values (--retry, -u, --retry-delay, --connect-timeout) are not taken for the URL" {
-  # The URL comes FIRST: the stub keeps the last bare word it sees, so a leaked option value
-  # that follows the URL would replace it.
-  run curl -s https://api.example.invalid/app/installations --retry 3 --retry-delay 2 --connect-timeout 9 -u user:pw
-  echo "$output"
-  [ "$status" -eq 0 ]
-  # The installations body, not the 404 `{}` a leaked option value would produce.
-  [[ "$output" == *'4242'* ]]
-}

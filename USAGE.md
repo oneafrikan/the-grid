@@ -116,13 +116,20 @@ skipping to code.
 
 ## automation-factory — recurring unattended work
 
-For work that should run on a schedule or loop over a backlog without a human
-driving each turn (e.g. clearing a repo's GitHub issues), cut a pattern into the
-target repo instead of running it ad hoc in a session — copy the pattern into a
-tracked `loop/` folder, fill its placeholders, then `bash loop/setup.sh` to wire
-the machine-specific bits (absolute paths, the `.claude/settings.json` hook).
-Full steps: [automation-factory/patterns/issue-loop/README.md](automation-factory/patterns/issue-loop/README.md).
-(`instantiate.sh`, which collapsed this to one command, is retired and quarantined under `_retired/issue-loop/`; the cut is manual again. See `_retired/issue-loop/RETIRED.md`.)
+For work that should loop over a backlog without a human driving each turn (e.g.
+working a repo's labelled GitHub issues), cut a pattern into the target repo instead
+of running it ad hoc in a session. One command does the whole cut: it copies the
+pattern into a tracked `loop/` folder, renders `loop/loop.conf` once, creates the
+labels and runs `loop/setup.sh`:
+
+```bash
+bash scripts/instantiate.sh issue-loop <target-repo> --profile work --verify-cmd "<your gate>"
+bash loop/run-issue.sh      # from the target repo: works ONE labelled issue, by hand
+```
+
+The loop opens pull requests and never merges; the runner runs your verify command
+itself before it pushes anything. Full steps and the list of known gaps:
+[automation-factory/patterns/issue-loop/README.md](automation-factory/patterns/issue-loop/README.md).
 
 ## project-factory — starting a brand-new project
 
