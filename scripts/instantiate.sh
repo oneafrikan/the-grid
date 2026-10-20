@@ -365,7 +365,7 @@ instantiate_issue_loop() {
   : "${ISSUE_TIMEOUT:=1800}"
   : "${WORKER_PERMISSIONS:=allowlist}"
   : "${WORKER_ALLOWED_TOOLS:=Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*)}"
-  : "${MAX_ISSUES_PER_DAY:=5}"
+  : "${MAX_ISSUES_PER_DAY:=0}"
   : "${TRUST_GATE:=on}"
   : "${RUN_ROLE:=issue-loop}"
 

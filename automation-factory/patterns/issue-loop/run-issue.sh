@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# run-issue.sh — work ONE labelled GitHub issue headlessly, then hand a verified PR to a human.
+# run-issue.sh — work ONE labelled GitHub issue headlessly, then hand a verified PR to a human
+# (MODE=pr) or land the verified commit straight on the base branch (MODE=direct).
 #
 # Usage:  bash loop/run-issue.sh [issue-number]
 #   no number : pick the lowest-numbered open issue carrying ISSUE_LABEL (default ready-for-agent)
@@ -8,7 +9,8 @@
 # What one invocation does (details: openspec/changes/issue-loop-v2, design.md + specs/loop-runner):
 #   preflight -> lock -> daily cap -> select -> gates (severity, existing PR/branch, trust)
 #   -> role routing -> worktree -> headless `claude -p` worker -> git-state check
-#   -> the RUNNER runs VERIFY_CMD -> push issue-N -> open the PR -> swap labels -> run record.
+#   -> the RUNNER runs VERIFY_CMD -> pr: push issue-N, open the PR | direct: rebase onto the base,
+#   re-verify if the base moved, push to the base -> swap labels -> run record.
 #
 # Rules this script lives by:
 #   - Same user, same machine: it uses the operator's own `gh` and `claude` logins. It never
@@ -16,7 +18,8 @@
 #   - The worker only COMMITS. This script verifies, pushes, opens the PR and swaps labels.
 #     "Never commit a red build" is true because the runner runs the gate, not because the
 #     prompt asks nicely (R10.qa.F6). The worker's own `done` never substitutes for it.
-#   - It never merges and never classifies issues: gh-triage classifies, a human merges.
+#   - It never merges and never classifies issues: gh-triage classifies, a human merges. MODE=direct
+#     is the one exception to "a human merges": it pushes the verified commit to BASE_BRANCH itself.
 #   - The guard hook reaches the worker only through the per-run --settings file written here;
 #     this script never reads or writes <repo>/.claude/settings.json.
 #   - Exit 0 for any issue-level outcome (PR opened, refused by a gate, blocked, needs-human),
@@ -106,7 +109,7 @@ REPO_ROOT="$(cd "$LOOP_DIR/.." && pwd -P)"
 # Optional (empty = not passed): a --permission-mode for the allowlist run. Which value, if any,
 # lets a normal task finish with no prompt is decided by the real-claude proof (tasks 8.5).
 : "${WORKER_PERMISSION_MODE:=}"
-: "${MAX_ISSUES_PER_DAY:=5}"
+: "${MAX_ISSUES_PER_DAY:=0}"   # 0 = unlimited
 : "${TRUST_GATE:=on}"
 : "${RUN_ROLE:=issue-loop}"
 
@@ -132,7 +135,10 @@ if [ "$#" -eq 1 ]; then
   ARG_ISSUE="$1"
 fi
 
-[ "$MODE" = "pr" ] || die_pre "headless runs are pr-only; use direct mode from an interactive /loop (MODE=$MODE in loop/loop.conf)"
+case "$MODE" in
+  pr|direct) ;;
+  *) die_pre "MODE must be 'pr' or 'direct' (got '$MODE') in loop/loop.conf" ;;
+esac
 [ -n "$VERIFY_CMD" ] || die_pre "VERIFY_CMD is empty in loop/loop.conf: the runner refuses to push anything it has not verified; set it (e.g. VERIFY_CMD='pytest')"
 case "$WORKER_PERMISSIONS" in
   allowlist|bypass) ;;
@@ -157,14 +163,7 @@ fi
 GUARD="$LOOP_DIR/hooks/guard-main-push.sh"
 [ -x "$GUARD" ] || die_pre "$GUARD is missing or not executable; re-run instantiate.sh"
 
-# claude must be logged in: `auth status --json` carries .loggedIn (exits non-zero when logged out).
-_auth="$("$CLAUDE_BIN" auth status --json 2>/dev/null || true)"
-printf '%s' "$_auth" | jq -e '.loggedIn == true' >/dev/null 2>&1 || die_pre "claude is not logged in; run 'claude auth login' as this user"
-gh auth status >/dev/null 2>&1 || die_pre "gh is not logged in; run 'gh auth login' as this user"
-
 git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || die_pre "$REPO_ROOT is not a git repository"
-git -C "$REPO_ROOT" ls-remote --exit-code --heads origin "refs/heads/$BASE_BRANCH" >/dev/null 2>&1 \
-  || die_pre "origin/$BASE_BRANCH does not exist on the remote; fix BASE_BRANCH in loop/loop.conf"
 
 # Absolute git common dir (--git-common-dir is relative in a main checkout).
 GIT_COMMON="$(cd "$REPO_ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd -P)"
@@ -175,7 +174,20 @@ mkdir -p "$WT_ROOT" 2>/dev/null || die_pre "cannot create the worktree root $WT_
 STATE="$GIT_COMMON/issue-loop"
 LOCK="$STATE/lock"
 RUNS_LOG="$STATE/runs.log"
+# BACKOFF holds `until=<epoch> fails=<n>` after an infrastructure failure (see infra_fail).
+BACKOFF="$STATE/backoff"
 mkdir -p "$STATE"
+
+# Inside the backoff window a cron tick exits quietly: a persistent outage (logged-out claude, gh
+# down, usage limit) must not be hammered every tick. A run for an explicit issue number is a human
+# asking, so it ignores the window.
+if [ -z "$ARG_ISSUE" ] && [ -f "$BACKOFF" ]; then
+  _until="$(sed -n 's/^until=\([0-9]*\).*/\1/p' "$BACKOFF" 2>/dev/null || true)"
+  if [ -n "$_until" ] && [ "$(date +%s)" -lt "$_until" ]; then
+    log "backing off after infrastructure failures until epoch $_until ($BACKOFF); exiting"
+    exit 0
+  fi
+fi
 
 # --------------------------------------------------------------------------
 # step 3 — cleanup trap and lock
@@ -212,8 +224,24 @@ trap 'echo "run-issue: unexpected failure near line $LINENO" >&2; exit 1' ERR
 if ! mkdir "$LOCK" 2>/dev/null; then
   holder=""
   if [ -f "$LOCK/pid" ]; then holder="$(cat "$LOCK/pid" 2>/dev/null || true)"; fi
-  log "busy: another run holds the lock (${holder:+pid $holder, }$LOCK); exiting"
-  exit 0
+  # Stale lock (a crash, SIGKILL or reboot left it): the recorded pid is gone, or was reused by a
+  # process that is not a run-issue.sh. Take it over; a live runner keeps the lock (non-overlap guard).
+  stale=0
+  if [ -n "$holder" ]; then
+    case "$holder" in *[!0-9]*) ;; *)
+      if ! ps -p "$holder" >/dev/null 2>&1; then stale=1
+      else case "$(ps -p "$holder" -o command= 2>/dev/null || true)" in *run-issue.sh*) ;; *) stale=1 ;; esac
+      fi ;;
+    esac
+  fi
+  # mv is atomic: if two runs race for the same stale lock, only one wins the rename and the other sees "busy".
+  if [ "$stale" = 1 ] && mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null && mkdir "$LOCK" 2>/dev/null; then
+    rm -rf "$LOCK.stale.$$"
+    log "took over a stale lock (pid $holder is not a running run-issue.sh)"
+  else
+    log "busy: another run holds the lock (${holder:+pid $holder, }$LOCK); exiting"
+    exit 0
+  fi
 fi
 HAVE_LOCK=1
 printf '%s\n' "$$" > "$LOCK/pid"
@@ -252,6 +280,16 @@ record_run() {
 infra_fail() {
   echo "run-issue: INFRASTRUCTURE FAILURE${N:+ on #$N}: $1" >&2
   if [ -n "$N" ]; then record_run error "infra: $(cut_bytes 300 "$1")"; fi
+  # Back off: the window starts at 15 minutes and doubles with each consecutive failure, up to 6 hours.
+  # Any issue-level outcome (conclude) or an empty queue clears it.
+  local fails=0 prev win=900
+  prev="$(sed -n 's/.*fails=\([0-9]*\).*/\1/p' "$BACKOFF" 2>/dev/null || true)"
+  case "$prev" in ''|*[!0-9]*) ;; *) fails="$prev" ;; esac
+  fails=$((fails + 1))
+  local i=1
+  while [ "$i" -lt "$fails" ] && [ "$win" -lt 21600 ]; do win=$((win * 2)); i=$((i + 1)); done
+  [ "$win" -le 21600 ] || win=21600
+  printf 'until=%s fails=%s\n' "$(( $(date +%s) + win ))" "$fails" > "$BACKOFF" 2>/dev/null || true
   exit 1
 }
 
@@ -323,12 +361,17 @@ post_comment() {
 # swap labels (ISSUE_LABEL out, exactly one of ready-for-human|needs-human|blocked in), comment,
 # record, exit 0. The label swap is what keeps a refused issue from starving the queue (R10.qa.F3):
 # if it fails the run is an infrastructure failure and the label stays for a retry.
+CLOSE_ISSUE=0   # set to 1 by the direct-mode landing: conclude also closes the issue
 conclude() {
   local add="$1" outcome="$2" text="$3" note="$4"
   if ! gh_t issue edit "$N" --repo "$ISSUE_REPO" --remove-label "$ISSUE_LABEL" --add-label "$add" >/dev/null 2>"$TMP/edit.err"; then
     infra_fail "could not relabel $ISSUE_REPO#$N: $(cut_bytes 200 "$(cat "$TMP/edit.err")")"
   fi
+  rm -f "$BACKOFF"   # gh and the issue answered: the infrastructure is fine again
   post_comment "$text"
+  if [ "$CLOSE_ISSUE" = 1 ]; then
+    gh_t issue close "$N" --repo "$ISSUE_REPO" >/dev/null 2>&1 || warn "could not close $ISSUE_REPO#$N"
+  fi
   record_run "$outcome" "$note"
   log "#$N -> $add ($outcome): $(cut_bytes 160 "$note")"
   exit 0
@@ -353,10 +396,29 @@ if [ -f "$RUNS_LOG" ]; then
   handled_today="$(grep -c "^$today " "$RUNS_LOG" 2>/dev/null || true)"
   [ -n "$handled_today" ] || handled_today=0
 fi
-if [ "$handled_today" -ge "$MAX_ISSUES_PER_DAY" ]; then
+# 0 means no cap (the default); a positive number stops new issues once that many were handled today.
+if [ "$MAX_ISSUES_PER_DAY" -gt 0 ] && [ "$handled_today" -ge "$MAX_ISSUES_PER_DAY" ]; then
   log "daily cap reached ($handled_today of $MAX_ISSUES_PER_DAY issues today); nothing to do"
   exit 0
 fi
+
+# --------------------------------------------------------------------------
+# step 4b — logins and the remote. These are infrastructure, not a bad issue or a bad config: a
+# logged-out claude or gh, or a network blip, keeps every issue labelled and backs off (infra_fail),
+# so the next cron tick retries. Only a base branch the remote really lacks is a config error.
+# --------------------------------------------------------------------------
+# claude must be logged in: `auth status --json` carries .loggedIn (exits non-zero when logged out).
+_auth="$("$CLAUDE_BIN" auth status --json 2>/dev/null || true)"
+printf '%s' "$_auth" | jq -e '.loggedIn == true' >/dev/null 2>&1 || infra_fail "claude is not logged in; run 'claude auth login' as this user"
+gh auth status >/dev/null 2>&1 || infra_fail "gh is not logged in (or gh is unreachable); run 'gh auth login' as this user"
+# ls-remote --exit-code: 2 = the ref is absent (config error), any other failure = remote unreachable
+_rc=0
+git_t -C "$REPO_ROOT" ls-remote --exit-code --heads origin "refs/heads/$BASE_BRANCH" >/dev/null 2>&1 || _rc=$?
+case "$_rc" in
+  0) ;;
+  2) die_pre "origin/$BASE_BRANCH does not exist on the remote; fix BASE_BRANCH in loop/loop.conf" ;;
+  *) infra_fail "could not reach origin (git ls-remote exit $_rc)" ;;
+esac
 
 # --------------------------------------------------------------------------
 # step 5 — select the issue and read it
@@ -370,6 +432,7 @@ else
   fi
   N="$(sort -n "$TMP/list.txt" | sed -n '1p')"
   if [ -z "$N" ]; then
+    rm -f "$BACKOFF"
     log "nothing to do: no open issue labelled $ISSUE_LABEL in $ISSUE_REPO"
     exit 0
   fi
@@ -386,6 +449,12 @@ jq -e 'type == "object"' "$TMP/issue.json" >/dev/null 2>&1 || infra_fail "the an
 jq -r '[.labels[]? | (if type == "object" then .name else . end)] | .[]' "$TMP/issue.json" > "$TMP/labels.txt"
 has_label() { grep -qxF -- "$1" "$TMP/labels.txt"; }
 
+# The issues endpoint also answers for pull requests (they carry a pull_request key). A PR is never
+# work for the worker, so refuse it by number as well as by label (nothing touched, exit 2).
+if jq -e 'has("pull_request")' "$TMP/issue.json" >/dev/null 2>&1; then
+  N=""   # not handled: no record, no label change
+  die_pre "$ISSUE_REPO#$CUR_ISSUE is a pull request, not an issue"
+fi
 if ! has_label "$ISSUE_LABEL"; then
   N=""   # not handled: no record, no label change
   die_pre "$ISSUE_REPO#$CUR_ISSUE does not carry the label '$ISSUE_LABEL'; add it or pick another issue"
@@ -411,9 +480,12 @@ done
 
 # an open PR or a remote branch for this issue already exists
 pr_line=""
+# A failing `gh pr list` is an outage, not "no PR": carrying on could open a second PR.
 if gh_t pr list --repo "$GH_REPO" --head "issue-$N" --state open --json number,url \
-     --jq '.[0] | "\(.number) \(.url)"' > "$TMP/pr.txt" 2>/dev/null; then
+     --jq '.[0] | "\(.number) \(.url)"' > "$TMP/pr.txt" 2> "$TMP/prlist.err"; then
   pr_line="$(sed -n '1p' "$TMP/pr.txt")"
+else
+  infra_fail "gh pr list failed: $(cut_bytes 200 "$(cat "$TMP/prlist.err")")"
 fi
 case "$pr_line" in null*|"") pr_line="" ;; esac
 if [ -n "$pr_line" ]; then
@@ -422,9 +494,14 @@ if [ -n "$pr_line" ]; then
   [ "$pr_url" != "$pr_line" ] || pr_url=""
   conclude ready-for-human skipped "issue-loop skipped this: an open pull request already exists for it (#$pr_num${pr_url:+, $pr_url}). A human should review it." "gate: existing PR $pr_num"
 fi
-if git_t -C "$REPO_ROOT" ls-remote --exit-code --heads origin "refs/heads/issue-$N" >/dev/null 2>&1; then
-  conclude ready-for-human skipped "issue-loop skipped this: the branch \`issue-$N\` already exists on the remote. A human should look at it." "gate: branch issue-$N exists"
-fi
+# ls-remote --exit-code: 0 = the branch exists, 2 = absent, anything else = the remote is unreachable
+_rc=0
+git_t -C "$REPO_ROOT" ls-remote --exit-code --heads origin "refs/heads/issue-$N" >/dev/null 2>&1 || _rc=$?
+case "$_rc" in
+  0) conclude ready-for-human skipped "issue-loop skipped this: the branch \`issue-$N\` already exists on the remote. A human should look at it." "gate: branch issue-$N exists" ;;
+  2) ;;
+  *) infra_fail "could not check origin for the branch issue-$N (git ls-remote exit $_rc)" ;;
+esac
 
 # trust gate: only OWNER / MEMBER / COLLABORATOR issues are worked. A null/empty association is untrusted.
 if [ "$TRUST_GATE" = "on" ] && ! is_trusted_assoc "$ASSOC"; then
@@ -471,6 +548,14 @@ if [ -e "$WT" ]; then
 fi
 if ! git_t -C "$REPO_ROOT" fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" >/dev/null 2>"$TMP/e.err"; then
   infra_fail "git fetch origin $BASE_BRANCH failed: $(cut_bytes 200 "$(cat "$TMP/e.err")")"
+fi
+# A local issue-N that is ahead of the base holds earlier work (for example a timed-out run's WIP
+# commit). `worktree add -B` would reset it to the base, so move it aside first.
+if git -C "$REPO_ROOT" rev-parse -q --verify "refs/heads/issue-$N" >/dev/null 2>&1 \
+   && [ "$(git -C "$REPO_ROOT" rev-list --count "origin/$BASE_BRANCH..refs/heads/issue-$N" 2>/dev/null || echo 0)" -gt 0 ]; then
+  _prev="issue-$N-prev-$(date +%s)"
+  git -C "$REPO_ROOT" branch -m "issue-$N" "$_prev" >/dev/null 2>&1 \
+    && log "#$N: kept the earlier local branch issue-$N as $_prev"
 fi
 CURRENT_WT="$WT"   # from here the trap removes it
 if ! git -C "$REPO_ROOT" worktree add --no-track -B "issue-$N" "$WT" "origin/$BASE_BRANCH" >/dev/null 2>"$TMP/e.err"; then
@@ -577,7 +662,21 @@ if [ "$RESULT_OK" = 1 ]; then
 fi
 
 if [ "$WORKER_RC" -eq 124 ] || [ "$WORKER_RC" -eq 137 ]; then
-  blocked "the worker exceeded ISSUE_TIMEOUT (${ISSUE_TIMEOUT}s) and was stopped"
+  # The cleanup trap removes the worktree, so uncommitted work would be lost: commit it as WIP on the
+  # local branch issue-N (never pushed) first. A worker that switched branches is left alone.
+  wip_note="Any commits it made are on the local branch issue-$N."
+  if [ "$(git -C "$WT" symbolic-ref --short -q HEAD 2>/dev/null || true)" = "issue-$N" ] \
+     && [ -n "$(git -C "$WT" status --porcelain 2>/dev/null)" ]; then
+    # same wording rule as the worker: no issue text in a commit on a possibly public repo
+    if [ "$ISSUE_REPO" = "$GH_REPO" ]; then wip_ref="#$N"; else wip_ref="refs $ISSUE_REPO#$N"; fi
+    if git -C "$WT" add -A >/dev/null 2>&1 \
+       && git -C "$WT" commit -q --no-verify -m "WIP: worker timed out, unfinished ($wip_ref)" >/dev/null 2>&1; then
+      wip_note="Its uncommitted work was saved as a WIP commit on the local branch issue-$N (not pushed)."
+    else
+      wip_note="Its uncommitted work could not be saved and was lost."
+    fi
+  fi
+  blocked "the worker exceeded ISSUE_TIMEOUT (${ISSUE_TIMEOUT}s) and was stopped. $wip_note"
 fi
 if [ "$RESULT_OK" = 1 ] && [ "$(jq -r '.is_error // false' "$TMP/result.json")" = "true" ]; then
   subtype="$(jq -r '.subtype // ""' "$TMP/result.json")"
@@ -602,7 +701,14 @@ case "$OUTCOME_LINE" in
     [ -n "$reason" ] || reason="the worker reported blocked"
     blocked "$reason" ;;
   done) ;;
-  *) blocked "the worker wrote no recognised outcome line (expected done, needs-human or blocked)" ;;
+  *)
+    # No outcome line can also mean claude itself was cut off (usage or rate limit, login, network).
+    # That is the infrastructure's fault, not the issue's: keep the label and back off.
+    { jq -r '.result // ""' "$TMP/result.json" 2>/dev/null || true; head -c 2000 "$TMP/worker.err" 2>/dev/null || true; } | head -c 4000 > "$TMP/infra-probe.txt" || true
+    if grep -qiE 'usage limit|rate.?limit|limit reached|overloaded_error|credit balance is too low|please run /login|invalid api key|oauth token|econnreset|etimedout|could not resolve host' "$TMP/infra-probe.txt"; then
+      infra_fail "the worker was cut off by the claude service: $(cut_bytes 200 "$(head -n 3 "$TMP/infra-probe.txt")")"
+    fi
+    blocked "the worker wrote no recognised outcome line (expected done, needs-human or blocked)" ;;
 esac
 
 # --------------------------------------------------------------------------
@@ -622,16 +728,45 @@ fi
 # --------------------------------------------------------------------------
 # step 12 — verify: the RUNNER runs the gate. Only exit 0 allows a push.
 # --------------------------------------------------------------------------
-run_child "$TMP/verify.out" "$TMP/verify.err" "$WT" "$TIMEOUT_BIN" -k 10 "$VERIFY_TIMEOUT" bash -c "$VERIFY_CMD"
-if [ "$CHILD_RC" -ne 0 ]; then
-  cat "$TMP/verify.out" "$TMP/verify.err" > "$TMP/verify.all" 2>/dev/null || true
-  vtail="$(tail_cut "$TMP/verify.all" 40 3000)"
-  if [ "$CHILD_RC" -eq 124 ] || [ "$CHILD_RC" -eq 137 ]; then
-    blocked "verify timed out after ${VERIFY_TIMEOUT}s. Last output:
+run_verify() {
+  run_child "$TMP/verify.out" "$TMP/verify.err" "$WT" "$TIMEOUT_BIN" -k 10 "$VERIFY_TIMEOUT" bash -c "$VERIFY_CMD"
+  if [ "$CHILD_RC" -ne 0 ]; then
+    cat "$TMP/verify.out" "$TMP/verify.err" > "$TMP/verify.all" 2>/dev/null || true
+    vtail="$(tail_cut "$TMP/verify.all" 40 3000)"
+    if [ "$CHILD_RC" -eq 124 ] || [ "$CHILD_RC" -eq 137 ]; then
+      blocked "verify timed out after ${VERIFY_TIMEOUT}s. Last output:
+$vtail"
+    fi
+    blocked "the verify command failed (exit $CHILD_RC), so nothing was pushed. Last output:
 $vtail"
   fi
-  blocked "the verify command failed (exit $CHILD_RC), so nothing was pushed. Last output:
-$vtail"
+}
+run_verify
+
+# --------------------------------------------------------------------------
+# step 12b — MODE=direct: land the verified commit on the base branch (no PR)
+# --------------------------------------------------------------------------
+if [ "$MODE" = "direct" ]; then
+  # A refusal from here on keeps the local branch issue-N, so the work is never lost.
+  if ! git_t -C "$WT" fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" >/dev/null 2>"$TMP/e.err"; then
+    infra_fail "git fetch origin $BASE_BRANCH failed: $(cut_bytes 200 "$(cat "$TMP/e.err")")"
+  fi
+  # If the base moved while the worker ran, put the work on top of it. The rebased tree is not the
+  # one that was verified, so verify again before anything is pushed.
+  if ! git -C "$WT" merge-base --is-ancestor "origin/$BASE_BRANCH" HEAD; then
+    if ! git -C "$WT" rebase "origin/$BASE_BRANCH" >/dev/null 2>"$TMP/rebase.err"; then
+      git -C "$WT" rebase --abort >/dev/null 2>&1 || true
+      blocked "the rebase onto origin/$BASE_BRANCH conflicted, so nothing was pushed; the work is on the local branch issue-$N. $(cut_bytes 300 "$(cat "$TMP/rebase.err")")"
+    fi
+    run_verify
+  fi
+  # Explicit refspec, never forced: a base that moved again since the fetch is a rejection, not a clobber.
+  if ! git_t -C "$WT" push origin "HEAD:refs/heads/$BASE_BRANCH" >/dev/null 2>"$TMP/push.err"; then
+    blocked "push to $BASE_BRANCH rejected, so nothing landed; the work is on the local branch issue-$N: $(cut_bytes 300 "$(cat "$TMP/push.err")")"
+  fi
+  SHA="$(git -C "$WT" rev-parse --short HEAD)"
+  CLOSE_ISSUE=1
+  conclude ready-for-human ok "issue-loop landed commit $SHA on $BASE_BRANCH ($GH_REPO). Its verify command passed in the runner. The issue is closed; review the commit when convenient." "landed $SHA on $BASE_BRANCH"
 fi
 
 # --------------------------------------------------------------------------
