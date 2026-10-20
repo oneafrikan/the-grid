@@ -247,6 +247,15 @@ curl_stub() {
   [[ "$output" == *"sources.sh: no submodules in .gitmodules"* ]]
 }
 
+@test "sources.sh --check-drift with no submodules exits 2 (1 means stale), naming the cause" {
+  gitmodules_fixture
+  cp "$EXAMPLE" "$FX/baseline-submodules.example.txt"
+  : > "$FX/docs/SOURCES.md"
+  GRID_DIR="$FX" run bash "$REPO_ROOT/scripts/sources.sh" --check-drift
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"sources.sh: no submodules in .gitmodules"* ]]
+}
+
 @test "sources.sh --check hands curl each URL after --, and a leading-dash URL is a FAIL without curl" {
   gitmodules_fixture https://example.com/ok.git --version
   curl_stub

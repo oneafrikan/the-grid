@@ -58,7 +58,8 @@ LIVE_DOC_PATHS="automation-factory scripts tests docs project-factory hooks READ
 @test "no live doc says the pattern is retired, quarantined or not to be deployed" {
   cd "$GRID_ROOT"
   # shellcheck disable=SC2086
-  run git grep -nIiE 'retire[d].*[l]oop|[l]oop.*retire[d]|quarantine[d].*[l]oop|RETIRE[D] - do not deploy' -- $LIVE_DOC_PATHS
+  # Any non-alphanumeric run before "do not deploy" counts (dash, em dash, colon), not just " - ".
+  run git grep -nIiE 'retire[d].*[l]oop|[l]oop.*retire[d]|quarantine[d].*[l]oop|RETIRE[D][^[:alnum:]]+do not deploy' -- $LIVE_DOC_PATHS
   [ "$status" -eq 1 ]
 }
 

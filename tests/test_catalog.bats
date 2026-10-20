@@ -320,6 +320,14 @@ in_other_dir() { # ARGS... -> runs catalog.sh from $OTHER_DIR against the mock g
   [ ! -e "$MOCK_GRID/SKILLS.md" ]
 }
 
+@test "catalog.sh with an empty output path exits 2 and does not write the default SKILLS.md" {
+  export MOCK_GRID REPO_ROOT
+  in_other_dir ""
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"empty output path"* ]]
+  [ ! -e "$MOCK_GRID/SKILLS.md" ]
+}
+
 @test "catalog.sh -h and --help print the usage, exit 0 and create no file" {
   export MOCK_GRID REPO_ROOT
   local flag
