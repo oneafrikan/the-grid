@@ -15,6 +15,7 @@ REVIEW_FOCUS=''            # one line: what the post-commit review should look a
 WORKER_MODEL='sonnet'      # model for the headless worker
 MAX_BUDGET_USD='5'         # spend cap per issue (USD)
 ISSUE_TIMEOUT='1800'       # wall-clock cap per issue (seconds)
+WORKER_EXIT_GRACE='30'      # seconds a worker may keep running after writing its outcome before the runner stops it
 WORKER_PERMISSIONS='allowlist'  # allowlist (default) or bypass (a fallback; read the pattern README first)
 WORKER_ALLOWED_TOOLS=''    # blank = the default allowlist (file tools + git add/commit/status/diff/log/show); add your test commands
 MAX_ISSUES_PER_DAY='5'     # daily cap on issues handled
