@@ -173,3 +173,90 @@ extract_trailhead() { sed -n '/^<!-- charter-trailhead -->$/,/^<!-- \/charter-tr
   echo "$output"
   [ "$status" -eq 0 ]
 }
+
+# =========================================================================================
+# vocabulary half: agent-factory/_core/AGENTS_base.md (spec agent-boot-vocabulary)
+# =========================================================================================
+BASE="agent-factory/_core/AGENTS_base.md"
+
+# base_section <heading text> — the body of one `## ` section of AGENTS_base.md (heading excluded).
+base_section() { awk -v h="## $1" '$0 == h {on=1; next} /^## / {on=0} on' "$REPO_ROOT/$BASE"; }
+
+@test "AGENTS_base: Evidence and Stages names all six stages, RAN/READ/UNTESTED and the wip rule" {
+  sec=$(base_section "Evidence and Stages")
+  [ -n "$sec" ]
+  for s in $(stage_names); do printf '%s\n' "$sec" | grep -qF "\`$s\`" || { echo "missing $s"; return 1; }; done
+  for w in RAN READ UNTESTED; do printf '%s\n' "$sec" | grep -qw "$w"; done
+  printf '%s\n' "$sec" | grep -qF '`wip` is never promoted'
+  printf '%s\n' "$sec" | grep -q 'is always decided by a human'
+  printf '%s\n' "$sec" | grep -q 'not stages'
+}
+
+@test "AGENTS_base: Memory names the always-in-context and on-demand sets" {
+  sec=$(base_section "Memory")
+  for w in 'LEARNINGS.md' 'knowledge/' 'instincts' 'learning: on' 'MAP.md' 'never present unread'; do
+    printf '%s\n' "$sec" | grep -qF "$w" || { echo "missing: $w"; return 1; }
+  done
+}
+
+@test "AGENTS_base: the filing section applies only if signals/README.md exists and keeps handoffs separate" {
+  first=$(base_section "Filing a Knowledge Signal" | grep -m1 .)
+  [[ "$first" == *"signals/README.md"* ]] || false
+  base_section "Filing a Knowledge Signal" | grep -qF 'signals/→<agent>.md'
+}
+
+@test "AGENTS_base: the added block is exactly 1670 bytes and the file exactly 4578" {
+  n=$(sed -n '/^## Evidence and Stages/,/^## Signal Protocol (handoff)/p' "$REPO_ROOT/$BASE" | sed '$d' | sed '$d' | wc -c)
+  echo "block=$n"
+  [ "$n" -eq 1670 ]
+  [ "$n" -le 2000 ]
+  [ "$(wc -c < "$REPO_ROOT/$BASE")" -eq 4578 ]
+}
+
+@test "AGENTS_base: the block sits between the OpenSpec section and the handoff section" {
+  a=$(grep -n '^## Spec-Driven Repos' "$REPO_ROOT/$BASE" | cut -d: -f1)
+  b=$(grep -n '^## Evidence and Stages' "$REPO_ROOT/$BASE" | cut -d: -f1)
+  c=$(grep -n '^## Signal Protocol (handoff)' "$REPO_ROOT/$BASE" | cut -d: -f1)
+  [ "$a" -lt "$b" ] && [ "$b" -lt "$c" ]
+}
+
+@test "AGENTS_base: the three new headings appear in no role AGENTS.md (merge would unify them)" {
+  run bash -c "grep -l '^## \(Evidence and Stages\|Memory\|Filing a Knowledge Signal\)' '$REPO_ROOT'/agent-factory/roles/*/AGENTS.md"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "AGENTS_base: the handoff section is byte-identical to origin/main (skipped without that ref)" {
+  git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null || skip "origin/main absent"
+  git -C "$REPO_ROOT" show "origin/main:$BASE" > "$T/old"
+  sect() { sed -n '/^## Signal Protocol (handoff)$/,/^## Scope$/p' "$1" | sed '$d'; }
+  sect "$T/old" > "$T/old.sect"
+  sect "$REPO_ROOT/$BASE" > "$T/new.sect"
+  [ -s "$T/old.sect" ]
+  cmp "$T/old.sect" "$T/new.sect"
+}
+
+@test "AGENTS_base: the change adds lines only (nothing in the old text is edited or removed)" {
+  git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null || skip "origin/main absent"
+  run git -C "$REPO_ROOT" diff -U0 origin/main -- "$BASE"
+  [ "$status" -eq 0 ]
+  ! printf '%s\n' "$output" | grep -E '^-[^-]' || false
+}
+
+@test "no compose.py and no role file is modified by this change (skipped without origin/main)" {
+  git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null || skip "origin/main absent"
+  run git -C "$REPO_ROOT" diff --name-only origin/main
+  [ "$status" -eq 0 ]
+  ! printf '%s\n' "$output" | grep -E '(^|/)compose\.py$' || false
+  ! printf '%s\n' "$output" | grep -E '^agent-factory/roles/' || false
+}
+
+@test "signals/README.md and AGENTS_base.md agree on the six stage names and the wip sentence" {
+  base_section "Evidence and Stages" > "$T/a"
+  awk '/^## Evidence and stages/ {on=1; next} /^## / {on=0} on' "$REPO_ROOT/signals/README.md" > "$T/b"
+  for s in $(stage_names); do
+    grep -qF "\`$s\`" "$T/a" && grep -qF "\`$s\`" "$T/b" || { echo "disagree on $s"; return 1; }
+  done
+  grep -qF '`wip` is never promoted' "$T/a"
+  grep -qF '`wip` is never promoted' "$T/b"
+}
