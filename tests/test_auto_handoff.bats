@@ -29,7 +29,10 @@ setup() {
   # sandboxes and the worker's own digest/snapshot dirs) into the per-test dir that bats
   # removes itself, so a worker that is SIGKILLed before its EXIT trap, or a write that lands
   # after teardown's rm -rf, cannot leave an entry in the gate's TMPDIR.
-  GATE_TMPDIR="${TMPDIR:-/tmp}"
+  # With TMPDIR unset the watched dir is this test's own (not the shared /tmp, where another
+  # process's tmp.* entry made the NF-001 test flake locally).
+  GATE_TMPDIR="${TMPDIR:-$BATS_TEST_TMPDIR/gate-tmp}"
+  mkdir -p "$GATE_TMPDIR"
   export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   common_setup
   # Temp HOME AFTER common_setup (it captured REAL_HOME for the sandbox check).
