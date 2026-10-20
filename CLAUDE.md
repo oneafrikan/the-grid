@@ -208,6 +208,10 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
   only if a staged `.bats` file also has unstaged edits). The script self-installs `core.hooksPath`
   on first run. Run `bash scripts/gate.sh` before readying a branch. `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
   `--strict` (CI) fails on any skip not named in `GRID_GATE_EXPECT_SKIPPED` (see `.github/workflows/tests.yml`).
+  CI splits the gate: a `checks` job (`gate.sh --strict --no-bats`) and a `bats` matrix of four shards
+  (`gate.sh --strict --shard <name>`, files listed in `tests/shards.txt`), aggregated by the one job named `gate`,
+  which passes only if every needed job is `success` (cancelled and skipped fail). A new `tests/test_*.bats` file
+  must be added to `tests/shards.txt`; `tests/test_gate.bats` fails otherwise.
   `catalog`, `sources` (`sources.sh --check-drift`) and `budget` run against the TRACKED `baseline-submodules.example.txt` (`GRID_BASELINE` pin; `wire.sh` pins it for SKILLS.md too), so SKILLS.md, docs/SOURCES.md and the ratchet are machine-independent; a personal baseline is never gated.
   It runs `check-personal.sh` as the `personal` check; with no private denylist on the
   machine (CI, forks) it passes and prints `gate: PASS (skipped: personal-denylist)`.

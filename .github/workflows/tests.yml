@@ -20,14 +20,16 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  gate:
-    # Keep the job name `gate`: the main ruleset requires a check with that name.
+  # Every gate check except bats, run once. The bats suite is split into the shard jobs
+  # below (about 21 of the 24 minutes a single job took); the `gate` job at the end
+  # aggregates both.
+  checks:
     # Pushes to main always run; a PR runs only when it is not a draft.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # Pinned image: ubuntu-latest moves to a new LTS without notice and the
     # loop treats this job as its truth signal.
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,10 +59,61 @@ jobs:
       # checkouts, which cannot prove a locked sha is on its upstream ref. That proof is a
       # hard failure by default; here the skip is the deliberate opt-in. The proof runs
       # wherever submodules are fully cloned (maintainer machines, gate.sh locally).
-      - name: Gate
+      - name: Gate (all checks except bats)
         env:
           GRID_LOCK_ALLOW_SHALLOW: "1"
           GRID_GATE_EXPECT_SKIPPED: >-
             plugins-validate personal-denylist
             compose-core compose-grid compose-finance-desk compose-learning-desk
-        run: bash scripts/gate.sh --strict
+        run: bash scripts/gate.sh --strict --no-bats
+
+  # One bats shard per matrix entry. The shard names and their files live in tests/shards.txt;
+  # tests/test_gate.bats fails if the matrix below and that file disagree, or if a
+  # tests/test_*.bats file belongs to no shard (or two). gate.sh --shard keeps the version pin
+  # and the per-run TMPDIR leak check, so leak detection still runs per shard.
+  bats:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      # A red shard must not cancel its siblings: a cancelled shard hides which tests failed.
+      fail-fast: false
+      matrix:
+        shard: [s1, s2, s3, s4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      # The venv-gated tests need PyYAML; gate.sh sets GRID_REQUIRE_VENV=1 so they cannot skip.
+      - name: Build agent-factory venv
+        run: |
+          python3 -m venv agent-factory/.venv
+          agent-factory/.venv/bin/pip install -r agent-factory/requirements.txt
+
+      - name: Bats shard ${{ matrix.shard }}
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: bash scripts/gate.sh --strict --shard "$SHARD"
+
+  # The ONE check the main ruleset requires: keep the job id and name `gate`.
+  # It needs every other job and passes only if each finished `success`. `if: always()` makes
+  # it run (and fail) when a needed job failed, was cancelled or was skipped; without it a
+  # skipped gate would count as passing. A draft PR skips every job, gate included, as before.
+  gate:
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    needs: [checks, bats]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to have succeeded
+        env:
+          # `bats` is the matrix as a whole: its result is success only if every shard was.
+          RESULTS: "checks=${{ needs.checks.result }} bats=${{ needs.bats.result }}"
+        run: |
+          echo "$RESULTS"
+          case "$RESULTS" in
+            "checks=success bats=success") ;;
+            *) echo "gate: FAIL — a needed job was not success (failure, cancelled or skipped)" >&2; exit 1 ;;
+          esac
