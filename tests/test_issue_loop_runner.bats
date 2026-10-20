@@ -358,6 +358,22 @@ add_agent() {
   refute has_gh "gh pr create"
 }
 
+@test "caps: a timed-out worker's uncommitted work is saved as a WIP commit on local issue-N, and the issue is still blocked" {
+  use_real_timeout
+  export STUB_CLAUDE_SLEEP=20
+  wrapper_claude 'case " $* " in *" --model "*) echo half-done > wip-file.txt ;; esac'
+  set_conf ISSUE_TIMEOUT 1
+  run_runner
+  [ "$status" -eq 0 ]
+  has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label blocked"
+  contains "$(cat "$STUB_COMMENTS")" "WIP commit on the local branch issue-4"
+  contains "$(git -C "$REPO" log -1 --format=%s issue-4)" "WIP"
+  [ "$(git -C "$REPO" show issue-4:wip-file.txt)" = "half-done" ]
+  # nothing is pushed
+  run git -C "$ORIGIN" rev-parse --verify -q refs/heads/issue-4
+  [ "$status" -ne 0 ]
+}
+
 @test "caps: a worker that wrote done but never exits is stopped after WORKER_EXIT_GRACE and the PR is opened" {
   use_real_timeout
   happy_env

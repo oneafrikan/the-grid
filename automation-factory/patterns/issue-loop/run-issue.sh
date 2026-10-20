@@ -472,6 +472,14 @@ fi
 if ! git_t -C "$REPO_ROOT" fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" >/dev/null 2>"$TMP/e.err"; then
   infra_fail "git fetch origin $BASE_BRANCH failed: $(cut_bytes 200 "$(cat "$TMP/e.err")")"
 fi
+# A local issue-N that is ahead of the base holds earlier work (for example a timed-out run's WIP
+# commit). `worktree add -B` would reset it to the base, so move it aside first.
+if git -C "$REPO_ROOT" rev-parse -q --verify "refs/heads/issue-$N" >/dev/null 2>&1 \
+   && [ "$(git -C "$REPO_ROOT" rev-list --count "origin/$BASE_BRANCH..refs/heads/issue-$N" 2>/dev/null || echo 0)" -gt 0 ]; then
+  _prev="issue-$N-prev-$(date +%s)"
+  git -C "$REPO_ROOT" branch -m "issue-$N" "$_prev" >/dev/null 2>&1 \
+    && log "#$N: kept the earlier local branch issue-$N as $_prev"
+fi
 CURRENT_WT="$WT"   # from here the trap removes it
 if ! git -C "$REPO_ROOT" worktree add --no-track -B "issue-$N" "$WT" "origin/$BASE_BRANCH" >/dev/null 2>"$TMP/e.err"; then
   blocked "could not create the worktree: $(cut_bytes 300 "$(cat "$TMP/e.err")")"
@@ -577,7 +585,21 @@ if [ "$RESULT_OK" = 1 ]; then
 fi
 
 if [ "$WORKER_RC" -eq 124 ] || [ "$WORKER_RC" -eq 137 ]; then
-  blocked "the worker exceeded ISSUE_TIMEOUT (${ISSUE_TIMEOUT}s) and was stopped"
+  # The cleanup trap removes the worktree, so uncommitted work would be lost: commit it as WIP on the
+  # local branch issue-N (never pushed) first. A worker that switched branches is left alone.
+  wip_note="Any commits it made are on the local branch issue-$N."
+  if [ "$(git -C "$WT" symbolic-ref --short -q HEAD 2>/dev/null || true)" = "issue-$N" ] \
+     && [ -n "$(git -C "$WT" status --porcelain 2>/dev/null)" ]; then
+    # same wording rule as the worker: no issue text in a commit on a possibly public repo
+    if [ "$ISSUE_REPO" = "$GH_REPO" ]; then wip_ref="#$N"; else wip_ref="refs $ISSUE_REPO#$N"; fi
+    if git -C "$WT" add -A >/dev/null 2>&1 \
+       && git -C "$WT" commit -q --no-verify -m "WIP: worker timed out, unfinished ($wip_ref)" >/dev/null 2>&1; then
+      wip_note="Its uncommitted work was saved as a WIP commit on the local branch issue-$N (not pushed)."
+    else
+      wip_note="Its uncommitted work could not be saved and was lost."
+    fi
+  fi
+  blocked "the worker exceeded ISSUE_TIMEOUT (${ISSUE_TIMEOUT}s) and was stopped. $wip_note"
 fi
 if [ "$RESULT_OK" = 1 ] && [ "$(jq -r '.is_error // false' "$TMP/result.json")" = "true" ]; then
   subtype="$(jq -r '.subtype // ""' "$TMP/result.json")"
