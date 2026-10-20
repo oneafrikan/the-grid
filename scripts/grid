@@ -6,14 +6,11 @@ restricted-YAML reader scripts/lib/miniyaml.py. Design: openspec change
 `manifest-lock-install` (design.md "CLI shape", "File formats", "Input
 validation", "Fetch mechanism").
 
-Group 1 landed the shared helpers, the grid.yaml reader, the typed-entry
-reader, the grid.lock reader with its input validation, and the `audit`
-passthrough. Group 2 added the content-hash helpers, `lock` and `lock --check`.
-Group 3 adds the ledger, the fetch/verify/audit/place routine and `install`.
-Group 4 adds `doctor`, `repair` and `uninstall`, which read the ledger and reuse
-group 3's classify / fetch / verify / audit / place routine.
-Group 5 adds `drift` (read-only upstream drift report) and `schedule` (render
-the weekly drift schedule; it never activates anything).
+Commands (see `grid --help`): `audit` (passthrough to scripts/audit.sh), `lock` /
+`lock --check` (grid.lock from the submodule checkouts), `install` (ledger, then the
+fetch/verify/audit/place routine), `doctor` / `repair` / `uninstall` (read the ledger and
+reuse that same routine), `drift` (read-only upstream drift report) and `schedule`
+(render the weekly drift schedule; it never activates anything).
 
 Python 3.8 floor: no str.removeprefix/removesuffix, no `dict | dict`, no
 `list[str]` annotations evaluated at runtime, no `match`. Checked with

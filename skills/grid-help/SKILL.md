@@ -6,7 +6,7 @@ description: Explain how to use the-grid (which slash command or subagent to rea
 # grid-help
 
 A live, in-session guide to the-grid. Answer from the summary in `sections/orientation.md`; point to
-[USAGE.md](../../USAGE.md) (repo root) for the full walkthrough rather than
+[USAGE.md](https://github.com/oneafrikan/the-grid/blob/main/USAGE.md) (repo root) for the full walkthrough rather than
 reproducing it verbatim — it changes independently of this skill.
 
 ## Quick orientation
@@ -25,7 +25,7 @@ Don't reproduce their content — hand off:
 ## Answering well
 
 - **Give a pointer, not a tutorial.** One or two lines plus the file to read.
-- **Check before asserting.** [SKILLS.md](../../SKILLS.md) is generated and
+- **Check before asserting.** [SKILLS.md](https://github.com/oneafrikan/the-grid/blob/main/SKILLS.md) is generated and
   current; your memory of what's wired is not. Same for which agents exist —
   read `~/.claude/agents/`.
 - **Private projects: mechanism yes, names never.** A machine may run a project
@@ -36,8 +36,8 @@ Don't reproduce their content — hand off:
 
 If the question is deeper than a pointer — which template to pick, how a
 pattern composes, how the delegation topology works — read the relevant
-section of [USAGE.md](../../USAGE.md), [README.md](../../README.md), or
-[CLAUDE.md](../../CLAUDE.md) rather than guessing.
+section of [USAGE.md](https://github.com/oneafrikan/the-grid/blob/main/USAGE.md), [README.md](https://github.com/oneafrikan/the-grid/blob/main/README.md), or
+[CLAUDE.md](https://github.com/oneafrikan/the-grid/blob/main/CLAUDE.md) rather than guessing.
 
 ## Sections
 Read a section only when its condition applies; do not preload them.

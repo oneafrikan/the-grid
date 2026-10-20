@@ -133,6 +133,16 @@ run_cd() {
   assert_argv "$odd/contexts/dev.md"
 }
 
+@test "a leading-dash relative GRID_DIR and a set CDPATH still resolve to one absolute path" {
+  mkdir -p "$OTHER_DIR/-rel/contexts" "$OTHER_DIR/elsewhere" "$OTHER_DIR/cdp/contexts"
+  echo "# dev" > "$OTHER_DIR/-rel/contexts/dev.md"
+  echo "# dev" > "$OTHER_DIR/cdp/contexts/dev.md"
+  # CDPATH would make a bare `cd` print the resolved dir and could pick the wrong "-rel".
+  CDPATH="$OTHER_DIR/cdp" run_cd bash -rel "$OTHER_DIR/elsewhere"
+  [ "$status" -eq 0 ]
+  assert_argv "$(cd "$OTHER_DIR/-rel/contexts" && pwd)/dev.md"
+}
+
 @test "a GRID_DIR without contexts/ falls back to the directory of aliases.sh" {
   mkdir -p "$OTHER_DIR/empty"
   run_cd bash "$OTHER_DIR/empty" "$OTHER_DIR"
