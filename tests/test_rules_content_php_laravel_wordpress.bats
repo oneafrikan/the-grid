@@ -57,6 +57,26 @@ teardown() {
   grep -qF 'CodeIgniter' "$REPO_ROOT/rules/laravel/README.md"
 }
 
+@test "wordpress/structure: prefix list omits constants on purpose, and the README says so" {
+  run grep -F 'constant' "$REPO_ROOT/rules/wordpress/structure.md"
+  [ "$status" -eq 1 ]
+  grep -qF 'leaves out constants' "$REPO_ROOT/rules/wordpress/README.md"
+}
+
+@test "wordpress/structure: enqueue bullet names the hooks and forbids hardcoded script tags" {
+  grep -qF 'with `wp_enqueue_script()`, not hardcoded `<script>` tags' "$REPO_ROOT/rules/wordpress/structure.md"
+  grep -qF '`wp_enqueue_scripts`, `admin_enqueue_scripts` or `login_enqueue_scripts`' "$REPO_ROOT/rules/wordpress/structure.md"
+}
+
+@test "wordpress/security: %i placeholder states the WordPress version that added it" {
+  grep -qF '`%i` (identifiers, added in WordPress 6.2.0)' "$REPO_ROOT/rules/wordpress/security.md"
+}
+
+@test "laravel: change() and chaperone() bullets carry a Laravel-version qualifier" {
+  grep -qF 'depending on your Laravel version' "$REPO_ROOT/rules/laravel/migrations.md"
+  grep -qF 'Where your Laravel version provides `chaperone()`' "$REPO_ROOT/rules/laravel/eloquent.md"
+}
+
 @test "php, laravel, wordpress: every bullet is at most 240 characters" {
   [ -z "$(over_cap_bullets php laravel wordpress)" ]
 }

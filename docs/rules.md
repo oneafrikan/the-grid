@@ -103,7 +103,8 @@ python3 scripts/rules.py emit --harness cursor|agents-md|gemini --packs sql,bash
 - Exit 2 also means one or more selected packs failed re-lint: `emit` lints every selected
   pack first, excludes a failing pack (named on stderr) and still delivers the clean ones.
   If every selected pack fails, nothing is written and an existing block is untouched.
-  Otherwise, on exit 2 nothing is written.
+  If only some packs fail, the clean ones are written. Every other exit-2 case (usage error,
+  refusal, I/O error, unbalanced markers) writes nothing.
 - Stdout: one line per change, `wrote <path>` or `removed <path>`; nothing when up to
   date. Errors go to stderr.
 - Output is deterministic and idempotent: packs and files sorted in C locale, no timestamps.
