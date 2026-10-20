@@ -211,11 +211,11 @@ add_agent() {
   [ ! -d "$STATE/lock" ]
 }
 
-@test "preflight: direct mode is refused" {
-  set_conf MODE direct
+@test "preflight: MODE must be pr or direct" {
+  set_conf MODE whatever
   run_runner
   [ "$status" -eq 2 ]
-  contains "$output" "headless runs are pr-only; use direct mode from an interactive /loop"
+  contains "$output" "MODE must be"
 }
 
 @test "preflight: a missing guard script exits 2 naming the file and instantiate.sh" {
@@ -973,6 +973,65 @@ EOF
 }
 
 # ======================================================================= ISSUE_REPO ===
+
+# ======================================================================= direct mode ===
+# MODE=direct lands the verified commit on the base branch. ORIGIN is a local bare repo, so every
+# push in these tests stays on disk.
+
+@test "direct: a verified commit is pushed to the base branch, no PR, no issue-N branch, the issue is commented, relabelled and closed" {
+  happy_env
+  set_conf MODE direct
+  run_runner
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$ORIGIN" show next:stub-work-4.txt)" = "work for issue 4" ]
+  run git -C "$ORIGIN" rev-parse --verify -q refs/heads/issue-4
+  [ "$status" -ne 0 ]
+  refute has_gh "gh pr create"
+  sha="$(git -C "$ORIGIN" rev-parse --short next)"
+  has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label ready-for-human"
+  contains "$(cat "$STUB_COMMENTS")" "landed commit $sha on next"
+  has_gh "gh issue close 4 --repo owner/name"
+  [ "$(rr_field 1 outcome)" = "ok" ]
+}
+
+@test "direct: a base that moved during the run is rebased onto, verified again, then pushed" {
+  happy_env
+  set_conf MODE direct
+  wrapper_claude "git clone -q '$ORIGIN' '$T/other' && echo other > '$T/other/other.txt' && git -C '$T/other' add -A && git -C '$T/other' commit -q -m other && git -C '$T/other' push -q origin next"
+  run_runner
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$ORIGIN" show next:other.txt)" = "other" ]
+  [ "$(git -C "$ORIGIN" show next:stub-work-4.txt)" = "work for issue 4" ]
+  # the worker's commit now sits on top of the other one
+  contains "$(git -C "$ORIGIN" log -2 --format=%s next)" "stub work #4"
+}
+
+@test "direct: a rebase conflict blocks the issue, pushes nothing, and keeps the work on local issue-N" {
+  happy_env
+  set_conf MODE direct
+  wrapper_claude "git clone -q '$ORIGIN' '$T/other' && echo conflicting > '$T/other/stub-work-4.txt' && git -C '$T/other' add -A && git -C '$T/other' commit -q -m other && git -C '$T/other' push -q origin next"
+  run_runner
+  [ "$status" -eq 0 ]
+  # the base still carries only the other commit's version of the file
+  [ "$(git -C "$ORIGIN" show next:stub-work-4.txt)" = "conflicting" ]
+  has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label blocked"
+  contains "$(cat "$STUB_COMMENTS")" "conflicted"
+  [ "$(git -C "$REPO" show issue-4:stub-work-4.txt)" = "work for issue 4" ]
+  refute has_gh "gh issue close"
+}
+
+@test "direct: a rejected push blocks the issue and keeps the work on local issue-N" {
+  happy_env
+  set_conf MODE direct
+  printf '#!/bin/sh\necho "protected branch" >&2\nexit 1\n' > "$ORIGIN/hooks/pre-receive"
+  chmod +x "$ORIGIN/hooks/pre-receive"
+  run_runner
+  [ "$status" -eq 0 ]
+  has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label blocked"
+  contains "$(cat "$STUB_COMMENTS")" "rejected"
+  [ "$(git -C "$REPO" show issue-4:stub-work-4.txt)" = "work for issue 4" ]
+  refute has_gh "gh issue close"
+}
 
 @test "issue repo: issue calls target ISSUE_REPO, push and PR calls target GH_REPO, PR text carries only a reference" {
   happy_env

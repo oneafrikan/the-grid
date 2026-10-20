@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# run-issue.sh — work ONE labelled GitHub issue headlessly, then hand a verified PR to a human.
+# run-issue.sh — work ONE labelled GitHub issue headlessly, then hand a verified PR to a human
+# (MODE=pr) or land the verified commit straight on the base branch (MODE=direct).
 #
 # Usage:  bash loop/run-issue.sh [issue-number]
 #   no number : pick the lowest-numbered open issue carrying ISSUE_LABEL (default ready-for-agent)
@@ -8,7 +9,8 @@
 # What one invocation does (details: openspec/changes/issue-loop-v2, design.md + specs/loop-runner):
 #   preflight -> lock -> daily cap -> select -> gates (severity, existing PR/branch, trust)
 #   -> role routing -> worktree -> headless `claude -p` worker -> git-state check
-#   -> the RUNNER runs VERIFY_CMD -> push issue-N -> open the PR -> swap labels -> run record.
+#   -> the RUNNER runs VERIFY_CMD -> pr: push issue-N, open the PR | direct: rebase onto the base,
+#   re-verify if the base moved, push to the base -> swap labels -> run record.
 #
 # Rules this script lives by:
 #   - Same user, same machine: it uses the operator's own `gh` and `claude` logins. It never
@@ -16,7 +18,8 @@
 #   - The worker only COMMITS. This script verifies, pushes, opens the PR and swaps labels.
 #     "Never commit a red build" is true because the runner runs the gate, not because the
 #     prompt asks nicely (R10.qa.F6). The worker's own `done` never substitutes for it.
-#   - It never merges and never classifies issues: gh-triage classifies, a human merges.
+#   - It never merges and never classifies issues: gh-triage classifies, a human merges. MODE=direct
+#     is the one exception to "a human merges": it pushes the verified commit to BASE_BRANCH itself.
 #   - The guard hook reaches the worker only through the per-run --settings file written here;
 #     this script never reads or writes <repo>/.claude/settings.json.
 #   - Exit 0 for any issue-level outcome (PR opened, refused by a gate, blocked, needs-human),
@@ -132,7 +135,10 @@ if [ "$#" -eq 1 ]; then
   ARG_ISSUE="$1"
 fi
 
-[ "$MODE" = "pr" ] || die_pre "headless runs are pr-only; use direct mode from an interactive /loop (MODE=$MODE in loop/loop.conf)"
+case "$MODE" in
+  pr|direct) ;;
+  *) die_pre "MODE must be 'pr' or 'direct' (got '$MODE') in loop/loop.conf" ;;
+esac
 [ -n "$VERIFY_CMD" ] || die_pre "VERIFY_CMD is empty in loop/loop.conf: the runner refuses to push anything it has not verified; set it (e.g. VERIFY_CMD='pytest')"
 case "$WORKER_PERMISSIONS" in
   allowlist|bypass) ;;
@@ -355,6 +361,7 @@ post_comment() {
 # swap labels (ISSUE_LABEL out, exactly one of ready-for-human|needs-human|blocked in), comment,
 # record, exit 0. The label swap is what keeps a refused issue from starving the queue (R10.qa.F3):
 # if it fails the run is an infrastructure failure and the label stays for a retry.
+CLOSE_ISSUE=0   # set to 1 by the direct-mode landing: conclude also closes the issue
 conclude() {
   local add="$1" outcome="$2" text="$3" note="$4"
   if ! gh_t issue edit "$N" --repo "$ISSUE_REPO" --remove-label "$ISSUE_LABEL" --add-label "$add" >/dev/null 2>"$TMP/edit.err"; then
@@ -362,6 +369,9 @@ conclude() {
   fi
   rm -f "$BACKOFF"   # gh and the issue answered: the infrastructure is fine again
   post_comment "$text"
+  if [ "$CLOSE_ISSUE" = 1 ]; then
+    gh_t issue close "$N" --repo "$ISSUE_REPO" >/dev/null 2>&1 || warn "could not close $ISSUE_REPO#$N"
+  fi
   record_run "$outcome" "$note"
   log "#$N -> $add ($outcome): $(cut_bytes 160 "$note")"
   exit 0
@@ -718,16 +728,45 @@ fi
 # --------------------------------------------------------------------------
 # step 12 — verify: the RUNNER runs the gate. Only exit 0 allows a push.
 # --------------------------------------------------------------------------
-run_child "$TMP/verify.out" "$TMP/verify.err" "$WT" "$TIMEOUT_BIN" -k 10 "$VERIFY_TIMEOUT" bash -c "$VERIFY_CMD"
-if [ "$CHILD_RC" -ne 0 ]; then
-  cat "$TMP/verify.out" "$TMP/verify.err" > "$TMP/verify.all" 2>/dev/null || true
-  vtail="$(tail_cut "$TMP/verify.all" 40 3000)"
-  if [ "$CHILD_RC" -eq 124 ] || [ "$CHILD_RC" -eq 137 ]; then
-    blocked "verify timed out after ${VERIFY_TIMEOUT}s. Last output:
+run_verify() {
+  run_child "$TMP/verify.out" "$TMP/verify.err" "$WT" "$TIMEOUT_BIN" -k 10 "$VERIFY_TIMEOUT" bash -c "$VERIFY_CMD"
+  if [ "$CHILD_RC" -ne 0 ]; then
+    cat "$TMP/verify.out" "$TMP/verify.err" > "$TMP/verify.all" 2>/dev/null || true
+    vtail="$(tail_cut "$TMP/verify.all" 40 3000)"
+    if [ "$CHILD_RC" -eq 124 ] || [ "$CHILD_RC" -eq 137 ]; then
+      blocked "verify timed out after ${VERIFY_TIMEOUT}s. Last output:
+$vtail"
+    fi
+    blocked "the verify command failed (exit $CHILD_RC), so nothing was pushed. Last output:
 $vtail"
   fi
-  blocked "the verify command failed (exit $CHILD_RC), so nothing was pushed. Last output:
-$vtail"
+}
+run_verify
+
+# --------------------------------------------------------------------------
+# step 12b — MODE=direct: land the verified commit on the base branch (no PR)
+# --------------------------------------------------------------------------
+if [ "$MODE" = "direct" ]; then
+  # A refusal from here on keeps the local branch issue-N, so the work is never lost.
+  if ! git_t -C "$WT" fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" >/dev/null 2>"$TMP/e.err"; then
+    infra_fail "git fetch origin $BASE_BRANCH failed: $(cut_bytes 200 "$(cat "$TMP/e.err")")"
+  fi
+  # If the base moved while the worker ran, put the work on top of it. The rebased tree is not the
+  # one that was verified, so verify again before anything is pushed.
+  if ! git -C "$WT" merge-base --is-ancestor "origin/$BASE_BRANCH" HEAD; then
+    if ! git -C "$WT" rebase "origin/$BASE_BRANCH" >/dev/null 2>"$TMP/rebase.err"; then
+      git -C "$WT" rebase --abort >/dev/null 2>&1 || true
+      blocked "the rebase onto origin/$BASE_BRANCH conflicted, so nothing was pushed; the work is on the local branch issue-$N. $(cut_bytes 300 "$(cat "$TMP/rebase.err")")"
+    fi
+    run_verify
+  fi
+  # Explicit refspec, never forced: a base that moved again since the fetch is a rejection, not a clobber.
+  if ! git_t -C "$WT" push origin "HEAD:refs/heads/$BASE_BRANCH" >/dev/null 2>"$TMP/push.err"; then
+    blocked "push to $BASE_BRANCH rejected, so nothing landed; the work is on the local branch issue-$N: $(cut_bytes 300 "$(cat "$TMP/push.err")")"
+  fi
+  SHA="$(git -C "$WT" rev-parse --short HEAD)"
+  CLOSE_ISSUE=1
+  conclude ready-for-human ok "issue-loop landed commit $SHA on $BASE_BRANCH ($GH_REPO). Its verify command passed in the runner. The issue is closed; review the commit when convenient." "landed $SHA on $BASE_BRANCH"
 fi
 
 # --------------------------------------------------------------------------
