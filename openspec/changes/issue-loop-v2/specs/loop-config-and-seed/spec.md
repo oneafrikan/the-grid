@@ -40,7 +40,7 @@ There SHALL be no `MAX_TURNS`, `REVIEW_MODEL`, `LABEL_BUDGETS`, `LOOP_TRUSTED_AC
 
 #### Scenario: Issues in a different repo
 - **WHEN** `ISSUE_REPO=owner/tracker` differs from `GH_REPO=owner/code`
-- **THEN** every `gh issue` and issue `gh api` call targets `owner/tracker`, every push and `gh pr` call targets `owner/code`, and the PR title and body carry only `refs <tracker>#N`, never the issue title or body
+- **THEN** every `gh issue` and issue `gh api` call targets `owner/tracker`, every push and `gh pr` call targets `owner/code`, and the PR body carries only `refs <tracker>#N` and the PR title is the fixed `issue-loop: work for <tracker>#N` (as built: with issues in the same repo the title stays the worker's commit subject), never the issue title or body, and the worker prompt asks for commit messages without issue text or a trailing `#N`
 
 #### Scenario: ISSUE_REPO unset
 - **WHEN** `ISSUE_REPO` is not set

@@ -14,7 +14,7 @@ BEFORE YOU EDIT
 
 WHAT YOU MAY DO
 - Read, edit and write files in the working directory; run the project's checks and tests; use git to add, commit, diff, log and show.
-- Commit your work on branch issue-{{ISSUE_NUMBER}} with a short message that ends with "#{{ISSUE_NUMBER}}".
+- {{COMMIT_RULE}}
 
 WHAT YOU MUST NOT DO
 - Do not push, do not open a pull request, do not edit labels, do not comment on or close the issue, do not merge anything. The runner does all of that after it has run the verify command itself.

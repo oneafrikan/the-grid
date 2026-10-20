@@ -95,7 +95,7 @@ Outcomes:
 | verify failed, no commit, wrong branch, dirty tree, timeout, spend cap, worker `blocked`, refused agent, setup or worktree failure | `blocked`, with the reason in a comment | error |
 | infrastructure failure (claude, gh, git, network) | unchanged | error, exit 1 |
 
-With issues in a different repo (`ISSUE_REPO`), every issue call targets the tracker and every push and PR call targets the code repo. The PR title is the worker's commit subject and its body is only `refs <tracker>#<N>`: the issue title and body never appear in the PR.
+With issues in a different repo (`ISSUE_REPO`), every issue call targets the tracker and every push and PR call targets the code repo. The PR body is only `refs <tracker>#<N>` and the PR title is a fixed `issue-loop: work for <tracker>#<N>` (with issues in the same repo the title is the worker's commit subject): the issue title and body never reach the PR text. The worker prompt also tells it not to quote the issue in commit messages and not to end them with `#<N>` in this mode (that number would cross-link an unrelated item on the code repo); the prompt is a request, and the commit messages themselves are pushed to the code repo as the worker wrote them.
 
 State lives in `<git-common-dir>/issue-loop/`: `lock/` (with `pid`, `issue`, `started`, `worker`) and `runs.log`.
 
@@ -124,6 +124,8 @@ Label an issue `agent:<name>` (for example `agent:grid-backend-dev`) and the wor
 ### Known gaps
 
 - The guard is a mistake-catcher, not a boundary. On the built-in parser `bash -c '...'` and `eval` are not inspected (the shared parser unwraps them once); shell aliases and scripts that call git internally are not inspected on either path.
+- The built-in splitter (used when `${GRID_DIR:-$HOME/.the-grid}/hooks/lib/common.sh` is absent, as in a business repo with no the-grid checkout) only sees a command whose first word is `git` or `gh`. It lets through, checked by running it: a subshell `(git push origin main)`, a group `{ git push origin main; }`, a backgrounded `sleep 1 & git push origin main`, a wrapper such as `sudo`, `env`, `command`, `time` or `xargs` before `git push ...`, and a substitution `echo $(git push origin main)`. The shared parser blocks all of these.
+- On BOTH parsers a merge made through `gh api graphql` (a `mergePullRequest` mutation) is not recognised; only `gh pr merge` and `gh api` calls with `/merge` or a PUT, PATCH or DELETE method are.
 - A SIGKILL of the runner orphans the worker process; remove the stale lock by hand until stale-lock handling lands.
 - With `WORKER_PERMISSIONS=bypass` the worker can run any `gh` call the guard does not block.
 

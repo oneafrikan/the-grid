@@ -491,6 +491,11 @@ CLAUDEMD
     echo "    bash loop/run-issue.sh"
     echo ""
     echo "  (one issue per run; nothing is scheduled and no scheduler file was written)"
+    echo ""
+    echo "  Before that run: the worker is DENIED every Bash command not in WORKER_ALLOWED_TOOLS."
+    echo "  The default list cannot run most VERIFY_CMDs, nor commands your global Claude rules"
+    echo "  trigger (a git identity check, for example), and a worker that cannot run its checks ends"
+    echo "  'blocked'. Add the commands your tests and rules need to WORKER_ALLOWED_TOOLS in loop/loop.conf."
   else
     echo "  Start the interactive loop (in Claude Code inside $TARGET_DIR):"
     echo ""
