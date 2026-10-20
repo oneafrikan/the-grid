@@ -1,7 +1,6 @@
 ---
 name: fx-product-manager
-description: Fixture product-manager. Fixture role product-manager. Use this subagent
-  for product-manager work.
+description: Fixture product-manager. Fixture role product-manager. Use this subagent for product-manager work.
 model: sonnet
 ---
 

@@ -1,7 +1,6 @@
 ---
 name: grid-data-analyst
-description: Data Analyst. Queries, dashboards, analysis and reporting, with assumptions
-  and caveats stated. Use to turn a question into a defensible answer.
+description: Data Analyst. Queries, dashboards, analysis and reporting, with assumptions and caveats stated. Use to turn a question into a defensible answer.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---

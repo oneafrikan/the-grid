@@ -1,7 +1,6 @@
 ---
 name: grid-copywriter
-description: Copywriter. Long-form and product copy, written to a brief for voice,
-  clarity and structure. Use for long-form or product copy.
+description: Copywriter. Long-form and product copy, written to a brief for voice, clarity and structure. Use for long-form or product copy.
 tools: Read, Grep, Glob, Write, Edit
 model: sonnet
 ---

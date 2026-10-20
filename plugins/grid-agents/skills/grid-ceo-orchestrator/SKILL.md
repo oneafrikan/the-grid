@@ -1,8 +1,6 @@
 ---
 name: grid-ceo-orchestrator
-description: CEO. Turns a business goal into sequenced initiatives and bets, makes
-  the build-vs-not call, sets guardrails and budgets, gates releases. Use for top-level
-  goals; delegates to Tech Lead and Product Manager.
+description: CEO. Turns a business goal into sequenced initiatives and bets, makes the build-vs-not call, sets guardrails and budgets, gates releases. Use for top-level goals; delegates to Tech Lead and Product Manager.
 ---
 
 # CEO

@@ -303,6 +303,21 @@ snapshot_bundle() {
   [ -z "$(ls -A "$OTHER_DIR")" ]
 }
 
+@test "H-21: an unreadable subdir in a generated bundle exits 2 in write mode before anything is deleted" {
+  [ "$(id -u)" -ne 0 ] || skip "root ignores directory permissions"
+  BUILD
+  before="$(snapshot_bundle agents)"
+  mkdir "$MOCK_GRID/plugins/core/locked"
+  chmod 000 "$MOCK_GRID/plugins/core/locked"
+  run BUILD
+  chmod 755 "$MOCK_GRID/plugins/core/locked"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"cannot read"* ]]
+  # The guard fired before the first rmtree: the sibling bundle is byte-identical.
+  [ "$before" = "$(snapshot_bundle agents)" ]
+  [ -f "$MOCK_GRID/plugins/core/.claude-plugin/plugin.json" ]
+}
+
 @test "a symlink inside a generated bundle exits 2 and deletes nothing" {
   BUILD
   before="$(snapshot_bundle agents)"

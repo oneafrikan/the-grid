@@ -1,7 +1,6 @@
 ---
 name: fx-growth-hacker
-description: Fixture growth-hacker orchestrator. Fixture role growth-hacker. Invoke
-  with /fx-growth-hacker.
+description: Fixture growth-hacker orchestrator. Fixture role growth-hacker. Invoke with /fx-growth-hacker.
 ---
 
 # Fixture growth-hacker

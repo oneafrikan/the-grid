@@ -1,8 +1,6 @@
 ---
 name: tron
-description: 'Tron. The grid''s front door: asks what the operator wants, checks which
-  skills and agents are wired, recommends one with a reason and next step. Never executes.
-  Use when unsure where to start.'
+description: 'Tron. The grid''s front door: asks what the operator wants, checks which skills and agents are wired, recommends one with a reason and next step. Never executes. Use when unsure where to start.'
 ---
 
 # Tron

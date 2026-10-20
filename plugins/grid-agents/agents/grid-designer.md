@@ -1,7 +1,6 @@
 ---
 name: grid-designer
-description: 'Designer. UI/UX design: user flows, layout, design systems, component
-  specs, accessibility-by-design. Use for design specs to hand to frontend-dev.'
+description: 'Designer. UI/UX design: user flows, layout, design systems, component specs, accessibility-by-design. Use for design specs to hand to frontend-dev.'
 tools: Read, Grep, Glob, Write, Edit
 model: sonnet
 ---

@@ -1,7 +1,6 @@
 ---
 name: fx-ceo-orchestrator
-description: Fixture ceo-orchestrator orchestrator. Fixture role ceo-orchestrator.
-  Invoke with /fx-ceo-orchestrator or when coordinating a multi-step dev-team feature.
+description: Fixture ceo-orchestrator orchestrator. Fixture role ceo-orchestrator. Invoke with /fx-ceo-orchestrator or when coordinating a multi-step dev-team feature.
 ---
 
 # Fixture ceo-orchestrator

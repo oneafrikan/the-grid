@@ -1,7 +1,6 @@
 ---
 name: grid-ad-copy
-description: 'Ad Copy. Short-form ad creative: hooks, headlines and channel-fit copy
-  variants written to be A/B tested. Use for ad copy variants from a brief.'
+description: 'Ad Copy. Short-form ad creative: hooks, headlines and channel-fit copy variants written to be A/B tested. Use for ad copy variants from a brief.'
 tools: Read, Grep, Glob, Write, Edit
 model: sonnet
 ---

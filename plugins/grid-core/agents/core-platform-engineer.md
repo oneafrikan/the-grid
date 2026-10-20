@@ -1,8 +1,6 @@
 ---
 name: core-platform-engineer
-description: Platform Engineer. Makes dotfiles, shell functions, bootstrap scripts
-  and package manifests work on macOS, Ubuntu and Arch from one repo. Use for cross-OS
-  dev-environment changes.
+description: Platform Engineer. Makes dotfiles, shell functions, bootstrap scripts and package manifests work on macOS, Ubuntu and Arch from one repo. Use for cross-OS dev-environment changes.
 model: sonnet
 ---
 

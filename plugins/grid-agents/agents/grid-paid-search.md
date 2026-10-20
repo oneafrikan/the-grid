@@ -1,8 +1,6 @@
 ---
 name: grid-paid-search
-description: 'Paid Search Specialist. Google and Microsoft Ads: account structure,
-  keywords, bidding, budget pacing, conversion tracking, search-term mining. Human
-  approves budget. Use for paid search.'
+description: 'Paid Search Specialist. Google and Microsoft Ads: account structure, keywords, bidding, budget pacing, conversion tracking, search-term mining. Human approves budget. Use for paid search.'
 tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Bash
 model: sonnet
 ---

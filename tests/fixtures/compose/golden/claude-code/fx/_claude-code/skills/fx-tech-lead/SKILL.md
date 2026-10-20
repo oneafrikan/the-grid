@@ -1,7 +1,6 @@
 ---
 name: fx-tech-lead
-description: Fixture tech-lead orchestrator. Fixture role tech-lead. Invoke with /fx-tech-lead
-  or when coordinating a multi-step dev-team feature.
+description: Fixture tech-lead orchestrator. Fixture role tech-lead. Invoke with /fx-tech-lead or when coordinating a multi-step dev-team feature.
 ---
 
 # Fixture tech-lead
