@@ -346,6 +346,10 @@ for ((i = 0; i < ${#GIT_SUB[@]}; i++)); do
     eff="$sub"
     case "$sub" in
       add|stage|commit|commit-tree|merge|cherry-pick|revert|am|rebase) ;;
+      # H-27: a subcommand built by a substitution or variable ($(echo commit), $SUB) reaches
+      # here as a word holding a $; it cannot be resolved statically, so fail closed and scan
+      # it as a commit (a false scan costs one diff read, a skipped one hides a secret).
+      *'$'*) eff=commit ;;
       *)
         is_plain_sub "$sub" && continue
         eff="$(alias_verb "$sub")"
