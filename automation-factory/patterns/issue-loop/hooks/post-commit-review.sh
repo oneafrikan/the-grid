@@ -8,12 +8,14 @@
 # else only the local log (~/.claude/hooks.log). The review runs detached so
 # Claude Code is never blocked.
 #
-# Settings come from loop/loop.conf (next to this hook's parent dir): GH_REPO,
-# PROJECT_CONTEXT, REVIEW_FOCUS. Env overrides: GRID_REVIEW_MODEL (default
+# Settings come from loop/loop.conf (next to this hook's parent dir): GH_REPO
+# (code and PRs), ISSUE_REPO (issues; defaults to GH_REPO), PROJECT_CONTEXT,
+# REVIEW_FOCUS. Env overrides: GRID_REVIEW_MODEL (default
 # sonnet), GRID_REVIEW_BUDGET_USD (default 1), GRID_CLAUDE (the claude binary).
 #
-# Stands down (exit 0, no review) when GRID_LOOP_HEADLESS=1 (the headless runner
-# does one Opus review per PR) or GRID_REVIEW_RUNNING=1 (recursion guard: the
+# Stands down (exit 0, no review) when GRID_LOOP_HEADLESS=1 (the runner sets it
+# for the headless worker: no review step runs inside a headless issue run) or
+# GRID_REVIEW_RUNNING=1 (recursion guard: the
 # reviewer's own session would otherwise trigger this hook again).
 #
 # Wired by ../setup.sh (PostToolUse -> Bash -> this script's abs path).
@@ -64,6 +66,8 @@ conf_get() {
   ( . "$HOOK_DIR/../loop.conf" >/dev/null 2>&1; eval "printf '%s' \"\${$1:-}\"" ) 2>/dev/null || true
 }
 GH_REPO="$(conf_get GH_REPO)"
+ISSUE_REPO="$(conf_get ISSUE_REPO)"
+[ -n "$ISSUE_REPO" ] || ISSUE_REPO="$GH_REPO"
 PROJECT_CONTEXT="$(conf_get PROJECT_CONTEXT)"
 REVIEW_FOCUS="$(conf_get REVIEW_FOCUS)"
 [ -n "$PROJECT_CONTEXT" ] || PROJECT_CONTEXT="a software project"
@@ -123,12 +127,14 @@ ${TRUNCATED}
 
 _Posted by post-commit-review hook (automation-factory · issue-loop)_"
 
-  repo_args=()
+  # PR comments go to the code repo, issue comments to the issue repo (they may differ).
+  repo_args=(); issue_repo_args=()
   [ -z "$GH_REPO" ] || repo_args=(--repo "$GH_REPO")
+  [ -z "$ISSUE_REPO" ] || issue_repo_args=(--repo "$ISSUE_REPO")
   if [ -n "$PR_NUM" ]; then
     gh pr comment "$PR_NUM" ${repo_args[@]+"${repo_args[@]}"} --body "$BODY" >/dev/null 2>&1 || true
   elif [ -n "$ISSUE_NUM" ]; then
-    gh issue comment "$ISSUE_NUM" ${repo_args[@]+"${repo_args[@]}"} --body "$BODY" >/dev/null 2>&1 || true
+    gh issue comment "$ISSUE_NUM" ${issue_repo_args[@]+"${issue_repo_args[@]}"} --body "$BODY" >/dev/null 2>&1 || true
   fi
 ) >/dev/null 2>&1 </dev/null &
 

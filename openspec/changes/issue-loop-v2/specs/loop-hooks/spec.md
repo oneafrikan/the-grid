@@ -53,8 +53,12 @@ On both parser paths, words SHALL have `"`, `'` and `\` removed as the shell wou
 The guard's header and the pattern README SHALL state that `bash -c '...'`, `eval`, shell aliases, and scripts that call git internally are not inspected, and that the guard is a mistake-catcher.
 
 #### Scenario: Gap pinned by a test
-- **WHEN** the command is `bash -c 'git push origin main'`
+- **WHEN** the command is `bash -c 'git push origin main'` and the built-in splitter is in use (no shared parser)
 - **THEN** the test asserts exit 0 and carries a comment naming it as a documented gap (so a future fix changes the test on purpose)
+
+#### Scenario: Shared parser is stricter on wrappers (found in B1; the original spec said both paths allow it)
+- **WHEN** the same command is run with the REAL shared parser
+- **THEN** exit 2: `grid_git_segments` re-scans a `bash -c` / `eval` string once. The wrapper gap therefore exists only on the built-in path; a script that calls git internally is a gap on both. The "identical on both paths" requirement covers the decision table, which does not include wrappers
 
 ### Requirement: Worktree helper
 `hooks/new-agent-worktree.sh <branch>` SHALL fetch `BASE_BRANCH` from `origin`, create `<root>/<branch>` with `git worktree add --no-track -B <branch> <path> origin/<base>` where `<root>` is `${LOOP_WORKTREE_ROOT:-<parent of the main checkout>/<repo-name>-loop}`, print only the path on stdout, and work when run from inside another worktree.
