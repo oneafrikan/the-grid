@@ -10,6 +10,10 @@ Remaining gap, which is large: most plugin and theme repositories have no `wp-co
 
 These files also load on vendored third-party code (`vendor/`, third-party plugins under `wp-content/`); the glob cannot exclude them.
 
+## Prefix list
+
+`structure.md` bullet 1 lists functions, classes, namespaces, variables, options and transients, and leaves out constants, which the best-practices page also names. The omission is deliberate (the pack's design prescribed this list); prefix constants the same way.
+
 ## Sources
 
 | Rule file | Source |

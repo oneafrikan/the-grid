@@ -1962,7 +1962,7 @@ printf '%s\n' \"\${HARNESS_BLOCK_BEGIN_HISTORY[@]}\"; echo --; printf '%s\n' \"\
   ! grep -q 'old-grid' "$R/AGENTS.md" || false
   grep -qx keep1 "$R/AGENTS.md"
   grep -qx keep2 "$R/AGENTS.md"
-  # The shipped rules.py does not know the old spelling: its block is user text (decision D20),
+  # The shipped rules.py does not know the old spelling: its block is user text,
   # so removal leaves it and a fresh emit appends a second block.
   cp "$R/orig" "$R/AGENTS.md"
   run emit --harness agents-md --packs "" --out "$R/AGENTS.md"

@@ -15,6 +15,6 @@ paths:
 - Use `esc_html__()`, `esc_attr__()` and their `_e` forms for translated output; each combines translation and escaping.
 
 ## Database
-- Pass every query that contains a variable through `$wpdb->prepare()` with unquoted `%s`, `%d`, `%f` or `%i` placeholders; `prepare()` escapes and quotes the values, which a variable interpolated into the query string skips.
+- Pass every query that contains a variable through `$wpdb->prepare()` with unquoted `%s`, `%d`, `%f` or `%i` (identifiers, added in WordPress 6.2.0) placeholders; `prepare()` escapes and quotes values, which interpolation skips.
 - Put a LIKE wildcard `%` in the substitution argument and escape the term with `$wpdb->esc_like()`; wildcards cannot be written directly in the query string.
 - Call a WordPress API function instead of querying the database directly when one exists; direct queries bypass its caching and forward compatibility.
