@@ -1,6 +1,6 @@
 # Pattern: issue-loop
 
-An agent that works a repo's labelled GitHub issues and hands a verified pull request to a human. It never merges and never classifies issues: [gh-triage](../../docs/gh-triage-to-issue-loop.md) classifies and writes the Agent Brief, the loop reads it. Same user, same machine: it uses the operator's own `gh` and `claude` logins, with no separate OS user, no GitHub App and no token handling.
+An agent that works a repo's labelled GitHub issues and hands a verified pull request to a human (or, with `MODE=direct`, lands the verified commit on the base branch itself). It never merges and never classifies issues: [gh-triage](../../docs/gh-triage-to-issue-loop.md) classifies and writes the Agent Brief, the loop reads it. Same user, same machine: it uses the operator's own `gh` and `claude` logins, with no separate OS user, no GitHub App and no token handling.
 
 It runs two ways from the same cut:
 
@@ -55,7 +55,7 @@ Tracked, plain assignments, **no secrets**. Every line is `KEY=${KEY:-'value'}`,
 | `ISSUE_REPO` | `GH_REPO` | `owner/name` the issues are read from. Set it to a private tracker when issue text must not be public |
 | `BASE_BRANCH` | `origin/HEAD`'s branch, else `main` | PR target and worktree base |
 | `ISSUE_LABEL` | `ready-for-agent` | opt-in label |
-| `MODE` | by profile | `pr` or `direct`. The runner refuses `direct` |
+| `MODE` | by profile | `pr`: push `issue-<N>` and open a draft PR. `direct`: no PR, the runner pushes the verified commit to `BASE_BRANCH` (see "Direct mode") |
 | `VERIFY_CMD` | empty | run by the **runner**; empty means the runner refuses to start |
 | `VERIFY_TIMEOUT` | `900` | seconds |
 | `SETUP_CMD` | empty | run in each worktree before the worker (for example `npm ci`) |
@@ -76,17 +76,17 @@ Worktrees live in `${LOOP_WORKTREE_ROOT:-<parent of repo>/<repo-name>-loop}/issu
 
 ## The runner
 
-`bash loop/run-issue.sh [issue-number]` handles exactly one issue. **The first run is started by hand.** Exit codes: **0** for any issue-level outcome (PR opened, refused by a gate, blocked, needs-human) and for "nothing to do", "busy" and "daily cap reached"; **1** for an infrastructure failure (the issue keeps its label); **2** for a preflight or usage problem (nothing touched, one stderr line names the fix).
+`bash loop/run-issue.sh [issue-number]` handles exactly one issue. **The first run is started by hand.** Exit codes: **0** for any issue-level outcome (PR opened or commit landed, refused by a gate, blocked, needs-human) and for "nothing to do", "busy", "backing off" and "daily cap reached"; **1** for an infrastructure failure (the issue keeps its label, and the next tick backs off); **2** for a preflight or usage problem (nothing touched, one stderr line names the fix).
 
 Order of events:
 
-1. Preflight: `MODE=pr`, `VERIFY_CMD` set, `git gh jq claude timeout` present, both logins good, `origin/<base>` exists, the guard script present and executable.
-2. Lock (`<git-common-dir>/issue-loop/lock`), then the daily cap, then pick the lowest-numbered open issue carrying the label.
+1. Preflight: `MODE` is `pr` or `direct`, `VERIFY_CMD` set, `git gh jq claude timeout` present, the guard script present and executable. A tick inside the backoff window exits 0 here.
+2. Lock (`<git-common-dir>/issue-loop/lock`; a stale one is taken over), then the daily cap (if `MAX_ISSUES_PER_DAY` is above 0), then both logins and `origin` (a failure here is infrastructure, exit 1), then pick the lowest-numbered open issue carrying the label.
 3. Gates before any model call: `severity:critical|high` goes to `ready-for-human`; an existing PR or remote `issue-<N>` branch goes to `ready-for-human`; with `TRUST_GATE=on` a stranger's issue goes to `needs-human`.
 4. Role routing from an `agent:<name>` label.
 5. A worktree off `origin/<base>`, `SETUP_CMD`, then the worker: `claude -p` with `--model`, `--max-budget-usd`, `--output-format json`, `--allowedTools`, a per-run `--settings` file holding only the guard, `--session-id` and `-n issue-<N>`, under `timeout -k 30 ISSUE_TIMEOUT`.
 6. Git-state check (on `issue-<N>`, clean, at least one commit ahead), then the **runner runs `VERIFY_CMD` itself**. The worker's own `done` never substitutes for it.
-7. Push `HEAD:refs/heads/issue-<N>` (never the base), `gh pr create`, swap labels, comment the PR URL, one `run-record.sh` line. The issue stays open.
+7. `MODE=pr`: push `HEAD:refs/heads/issue-<N>` (never the base), `gh pr create`, swap labels, comment the PR URL, one `run-record.sh` line. The issue stays open.
    The PR is opened as a draft: CI does not run until it is marked ready for review, and the operator marks it ready (`gh pr ready <n>`) when it is time to merge.
 
 Outcomes:
@@ -96,12 +96,25 @@ Outcomes:
 | PR opened | `ready-for-agent` out, `ready-for-human` in | ok |
 | worker says `needs-human <reason>`, or a gate refuses a stranger | `needs-human` | skipped |
 | severity label, or an existing PR or branch | `ready-for-human` | skipped |
-| verify failed, no commit, wrong branch, dirty tree, timeout, spend cap, worker `blocked`, refused agent, setup or worktree failure | `blocked`, with the reason in a comment | error |
-| infrastructure failure (claude, gh, git, network) | unchanged | error, exit 1 |
+| verify failed, no commit, wrong branch, dirty tree, timeout (uncommitted work is saved as a WIP commit on local `issue-<N>`), spend cap, worker `blocked`, refused agent, setup or worktree failure, direct-mode rebase conflict or rejected push | `blocked`, with the reason in a comment | error |
+| commit landed (`MODE=direct`) | `ready-for-agent` out, `ready-for-human` in, issue closed | ok |
+| infrastructure failure: claude or gh logged out, gh or origin unreachable, `gh pr list` failing, a worker cut off by a usage or rate limit | unchanged | error, exit 1, backoff |
 
 With issues in a different repo (`ISSUE_REPO`), every issue call targets the tracker and every push and PR call targets the code repo. The PR body is only `refs <tracker>#<N>` and the PR title is a fixed `issue-loop: work for <tracker>#<N>` (with issues in the same repo the title is the worker's commit subject): the issue title and body never reach the PR text. The worker prompt also tells it not to quote the issue in commit messages and not to end them with `#<N>` in this mode (that number would cross-link an unrelated item on the code repo); the prompt is a request, and the commit messages themselves are pushed to the code repo as the worker wrote them.
 
-State lives in `<git-common-dir>/issue-loop/`: `lock/` (with `pid`, `issue`, `started`, `worker`) and `runs.log`.
+State lives in `<git-common-dir>/issue-loop/`: `lock/` (with `pid`, `issue`, `started`, `worker`), `runs.log` and `backoff`.
+
+### Direct mode
+
+`MODE=direct` is for a repo where the operator wants no PRs. After the runner's own `VERIFY_CMD` passes it fetches the base, rebases `issue-<N>` onto `origin/<BASE_BRANCH>` if the base moved (and runs `VERIFY_CMD` again, because the rebased tree is not the one that was verified), then pushes `HEAD:refs/heads/<BASE_BRANCH>` without force. It comments the short sha on the issue, swaps `ready-for-agent` for `ready-for-human` and closes the issue. A rebase conflict or a rejected push (branch protection, a base that moved again) labels the issue `blocked`, comments, pushes nothing and keeps the work on the local branch `issue-<N>`. The worker still cannot push; only the runner does, and the guard still blocks the worker from pushing to the base. With issues in another repo the commit message carries `refs <tracker>#<N>` as in `pr` mode, and the comment is on the tracker.
+
+There is no review step: **branch protection and the `VERIFY_CMD` gate are the only checks**, so use direct mode only where the base branch can take unreviewed commits. A `gh` outage between the push and the label swap leaves the issue labelled `ready-for-agent` with its commit already landed, and the next tick will work it again.
+
+### Failures that are not the issue's fault
+
+A logged-out `claude` or `gh`, an unreachable `gh` or `origin`, a failing `gh pr list`, and a worker whose output shows a usage or rate limit are infrastructure: the runner exits 1, the issue keeps `ready-for-agent`, and `backoff` records `until=<epoch> fails=<n>`. Ticks inside the window exit 0 quietly. The window is 15 minutes after the first failure and doubles with each consecutive one, up to 6 hours. Any issue-level outcome or an empty queue clears it, and `run-issue.sh <N>` ignores it. Verify failures, worker `blocked`, timeouts and the like still mark the issue `blocked` or `needs-human`.
+
+A lock whose recorded pid is gone, or now belongs to something that is not a `run-issue.sh`, is taken over with a log line (a crash, SIGKILL or reboot). A live runner keeps the lock and the new tick exits 0 "busy".
 
 ## Unattended: one cron line per repo
 
@@ -116,7 +129,7 @@ Prints one crontab line for that repo (poll every N minutes, 1-59) and the comma
 - Nothing is installed for you: `instantiate.sh` never runs `crontab`. The activation command it prints is idempotent (pasting it twice leaves one copy).
 - Check the environment before trusting it: run the printed line's command under `env -i HOME=$HOME PATH=/usr/bin:/bin sh -c '...'` (everything after the five time fields) and read the log. It should show the runner's own messages, not "command not found".
 
-Not built yet: **backoff** on rate limits and repeated infrastructure failures, a **poison-issue rule** (three infra failures on one issue block it) and **stale-lock reclaim**. If a run was killed by SIGKILL, remove the lock directory by hand after checking the pid is gone.
+Not built yet: a **poison-issue rule** (three infra failures on one issue block it). A stale lock from a crash or SIGKILL is taken over automatically; backoff is described under "Failures that are not the issue's fault".
 
 ## Fast verify
 
@@ -147,7 +160,7 @@ Label an issue `agent:<name>` (for example `agent:grid-backend-dev`) and the wor
 - The guard is a mistake-catcher, not a boundary. On the built-in parser `bash -c '...'` and `eval` are not inspected (the shared parser unwraps them once); shell aliases and scripts that call git internally are not inspected on either path.
 - The built-in splitter (used when `${GRID_DIR:-$HOME/.the-grid}/hooks/lib/common.sh` is absent, as in a business repo with no the-grid checkout) only sees a command whose first word is `git` or `gh`. It lets through, checked by running it: a subshell `(git push origin main)`, a group `{ git push origin main; }`, a backgrounded `sleep 1 & git push origin main`, a wrapper such as `sudo`, `env`, `command`, `time` or `xargs` before `git push ...`, and a substitution `echo $(git push origin main)`. The shared parser blocks all of these.
 - On BOTH parsers a merge made through `gh api graphql` (a `mergePullRequest` mutation) is not recognised; only `gh pr merge` and `gh api` calls with `/merge` or a PUT, PATCH or DELETE method are.
-- A SIGKILL of the runner orphans the worker process; remove the stale lock by hand until stale-lock handling lands.
+- A SIGKILL of the runner orphans the worker process. The next run takes over the stale lock but does not stop the orphan.
 - With `WORKER_PERMISSIONS=bypass` the worker can run any `gh` call the guard does not block.
 
 ## What the worker can and cannot do

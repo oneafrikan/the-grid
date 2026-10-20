@@ -7,7 +7,7 @@ GH_REPO=${GH_REPO:-{{GH_REPO}}}                  # owner/name: code, branches, p
 ISSUE_REPO=${ISSUE_REPO:-{{ISSUE_REPO}}}         # owner/name the issues are read from (default: GH_REPO); a private tracker keeps issue text out of a public repo
 BASE_BRANCH=${BASE_BRANCH:-{{BASE_BRANCH}}}      # PR target and worktree base
 ISSUE_LABEL=${ISSUE_LABEL:-{{ISSUE_LABEL}}}      # opt-in label the loop works on
-MODE=${MODE:-{{MODE}}}                           # pr | direct (direct = interactive /loop only; the runner refuses it)
+MODE=${MODE:-{{MODE}}}                           # pr | direct (direct = no PR: the runner pushes the verified commit to BASE_BRANCH)
 VERIFY_CMD=${VERIFY_CMD:-{{VERIFY_CMD}}}         # run by the RUNNER before any push; empty = the runner refuses to start
 VERIFY_TIMEOUT=${VERIFY_TIMEOUT:-{{VERIFY_TIMEOUT}}}   # seconds
 SETUP_CMD=${SETUP_CMD:-{{SETUP_CMD}}}            # run in the worktree before the worker (e.g. npm ci); empty = none

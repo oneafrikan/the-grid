@@ -10,7 +10,7 @@ Edit `loop/loop.conf.seed` (it seeds the real config), then cut the loop in:
 
 1. `VERIFY_CMD`: the check that must pass before anything is pushed (the runner runs it itself, not the model). No value, no loop.
 2. `BASE_BRANCH`: the branch PRs target. Blank is detected from `origin/HEAD`, else `main`.
-3. `MODE`: `pr` (the default and the only mode the headless runner accepts).
+3. `MODE`: `pr` (the default: the runner opens a draft PR) or `direct` (no PR: the runner pushes the verified commit to the base branch, so protect that branch).
 4. `ISSUE_LABEL`: the label that opts an issue in (default `ready-for-agent`).
 5. The three caps: `MAX_BUDGET_USD` (spend per issue), `ISSUE_TIMEOUT` (seconds per issue), `MAX_ISSUES_PER_DAY`.
 6. `SETUP_CMD`: whatever a fresh worktree needs before work starts (dependencies, a database). Project specific; blank if nothing.
