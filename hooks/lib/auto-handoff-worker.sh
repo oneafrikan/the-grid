@@ -153,6 +153,9 @@ disp() {
 }
 # join_csv <items...>: comma-joined, for log tokens.
 join_csv() { local out="" i; for i in "$@"; do out="${out:+$out,}$i"; done; printf '%s' "$out"; }
+# safe_csv <items...>: join_csv for file names that go into the log. A name can look like a
+# credential (the child chose it), so it gets the same masking as other log text.
+safe_csv() { join_csv "$@" | secret_mask_stream | tr -d '\n'; }
 # trim <string>: strip surrounding whitespace.
 trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
 
@@ -201,8 +204,21 @@ take_lock() {
   local d="$1" mins=$(( (TIMEOUT + 300 + 59) / 60 ))
   if ! mkdir "$d" 2>/dev/null; then
     [ -n "$(find "$d" -maxdepth 0 -mmin "+$mins" 2>/dev/null)" ] || return 1
+    # Takeover is itself a mkdir race: with a bare rmdir+mkdir, a second worker that saw the
+    # lock as stale could remove the FIRST worker's fresh lock and both would run (a paid
+    # duplicate). Whoever wins "$d.takeover" is the only one allowed to replace the stale
+    # lock, and it re-checks staleness once it holds the mutex. A mutex left by a killed
+    # worker is cleared when it is itself stale; that attempt backs off and the next wins.
+    if ! mkdir "$d.takeover" 2>/dev/null; then
+      [ -z "$(find "$d.takeover" -maxdepth 0 -mmin "+$mins" 2>/dev/null)" ] || rmdir "$d.takeover" 2>/dev/null
+      return 1
+    fi
+    if [ -z "$(find "$d" -maxdepth 0 -mmin "+$mins" 2>/dev/null)" ]; then
+      rmdir "$d.takeover" 2>/dev/null; return 1
+    fi
     rmdir "$d" 2>/dev/null
-    mkdir "$d" 2>/dev/null || return 1
+    mkdir "$d" 2>/dev/null || { rmdir "$d.takeover" 2>/dev/null; return 1; }
+    rmdir "$d.takeover" 2>/dev/null
   fi
   LOCKS+=("$d")
   return 0
@@ -886,12 +902,12 @@ while IFS= read -r p; do [ -n "$p" ] && NEWGIT+=("$(disp "$p")"); done \
   < <(git_entries | comm -13 "$SNAP_DIR/git.entries.before" -)
 if [ "${#NEWGIT[@]}" -gt 0 ]; then
   scan_new_and_quarantine
-  finish_error unexpected-git-dir "paths=$(join_csv "${NEWGIT[@]}")${QNOTE:+ $QNOTE}"
+  finish_error unexpected-git-dir "paths=$(safe_csv "${NEWGIT[@]}")${QNOTE:+ $QNOTE}"
 fi
 if [ "${#CHANGED[@]}" -gt 0 ]; then
   DISP=(); for p in "${CHANGED[@]}"; do DISP+=("$(disp "$p")"); done
   scan_new_and_quarantine
-  finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")${QNOTE:+ $QNOTE}"
+  finish_error unexpected-file "paths=$(safe_csv "${DISP[@]}")${QNOTE:+ $QNOTE}"
 fi
 
 # 7b. what changed under the roots DURING the child run: entries in the after-snapshot that
@@ -918,7 +934,7 @@ done < <({ comm -13 "$SNAP_DIR/fs.before" "$SNAP_DIR/fs.after"
 if [ "${#SYMS[@]}" -gt 0 ]; then
   DISP=(); for p in "${SYMS[@]}"; do DISP+=("$(disp "$p")"); done
   scan_new_and_quarantine
-  finish_error unexpected-file "paths=$(join_csv "${DISP[@]}")${QNOTE:+ $QNOTE}"
+  finish_error unexpected-file "paths=$(safe_csv "${DISP[@]}")${QNOTE:+ $QNOTE}"
 fi
 
 # 7b'. a path that was in the before-snapshot and is gone from the after-snapshot: the child
@@ -966,7 +982,7 @@ done
 if [ "${#UNEXP[@]}" -gt 0 ]; then
   # Detect only: nothing is moved or deleted, every unexpected path is named.
   scan_new_and_quarantine
-  finish_error unexpected-file "paths=$(join_csv "${UNEXP[@]}")${QNOTE:+ $QNOTE}"
+  finish_error unexpected-file "paths=$(safe_csv "${UNEXP[@]}")${QNOTE:+ $QNOTE}"
 fi
 PAIR=("$HF"); [ -n "$CTX" ] && PAIR+=("$CTX")
 
@@ -996,7 +1012,7 @@ R="$(dirname "$HF")"
 RG="$("${WGIT[@]}" -C "$R" rev-parse --absolute-git-dir 2>/dev/null)"
 if [ -n "$RG" ]; then
   RG="$(rp "$RG" 2>/dev/null)" || RG=""
-  have_gitdir "$RG" || { scan_new_and_quarantine; finish_error unexpected-git-dir "paths=$(disp "$RG")${QNOTE:+ $QNOTE}"; }
+  have_gitdir "$RG" || { scan_new_and_quarantine; finish_error unexpected-git-dir "paths=$(safe_csv "$(disp "$RG")")${QNOTE:+ $QNOTE}"; }
 fi
 T="$("${WGIT[@]}" -C "$R" rev-parse --show-toplevel 2>/dev/null)"
 if [ -z "$T" ]; then

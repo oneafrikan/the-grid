@@ -382,7 +382,11 @@ proven live (operator check B1), so the rules are not the only barrier:
    line is scanned as it is and again with those blanks replaced, so neither reading hides
    a finding).
    A templated value such as `token=${A_LONG_VARIABLE_NAME}` is therefore quarantined too.
-   A long hex digest in a handoff is therefore quarantined too. The same
+   A bare sha256 or sha512 hex digest (64 or 128 hex characters) is not a hit; any other
+   run of 64 or more base64 characters is, and so are key names such as `tokenizer = ...`,
+   `max_tokens = <long number>`, `token_url: ...`, `secret_name: ...` and
+   `password_file: ...` (a name suffix cannot be exempted without giving the model the same
+   escape; the quarantine is reviewed, not lost). The same
    scan runs first on the timeout, child-failure and `unexpected-file` paths: a NEW file
    with a hit moves to the quarantine directory (the reason stays `timeout` and so on,
    with `secret=` and `quarantine=` added); a pre-existing file the child changed is only
@@ -404,6 +408,13 @@ transcript is never in front of the model. Child output and git's error text are
 the same way before they are written to the log (`child| [masked: <pattern>]`). Each
 message in the digest is cut to the size cap before it is measured, so one huge message
 cannot exhaust memory.
+
+Digest redaction is line by line, so these shapes are NOT redacted (the handoff the model
+writes is still scanned afterwards, and a hit there is quarantined): a token split over two
+lines or two messages, a base64 value shorter than 64 characters with no key name, prose
+such as "the password is X", and the first 200 characters of a tool input cut mid-token (a
+token prefix too short to match). `{"password":"..."}` is redacted. File names in the
+`paths=` log field are masked like other log text.
 
 **Fallback directory.**
 `${GRID_HANDOFF_FALLBACK_DIR:-${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}/handoffs}/<basename of the session directory>/`.

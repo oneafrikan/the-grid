@@ -980,6 +980,35 @@ lock_dir() { printf '%s\n' "$GRID_HOOK_STATE_DIR/handoff/$SID.lock"; }
   [ ! -d "$(lock_dir)" ]                    # released by the run that took it
 }
 
+# H-06 (hardening, refs private issue #79): two workers that both see a lock as stale must not
+# both take it. take_lock is cut out of the worker and run in two racing subshells per round;
+# the "fake clock" is the lock's mtime, set far in the past before each round.
+@test "stale-lock takeover has exactly one winner when two takers race" {
+  local d="$BATS_TEST_TMPDIR/race.lock" r
+  eval "TIMEOUT=900; LOCKS=(); $(sed -n '/^take_lock() {/,/^}/p' "$WORKER")"
+  for r in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    rm -rf "$d" "$d.takeover" "$BATS_TEST_TMPDIR/won."*
+    mkdir "$d"; touch -t 202001010000 "$d"
+    (take_lock "$d" && : > "$BATS_TEST_TMPDIR/won.a") &
+    (take_lock "$d" && : > "$BATS_TEST_TMPDIR/won.b") &
+    wait
+    [ "$(ls "$BATS_TEST_TMPDIR"/won.* 2>/dev/null | wc -l)" -le 1 ]   # never two winners
+    [ ! -e "$d.takeover" ]                                              # mutex always released
+  done
+}
+
+@test "a file name that looks like a credential is masked in the paths= log field" {
+  local tok; tok="$(printf '%s%s' 'ghp_' 'abcdefghijklmnopqrstuvwxyz0123456789')"
+  # safe_csv is cut out of the worker with the helpers it calls; SECRET_STRICT as the worker sets it
+  . "$REPO_ROOT/hooks/lib/secret-patterns.sh"
+  SECRET_STRICT=1
+  eval "$(sed -n '/^join_csv()/p;/^safe_csv()/p' "$WORKER")"
+  run safe_csv "ok.md" "$tok.txt"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "[masked:"* ]]
+  [[ "$output" != *"$tok"* ]]
+}
+
 @test "the session lock is released on every exit path" {
   mk_tx 6
   export STUB_CLAUDE_EXIT=3

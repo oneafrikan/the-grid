@@ -114,8 +114,8 @@ secret_prefilter_re() {
 # _SECRET_EXEMPT, including the allow pragma, and (b) also tries the few extra shapes
 # below. They are worker-only on purpose: as a commit guard on human diffs they would be
 # too noisy (any long hash or `password=...` in code). No entropy scoring: fixed patterns,
-# nothing to tune. Known cost: a long base64-looking run (a 64-hex digest, for example) in
-# a handoff is quarantined; the operator reviews the quarantine directory.
+# nothing to tune. Known cost: a long base64-looking run in a handoff is quarantined (a bare
+# sha256/sha512 hex digest is the one exemption); the operator reviews the quarantine directory.
 _STRICT_Q="'\""   # a single and a double quote
 STRICT_NAMES=(base64-run bearer-value url-password password-assigned)
 STRICT_RES=(
@@ -127,7 +127,7 @@ STRICT_RES=(
   # handoff on a templated URL.
   '://[^/@:[:space:]]*:[^/@[:space:]]{6,}@'
   # case-insensitive; the leading boundary keeps "bypass_cache: enabled" out
-  "(^|[^A-Za-z0-9])(pass|pwd|passw(or)?d)[A-Za-z0-9_]*[[:space:]]*[:=][[:space:]]*[${_STRICT_Q}]?[^${_STRICT_Q}[:space:]]{6,}"
+  "(^|[^A-Za-z0-9])(pass|pwd|passw(or)?d)[A-Za-z0-9_]*[${_STRICT_Q}]?[[:space:]]*[:=][[:space:]]*[${_STRICT_Q}]?[^${_STRICT_Q}[:space:]]{6,}"
 )
 STRICT_BOUND=(0 0 0 1)
 
@@ -394,6 +394,12 @@ _secret_match() {
     for ((i = 0; i < ${#STRICT_NAMES[@]}; i++)); do
       re="${STRICT_RES[$i]}"
       if [[ "$line" =~ $re ]]; then
+        # A bare sha256 / sha512 (all hex, exactly 64 or 128 characters) is a checksum a
+        # handoff legitimately quotes, and quarantining it loses the handoff. A hex value
+        # with a key name in front of it is still caught by the assigned-secret row above.
+        if [ "${STRICT_NAMES[$i]}" = base64-run ] && [[ "${BASH_REMATCH[0]}" =~ ^([0-9a-fA-F]{64}|[0-9a-fA-F]{128})$ ]]; then
+          continue
+        fi
         hit="${STRICT_NAMES[$i]}"
         text="${BASH_REMATCH[0]}"
         if [ "${STRICT_BOUND[$i]}" = 1 ]; then text="${text#"${BASH_REMATCH[1]}"}"; fi
