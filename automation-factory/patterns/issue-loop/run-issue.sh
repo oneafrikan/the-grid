@@ -100,6 +100,7 @@ REPO_ROOT="$(cd "$LOOP_DIR/.." && pwd -P)"
 : "${WORKER_MODEL:=sonnet}"
 : "${MAX_BUDGET_USD:=5}"
 : "${ISSUE_TIMEOUT:=1800}"
+: "${WORKER_EXIT_GRACE:=30}"
 : "${WORKER_PERMISSIONS:=allowlist}"
 : "${WORKER_ALLOWED_TOOLS:=Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*)}"
 # Optional (empty = not passed): a --permission-mode for the allowlist run. Which value, if any,
@@ -141,6 +142,7 @@ esac
 case "$MAX_ISSUES_PER_DAY" in ''|*[!0-9]*) die_pre "MAX_ISSUES_PER_DAY must be a number (got '$MAX_ISSUES_PER_DAY')" ;; esac
 case "$VERIFY_TIMEOUT" in ''|*[!0-9]*) die_pre "VERIFY_TIMEOUT must be a number of seconds (got '$VERIFY_TIMEOUT')" ;; esac
 case "$ISSUE_TIMEOUT" in ''|*[!0-9]*) die_pre "ISSUE_TIMEOUT must be a number of seconds (got '$ISSUE_TIMEOUT')" ;; esac
+case "$WORKER_EXIT_GRACE" in ''|*[!0-9]*) die_pre "WORKER_EXIT_GRACE must be a number of seconds (got '$WORKER_EXIT_GRACE')" ;; esac
 
 for _tool in git gh jq awk; do
   command -v "$_tool" >/dev/null 2>&1 || die_pre "'$_tool' not found on PATH; install it"
@@ -260,7 +262,44 @@ git_t() { "$TIMEOUT_BIN" 300 git "$@"; }
 # run_child <out> <err> <dir> cmd... — run cmd in <dir> as a BACKGROUND job and wait, so a trapped
 # signal interrupts the wait at once. stdin is /dev/null. Sets CHILD_RC. The subshell execs cmd, so
 # CHILD_PID is the command itself. The pid goes to $CHILD_PID_FILE when set (lock/worker).
+# With GRACE_WATCH=1 a grace_watch runs beside the child (the worker only).
 CHILD_RC=0
+GRACE_WATCH=0
+
+# outcome_valid — the outcome file's first line starts with a recognised outcome word.
+outcome_valid() {
+  local line=""
+  if [ -f "$OUTCOME_FILE" ]; then line="$(sed -n '1p' "$OUTCOME_FILE" 2>/dev/null || true)"; fi
+  case "$line" in done|needs-human*|blocked*) return 0 ;; esac
+  return 1
+}
+
+# grace_watch <pid> — a worker can write its outcome and then never exit (a background watcher keeps
+# the session alive). Once the outcome is valid, give the worker WORKER_EXIT_GRACE seconds to exit by
+# itself, then stop its whole process group (timeout leads one) and leave $TMP/worker-reaped so the
+# classifier knows the missing result and the signal exit are ours, not a failure. It ends by itself
+# when the worker is gone.
+grace_watch() {
+  local pid="$1" waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if outcome_valid; then
+      while [ "$waited" -lt "$WORKER_EXIT_GRACE" ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 1; waited=$((waited + 1))
+      done
+      kill -0 "$pid" 2>/dev/null || return 0
+      : > "$TMP/worker-reaped"
+      log "#$N: the worker wrote its outcome but did not exit within ${WORKER_EXIT_GRACE}s; stopping it"
+      kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || rm -f "$TMP/worker-reaped"
+      waited=0
+      while [ "$waited" -lt 10 ] && kill -0 "$pid" 2>/dev/null; do sleep 1; waited=$((waited + 1)); done
+      if kill -0 "$pid" 2>/dev/null; then kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true; fi
+      return 0
+    fi
+    sleep 1
+  done
+  return 0
+}
+
 run_child() {
   local out="$1" err="$2" dir="$3"
   shift 3
@@ -268,6 +307,7 @@ run_child() {
   CHILD_PID=$!
   if [ -n "${CHILD_PID_FILE:-}" ]; then printf '%s\n' "$CHILD_PID" > "$CHILD_PID_FILE"; fi
   CHILD_RC=0
+  if [ "$GRACE_WATCH" = 1 ]; then grace_watch "$CHILD_PID" > /dev/null 2>&1 < /dev/null & fi
   wait "$CHILD_PID" || CHILD_RC=$?
   CHILD_PID=""
 }
@@ -505,11 +545,16 @@ fi
 
 log "#$N: starting the worker${AGENT:+ (agent $AGENT)} in $WT"
 CHILD_PID_FILE="$LOCK/worker"
+GRACE_WATCH=1
 run_child "$TMP/worker.json" "$TMP/worker.err" "$WT" \
   env LOOP_OUTCOME_FILE="$OUTCOME_FILE" GRID_LOOP_HEADLESS=1 \
   "$TIMEOUT_BIN" -k 30 "$ISSUE_TIMEOUT" "$CLAUDE_BIN" "${args[@]}"
+GRACE_WATCH=0
 CHILD_PID_FILE=""
 WORKER_RC="$CHILD_RC"
+# Stopped by grace_watch after it wrote a valid outcome: carry on as if it had exited by itself.
+WORKER_REAPED=0
+if [ -e "$TMP/worker-reaped" ]; then WORKER_REAPED=1; WORKER_RC=0; fi
 
 # --------------------------------------------------------------------------
 # step 10 — classify the worker
@@ -541,7 +586,7 @@ if [ "$RESULT_OK" = 1 ] && [ "$(jq -r '.is_error // false' "$TMP/result.json")" 
     *) infra_fail "the worker returned an error result ($subtype): $(cut_bytes 200 "$(jq -r '.result // ""' "$TMP/result.json")")" ;;
   esac
 fi
-if [ "$WORKER_RC" -ne 0 ] || [ "$RESULT_OK" != 1 ]; then
+if [ "$WORKER_REAPED" != 1 ] && { [ "$WORKER_RC" -ne 0 ] || [ "$RESULT_OK" != 1 ]; }; then
   infra_fail "the worker failed (exit $WORKER_RC): $(cut_bytes 300 "$(cat "$TMP/worker.err")")"
 fi
 
