@@ -106,7 +106,7 @@ REPO_ROOT="$(cd "$LOOP_DIR/.." && pwd -P)"
 # Optional (empty = not passed): a --permission-mode for the allowlist run. Which value, if any,
 # lets a normal task finish with no prompt is decided by the real-claude proof (tasks 8.5).
 : "${WORKER_PERMISSION_MODE:=}"
-: "${MAX_ISSUES_PER_DAY:=5}"
+: "${MAX_ISSUES_PER_DAY:=0}"   # 0 = unlimited
 : "${TRUST_GATE:=on}"
 : "${RUN_ROLE:=issue-loop}"
 
@@ -353,7 +353,8 @@ if [ -f "$RUNS_LOG" ]; then
   handled_today="$(grep -c "^$today " "$RUNS_LOG" 2>/dev/null || true)"
   [ -n "$handled_today" ] || handled_today=0
 fi
-if [ "$handled_today" -ge "$MAX_ISSUES_PER_DAY" ]; then
+# 0 means no cap (the default); a positive number stops new issues once that many were handled today.
+if [ "$MAX_ISSUES_PER_DAY" -gt 0 ] && [ "$handled_today" -ge "$MAX_ISSUES_PER_DAY" ]; then
   log "daily cap reached ($handled_today of $MAX_ISSUES_PER_DAY issues today); nothing to do"
   exit 0
 fi

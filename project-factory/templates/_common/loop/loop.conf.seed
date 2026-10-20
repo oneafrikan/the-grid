@@ -18,6 +18,6 @@ ISSUE_TIMEOUT='1800'       # wall-clock cap per issue (seconds)
 WORKER_EXIT_GRACE='30'      # seconds a worker may keep running after writing its outcome before the runner stops it
 WORKER_PERMISSIONS='allowlist'  # allowlist (default) or bypass (a fallback; read the pattern README first)
 WORKER_ALLOWED_TOOLS=''    # blank = the default allowlist (file tools + git add/commit/status/diff/log/show); add your test commands
-MAX_ISSUES_PER_DAY='5'     # daily cap on issues handled
+MAX_ISSUES_PER_DAY='0'     # daily cap on issues handled; 0 = unlimited
 TRUST_GATE='on'            # on = only issues and briefs from the owner, members and collaborators are read
 RUN_ROLE='issue-loop'      # run-record role when an issue has no agent:<name> label

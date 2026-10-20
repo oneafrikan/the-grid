@@ -214,7 +214,7 @@ tree_hash() {
   [ "$(loop_conf_value MAX_BUDGET_USD)" = "5" ]
   [ "$(loop_conf_value ISSUE_TIMEOUT)" = "1800" ]
   [ "$(loop_conf_value WORKER_PERMISSIONS)" = "allowlist" ]
-  [ "$(loop_conf_value MAX_ISSUES_PER_DAY)" = "5" ]
+  [ "$(loop_conf_value MAX_ISSUES_PER_DAY)" = "0" ]
   [ "$(loop_conf_value TRUST_GATE)" = "on" ]
   [ "$(loop_conf_value RUN_ROLE)" = "issue-loop" ]
   contains "$(loop_conf_value WORKER_ALLOWED_TOOLS)" "Bash(git commit:*)"

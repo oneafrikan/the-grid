@@ -426,6 +426,17 @@ add_agent() {
   [ "$(rr_lines)" -eq 0 ]
 }
 
+@test "caps: MAX_ISSUES_PER_DAY=0 means unlimited, however many were handled today" {
+  happy_env
+  set_conf MAX_ISSUES_PER_DAY 0
+  today="$(date '+%Y-%m-%d')"
+  mkdir -p "$STATE"
+  for i in 1 2 3 4 5 6 7; do echo "$today $i ok" >> "$STATE/runs.log"; done
+  run_runner
+  [ "$status" -eq 0 ]
+  has_gh "gh pr create"
+}
+
 @test "caps: yesterday's lines do not count against today's cap" {
   happy_env
   mkdir -p "$STATE"
