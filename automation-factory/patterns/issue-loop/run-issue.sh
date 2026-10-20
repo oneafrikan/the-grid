@@ -294,7 +294,15 @@ conclude() {
   exit 0
 }
 # blocked <reason> — the common issue-level failure.
-blocked() { conclude blocked error "issue-loop could not land this: $1" "blocked: $1"; }
+DENIALS=""
+blocked() {
+  local text="issue-loop could not land this: $1"
+  if [ -n "$DENIALS" ]; then
+    text="$text
+The worker was denied: $DENIALS. If those are commands the project needs, add them to WORKER_ALLOWED_TOOLS in loop/loop.conf."
+  fi
+  conclude blocked error "$text" "blocked: $1"
+}
 
 # --------------------------------------------------------------------------
 # step 4 — daily cap (counted from runs.log, local date)
@@ -453,9 +461,21 @@ if [ "$(wc -c < "$TMP/body.full" | tr -d ' ')" -gt 60000 ]; then
   printf '\n[... issue body cut at 60000 bytes ...]\n' >> "$TMP/body.txt"
 fi
 
-OUTCOME_FILE="$TMP/outcome"
+# The worker may write ONLY here: this directory (and nothing else of $TMP, which also holds the
+# per-run settings file with the guard) is what --add-dir exposes.
+OUTCOME_DIR="$TMP/outcome.d"
+mkdir -p "$OUTCOME_DIR"
+OUTCOME_FILE="$OUTCOME_DIR/outcome"
+# Commit-message rule. Same repo: the commit ends with "#N" (it links the issue, and the review hook
+# reads it). Issues in ANOTHER repo: "#N" would cross-link an unrelated item on the code repo and the
+# code repo may be public, so the worker must not carry issue text or a bare number into its commits.
+if [ "$ISSUE_REPO" = "$GH_REPO" ]; then
+  COMMIT_RULE="Commit your work on branch issue-$N with a short message that ends with \"#$N\"."
+else
+  COMMIT_RULE="Commit your work on branch issue-$N. The issue lives in another repo ($ISSUE_REPO) and this repo may be public: do NOT quote or paraphrase the issue title or body in commit messages, and do not end a commit message with \"#$N\" (that number belongs to the other repo). Use a short neutral subject; you may end the message with \"refs $ISSUE_REPO#$N\"."
+fi
 PROMPT="$(V_ISSUE_NUMBER="$N" V_ISSUE_TITLE="$TITLE" V_WORKING_DIR="$WT" V_VERIFY_CMD="$VERIFY_CMD" \
-          V_OUTCOME_FILE="$OUTCOME_FILE" F_ISSUE_BODY="$TMP/body.txt" F_AGENT_BRIEF="$TMP/brief.txt" \
+          V_COMMIT_RULE="$COMMIT_RULE" V_OUTCOME_FILE="$OUTCOME_FILE" F_ISSUE_BODY="$TMP/body.txt" F_AGENT_BRIEF="$TMP/brief.txt" \
           render_template "$LOOP_DIR/worker-prompt.template.md")"
 
 # Per-run settings holding ONLY the guard's PreToolUse entry (D4). The repo's own
@@ -475,7 +495,7 @@ args=(-p "$PROMPT")
 if [ -n "$AGENT" ]; then args+=(--agent "$AGENT"); fi
 args+=(--model "$WORKER_MODEL" --max-budget-usd "$MAX_BUDGET_USD" --output-format json)
 if [ -n "$SESSION_ID" ]; then args+=(--session-id "$SESSION_ID"); fi
-args+=(-n "issue-$N" --settings "$SETTINGS_FILE" --add-dir "$TMP")
+args+=(-n "issue-$N" --settings "$SETTINGS_FILE" --add-dir "$OUTCOME_DIR")
 if [ -n "$WORKER_PERMISSION_MODE" ]; then args+=(--permission-mode "$WORKER_PERMISSION_MODE"); fi
 if [ "$WORKER_PERMISSIONS" = "bypass" ]; then
   args+=(--dangerously-skip-permissions)
@@ -502,6 +522,13 @@ fi
 if [ "$RESULT_OK" = 1 ]; then
   _c="$(jq -r '.total_cost_usd // empty' "$TMP/result.json" 2>/dev/null || true)"
   case "$_c" in ''|*[!0-9.]*) COST="" ;; *) COST="$_c" ;; esac
+fi
+
+# Names of what the worker was denied (tool and command only, each cut short, never any output). It is
+# appended to every blocked comment: the usual cause is a command missing from WORKER_ALLOWED_TOOLS.
+if [ "$RESULT_OK" = 1 ]; then
+  DENIALS="$(jq -r '[ .permission_denials[]? | ((.tool_name // "tool") + (if (.tool_input.command // "") != "" then ": " + (.tool_input.command | tostring | .[0:80]) else "" end)) ] | .[0:6] | join("; ")' "$TMP/result.json" 2>/dev/null || true)"
+  DENIALS="$(cut_bytes 400 "$DENIALS")"
 fi
 
 if [ "$WORKER_RC" -eq 124 ] || [ "$WORKER_RC" -eq 137 ]; then
@@ -569,9 +596,14 @@ if ! git_t -C "$WT" push origin "HEAD:refs/heads/issue-$N" >/dev/null 2>"$TMP/pu
   blocked "push rejected: $(cut_bytes 300 "$(cat "$TMP/push.err")")"
 fi
 # The PR carries only a reference to the issue: never the issue title or body, because the code
-# repo may be public while the tracker is private. The title is the worker's own commit subject.
-pr_title="$(git -C "$WT" log -1 --format=%s)"
-[ -n "$pr_title" ] || pr_title="issue-loop: work for $ISSUE_REPO#$N"
+# repo may be public while the tracker is private. Same repo: the title is the worker's own commit
+# subject. Issues in another repo: a fixed title, because a commit subject is worker-written text and
+# can carry issue text (the prompt asks it not to; this is the enforcement).
+pr_title="issue-loop: work for $ISSUE_REPO#$N"
+if [ "$ISSUE_REPO" = "$GH_REPO" ]; then
+  subject="$(git -C "$WT" log -1 --format=%s)"
+  [ -z "$subject" ] || pr_title="$subject"
+fi
 printf 'refs %s#%s\n\nOpened by the issue-loop runner after its own run of the verify command passed. Needs human review and merge.\n' \
   "$ISSUE_REPO" "$N" > "$TMP/pr-body.txt"
 if ! gh_t pr create --repo "$GH_REPO" --base "$BASE_BRANCH" --head "issue-$N" \

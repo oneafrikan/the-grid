@@ -971,3 +971,109 @@ EOF
   [ "$(tr -d ' ' < "$T/verify.stdin")" = "0" ]
   contains "$(cat "$STUB_ENV_LOG")" "stdin_bytes=0"
 }
+
+# ======================================================================= review fixes (PR #291) ===
+
+# leaky_claude — a worker that commits, then rewrites the commit subject to carry issue text, as a
+# careless real worker might. Runs the stub first (it commits and writes the outcome), then amends.
+leaky_claude() {
+  cat > "$T/claude-leaky" <<EOF
+#!/bin/bash
+case "\${1:-}" in auth|--help|-h) exec "$REAL_STUB_CLAUDE" "\$@" ;; esac
+"$REAL_STUB_CLAUDE" "\$@"
+rc=\$?
+git commit -q --amend -m "PRIVATE-TITLE-XYZ (#4)"
+exit \$rc
+EOF
+  chmod +x "$T/claude-leaky"
+  export GRID_CLAUDE="$T/claude-leaky"
+}
+
+@test "cross-repo: a commit subject that carries issue text never reaches the PR title; the title is fixed" {
+  happy_env
+  leaky_claude
+  set_conf ISSUE_REPO owner/tracker
+  run_runner
+  [ "$status" -eq 0 ]
+  line="$(grep '^gh pr create' "$STUB_LOG")"
+  lacks "$line" "PRIVATE-TITLE-XYZ"
+  contains "$line" "--title issue-loop: work for owner/tracker#4"
+  body="$(cat "$STUB_DIR/pr-create.body")"
+  contains "$body" "refs owner/tracker#4"
+  lacks "$body" "PRIVATE-TITLE-XYZ"
+}
+
+@test "same repo: the PR title stays the worker's commit subject" {
+  happy_env
+  leaky_claude
+  run_runner
+  [ "$status" -eq 0 ]
+  contains "$(grep '^gh pr create' "$STUB_LOG")" "--title PRIVATE-TITLE-XYZ (#4)"
+}
+
+@test "cross-repo: the worker prompt forbids issue text and a trailing #N in commits; same repo keeps the #N rule" {
+  happy_env
+  set_conf ISSUE_REPO owner/tracker
+  run_runner
+  p="$(prompt_text)"
+  contains "$p" "do NOT quote or paraphrase the issue title or body"
+  contains "$p" 'do not end a commit message with "#4"'
+  contains "$p" "refs owner/tracker#4"
+  lacks "$p" 'ends with "#4"'
+  write_conf
+  git -C "$ORIGIN" branch -D issue-4 >/dev/null 2>&1 || true
+  run_runner
+  p="$(prompt_text)"
+  contains "$p" 'ends with "#4"'
+  lacks "$p" "do NOT quote or paraphrase"
+}
+
+@test "denials: a blocked comment names the tools and commands the worker was denied, nothing else" {
+  export STUB_OUTCOME="blocked could not check the git identity"
+  export STUB_CLAUDE_JSON='{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"result":"SECRET-OUTPUT-TEXT","permission_denials":[{"tool_name":"Bash","tool_input":{"command":"git config user.email"}},{"tool_name":"Bash","tool_input":{"command":"bash ~/scripts/identity.sh --check"}}]}'
+  run_runner
+  [ "$status" -eq 0 ]
+  c="$(cat "$STUB_COMMENTS")"
+  contains "$c" "denied"
+  contains "$c" "Bash: git config user.email"
+  contains "$c" "Bash: bash ~/scripts/identity.sh --check"
+  contains "$c" "WORKER_ALLOWED_TOOLS"
+  lacks "$c" "SECRET-OUTPUT-TEXT"
+}
+
+@test "denials: long commands are truncated and a clean run adds no denial note" {
+  long="$(head -c 400 /dev/zero | tr '\0' 'x')"
+  export STUB_OUTCOME="blocked nope"
+  export STUB_CLAUDE_JSON="{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$long\"}}]}"
+  run_runner
+  c="$(cat "$STUB_COMMENTS")"
+  contains "$c" "Bash: xxxx"
+  lacks "$c" "$long"
+  : > "$STUB_COMMENTS"
+  unset STUB_CLAUDE_JSON
+  git -C "$ORIGIN" branch -D issue-4 >/dev/null 2>&1 || true
+  run_runner
+  lacks "$(cat "$STUB_COMMENTS")" "denied"
+}
+
+@test "add-dir: the worker gets only the outcome directory; the settings file holding the guard is outside it" {
+  happy_env
+  run_runner
+  [ "$status" -eq 0 ]
+  ad="$(argv_get --add-dir)"
+  sf="$(argv_get --settings)"
+  [ -n "$ad" ]
+  [ -n "$sf" ]
+  case "$sf" in "$ad"/*) echo "settings file $sf is inside the added dir $ad"; false ;; esac
+  # the added dir holds the outcome file's path (the prompt names it) and nothing else of the run
+  contains "$(prompt_text)" "$ad/outcome"
+}
+
+@test "permissions: with no WORKER_PERMISSIONS key in loop.conf the runner defaults to the allowlist, never bypass" {
+  happy_env
+  sed -i.bak '/^WORKER_PERMISSIONS=/d' "$REPO/loop/loop.conf"
+  run_runner
+  [ "$status" -eq 0 ]
+  argv_has --allowedTools
+  refute argv_has --dangerously-skip-permissions
+}

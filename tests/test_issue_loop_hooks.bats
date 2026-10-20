@@ -700,7 +700,7 @@ SH
 @test "worker prompt: has the placeholders, the unattended statement and the outcome protocol" {
   f="$PAT_DIR/worker-prompt.template.md"
   local p
-  for p in ISSUE_NUMBER ISSUE_TITLE ISSUE_BODY AGENT_BRIEF WORKING_DIR VERIFY_CMD OUTCOME_FILE; do
+  for p in ISSUE_NUMBER ISSUE_TITLE ISSUE_BODY AGENT_BRIEF WORKING_DIR VERIFY_CMD OUTCOME_FILE COMMIT_RULE; do
     grep -q "{{$p}}" "$f" || { echo "missing placeholder $p"; return 1; }
   done
   grep -q 'UNATTENDED' "$f"
@@ -739,6 +739,29 @@ SH
   contains "$readme" "eval"
   contains "$readme" "aliases"
   contains "$readme" "SIGKILL"
+  # built-in splitter gaps and the graphql merge, as checked by running them
+  contains "$readme" "sleep 1 & git push origin main"
+  contains "$readme" "{ git push origin main; }"
+  contains "$readme" "xargs"
+  contains "$readme" "gh api graphql"
+}
+
+@test "built-in splitter gaps listed in the README are real, and the shared parser covers them (so the list stays honest)" {
+  local c
+  for c in '(git push origin main)' '{ git push origin main; }' 'sleep 1 & git push origin main' 'sudo git push origin main' 'echo $(git push origin main)'; do
+    use_parser empty
+    guard "$c"
+    [ "$status" -eq 0 ] || { echo "built-in now blocks (update the README gap): $c"; return 1; }
+    use_parser real
+    guard "$c"
+    [ "$status" -eq 2 ] || { echo "shared parser misses: $c"; return 1; }
+  done
+  # the graphql merge is a gap on both parsers
+  for p in empty real; do
+    use_parser "$p"
+    guard 'gh api graphql -f query=mutation{mergePullRequest(input:{pullRequestId:"x"}){clientMutationId}}'
+    [ "$status" -eq 0 ]
+  done
 }
 
 @test "README: states that the first run is by hand, the waker is installed by the operator, and what is not built yet" {

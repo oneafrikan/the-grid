@@ -397,3 +397,14 @@ EOF
   run bash "$INST" cli-cron "$REPO" --profile work
   [ "$status" -ne 0 ]
 }
+
+@test "first run: pr mode tells the operator to extend WORKER_ALLOWED_TOOLS; direct mode has no such hint" {
+  inst --profile work
+  [ "$status" -eq 0 ]
+  contains "$output" "WORKER_ALLOWED_TOOLS in loop/loop.conf"
+  contains "$output" "DENIED every Bash command"
+  rm -rf "$REPO/loop"
+  inst --profile personal
+  [ "$status" -eq 0 ]
+  lacks "$output" "DENIED every Bash command"
+}
