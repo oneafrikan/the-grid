@@ -173,7 +173,7 @@ e.g. `claude-review "check PR 12"`. The mode files are in `contexts/` (each unde
 ## Keeping it healthy
 
 ```bash
-bash scripts/check-grid.sh      # the full test suite (many minutes; ~15 on CI) + broken-symlink scan
+bash scripts/check-grid.sh      # the full test suite (many minutes; the CI `gate` job that includes it ran 18-30 min in recent Actions runs) + broken-symlink scan
 tests/lib/bats-core/bin/bats tests/   # the same test suite directly, without the symlink scan
 bash scripts/sources.sh --check # link-check every submodule upstream URL
 ```

@@ -284,7 +284,7 @@ bash scripts/check-grid.sh
 ```
 
 Runs the full bats suite (one-line PASS/FAIL — full output only on failure; it takes
-many minutes, roughly 15 on CI) and scans for broken grid-owned symlinks. Exits
+many minutes; the CI `gate` job that includes it ran 18 to 30 minutes in recent Actions runs) and scans for broken grid-owned symlinks. Exits
 non-zero if anything's wrong, so it works as a CI / pre-push gate. A `pre-commit`
 hook (in `.githooks/`, activated by `bootstrap.sh`) runs `scripts/gate.sh` before
 every commit; bypass with

@@ -340,7 +340,7 @@ cd ~/.the-grid
 tests/lib/bats-core/bin/bats tests/
 ```
 
-This is the full suite (many minutes; roughly 15 on CI), and every test should be
+This is the full suite (many minutes; the CI `gate` job that includes it ran 18 to 30 minutes in recent Actions runs), and every test should be
 green. If one is not, something is misconfigured.
 
 ---
