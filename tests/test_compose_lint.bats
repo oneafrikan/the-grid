@@ -440,7 +440,7 @@ cfg_with_project() {
 
 # ---- WP-051: tool names and description text ----------------------------------------------
 
-@test "lint-roles: a tool name outside the known eight is E_TOOL_UNKNOWN (case-sensitive)" {
+@test "lint-roles: a tool name outside the known nine is E_TOOL_UNKNOWN (case-sensitive)" {
   local bad
   for bad in Task Frobnicate read bash 'Read '; do
     make_role zz-t
@@ -452,7 +452,7 @@ cfg_with_project() {
     rm -rf "$PRIV/zz-t"
   done
   make_role zz-t
-  printf 'tools: [Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch]\n' >> "$PRIV/zz-t/role.yaml"
+  printf 'tools: [Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, Skill]\n' >> "$PRIV/zz-t/role.yaml"
   run "$PY" "$COMPOSE" --lint-roles
   [ "$status" -eq 0 ]
 }

@@ -1,8 +1,6 @@
 ---
 name: core-researcher
-description: Researcher. General-purpose investigation turned into source-grounded,
-  fact-checked synthesis with citations, confidence levels and gaps. Scopes first;
-  does not decide. Use for research on any subject.
+description: Researcher. General-purpose investigation turned into source-grounded, fact-checked synthesis with citations, confidence levels and gaps. Scopes first; does not decide. Use for research on any subject.
 tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Bash
 model: sonnet
 ---

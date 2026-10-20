@@ -213,7 +213,7 @@ python3 scripts/rules.py emit --harness <rules_harness> --packs <p1,p2,...> --ou
 - Decided: orchestrators ship as skills on every harness: no OpenCode `mode: primary`, no `GEMINI.md` folding, no Codex `[agents]` config. Reason: operator answer, and one orchestrator shape resolves #32 and #33.
 - Decided: `model` is never written into non-Claude agents. Reason: model ids are provider-specific and rot, while inheriting the session model is always valid.
 - Decided: tool allowlists map to Codex `sandbox_mode`, OpenCode `permission` and Gemini `tools`, and an unmapped tool is a compose error. Reason: read-only roles (qa, security) must stay read-only everywhere.
-- Decided: a Codex `read-only` sandbox also blocks writes through Bash. Reason: stricter than Claude's Bash-can-write, and it errs safe.
+- Decided: a Codex `read-only` sandbox also blocks writes through Bash. Reason: stricter than Claude's Bash-can-write, which is why the two roles that write through the shell (`finance-sentinel`, `data-analyst`) get no read-only sandbox on Codex.
 - Decided: agent files are symlinked into each harness's agents dir, as for Claude. Reason: same ownership and teardown model. Symlink support for agent files is unverified, so the smoke test covers it, and copy-with-marker is a follow-up.
 - Decided: non-Claude subagents use the full-profile body, the same as Claude subagents. Reason: one body, one golden family, and no second rendering to drift.
 - Decided: rules are delivered only into an instruction file that already exists, via `rules.py emit`. Reason: creating `~/.config/opencode/AGENTS.md` or `~/.pi/agent/AGENTS.md` would silently disable their fallback to `~/.claude/CLAUDE.md`. Requiring the file is also a second explicit opt-in for always-loaded tokens.

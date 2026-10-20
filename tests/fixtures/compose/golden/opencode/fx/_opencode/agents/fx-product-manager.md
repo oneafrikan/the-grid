@@ -1,6 +1,5 @@
 ---
-description: Fixture product-manager. Fixture role product-manager. Use this subagent
-  for product-manager work.
+description: Fixture product-manager. Fixture role product-manager. Use this subagent for product-manager work.
 mode: subagent
 ---
 

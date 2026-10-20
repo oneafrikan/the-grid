@@ -1,7 +1,6 @@
 ---
 name: grid-frontend-dev
-description: 'Frontend Dev. Client side: UI templates, components, client state, forms,
-  accessibility, built to a PRD and the backend API contract. Use for frontend implementation.'
+description: 'Frontend Dev. Client side: UI templates, components, client state, forms, accessibility, built to a PRD and the backend API contract. Use for frontend implementation.'
 model: sonnet
 ---
 

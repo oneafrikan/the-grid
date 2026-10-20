@@ -1,8 +1,6 @@
 ---
 name: core-gh-triage
-description: 'GitHub Triage Agent. Scheduled issue triage: classifies severity, applies
-  labels, writes agent briefs and human triage notes. Runs on cron. Use for GitHub
-  issue triage.'
+description: 'GitHub Triage Agent. Scheduled issue triage: classifies severity, applies labels, writes agent briefs and human triage notes. Runs on cron. Use for GitHub issue triage.'
 tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 ---

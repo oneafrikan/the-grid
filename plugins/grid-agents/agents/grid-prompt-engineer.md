@@ -1,8 +1,6 @@
 ---
 name: grid-prompt-engineer
-description: Prompt Engineer. System prompts, rubrics, few-shot examples, output schemas
-  and their versioning; defines what good output is. Use for writing or versioning
-  LLM prompts.
+description: Prompt Engineer. System prompts, rubrics, few-shot examples, output schemas and their versioning; defines what good output is. Use for writing or versioning LLM prompts.
 model: sonnet
 ---
 

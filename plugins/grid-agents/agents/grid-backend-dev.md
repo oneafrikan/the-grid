@@ -1,7 +1,6 @@
 ---
 name: grid-backend-dev
-description: Backend Dev. Server-side logic, APIs, database, auth and business rules,
-  implemented to a PRD. Use for backend implementation.
+description: Backend Dev. Server-side logic, APIs, database, auth and business rules, implemented to a PRD. Use for backend implementation.
 model: sonnet
 ---
 
