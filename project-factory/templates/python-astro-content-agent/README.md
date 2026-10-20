@@ -40,9 +40,9 @@ This template only scaffolds the tree. To make it a working agent:
    `repos/spillwave-astro` in the-grid) covers Astro Content Collections,
    Markdown/MDX, and deployment; pull its guidance into `src/prompts/` or
    reference it directly while implementing.
-3. Once this repo has a GitHub issue backlog, `automation-factory`'s
-   `issue-loop` pattern can grind through it unattended — see
-   `automation-factory/patterns/issue-loop/README.md`.
+3. Optional: once this repo has a GitHub issue backlog, you can opt in to
+   `automation-factory`'s `issue-loop` pattern (off by default; see `loop/ENABLE.md`
+   and `automation-factory/patterns/issue-loop/README.md`). It opens PRs and never merges.
 
 ## Where the actual Astro site lives
 

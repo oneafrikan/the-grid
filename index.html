@@ -971,17 +971,18 @@ bash scripts/wire.sh
         </p>
 
         <p>
-          First pattern: <code>issue-loop</code> — an autonomous agent that works a repo's
-          GitHub issue backlog unattended, with an auto code-review posted to each issue.
-          Composes a <code>/loop</code> prompt with a post-commit review hook.
+          First pattern: <code>issue-loop</code> — an agent that works a repo's labelled
+          GitHub issues and hands a verified pull request to a human, one issue per run.
+          Composes a headless runner with a <code>/loop</code> prompt and a post-commit review hook.
         </p>
 
         <div class="ownership-note">
           The template is what the-grid owns; the instance lives in the project it serves.
-          <code>scripts/instantiate.sh &lt;pattern&gt; &lt;target-repo&gt; --profile &lt;personal|work|mac-mini&gt;</code> (retired: quarantined under <code>_retired/issue-loop/</code>, see its <code>RETIRED.md</code>)
-          did the machine-profiled cut: copy into <code>loop/</code> + placeholder-fill + settings
-          wiring, plus worktree/PR sandboxing on the <code>work</code> profile and a launchd
-          nightly run on <code>mac-mini</code>.
+          <code>scripts/instantiate.sh &lt;pattern&gt; &lt;target-repo&gt; --profile &lt;personal|work|mac-mini&gt;</code>
+          does the profiled cut: a verbatim copy into <code>loop/</code>, a <code>loop.conf</code>
+          rendered once, and on the <code>work</code> and <code>mac-mini</code> profiles the
+          headless runner (one issue per run; it runs your verify command itself and opens a PR,
+          never a merge) with a push guard and a worktree helper.
         </div>
       </section><!-- /#automation-factory-heading -->
 
@@ -1785,7 +1786,7 @@ bash scripts/wire.sh
             </tr>
             <tr>
               <td><code>automation-factory/</code></td>
-              <td>Reusable automation patterns (e.g. <code>issue-loop</code>), cut into a target repo's tracked <code>loop/</code> folder. The-grid's own loop instance is retired (<code>_retired/issue-loop/</code>).</td>
+              <td>Reusable automation patterns (e.g. <code>issue-loop</code>), cut into a target repo's tracked <code>loop/</code> folder. The loop opens PRs and never merges.</td>
             </tr>
             <tr>
               <td><code>project-factory/</code></td>

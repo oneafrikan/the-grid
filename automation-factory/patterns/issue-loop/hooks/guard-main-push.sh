@@ -2,9 +2,14 @@
 # guard-main-push — PreToolUse(Bash) hook for the issue-loop pattern.
 #
 # MISTAKE-CATCHER, NOT THE BOUNDARY. Branch protection (a ruleset requiring a
-# pull request on the base branch) and token scope are the boundary; a headless
-# worker holds no GitHub token at all. This hook only stops an agent from
-# *accidentally* doing the obvious wrong thing, and tells it what to do instead.
+# pull request on the base branch) and the fact that only a human merges are the
+# boundary. This hook only stops an agent from *accidentally* doing the obvious
+# wrong thing, and tells it what to do instead.
+#
+# Where it runs: the issue-loop runner passes it to the headless worker through a
+# per-run `--settings` file. It is NOT written into a repo's .claude/settings.json
+# unless the operator runs `loop/setup.sh --interactive` for an interactive loop
+# session (never in the-grid, whose own sessions must be able to `gh pr merge`).
 #
 # Exit 2 (with a reason on stderr) when a command segment is:
 #   - `git push` with any word that, after stripping a leading `+`, everything
@@ -17,19 +22,37 @@
 #   - `gh api` with a word containing /merge, or -X / --method (also -XPUT,
 #     --method=PUT) with PUT, PATCH or DELETE (case-insensitive)
 #
-# Known gaps (also in the README): `bash -c '...'`, `eval`, shell aliases and
-# scripts that call git internally are NOT inspected.
+# Quoting is normalised the way the shell does it: `"`, `'` and `\` are removed
+# from words, and `git` / `gh` are recognised by basename, so
+#   git push origin 'main'      /usr/bin/git push origin main      gh pr 'merge' 5
+# are all caught (R10.qa.F14).
 #
-# BASE_BRANCH comes from loop/loop.conf next to this hook's parent dir
-# (default: main). Segmenting uses grid_git_segments from
-# ${GRID_DIR:-$HOME/.the-grid}/hooks/lib/common.sh when that file exists (one
-# git segment per output line: "<subcommand> <words...>"), else the built-in
-# split below. `gh` segments always use the built-in split: the shared parser
-# only covers git.
+# KNOWN GAPS (also in the pattern README): `bash -c '...'`, `eval`, shell aliases
+# and scripts that call git internally are NOT inspected. `bash -c 'git push
+# origin main'` is allowed on purpose and pinned as such by the test suite.
+#
+# Parsers. Two paths feed ONE decision function (decide_push below):
+#   1. ${GRID_DIR:-$HOME/.the-grid}/hooks/lib/common.sh exists: use its shared
+#      tokenizer. grid_git_segments prints NOTHING; it returns through the globals
+#      GIT_SUB / GIT_START / GIT_LEN / GIT_FLAG, so it must be called directly in
+#      this shell, never inside $(...) or < <(...).
+#      R10.qa.F1 history: an earlier version called it inside `< <(...)`, so the
+#      guard saw no segments and ALLOWED EVERYTHING on every machine that had
+#      the-grid installed.
+#   2. Otherwise (a business repo with no the-grid checkout): the built-in
+#      splitter below fills the same four globals.
+# `gh` segments always use the built-in splitter: the shared parser covers git only.
+#
+# BASE_BRANCH comes from loop/loop.conf next to this hook's parent dir (default
+# main).
 #
 # Bash 3.2 compatible (macOS). Requires: jq.
 
 set -euo pipefail
+# The guard reads words that may contain * or ?; never let the shell expand them.
+set -f
+# Byte-wise string handling: the shared parser's size caps count bytes.
+LC_ALL=C; export LC_ALL
 
 INPUT="$(cat)"
 COMMAND="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // ""')"
@@ -65,7 +88,23 @@ current_branch() {
   git -C "$CWD" symbolic-ref --short -q HEAD 2>/dev/null || true
 }
 
+# unquote <word> — remove " ' and \ the way the shell would, leaving the content.
+unquote() {
+  local w="$1"
+  w="${w//\"/}"
+  w="${w//\'/}"
+  w="${w//\\/}"
+  printf '%s' "$w"
+}
+
+# base_of <word> — basename of a (quote-stripped) command word: /usr/bin/git -> git.
+base_of() {
+  printf '%s' "${1##*/}"
+}
+
 # --- split the command into segments, one per line ---
+# Used by the built-in git splitter and by the gh checks. A quoted separator
+# (a commit message containing "&&") splits too; that can only add false blocks.
 nl=$'\n'
 segs="$COMMAND"
 segs="${segs//&&/$nl}"
@@ -73,18 +112,17 @@ segs="${segs//||/$nl}"
 segs="${segs//;/$nl}"
 segs="${segs//|/$nl}"
 
-# git_segments — print "<subcommand> <words...>" for each git segment.
-git_segments() {
-  local common="${GRID_DIR:-$HOME/.the-grid}/hooks/lib/common.sh"
-  if [ -f "$common" ]; then
-    # shellcheck disable=SC1090
-    . "$common"
-    if command -v grid_git_segments >/dev/null 2>&1; then
-      grid_git_segments "$COMMAND"
-      return 0
-    fi
-  fi
-  local seg words w i n
+# The result globals, identical for both parsers:
+#   GIT_SUB[i]    subcommand of git segment i
+#   GIT_START[i]  offset of its first word in GIT_FLAG
+#   GIT_LEN[i]    number of words after the subcommand
+#   GIT_FLAG[]    those words, quotes and backslashes removed
+GIT_SUB=(); GIT_START=(); GIT_LEN=(); GIT_FLAG=()
+
+# builtin_git_segments — fill the GIT_* globals from $segs without the shared parser.
+builtin_git_segments() {
+  local seg words w i n sub nflag=0
+  GIT_SUB=(); GIT_START=(); GIT_LEN=(); GIT_FLAG=()
   while IFS= read -r seg; do
     [ -n "$seg" ] || continue
     read -r -a words <<< "$seg"
@@ -98,11 +136,12 @@ git_segments() {
       esac
     done
     [ "$i" -lt "$n" ] || continue
-    [ "${words[$i]}" = "git" ] || continue
+    w="$(unquote "${words[$i]}")"
+    [ "$(base_of "$w")" = "git" ] || continue
     i=$((i + 1))
     # skip git global options: -C <dir>, -c <k=v>, --opt[=v], other -x flags
     while [ "$i" -lt "$n" ]; do
-      w="${words[$i]}"
+      w="$(unquote "${words[$i]}")"
       case "$w" in
         -C|-c) i=$((i + 2)) ;;
         -*) i=$((i + 1)) ;;
@@ -110,18 +149,21 @@ git_segments() {
       esac
     done
     [ "$i" -lt "$n" ] || continue
-    printf '%s' "${words[$i]}"
+    sub="$(unquote "${words[$i]}")"
     i=$((i + 1))
+    GIT_SUB[${#GIT_SUB[@]}]="$sub"
+    GIT_START[${#GIT_START[@]}]="$nflag"
+    GIT_LEN[${#GIT_LEN[@]}]=$((n - i))
     while [ "$i" -lt "$n" ]; do
-      printf ' %s' "${words[$i]}"
+      GIT_FLAG[$nflag]="$(unquote "${words[$i]}")"
+      nflag=$((nflag + 1))
       i=$((i + 1))
     done
-    printf '\n'
   done <<< "$segs"
 }
 
-# check_push <words...> — the words after `git push`.
-check_push() {
+# decide_push <words...> — the words after `git push`. Exits 2 via block().
+decide_push() {
   local w refspecs=0 cur
   for w in "$@"; do
     case "$w" in
@@ -151,16 +193,45 @@ check_push() {
   fi
 }
 
-# --- git segments ---
-while IFS= read -r line; do
-  [ -n "$line" ] || continue
-  read -r -a gw <<< "$line"
-  if [ "${gw[0]}" = "push" ]; then
-    check_push ${gw[@]+"${gw[@]:1}"}
+# --- git segments: shared parser when present, built-in splitter otherwise ---
+COMMON="${GRID_DIR:-$HOME/.the-grid}/hooks/lib/common.sh"
+used_shared=0
+if [ -f "$COMMON" ]; then
+  # common.sh is written for a shell WITHOUT `set -u` (empty-array expansions
+  # misbehave under it on bash 3.2), so relax it for the sourced calls only.
+  set +u
+  # shellcheck disable=SC1090
+  . "$COMMON"
+  if command -v grid_git_segments >/dev/null 2>&1; then
+    # Called DIRECTLY (no subshell): the parser returns through GIT_* globals.
+    grid_check_cmd_cap issue-loop-guard "$COMMAND"
+    grid_git_segments "$COMMAND"
+    grid_check_balanced issue-loop-guard "$COMMAND"
+    used_shared=1
   fi
-done < <(git_segments)
+  set -u
+fi
+if [ "$used_shared" = 0 ]; then
+  builtin_git_segments
+fi
 
-# --- gh segments (always the built-in split) ---
+i=0
+while [ "$i" -lt "${#GIT_SUB[@]}" ]; do
+  if [ "${GIT_SUB[$i]}" = "push" ]; then
+    # collect this segment's words and hand them to the one decision function
+    pw=()
+    k="${GIT_START[$i]}"
+    end=$((k + GIT_LEN[$i]))
+    while [ "$k" -lt "$end" ]; do
+      pw[${#pw[@]}]="${GIT_FLAG[$k]}"
+      k=$((k + 1))
+    done
+    decide_push ${pw[@]+"${pw[@]}"}
+  fi
+  i=$((i + 1))
+done
+
+# --- gh segments (always the built-in split, same normalisation) ---
 while IFS= read -r seg; do
   [ -n "$seg" ] || continue
   read -r -a words <<< "$seg"
@@ -173,8 +244,13 @@ while IFS= read -r seg; do
     esac
   done
   [ "$i" -lt "$n" ] || continue
-  [ "${words[$i]}" = "gh" ] || continue
-  rest=("${words[@]:$((i + 1))}")
+  [ "$(base_of "$(unquote "${words[$i]}")")" = "gh" ] || continue
+  rest=()
+  k=$((i + 1))
+  while [ "$k" -lt "$n" ]; do
+    rest[${#rest[@]}]="$(unquote "${words[$k]}")"
+    k=$((k + 1))
+  done
   m=${#rest[@]}
   k=0
   while [ "$k" -lt "$m" ]; do

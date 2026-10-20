@@ -23,6 +23,7 @@ One tracked config file drives the loop in any repo, the tool that cuts the patt
 | `ISSUE_TIMEOUT` | `1800` | seconds, worker |
 | `WORKER_PERMISSIONS` | `allowlist` | `allowlist` or `bypass` (fallback; see proposal assumption 1) |
 | `WORKER_ALLOWED_TOOLS` | read/edit/write/glob/grep and `Bash(git status|diff|log|show|add|commit:*)` | passed as `--allowedTools`; the project appends its test commands |
+| `WORKER_PERMISSION_MODE` | empty | optional, added in B1: passed as `--permission-mode` when set. The proof (design.md, "As built") found the default allowlist alone completes a normal task, so the default stays empty |
 | `MAX_ISSUES_PER_DAY` | `5` | daily cap |
 | `TRUST_GATE` | `on` | `on` or `off` |
 | `RUN_ROLE` | `issue-loop` | run-record role when no `agent:` label |
@@ -39,7 +40,7 @@ There SHALL be no `MAX_TURNS`, `REVIEW_MODEL`, `LABEL_BUDGETS`, `LOOP_TRUSTED_AC
 
 #### Scenario: Issues in a different repo
 - **WHEN** `ISSUE_REPO=owner/tracker` differs from `GH_REPO=owner/code`
-- **THEN** every `gh issue` and issue `gh api` call targets `owner/tracker`, every push and `gh pr` call targets `owner/code`, and the PR title and body carry only `refs <tracker>#N`, never the issue title or body
+- **THEN** every `gh issue` and issue `gh api` call targets `owner/tracker`, every push and `gh pr` call targets `owner/code`, and the PR body carries only `refs <tracker>#N` and the PR title is the fixed `issue-loop: work for <tracker>#N` (as built: with issues in the same repo the title stays the worker's commit subject), never the issue title or body, and the worker prompt asks for commit messages without issue text or a trailing `#N`
 
 #### Scenario: ISSUE_REPO unset
 - **WHEN** `ISSUE_REPO` is not set
@@ -50,7 +51,7 @@ There SHALL be no `MAX_TURNS`, `REVIEW_MODEL`, `LABEL_BUDGETS`, `LOOP_TRUSTED_AC
 - **THEN** the worker argv has `--max-budget-usd 1`
 
 ### Requirement: instantiate.sh keeps main's shape and folds in next's good parts
-`scripts/instantiate.sh` SHALL be `main`'s version as base (already at `scripts/instantiate.sh` on `main`; `_retired/` is only read), with: options `--repo --project-context --verify-cmd --label --review-focus --base-branch --mode --setup-cmd --worker-model --agent-labels`; base-branch detection from `origin/HEAD`; render-once `loop.conf`; placeholder substitution through awk with values read from the environment (no `sed` delimiter or `&` injection); the shipped `guard-main-push.sh`, `new-agent-worktree.sh`, `post-commit-review.sh`, `run-issue.sh`, `setup.sh`, both prompt templates and `.gitignore` copied verbatim instead of heredocs (`wake.sh` and the cron line are added by B2, see `loop-waker`); label creation (create-if-absent, `--limit 200` on the listing) for `ISSUE_LABEL`, `ready-for-human`, `needs-human`, `blocked`, and `agent:<name>` for each `--agent-labels a,b` entry; and an existing `loop.conf` (or `loop.conf.seed`) read before rendering so flags it does not set are taken from it. It SHALL NOT write launchd or systemd units, SHALL NOT use `bash -l`, SHALL NOT pass `--dangerously-skip-permissions` anywhere (only `run-issue.sh` with `WORKER_PERMISSIONS=bypass`), SHALL NOT write `.claude/settings.json` hook entries, and SHALL never overwrite an existing `CLAUDE.md`.
+`scripts/instantiate.sh` SHALL be `main`'s version as base (already at `scripts/instantiate.sh` on `main`; `_retired/` is only read), with: options `--repo --issue-repo --project-context --verify-cmd --label --review-focus --base-branch --mode --setup-cmd --worker-model --agent-labels` (`--issue-repo` added in B1 for the `ISSUE_REPO` key); base-branch detection from `origin/HEAD`; render-once `loop.conf`; placeholder substitution through awk with values read from the environment (no `sed` delimiter or `&` injection); the shipped `guard-main-push.sh`, `new-agent-worktree.sh`, `post-commit-review.sh`, `run-issue.sh`, `setup.sh`, both prompt templates and `.gitignore` copied verbatim instead of heredocs (`wake.sh` and the cron line are added by B2, see `loop-waker`); label creation (create-if-absent, `--limit 200` on the listing) for `ISSUE_LABEL`, `ready-for-human`, `needs-human`, `blocked`, and `agent:<name>` for each `--agent-labels a,b` entry; and an existing `loop.conf` (or `loop.conf.seed`) read before rendering so flags it does not set are taken from it. It SHALL NOT write launchd or systemd units, SHALL NOT use `bash -l`, SHALL NOT pass `--dangerously-skip-permissions` anywhere (only `run-issue.sh` with `WORKER_PERMISSIONS=bypass`), SHALL NOT write `.claude/settings.json` hook entries, and SHALL never overwrite an existing `CLAUDE.md`.
 
 #### Scenario: Idempotent
 - **WHEN** it runs twice with the same arguments into a temp git repo (stub `gh`)

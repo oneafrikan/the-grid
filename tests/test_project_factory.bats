@@ -260,3 +260,76 @@ stub_python() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"--with-related"* ]] || false
 }
+
+# ---- the issue-loop seed (opt-in, off by default) ----
+
+@test "the loop seed lands, ENABLE.md lands, and the runner does not exist (the loop stays off)" {
+  run bash "$CUT" python-agents-base "$P"
+  [ "$status" -eq 0 ]
+  [ -f "$P/loop/loop.conf.seed" ]
+  [ -f "$P/loop/ENABLE.md" ]
+  [ ! -e "$P/loop/run-issue.sh" ]
+  [ ! -e "$P/loop/loop.conf" ]
+  [ ! -e "$P/prompts/autonomous-coding-loop.template.md" ]
+}
+
+@test "ENABLE.md is at most 40 lines and names VERIFY_CMD, the PR-only rule and the instantiate command" {
+  f="$REPO_ROOT/project-factory/templates/_common/loop/ENABLE.md"
+  [ "$(wc -l < "$f")" -le 40 ]
+  grep -q 'VERIFY_CMD' "$f"
+  grep -qi 'opt-in' "$f"
+  grep -q 'refuses to run' "$f"
+  grep -q 'never merges' "$f"
+  grep -q 'instantiate.sh issue-loop . --profile work' "$f"
+}
+
+@test "the seed sources cleanly and carries every loop.conf key, in step with the pattern's template" {
+  seed="$REPO_ROOT/project-factory/templates/_common/loop/loop.conf.seed"
+  tpl="$REPO_ROOT/automation-factory/patterns/issue-loop/loop.conf.template"
+  ( . "$seed" )
+  for k in $(grep -oE '^[A-Z_]+=' "$tpl" | tr -d '='); do
+    grep -q "^$k=" "$seed" || { echo "seed lacks $k"; return 1; }
+  done
+  # the seed is a seed: it does not default the one value the loop needs
+  grep -q "^VERIFY_CMD=''" "$seed"
+  grep -q "^MODE='pr'" "$seed"
+}
+
+@test "a retrofit with a different loop seed skips it and reports it" {
+  mkdir -p "$P/loop"
+  echo "VERIFY_CMD='make check'" > "$P/loop/loop.conf.seed"
+  run bash "$CUT" python-agents-base "$P"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$P/loop/loop.conf.seed")" = "VERIFY_CMD='make check'" ]
+  [[ "$output" == *"SKIPPED"*"loop/loop.conf.seed"* ]] || false
+}
+
+@test "a second cut leaves the seed unchanged and writes nothing new" {
+  bash "$CUT" python-agents-base "$P" >/dev/null
+  run bash "$CUT" python-agents-base "$P"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"wrote:"* ]] || false
+}
+
+@test "no template doc points at the old pairing prompt or a literal {{VERIFY_CMD}}" {
+  cd "$REPO_ROOT/project-factory"
+  for f in README.md templates/lamp-agents-base/README.md templates/lamp-agents-base/CLAUDE.md \
+           templates/python-agents-base/CLAUDE.md templates/python-astro-content-agent/CLAUDE.md \
+           templates/finance-agents-base/README.md templates/finance-agents-base/CLAUDE.md \
+           scripts/cut-project.sh; do
+    if grep -q 'autonomous-coding-loop' "$f"; then echo "$f still names the old prompt"; return 1; fi
+    if grep -q '{{VERIFY_CMD}}' "$f"; then echo "$f still has a literal placeholder"; return 1; fi
+  done
+}
+
+@test "the templates keep their own verify command and say the loop is opt-in" {
+  cd "$REPO_ROOT/project-factory"
+  grep -q 'pytest' templates/python-agents-base/CLAUDE.md
+  grep -q 'phpunit' templates/lamp-agents-base/CLAUDE.md
+  grep -q 'worktree-setup.sh' templates/lamp-agents-base/CLAUDE.md
+  grep -q 'loop/ENABLE.md' templates/python-agents-base/CLAUDE.md
+  grep -qi 'opt-in' README.md
+  grep -q 'refuses to run' README.md
+  # nothing claims every project grinds its backlog unattended
+  if grep -rniE 'unattended|grinding it|grind through' README.md templates/*/README.md templates/*/CLAUDE.md; then return 1; fi
+}

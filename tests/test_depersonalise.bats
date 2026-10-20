@@ -12,7 +12,6 @@ REMOVED_PATHS=(
   docs/playbook-ai-dev-team.md
   agent-factory/docs/openclaw-paperclip-targets-plan.md
   docs/openclaw-portfolio-desk-blueprint.md
-  automation-factory/docs/gh-triage-to-issue-loop.md
   prompts/2026-06-13-openclaw-lamp-team-prompt.md
 )
 
@@ -25,7 +24,6 @@ REMOVED_NAMES=(
   playbook-ai-dev-team.md
   openclaw-paperclip-targets-plan.md
   openclaw-portfolio-desk-blueprint.md
-  gh-triage-to-issue-loop.md
   2026-06-13-openclaw-lamp-team-prompt.md
 )
 

@@ -75,6 +75,10 @@ full-roster port) and chunked into single-session specialist work:
 | [#12](https://github.com/oneafrikan/the-grid/issues/12) | Add OpenGAP + soulspec as reference submodules | ready-for-human |
 | [#29](https://github.com/oneafrikan/the-grid/issues/29) | finance-agents-base: implement Layer-1 guardrail/rules.py (hard-limit veto) | ready-for-human, severity:medium |
 
+### Deferred (no issue yet)
+
+- `karpathy-loop` and `cli-agent-cron` (the unbuilt Phase B of `openspec/changes/loops`, tasks 6 to 8): deferred until the rebuilt issue-loop (`openspec/changes/issue-loop-v2`) is proven. See `openspec/changes/loops/SUPERSEDED.md`.
+
 ---
 
 Shipped-work history is kept privately; see git log.

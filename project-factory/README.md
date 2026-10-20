@@ -21,9 +21,9 @@ Anything the retrofit can't safely place is reported at the end for manual revie
 ## `_common` — session-continuity scaffolding every project gets
 
 Every project cut from this factory is assumed to end up with a GitHub issue
-backlog, an `issue-loop` instance grinding it, and multiple agent sessions
-working it over time — so every project needs the same context-management and
-handoff shape regardless of stack. That shape lives once, in
+backlog and multiple agent sessions working it over time (the `issue-loop` is
+an opt-in extra, off until you enable it) — so every project needs the same
+context-management and handoff shape regardless of stack. That shape lives once, in
 [`templates/_common/`](templates/_common/), not copy-pasted into each template:
 
 - `CONTEXT.md` — domain glossary and architecture decisions.
@@ -35,8 +35,10 @@ handoff shape regardless of stack. That shape lives once, in
 - `.grid/project.yaml` — commented skeleton for the project facts those agents get.
 - `.claude/skills/project-review/SKILL.md` — a project-aware review skill seed: generic
   correctness + invariants passes, with this repo's own invariants left as `<fill>` markers.
-- `prompts/autonomous-coding-loop.template.md` — the pre-flight/`{{VERIFY_CMD}}`
-  gap `issue-loop` leaves to the project.
+- `loop/loop.conf.seed` and `loop/ENABLE.md` — the issue-loop is **opt-in and off**: the seed
+  holds its defaults and `ENABLE.md` lists what to define before turning it on (`VERIFY_CMD`
+  first: the loop refuses to run without one). Set `VERIFY_CMD` (and `SETUP_CMD`) there; the
+  loop opens PRs and never merges. It does not make `loop/run-issue.sh` exist.
 - `PURPOSE.md`, `GUARDRAILS.md`, `BEHAVIOUR.md` — the charter files (see below), as `<fill>` stubs.
 - `signals/README.md`, `knowledge/README.md`, `knowledge/canon/.gitkeep` — the signal and knowledge conventions.
 - `scripts/map.py` — generates `MAP.md`; a byte-identical mirror of the-grid's `scripts/map.py`.
