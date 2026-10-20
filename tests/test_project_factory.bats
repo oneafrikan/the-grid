@@ -145,6 +145,8 @@ stub_python() {
   [ ! -e "$P/MAP.md" ]
   [ ! -e "$STUB/python3.calls" ]
   [[ "$output" == *"SKIPPED (exists, differs — review manually): scripts/map.py"* ]] || false
+  # the retrofit says how to generate the map by hand
+  [[ "$output" == *"MAP.md not generated; run: python3 scripts/map.py"* ]] || false
   rm -rf "$STUB"
 }
 
