@@ -251,6 +251,162 @@ base_section() { awk -v h="## $1" '$0 == h {on=1; next} /^## / {on=0} on' "$REPO
   ! printf '%s\n' "$output" | grep -E '^agent-factory/roles/' || false
 }
 
+# =========================================================================================
+# template half: project-factory/templates/_common (spec project-charter-files)
+# =========================================================================================
+COMMON="project-factory/templates/_common"
+TEMPLATES="finance-agents-base lamp-agents-base python-agents-base python-astro-content-agent"
+
+@test "template PURPOSE.md: three headings in order, a GUARDRAILS link, <fill markers, no guardrail entries, <= 40 lines" {
+  f="$REPO_ROOT/$COMMON/PURPOSE.md"
+  [ -f "$f" ]
+  [ "$(grep '^## ' "$f" | paste -sd'|')" = "## Problem|## Intended solution|## Outcome" ]
+  grep -qxF 'Must-nots: see [GUARDRAILS.md](GUARDRAILS.md).' "$f"
+  grep -q '<fill' "$f"
+  ! grep -Eq '^- G[0-9]+:' "$f" || false
+  [ "$(wc -l < "$f")" -le 40 ]
+}
+
+@test "template GUARDRAILS.md: states the format, carries no active entry, example is commented out" {
+  f="$REPO_ROOT/$COMMON/GUARDRAILS.md"
+  [ -f "$f" ]
+  ! grep -Eq '^- G[0-9]+:' "$f" || false
+  grep -q '\[check: human|CI|hook|none\]' "$f"
+  grep -q '<fill' "$f"
+  grep -Eq '^<!-- - G1: ' "$f"
+}
+
+@test "template BEHAVIOUR.md: additions-only opening line, empty body, no stage vocabulary" {
+  f="$REPO_ROOT/$COMMON/BEHAVIOUR.md"
+  first=$(grep -m1 . "$f")
+  [[ "$first" == *"agent-factory/_core/AGENTS_base.md"* ]] || false
+  [[ "$first" == *"additions only"* ]] || false
+  grep -qxF '(none yet)' "$f"
+  ! grep -q 'never promoted' "$f" || false
+}
+
+@test "template signals/README.md and knowledge/README.md: own-repo wording, honest sweep status, restated vocabulary" {
+  s="$REPO_ROOT/$COMMON/signals/README.md"
+  k="$REPO_ROOT/$COMMON/knowledge/README.md"
+  [ -f "$s" ] && [ -f "$k" ] && [ -f "$REPO_ROOT/$COMMON/knowledge/canon/.gitkeep" ]
+  for f in "$s" "$k"; do
+    grep -qi 'own repo' "$f"
+    grep -qi 'no sweep runs' "$f"
+    grep -qi 'no secrets' "$f"
+  done
+  grep -q '→' "$s"
+  grep -qi 'not knowledge signals' "$s"
+  sec=$(awk '/^## Evidence and stages/ {on=1; next} /^## / {on=0} on' "$s")
+  [ "$(printf '%s\n' "$sec" | wc -l)" -le 25 ]
+  for st in $(stage_names); do printf '%s\n' "$sec" | grep -qw "$st"; done
+  printf '%s\n' "$sec" | grep -qF '`wip` is never promoted'
+  grep -q '`stage`' "$k" && grep -q '`claim`' "$k"
+}
+
+@test "MAP.md is NOT shipped in _common (cut-project.sh generates it) and no CI workflow is seeded" {
+  [ ! -e "$REPO_ROOT/$COMMON/MAP.md" ]
+  [ ! -e "$REPO_ROOT/$COMMON/.github" ]
+}
+
+@test "scripts/map.py and the _common mirror are byte-identical" {
+  cmp "$REPO_ROOT/scripts/map.py" "$REPO_ROOT/$COMMON/scripts/map.py"
+}
+
+@test "the trailhead block is byte-identical in the four template CLAUDE.md files and at the top of each" {
+  for t in $TEMPLATES; do
+    f="$REPO_ROOT/project-factory/templates/$t/CLAUDE.md"
+    extract_trailhead "$f" > "$T/block"
+    cmp "$T/block" "$REPO_ROOT/project-factory/trailhead.md" || { echo "differs: $t"; return 1; }
+    [ "$(head -n 1 "$f")" = "<!-- charter-trailhead -->" ] || { echo "not at top: $t"; return 1; }
+    [ "$(grep -c '^<!-- charter-trailhead -->$' "$f")" -eq 1 ]
+  done
+}
+
+@test "no template and not _common ships a RELATED.md (it is opt-in)" {
+  [ ! -e "$REPO_ROOT/$COMMON/RELATED.md" ]
+  for t in $TEMPLATES; do [ ! -e "$REPO_ROOT/project-factory/templates/$t/RELATED.md" ]; done
+}
+
+@test "related.md template: header sentences, six entry fields, <= 25 lines, outside templates/" {
+  f="$REPO_ROOT/project-factory/related.md"
+  [ -f "$f" ]
+  [ "$(wc -l < "$f")" -le 25 ]
+  grep -qi 'not exhaustive' "$f"
+  grep -qi 'search' "$f"
+  grep -qi 'same or greater privacy' "$f"
+  grep -qi 'signal' "$f"
+  grep -qi 'issue' "$f"
+  grep -qi 'never push' "$f"
+  for key in 'repo:' 'owns:' 'provides to us / we provide to it:' "don't build here:" 'reach:' 'verified: YYYY-MM-DD'; do
+    grep -qF -- "- $key" "$f" || { echo "missing field: $key"; return 1; }
+  done
+}
+
+# mk_proj — a fixture project with the seeded map.py and a current MAP.md; sets $P.
+mk_proj() {
+  P="$T/proj"
+  mkdir -p "$P/scripts" "$P/.githooks"
+  cp "$REPO_ROOT/$COMMON/scripts/map.py" "$P/scripts/map.py"
+  cp "$REPO_ROOT/$COMMON/.githooks/pre-commit" "$P/.githooks/pre-commit"
+  echo x > "$P/PURPOSE.md"
+  python3 "$P/scripts/map.py" --root "$P"
+}
+
+@test "pre-commit shim is executable and shellcheck-clean" {
+  [ -x "$REPO_ROOT/$COMMON/.githooks/pre-commit" ]
+  command -v shellcheck >/dev/null || skip "shellcheck not installed"
+  shellcheck -S warning "$REPO_ROOT/$COMMON/.githooks/pre-commit"
+}
+
+@test "pre-commit shim: a current map passes (0)" {
+  mk_proj
+  run bash -c "cd '$P' && .githooks/pre-commit"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit shim: a stale map is refused (1) with the regenerate command" {
+  mk_proj
+  echo x > "$P/CONTEXT.md"
+  run bash -c "cd '$P' && .githooks/pre-commit"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"run: python3 scripts/map.py"* ]] || false
+}
+
+@test "pre-commit shim: with python3 hidden it exits 0 with a skip notice" {
+  mk_proj
+  echo x > "$P/CONTEXT.md"
+  NOPY="$(path_without 'python3*' python python2*)"
+  run env PATH="$NOPY" bash -c "cd '$P' && .githooks/pre-commit"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skip"* ]] || false
+}
+
+@test "pre-commit shim: it works when invoked from another directory (git runs hooks from the top level, but be safe)" {
+  mk_proj
+  run bash -c "cd / && '$P/.githooks/pre-commit'"
+  [ "$status" -eq 0 ]
+}
+
+@test "check-personal.sh finds nothing in the template charter files" {
+  R="$T/repo"
+  mkdir -p "$R/scripts"
+  git -C "$R" init -q
+  cp "$REPO_ROOT"/scripts/personal-patterns.txt "$REPO_ROOT"/scripts/personal-allow-paths.txt \
+     "$REPO_ROOT"/scripts/personal-denylist.example.txt "$R/scripts/"
+  for p in "$COMMON/PURPOSE.md" "$COMMON/GUARDRAILS.md" "$COMMON/BEHAVIOUR.md" "$COMMON/signals/README.md" \
+           "$COMMON/knowledge/README.md" "$COMMON/.githooks/pre-commit" project-factory/related.md; do
+    mkdir -p "$R/$(dirname "$p")"
+    cp "$REPO_ROOT/$p" "$R/$p"
+  done
+  git -C "$R" add -A
+  run env GRID_DIR="$R" GRID_PRIVATE_DENYLIST= HOME="$T/home" bash "$REPO_ROOT/scripts/check-personal.sh"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
 @test "signals/README.md and AGENTS_base.md agree on the six stage names and the wip sentence" {
   base_section "Evidence and Stages" > "$T/a"
   awk '/^## Evidence and stages/ {on=1; next} /^## / {on=0} on' "$REPO_ROOT/signals/README.md" > "$T/b"

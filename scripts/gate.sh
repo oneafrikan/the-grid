@@ -113,6 +113,7 @@ run_shellcheck() {
     automation-factory/patterns/*/*.sh automation-factory/patterns/*/hooks/*.sh
     hooks/*.sh hooks/lib/*.sh hooks/scripts/*.sh
     agent-factory/scripts/*.sh project-factory/scripts/*.sh project-factory/templates/*/scripts/*.sh
+    project-factory/templates/_common/.githooks/*
     tests/helpers/*.bash)
   shopt -u nullglob
   [ "${#files[@]}" -gt 0 ] || return 0
