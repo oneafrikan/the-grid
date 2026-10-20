@@ -215,7 +215,7 @@ fidelity: fetches every cited URL and quotes support for each bullet) and
   line, matched whole-line (a CR before the newline is allowed). A user note that merely
   starts like a marker, or quotes one marker, is user text. Markers are exact-line matches,
   so a hand-edited BEGIN line is treated as user text and the next emit appends a fresh
-  block (decision D20). An exact END line with no BEGIN line at all (the BEGIN was deleted, or
+  block. An exact END line with no BEGIN line at all (the BEGIN was deleted, or
   edited so it no longer starts `<!-- BEGIN the-grid rules`) is refused with a message that says
   so; restore the BEGIN line or delete the END line by hand. If the edited BEGIN still starts
   `<!-- BEGIN the-grid rules`, it and the END beside it are taken for a quoted fence: emit
