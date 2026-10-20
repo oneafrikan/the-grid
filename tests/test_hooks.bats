@@ -2212,6 +2212,47 @@ expect_in() {
   expect_strict clean "$(rep 'the token is in the secret store, ask for the password. ' 200)"
 }
 
+# --- H-26 (hardening, refs private issue #99): coverage gaps left after H-01 ---------------
+# Every value is plainly fake. Each test was red before the change.
+
+@test "H-26 VS4: pass, pwd and passphrase keys with a long filler run straddle a cut in strict mode" {
+  local kw
+  for kw in pass pwd passphrase; do
+    expect_strict password-assigned "$(_straddle 4060 "$kw" 300 _ '=Ab3dEf9Gh2Jk4Lm6Np8Q')"
+  done
+  # control: the same text with the dot that ends the run is not a key
+  expect_strict clean "$(_straddle 4060 pass 300 _ '.=Ab3dEf9Gh2Jk4Lm6Np8Q')"
+}
+
+@test "H-26 VS5: a JWT, a URL user name, a key header gap and a webhook that are open at a cut are found" {
+  local jwt="eyJ$(_fill 33 a).$(_fill 400 b).$(_fill 100 c)"
+  expect_plain jwt "$(_fill 4000 .) $jwt $(_fill 3000 .)"
+  expect_plain db-url-password "$(_fill 4060 .) https://$(_fill 300 u):pw12345@host $(_fill 3000 .)"
+  expect_plain private-key "$(_fill 4060 .) -----BEGIN $(_fill 300 A) PRIVATE KEY----- $(_fill 3000 .)"
+  expect_plain slack-webhook "$(_fill 4060 .) hooks.slack.com/services/T$(_fill 300 A)/B12345678/abcdefgh $(_fill 3000 .)"
+  # control: a long line of URLs with no password stays clean
+  expect_plain clean "$(rep 'see https://host.invalid/path for details ' 200)"
+}
+
+@test "H-26 VS3: a letters-only unquoted value whose first digit is past the cut is found in default mode" {
+  expect_plain assigned-secret "$(_fill 4090 .)token=$(_fill 300 a)9 $(_fill 3000 .)"
+  # control: letters only, no digit anywhere
+  expect_plain clean "$(_fill 4090 .)token=$(_fill 300 a) $(_fill 3000 .)"
+}
+
+@test "H-26 VS6/VF10: a zero-width or combining character before the =, or a blank inside the value, is found in strict mode" {
+  local loc ins
+  for loc in C C.UTF-8; do
+    for ins in $'\xe2\x80\x8b' $'\xcc\x81' $'\xef\xbb\xbf'; do
+      expect_in "$loc" strict assigned-secret "token${ins}=Abcdefghijklmnop12"
+    done
+    expect_in "$loc" strict assigned-secret $'token\xe3\x80\x80=Abcdefgh\xe3\x80\x80ijklmnop12'
+    # control: the commit guard (default mode) is unchanged, and an accented word is clean
+    expect_in "$loc" plain clean "token${ins}=Abcdefghijklmnop12"
+    expect_in "$loc" strict clean $'caf\xcc\x81e au lait'
+  done
+}
+
 # --- VH5 test gaps: the key-count bound, exactly at its edge, and its per-line reset -----
 @test "key bound: exactly 200 key= candidates on a line is clean, 201 is key-dense-line" {
   expect_plain  clean         "$(rep 'token=1 ' 200)"
