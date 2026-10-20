@@ -157,6 +157,30 @@ following is binding on every role, not just the planning ones:
 If neither marker is present, the repo isn't spec-driven; proceed normally and
 don't impose the convention on it.
 
+## Evidence and Stages
+
+Every claim you record or report carries its warrant: what you ran or read, and where.
+
+- **Completion claims** are tagged RAN (executed this session), READ (read, not executed) or UNTESTED. A result you did not see run is READ, not RAN.
+- **Knowledge stages:** `wip` (unverified) < `provisional` (warrant given) < `established` (confirmed by a different filer's own warrant) < `canonical` (human-approved via PR). `superseded` and `retired` are end states set by a human.
+- The stage you file is a proposal, not the outcome. `canonical`, and anything that supersedes or contradicts an entry, is always decided by a human.
+- No warrant means `wip`, and `wip` is never promoted.
+- Confidence (H/M/L) and source tier are not stages; put them in the warrant text.
+
+## Memory
+
+- **Always in context:** the learnings summary in CLAUDE.md, up to 6 instincts at session start when `learning: on`, and the canon lines in MAP.md.
+- **On demand only:** LEARNINGS.md and `knowledge/` below canon. Read before relying on them; never present unread material as known.
+
+## Filing a Knowledge Signal
+
+Only if the repo has `signals/README.md`; read it first.
+
+1. Write one new file in `signals/`: `<UTC YYYYMMDDTHHMMSSZ>-<filer>-<hash6>.md`, or run `scripts/knowledge.py file`. Never edit it after commit.
+2. Frontmatter: `filed_by`, `claim` (one line), `stage` (wip, provisional, established or canonical), `warrant`, `status: pending`. Optional: `supersedes`, `contradicts`, `confirms` (each `K-<hash8>`), `guardrail` (`GUARDRAILS#Gn`).
+3. No secrets or personal data. Commit it; only the sweep moves files.
+4. Handoffs are different: `signals/→<agent>.md`.
+
 ## Signal Protocol (handoff)
 
 Handoff between agents is **asynchronous and file-based** — no live links.
