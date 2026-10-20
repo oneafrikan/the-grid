@@ -239,13 +239,17 @@ add_agent() {
   contains "$output" "WORKER_PERMISSIONS"
 }
 
-@test "preflight: claude not logged in, gh not logged in, no GH_REPO, no base branch on origin: exit 2 each" {
+@test "preflight: claude or gh not logged in is infra (exit 1, backoff, nothing relabelled); no GH_REPO or no base branch on origin: exit 2" {
   STUB_CLAUDE_LOGGED_IN=0 run_runner
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 1 ]
   contains "$output" "claude is not logged in"
+  rm -f "$STATE/backoff"
   STUB_GH_STORED_LOGIN=0 run_runner
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 1 ]
   contains "$output" "gh is not logged in"
+  [ -f "$STATE/backoff" ]
+  refute has_gh "gh issue edit"
+  rm -f "$STATE/backoff"   # the window would otherwise end the next runs quietly
   set_conf GH_REPO ''
   set_conf ISSUE_REPO ''
   run_runner
@@ -257,6 +261,47 @@ add_agent() {
   [ "$status" -eq 2 ]
   contains "$output" "no-such-branch"
   [ "$(claude_calls)" -eq 0 ]
+}
+
+@test "backoff: an infra failure opens a window that doubles; inside it a tick exits quietly; an issue-level outcome clears it" {
+  happy_env
+  # first failure: 15 min window
+  STUB_CLAUDE_LOGGED_IN=0 run_runner
+  [ "$status" -eq 1 ]
+  contains "$(cat "$STATE/backoff")" "fails=1"
+  until1="$(sed -n 's/^until=\([0-9]*\).*/\1/p' "$STATE/backoff")"
+  [ "$((until1 - $(date +%s)))" -gt 800 ]
+  [ "$((until1 - $(date +%s)))" -le 900 ]
+  # inside the window: quiet exit 0, no gh call, no claude call; an explicit issue number ignores it
+  : > "$STUB_LOG"
+  run_runner
+  [ "$status" -eq 0 ]
+  contains "$output" "backing off"
+  [ -z "$(cat "$STUB_LOG")" ]
+  # window over, still failing: the next window is twice as long
+  printf 'until=1 fails=1\n' > "$STATE/backoff"
+  STUB_CLAUDE_LOGGED_IN=0 run_runner
+  contains "$(cat "$STATE/backoff")" "fails=2"
+  until2="$(sed -n 's/^until=\([0-9]*\).*/\1/p' "$STATE/backoff")"
+  [ "$((until2 - $(date +%s)))" -gt 1700 ]
+  # a manual run for one issue ignores the window and, reaching an issue-level outcome, clears it
+  run_runner 4
+  [ "$status" -eq 0 ]
+  [ ! -f "$STATE/backoff" ]
+}
+
+@test "backoff: a worker cut off by a usage limit keeps the label and backs off; a plain missing outcome is still blocked" {
+  export STUB_NO_OUTCOME=1
+  export STUB_CLAUDE_JSON='{"type":"result","subtype":"success","is_error":false,"result":"Claude AI usage limit reached","total_cost_usd":0}'
+  run_runner
+  [ "$status" -eq 1 ]
+  refute has_gh "gh issue edit"
+  [ -f "$STATE/backoff" ]
+  rm -f "$STATE/backoff"
+  export STUB_CLAUDE_JSON='{"type":"result","subtype":"success","is_error":false,"result":"all done","total_cost_usd":0}'
+  run_runner
+  [ "$status" -eq 0 ]
+  has_gh "--add-label blocked"
 }
 
 @test "preflight: a missing timeout binary exits 2" {
