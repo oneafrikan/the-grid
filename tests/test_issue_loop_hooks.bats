@@ -722,3 +722,38 @@ SH
   refute grep -q -- '--add-label' "$f"
   refute grep -q 'gh issue close' "$f"
 }
+
+# ------------------------------------------------------------ pattern README ---
+
+@test "README: says the guard is not installed in the-grid's settings and why" {
+  grep -q "not installed in the-grid's own" "$PAT_DIR/README.md"
+  grep -q 'gh pr merge' "$PAT_DIR/README.md"
+  grep -q 'merge reviewed PRs' "$PAT_DIR/README.md"
+}
+
+@test "README: Known gaps list matches the documented-not-fixed rows" {
+  readme="$(cat "$PAT_DIR/README.md")"
+  contains "$readme" "### Known gaps"
+  contains "$readme" "mistake-catcher, not a boundary"
+  contains "$readme" "bash -c"
+  contains "$readme" "eval"
+  contains "$readme" "aliases"
+  contains "$readme" "SIGKILL"
+}
+
+@test "README: states that the first run is by hand, the waker is installed by the operator, and what is not built yet" {
+  readme="$(cat "$PAT_DIR/README.md")"
+  contains "$readme" "The first run is started by hand"
+  contains "$readme" "bash loop/run-issue.sh"
+  contains "$readme" "the operator installs"
+  contains "$readme" "Planned, not built yet"
+  contains "$readme" "Stale-lock reclaim"
+}
+
+@test "README: documents every loop.conf key and carries no retirement language" {
+  local k
+  for k in GH_REPO ISSUE_REPO BASE_BRANCH ISSUE_LABEL MODE VERIFY_CMD VERIFY_TIMEOUT SETUP_CMD PROJECT_CONTEXT REVIEW_FOCUS WORKER_MODEL MAX_BUDGET_USD ISSUE_TIMEOUT WORKER_PERMISSIONS WORKER_ALLOWED_TOOLS MAX_ISSUES_PER_DAY TRUST_GATE RUN_ROLE; do
+    grep -q "\`$k\`" "$PAT_DIR/README.md" || { echo "README lacks $k"; return 1; }
+  done
+  refute grep -niE 'retired|quarantin|abandoned' "$PAT_DIR/README.md"
+}

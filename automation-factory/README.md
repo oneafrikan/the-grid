@@ -24,7 +24,7 @@ the hub where the reusable asset is managed.
 
 | Pattern | What it does |
 |---------|--------------|
-| [`issue-loop`](patterns/issue-loop/) | Autonomous agent that works a repo's GitHub issue backlog unattended, with an auto code-review posted to each PR. Interactive `/loop` prompt + post-commit review hook, and a headless PR-mode runner (`run-issues.sh`: tokenless capped worker per issue, the runner pushes and opens the PR to a configurable base branch, Opus review, run record) scheduled by a systemd user timer or launchd. |
+| [`issue-loop`](patterns/issue-loop/) | Agent that works a repo's labelled GitHub issues and hands a verified PR to a human (it never merges). A headless runner (`run-issue.sh`: one issue per run, capped worker, the runner runs the verify command itself, then pushes and opens the PR to a configurable base branch, run record), an interactive `/loop` prompt and a post-commit review hook. Started by hand; the operator decides when to schedule it. |
 
 ## Anatomy of a pattern
 
@@ -47,17 +47,15 @@ convention this led to.
 
 ## Roadmap
 
-- **`instantiate.sh`** (**retired**: quarantined under `_retired/issue-loop/scripts/`, see
-  `_retired/issue-loop/RETIRED.md`; [issue #15](https://github.com/oneafrikan/the-grid/issues/15)) — machine-profiled (personal / work / mac-mini / linux) cut of
-  a pattern into a target repo: copy into `loop/` + placeholder-fill + settings
-  wiring, plus a guard hook + worktree/PR sandboxing (work, mac-mini, linux), and
-  systemd / launchd / cron scheduling through the shared `scripts/lib/render-schedule.sh`
-  (files written, activation commands printed, never run). Shipped for `issue-loop` before it was retired;
-  PR mode shipped.
+- **`instantiate.sh`** (`scripts/instantiate.sh`, shipped for `issue-loop`; [issue #15](https://github.com/oneafrikan/the-grid/issues/15)) — profiled (personal / work / mac-mini) cut of
+  a pattern into a target repo: verbatim copy into a tracked `loop/`, a `loop.conf` rendered
+  once, the headless runner, guard hook and worktree helper for the PR-only profiles, and the
+  opt-in labels. It writes no scheduler file and no hook entry in `.claude/settings.json`.
+  Planned: a waker (a cron line the operator installs) and backoff / stale-lock handling.
 - **`AUTOMATIONS.md`** — a generated index of patterns, parallel to `SKILLS.md`.
 - **More patterns** — issue-loop is the first. Scheduled jobs, watch-and-react
   hooks, release automations, and agent-team orchestrations follow.
 
 See each pattern's own `README.md` for instantiation steps and design rationale.
 
-Running a pattern unattended (dedicated OS user, GitHub App, trust gate)? See the [secure agent loop playbook](docs/secure-agent-loop.md).
+How the issue-loop connects to triage: [gh-triage to issue-loop](docs/gh-triage-to-issue-loop.md).
