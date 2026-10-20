@@ -19,8 +19,9 @@
 # Outside the repo the out dir must be absent, empty, or hold the sentinel file
 # (.stage-site-out) that a previous run wrote; anything else exits 2 so a mistyped
 # path (HOME, /tmp, a project dir) is never wiped. '--adopt' lets ONE run take over an
-# existing non-empty dir; that run then writes the sentinel. The sentinel is staged into
-# the site and published with it (a one-line dotfile, harmless).
+# existing non-empty dir; that run then writes the sentinel. The sentinel sits in the staged
+# dir but is not published: upload-pages-artifact excludes dotfiles (include-hidden-files
+# defaults to false), and the live site returns 404 for /.stage-site-out.
 #
 # Env: GRID_DIR (default: parent of scripts/) — tests point it at a fixture.
 set -euo pipefail
