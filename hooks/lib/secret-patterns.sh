@@ -194,7 +194,8 @@ _IDRUN_RE='[[:alnum:]_]{200}[^[:alnum:]_]{0,16}$'
 # The tail of every key word that can sit inside an identifier run: `api-key` has a `-`,
 # so only its `key` is part of the run. A superset on purpose (any run holding "key"
 # counts); case-insensitive, see _has_keyword_tail.
-_KEYWORD_TAIL_RE='secret|token|passw|key'
+# H-26 (VS4): also `pass`, `pwd`, `passphrase` (the strict password-assigned row's keys).
+_KEYWORD_TAIL_RE='secret|token|pass|pwd|key'
 # H-01: the open-key check of secret_match_long (see _open_key_pos). A glob that finds the
 # last character that cannot belong to the unbounded middle of an assignment. That middle is
 # identifier characters, backslashes, quotes, : and = (and, with up to three single blanks
@@ -208,8 +209,13 @@ _OPEN_TAIL=80
 # A key word that still reads like an assignment when the piece ends: key word, identifier
 # characters, backslashes, a quote, then optionally the : or = and a value of up to 64
 # characters. A superset of the key side of the assigned-secret row plus the start of its value.
-_OPEN_RE='^('"$_SECRET_KEYWORDS"')[[:alnum:]_]*\\*["'"'"']?[[:space:]]*([:=][[:space:]]*\\*["'"'"']?[[:space:]]*[^"'"'"'[:space:]]{0,64})?$'
-_OPEN_KW='('"$_SECRET_KEYWORDS"')'
+# H-26 (VS3): the value may also be an unbounded run of letters: in default mode an unquoted
+# value is judged on its whole run and a letters-only run is no finding until a digit comes,
+# which may be past the cut.
+# H-26 (VS4): the strict-only key words (pass, pwd, passphrase) are open keys too.
+_OPEN_KEYWORDS="$_SECRET_KEYWORDS|pass|pwd"
+_OPEN_RE='^('"$_OPEN_KEYWORDS"')[[:alnum:]_]*\\*["'"'"']?[[:space:]]*([:=][[:space:]]*\\*["'"'"']?[[:space:]]*([^"'"'"'[:space:]]{0,64}|[A-Za-z]+))?$'
+_OPEN_KW='('"$_OPEN_KEYWORDS"')'
 _OPEN_POS=-1
 
 # H-01 (N6), strict mode only. The blanks that [[:space:]] knows only in a UTF-8 locale (and
@@ -225,25 +231,38 @@ _MB_BLANKS=(
   $'\xe2\x80\xa8' $'\xe2\x80\xa9' $'\xe2\x80\xaf' $'\xe2\x81\x9f' $'\xe3\x80\x80'
 )
 _UB=""
-# The same list as one sed script, for long lines: bash's ${x//pat/ } copies the whole text
-# once per pattern and a long line made of such blanks cost seconds (about 4x per doubling).
-_MB_SED=()
-for _b in "${_MB_BLANKS[@]}"; do _MB_SED+=(-e "s/$_b/ /g"); done
+# H-26 (VS6/VF10): characters that are invisible or zero-width: soft hyphen, U+200B to U+200D,
+# U+2060, U+FEFF and the combining marks U+0300 to U+036F. `token<U+200B>=value` hides the
+# key from the key regex, and a value cut by a multibyte blank (`Abcdefgh<U+3000>ijklmnop12`)
+# is two short words once the blanks become spaces, yet one value in a shell. The third strict
+# reading (_unblank ... strip) deletes these and the blanks above. It is scanned in addition
+# to the other two, never instead of them.
+_MB_INVIS=($'\xc2\xad' $'\xe2\x80\x8b' $'\xe2\x80\x8c' $'\xe2\x80\x8d' $'\xe2\x81\xa0' $'\xef\xbb\xbf')
+for _b in $(seq 768 879); do
+  printf -v _b '\\x%02x\\x%02x' $((0xC0 | _b >> 6)) $((0x80 | _b & 0x3F))
+  printf -v _b "$_b"
+  _MB_INVIS+=("$_b")
+done
 unset _b
-# _unblank <text>: sets _UB to the text, with the blanks above replaced by a space when the
-# scan is strict. Callers scan the ORIGINAL text first and this one second (see
-# secret_match_long): in the C locale the bytes of a multibyte blank inside a value are value
-# characters, and replacing them can only shorten a value.
+# _unblank <text> [strip]: sets _UB to the text, with the blanks above replaced by a space (or,
+# with "strip", deleted together with the invisible characters above) when the scan is
+# strict. Callers scan the ORIGINAL text first and this one after (see secret_match_long): in
+# the C locale the bytes of a multibyte blank inside a value are value characters, and
+# replacing them can only shorten a value.
 _unblank() {
-  local b out
+  local b out repl=" " list=("${_MB_BLANKS[@]}") sedargs=()
   _UB="$1"
   [ "${SECRET_STRICT:-0}" = 1 ] || return 0
+  if [ "${2:-}" = strip ]; then repl=""; list+=("${_MB_INVIS[@]}"); fi
   if [ "${#1}" -gt 6000 ]; then
-    # one linear pass; if sed fails the text is left as it is (the original was scanned)
-    if out="$(printf '%s' "$1" | sed "${_MB_SED[@]}")"; then _UB="$out"; fi
+    # bash's ${x//pat/ } copies the whole text once per pattern and a long line made of such
+    # blanks cost seconds (about 4x per doubling): one linear sed pass instead; if sed fails
+    # the text is left as it is (the original was scanned)
+    for b in "${list[@]}"; do sedargs+=(-e "s/$b/$repl/g"); done
+    if out="$(printf '%s' "$1" | sed "${sedargs[@]}")"; then _UB="$out"; fi
     return 0
   fi
-  for b in "${_MB_BLANKS[@]}"; do _UB="${_UB//"$b"/ }"; done
+  for b in "${list[@]}"; do _UB="${_UB//"$b"/$repl}"; done
 }
 
 # Set by _secret_match: the matched pattern name and the matched text without its
@@ -465,6 +484,22 @@ _open_key_pos() {
   if [ "$was" = 1 ]; then shopt -s nocasematch; else shopt -u nocasematch; fi
 }
 
+# H-26 (VS5): the other table rows with an unbounded part (a JWT's payload, the user name in
+# front of a URL password, the gap in a private key header, a slack webhook's ids) can also be
+# longer than the overlap of two pieces. A token whose first characters are still open when a
+# piece ends (a run of the characters the token allows, ending at the piece end) makes the next
+# piece start there. Only the last 1024 characters of the piece are looked at, so the next
+# piece moves on by at least 3328: a token with a longer open run than that is not caught.
+_OPEN_TOK_RE='(eyJ[A-Za-z0-9_.-]*|://[^/@[:space:]]*|-----BEGIN [A-Z0-9 ]*|hooks\.slack\.com/services/[A-Za-z0-9/]*)$'
+_open_token_pos() {
+  local p="$1" n=${#1} w
+  _OPEN_POS=-1
+  [ "$n" -gt 1024 ] || return 0
+  w="${p:$((n - 1024))}"
+  [[ "$w" =~ $_OPEN_TOK_RE ]] && _OPEN_POS=$((n - ${#BASH_REMATCH[0]}))
+  return 0
+}
+
 # secret_match_long <text>
 #   _secret_match for text of any length. The bash matcher is superlinear on long input,
 #   so text over 6,000 characters is matched in 4,352-character pieces that overlap by 256
@@ -499,6 +534,8 @@ secret_match_long() {
   _match_pieces "$1" && return 0
   [ "${SECRET_STRICT:-0}" = 1 ] || return 1
   _unblank "$1"
+  if [ "$_UB" != "$1" ]; then _match_pieces "$_UB" && return 0; fi
+  _unblank "$1" strip   # H-26 (VS6/VF10): the third reading, see _MB_INVIS
   [ "$_UB" != "$1" ] || return 1
   _match_pieces "$_UB"
 }
@@ -555,6 +592,9 @@ _match_pieces() {
       _open_key_pos "$cur" 4096
       if [ "$_OPEN_POS" -eq 0 ]; then SECRET_MATCH_NAME="oversize-line"; SECRET_MATCH_TEXT=""; return 0; fi
       if [ "$_OPEN_POS" -gt 0 ]; then next=$((off + _OPEN_POS)); fi
+      # H-26 (VS5): a token still open at the end of the piece; the earlier restart wins
+      _open_token_pos "$cur"
+      if [ "$_OPEN_POS" -gt 0 ] && [ "$((off + _OPEN_POS))" -lt "$next" ]; then next=$((off + _OPEN_POS)); fi
     fi
     off=$next
   done
@@ -566,14 +606,20 @@ _match_pieces() {
 #   Prints the name of the first matching pattern and returns 0; returns 1 for no
 #   match or an exempt line. (Use _secret_match directly to also get the text.)
 secret_match_line() {
+  local mode
   _SM_KEYS_LEFT=$SECRET_MAX_KEYS
   if ! _secret_match "$1"; then
-    # strict: then the text with multibyte blanks turned into spaces (see secret_match_long)
+    # strict: then the text with multibyte blanks turned into spaces, then with them and the
+    # invisible characters deleted (see secret_match_long); a reading equal to the original
+    # is skipped
     [ "${SECRET_STRICT:-0}" = 1 ] || return 1
-    _unblank "$1"
-    [ "$_UB" != "$1" ] || return 1
-    _SM_KEYS_LEFT=$SECRET_MAX_KEYS
-    _secret_match "$_UB" || return 1
+    for mode in "" strip; do
+      _unblank "$1" $mode
+      [ "$_UB" != "$1" ] || continue
+      _SM_KEYS_LEFT=$SECRET_MAX_KEYS
+      if _secret_match "$_UB"; then printf '%s\n' "$SECRET_MATCH_NAME"; return 0; fi
+    done
+    return 1
   fi
   printf '%s\n' "$SECRET_MATCH_NAME"
 }

@@ -134,7 +134,9 @@ long to keep whole in a piece (over 4096 characters past a cut) is also `oversiz
 key word followed by a long run of filler (identifier characters or backslashes) and then
 `=` and a value can be longer than the overlap of two pieces: when a piece ends inside such
 an assignment, the next piece starts at the key word instead of 4096 characters on, and an
-assignment that fills a whole piece is `oversize-line`. A line with more than 200
+assignment that fills a whole piece is `oversize-line`. A JWT, a URL password, a private key
+header or a Slack webhook that is still open at the end of a piece (within its last 1024
+characters) restarts the next piece the same way. A line with more than 200
 `key =` candidates (`secret`, `token`, `password`, ...) is `key-dense-line`, because a scan
 that cannot finish must block, not pass. These
 are bounds, not a proof: an unusual input can still cost more than measured. Both catalogue entries carry
@@ -380,7 +382,8 @@ proven live (operator check B1), so the rules are not the only barrier:
    run of 16 or more backslashes after the `=` as a value, and reads the multibyte blanks
    that only some locales know (U+3000, U+2003, U+00A0 and the like) as ordinary blanks (the
    line is scanned as it is and again with those blanks replaced, so neither reading hides
-   a finding).
+   a finding; a third reading deletes those blanks and the zero-width and combining
+   characters, so `token<U+200B>=value` does not hide the key).
    A templated value such as `token=${A_LONG_VARIABLE_NAME}` is therefore quarantined too.
    A long hex digest in a handoff is therefore quarantined too. The same
    scan runs first on the timeout, child-failure and `unexpected-file` paths: a NEW file
