@@ -13,10 +13,11 @@ the repo being usable by someone who isn't Gareth. `next` was merged to `main` o
 2026-10-19 (PR #286) and the branch is retired; `main` is the only long-lived branch.
 
 Behind that: `agent-factory` is a multi-target compiler. The **Claude Code** target is
-live, and the `codex`, `opencode`, `gemini-cli` and `portable` targets are built
+live, and the `codex`, `opencode` and `gemini-cli` targets are built
 (skills, subagents and rules reach those harnesses via `harness:<name>`, see
 `docs/harnesses.md`); what is missing is a real-install smoke test of each (**#31**,
-**#33**, **#32**, **#36** stay open until then). The OpenClaw/Paperclip emitter work
+**#33**, **#32** stay open until then). The `portable` target is built too
+(`dist/personas/`) and **#36** is closed. The OpenClaw/Paperclip emitter work
 (**#4**) remains the deeper lift.
 
 ---
@@ -39,7 +40,6 @@ Regenerate with:
 | [#31](https://github.com/oneafrikan/the-grid/issues/31) | New compose.py target: opencode | built; real-install check pending |
 | [#33](https://github.com/oneafrikan/the-grid/issues/33) | New compose.py target: OpenAI Codex CLI | built; real-install check pending |
 | [#32](https://github.com/oneafrikan/the-grid/issues/32) | New compose.py target: Gemini CLI | built; real-install check pending |
-| [#36](https://github.com/oneafrikan/the-grid/issues/36) | New compose.py target: portable single-file personas for chat-UI Projects | built (`dist/personas/`) |
 | [#34](https://github.com/oneafrikan/the-grid/issues/34) | Amp: verify custom-agent mechanism before scoping a target | deferred, needs-info |
 | [#4](https://github.com/oneafrikan/the-grid/issues/4) | agent-factory target: async/autonomous via Paperclip | needs-info, severity:medium |
 
