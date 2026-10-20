@@ -3,7 +3,10 @@ name: tests
 on:
   push:
     branches: [main]
+  # Draft PRs are work in progress and do not run the gate; mark the PR ready for review
+  # to run it (ready_for_review triggers a run). Drafts also skip the job below.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 # Least privilege: the gate only reads the repo.
 permissions:
@@ -18,6 +21,9 @@ concurrency:
 
 jobs:
   gate:
+    # Keep the job name `gate`: the main ruleset requires a check with that name.
+    # Pushes to main always run; a PR runs only when it is not a draft.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # Pinned image: ubuntu-latest moves to a new LTS without notice and the
     # loop treats this job as its truth signal.
     runs-on: ubuntu-24.04
