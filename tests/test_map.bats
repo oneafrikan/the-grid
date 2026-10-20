@@ -250,6 +250,38 @@ EOF
   [ "$status" -eq 2 ]
 }
 
+@test "status: a non-UTF-8 knowledge file is counted invalid and exits 0" {
+  mkdir -p "$R/knowledge/wip"
+  printf '\377\376 not utf-8\n' > "$R/knowledge/wip/bad.md"
+  run python3 "$MAP" status --root "$R"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx 'invalid: 1'
+}
+
+@test "a read-only root exits 2 with a one-line message, not a traceback" {
+  put PURPOSE.md
+  chmod 555 "$R"
+  run python3 "$MAP" --root "$R"
+  chmod 755 "$R"
+  [ "$status" -eq 2 ]
+  [[ "$output" == "map.py: cannot write "* ]] || false
+  [ "$(echo "$output" | wc -l)" -eq 1 ]
+}
+
+@test "in a git repo an untracked registry file adds no row, so --check stays 0 (refs #101 VF1)" {
+  put PURPOSE.md
+  git -C "$R" init -q
+  git -C "$R" add PURPOSE.md
+  gen
+  put .grid/project.yaml
+  run python3 "$MAP" --check --root "$R"
+  [ "$status" -eq 0 ]
+  ! grep -q 'project.yaml' "$R/MAP.md" || false
+  # the escape hatch cut-project.sh uses for files that are not committed yet
+  run python3 "$MAP" --check --include-untracked --root "$R"
+  [ "$status" -eq 1 ]
+}
+
 @test "MAP.md holds no volatile data: no stage names with counts, no pending-signal count" {
   entry wip a; entry provisional b; put signals/20260101T000000Z-x-abc123.md
   gen
