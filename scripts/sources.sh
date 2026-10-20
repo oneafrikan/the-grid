@@ -20,8 +20,9 @@
 #
 # A leading dash is always an option: an unknown one is a usage error (exit 2) before any file
 # is touched, so a mistyped flag never becomes the name of an output file.
-# With no submodules in .gitmodules every mode exits 1 ("no submodules"): this repo always
-# tracks some, so an empty list means a broken checkout, never a vacuous pass.
+# With no submodules in .gitmodules every mode fails ("no submodules"): this repo always
+# tracks some, so an empty list means a broken checkout, never a vacuous pass. The exit is 1,
+# except --check-drift, where 1 already means "stale" and so this error is 2.
 #
 # --check is the rot detector. Upstream repos get renamed, deleted, or made
 # private, and a submodule URL keeps pointing at nothing without any local
