@@ -1146,9 +1146,11 @@ fi
 #           compose target that was never run has no dir and simply links nothing.
 # wire_harness_link never replaces anything: ~/.agents/skills is also written by other
 # tools, so ANY entry already at the destination after teardown (real dir or file,
-# foreign or dangling symlink) is theirs and is skipped. Its stdout line deliberately
-# does NOT start `  skip (real dir, not managed)`: reconcile.sh parses that exact
-# prefix and would rm -rf the same-named dir in the Claude skills dir.
+# foreign or dangling symlink) is theirs and is skipped. Its stdout line is
+# `  skip (<disp>: exists, not managed)`, not the Claude-skills `skip (real dir, not
+# managed)` line. reconcile.sh does not parse wire.sh output: it dry-wires into a
+# throwaway home and only looks at the Claude skills dir, so a harness dir is never offered
+# for moving.
 # Manifest rows use kind skill@<~dir> / agent@<~dir> (home-independent), reason last.
 # $6 (optional) = the composed project the file comes from: a destination this run already
 # linked for ANOTHER project is a name clash between projects, not a foreign entry.

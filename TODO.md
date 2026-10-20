@@ -75,6 +75,12 @@ full-roster port) and chunked into single-session specialist work:
 | [#12](https://github.com/oneafrikan/the-grid/issues/12) | Add OpenGAP + soulspec as reference submodules | ready-for-human |
 | [#29](https://github.com/oneafrikan/the-grid/issues/29) | finance-agents-base: implement Layer-1 guardrail/rules.py (hard-limit veto) | ready-for-human, severity:medium |
 
+### Issue-loop (`openspec/changes/issue-loop-v2`, no issue yet)
+
+- **Working:** headless runner (`pr` draft PRs and `direct` landing on the base), runner-side verify, `--fast-verify`, `--cron-every` (one printed crontab line per repo, `loop/cron-run.sh`), unlimited daily count by default, stale-lock takeover, infra failures keep the label and back off (15 min doubling to 6 h).
+- **Outstanding:** poison-issue rule (three infra failures on one issue block it; being built separately); the group 7.0/7.4 `_retired/` decision; the HUMAN proofs on a throwaway repo (groups 8.7-8.9, 10, 12); remaining B3 tests (full doubling table with the 6 h cap, parallel stale-lock race, SIGKILL run).
+- **Gaps to decide:** `instantiate.sh --mode direct` ships no runner and `--cron-every` refuses `direct`, so headless direct is only reachable by setting `MODE=direct` in a `pr` cut's `loop/loop.conf`.
+
 ### Deferred (no issue yet)
 
 - `karpathy-loop` and `cli-agent-cron` (the unbuilt Phase B of `openspec/changes/loops`, tasks 6 to 8): deferred until the rebuilt issue-loop (`openspec/changes/issue-loop-v2`) is proven. See `openspec/changes/loops/SUPERSEDED.md`.
