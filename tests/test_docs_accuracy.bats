@@ -190,12 +190,22 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
     total=$((total + $(printf '%s\n' "$out" | grep -c ' -> CC ')))
     orch=$((orch + $(printf '%s\n' "$out" | grep -c 'CC skill (orchestrator)')))
     spec=$((spec + $(printf '%s\n' "$out" | grep -c 'CC subagent (specialist)')))
+    # CLAUDE.md types the grid project's own split (VD8/VD9): remember it for the check below
+    if [ "$cfg" = agent-factory/examples/grid.yaml ]; then
+      gt=$(printf '%s\n' "$out" | grep -c ' -> CC ')
+      go=$(printf '%s\n' "$out" | grep -c 'CC skill (orchestrator)')
+      gs=$(printf '%s\n' "$out" | grep -c 'CC subagent (specialist)')
+    fi
   done
   [ "$total" -eq $((orch + spec)) ]
   flat="$(tr '\n' ' ' < README.md | tr -s ' ')"
   [[ "$flat" == *"$total composed AI agents across 4 ready-to-run teams ($orch orchestrators, $spec specialists)"* ]]
   [[ "$flat" == *"$total ready-made AI roles"* ]]
   grep -q "the other $spec roles" USAGE.md
+  # CLAUDE.md's hand-typed counts: the grid project's split and the all-public-roles total
+  flatc="$(tr '\n' ' ' < CLAUDE.md | tr -s ' ')"
+  [[ "$flatc" == *"$gt roles: $go orchestrators → CC skills, $gs specialists → CC subagents"* ]]
+  [[ "$flatc" == *"all $total composed public roles"* ]]
 }
 
 # --- F12: four public projects, four factories ---
