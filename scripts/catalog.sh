@@ -39,6 +39,8 @@ while [ "$#" -gt 0 ]; do
     --check)   CHECK=1 ;;
     -h|--help) usage; exit 0 ;;
     -*)        echo "catalog.sh: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    # An empty path must not fall through to the default SKILLS.md (OUT="" reads as unset).
+    "")        echo "catalog.sh: empty output path" >&2; usage >&2; exit 2 ;;
     *)         [ -z "$OUT" ] || { echo "catalog.sh: more than one output path" >&2; usage >&2; exit 2; }
                OUT="$1" ;;
   esac
