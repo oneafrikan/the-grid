@@ -1801,6 +1801,17 @@ expect_plain() {
   expect_strict assigned-secret 'name = x; secret=abcdefghijklmnopqrstuvwxyz'
 }
 
+# H-06 (hardening, refs private issue #79): a checksum quoted in a handoff is not a secret,
+# a long base64 run and a hex value with a key name still are, and a JSON password is read.
+@test "strict: a bare sha256 is clean; base64 runs, assigned hex and a JSON password are not" {
+  local h; h="$(printf 'e3b0c442%.0s' 1 2 3 4 5 6 7 8)"          # 64 hex characters
+  expect_strict clean "sha256: $h"
+  expect_strict clean "$h$h"                                     # sha512 length
+  expect_strict base64-run "blob: ${h}Zm9v"
+  expect_strict assigned-secret "secret = $h"
+  expect_strict password-assigned '{"password":"s3cr3tVal"}'
+}
+
 @test "strict: the value boundaries hold (15 chars passes; a template marker first no longer exempts, H-01)" {
   expect_strict clean 'api_key = abcdefghijklmno'
   # H-01 (d): a model can put $ < { in front of any value, so strict mode reads those as
