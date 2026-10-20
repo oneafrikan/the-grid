@@ -14,6 +14,8 @@ It runs two ways from the same cut:
 | interactive prompt | `loop-prompt.template.md` | The `/loop` prompt with a `pr` and a `direct` block. Copied verbatim into the target; `setup.sh` renders `loop/loop-prompt.md` from it. |
 | config | `loop.conf.template` | Rendered once into `loop/loop.conf`, the single source of config. |
 | guard | `hooks/guard-main-push.sh` | PreToolUse mistake-catcher for pushes and merges. Reaches the worker only through the runner's per-run `--settings` file. |
+| cron wrapper | `cron-run.sh` | What the cron line runs: sources `loop/cron.env` (PATH, HOME), then `exec`s the runner. |
+| fast verify | `verify.sh` | Optional `VERIFY_CMD`: shellcheck, Python syntax, related bats, Markdown and rules lint on what changed. |
 | worktree helper | `hooks/new-agent-worktree.sh` | Cuts `issue-<N>` worktrees off `origin/<base>`. |
 | review hook | `hooks/post-commit-review.sh` | PostToolUse: reviews each commit of an interactive session and comments on the PR or issue. Stands down in headless runs. |
 | wiring | `setup.sh`, `.gitignore` | Renders the prompt, self-tests the guard. `--interactive` wires hooks into the repo's settings. |
@@ -30,7 +32,7 @@ bash scripts/instantiate.sh issue-loop <target-repo> --profile <personal|work|ma
 | `work` | `pr` | yes |
 | `mac-mini` | `pr` | yes |
 
-Options: `--repo`, `--issue-repo`, `--base-branch` (default: `origin/HEAD`'s branch, else `main`), `--mode pr|direct`, `--verify-cmd`, `--label` (default `ready-for-agent`), `--project-context`, `--review-focus`, `--setup-cmd`, `--worker-model`, `--agent-labels a,b`. Run it with no arguments for the list. It needs an authenticated `gh` (to create labels).
+Options: `--repo`, `--issue-repo`, `--base-branch` (default: `origin/HEAD`'s branch, else `main`), `--mode pr|direct`, `--verify-cmd`, `--label` (default `ready-for-agent`), `--project-context`, `--review-focus`, `--setup-cmd`, `--worker-model`, `--agent-labels a,b`, `--fast-verify`, `--cron-every N`, `--cron-log <file>`. Run it with no arguments for the list. It needs an authenticated `gh` (to create labels).
 
 What it does, idempotently (a second identical run prints no `wrote:` line):
 
@@ -41,7 +43,7 @@ What it does, idempotently (a second identical run prints no `wrote:` line):
 - appends `.claude/settings.json` to the target's `.gitignore` once;
 - writes a `CLAUDE.md` only if there is none.
 
-It writes no scheduler file and no hook entry into `.claude/settings.json`.
+It writes no scheduler file and no hook entry into `.claude/settings.json`. With `--cron-every` it also writes the gitignored `loop/cron.env` and prints a crontab line (see "Unattended").
 
 ## `loop/loop.conf`
 
@@ -101,15 +103,32 @@ With issues in a different repo (`ISSUE_REPO`), every issue call targets the tra
 
 State lives in `<git-common-dir>/issue-loop/`: `lock/` (with `pid`, `issue`, `started`, `worker`) and `runs.log`.
 
-## The waker, backoff and stale locks
+## Unattended: one cron line per repo
 
-Planned, not built yet:
+```bash
+bash scripts/instantiate.sh issue-loop <repo> --profile work --cron-every 15 [--cron-log <file>]
+```
 
-- **Waker** (`wake.sh`): a cron poll the operator installs. The cron line stays uninstalled until backoff and stale-lock handling are proven.
-- **Backoff** on rate limits and repeated infrastructure failures, and a **poison-issue rule** (three infra failures on one issue block it).
-- **Stale-lock reclaim.**
+Prints one crontab line for that repo (poll every N minutes, 1-59) and the command that adds it. Run it once per repo; each repo has its own `loop/`, lock and log, so repos run concurrently and a repo never overlaps itself. The guard against overlap is the runner's lock: a tick that finds it held exits 0 "busy".
 
-Until those land, a run that finds the lock held exits 0 "busy" and names the pid; if a run was killed by SIGKILL, remove the lock directory by hand after checking the pid is gone.
+- The log defaults to `~/.grid/logs/issue-loop-<repo>.log` (`--cron-log` overrides), appended by the line.
+- The line runs `bash loop/cron-run.sh`, which sources `loop/cron.env` and `exec`s `run-issue.sh`. `cron.env` holds `HOME` and a `PATH` that includes the directories of `gh`, `claude`, `jq`, `git`, `awk` and `timeout`, resolved when you ran the install. It is machine-local and gitignored. Re-run the install after moving a tool or the repo.
+- Nothing is installed for you: `instantiate.sh` never runs `crontab`. The activation command it prints is idempotent (pasting it twice leaves one copy).
+- Check the environment before trusting it: run the printed line's command under `env -i HOME=$HOME PATH=/usr/bin:/bin sh -c '...'` (everything after the five time fields) and read the log. It should show the runner's own messages, not "command not found".
+
+Not built yet: **backoff** on rate limits and repeated infrastructure failures, a **poison-issue rule** (three infra failures on one issue block it) and **stale-lock reclaim**. If a run was killed by SIGKILL, remove the lock directory by hand after checking the pid is gone.
+
+## Fast verify
+
+`VERIFY_CMD` is whatever your repo's gate is. When the full suite is too slow for a loop run, select the shipped `loop/verify.sh`: `--fast-verify` at install time, or `VERIFY_CMD='bash loop/verify.sh'` in `loop/loop.conf`. An explicit `--verify-cmd` wins over `--fast-verify`. It checks only what the branch changed against `origin/<BASE_BRANCH>` (override with `VERIFY_BASE`), and skips a step whose tool is absent, saying so:
+
+- `shellcheck` on changed shell scripts;
+- a syntax check on changed Python files;
+- the changed `tests/*.bats`, plus every test that mentions a changed script by name (`tests/lib/bats-core`, else `bats` on `PATH`);
+- changed Markdown: no leftover `<<<<<<<` / `>>>>>>>` conflict markers;
+- `python3 scripts/rules.py lint` when files under `rules/` changed and that script exists.
+
+It exits 1 when nothing has changed. It is a sanity pass, not a replacement for CI on the pull request, which stays the authoritative gate. Bash 3.2 compatible.
 
 ## Role routing
 
