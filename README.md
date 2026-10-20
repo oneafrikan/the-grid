@@ -95,7 +95,7 @@ different asset type:
 | Factory | Produces | Deployed via |
 |---------|----------|---------------|
 | `agent-factory/` | Composed AI agents (`role × stack × skills`) — 4 public projects (`core`, `grid`, `finance-desk`, `learning-desk`; 38 roles, 7 orchestrators + 31 specialists) plus any private desk composed separately | `scripts/wire.sh` (Claude Code target; opt-in `harness:<name>` entries add Codex, OpenCode, Gemini CLI and others) |
-| `automation-factory/` | Reusable automation patterns (e.g. `issue-loop`) | Cut into a target repo's tracked `loop/` folder (the-grid's own loop instance is retired: `_retired/issue-loop/RETIRED.md`) |
+| `automation-factory/` | Reusable automation patterns (e.g. `issue-loop`) | `bash scripts/instantiate.sh issue-loop <repo> --profile work`: cut into a target repo's tracked `loop/` folder; the loop opens PRs and never merges |
 | `project-factory/` | Whole new project scaffolds from a template | `project-factory/scripts/cut-project.sh` (seed or retrofit) |
 | Skill wiring | the curated skill set (`skills/` plus the `repos/` submodules) | `scripts/wire.sh`, steered by `baseline-submodules.txt` and `machines/<host>.txt` |
 
@@ -234,7 +234,7 @@ never touches its history.
   openspec/             ← OpenSpec changes (proposals, design, tasks) for the-grid itself
   signals/              ← claims filed for the knowledge flow, plus agent handoffs (signals/README.md)
   knowledge/            ← recorded claims by stage; canon/ is human-approved (knowledge/README.md)
-  _retired/             ← quarantined code, not gated or deployed (issue-loop; see its RETIRED.md)
+  _retired/             ← archive, not gated or deployed; removal is pending the operator's GitHub-side cleanup
   repos/                ← sibling repos as git submodules
     gstack/             (each may contain many skill dirs)
     openclaw/
@@ -248,7 +248,7 @@ never touches its history.
     sources.sh          ← regenerates docs/SOURCES.md; --check link-checks every URL
     reconcile.sh        ← removes stale skill shadows on a new machine
     check-grid.sh       ← full bats suite + broken-symlink scan (CI / pre-push gate)
-    instantiate.sh      ← RETIRED, moved to _retired/issue-loop/scripts/ (cut an automation-factory pattern into a target repo)
+    instantiate.sh      ← cuts an automation-factory pattern into a target repo (issue-loop; idempotent)
     rules.py            ← lints, lists and emits the rule packs (rules/)
     audit.sh, audit.py  ← the vetting scan that wire.sh runs before touching any link
     gate.sh             ← the commit gate: shellcheck, catalog, role lint, composed output, tests

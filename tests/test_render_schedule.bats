@@ -35,13 +35,13 @@ in_proc() {
 }
 
 @test "service: Type=oneshot, WorkingDirectory, PATH with %h/.local/bin, ExecStart, TimeoutStartSec" {
-  rs render_systemd_service "issue-loop runner for owner/name" /srv/repo 7800 /bin/bash /srv/repo/loop/run-issues.sh
+  rs render_systemd_service "issue-loop runner for owner/name" /srv/repo 7800 /bin/bash /srv/repo/loop/run-job.sh
   [ "$status" -eq 0 ]
   contains "$output" "Description=issue-loop runner for owner/name"
   contains "$output" "Type=oneshot"
   contains "$output" "WorkingDirectory=/srv/repo"
   contains "$output" "Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin"
-  contains "$output" "ExecStart=/bin/bash /srv/repo/loop/run-issues.sh"
+  contains "$output" "ExecStart=/bin/bash /srv/repo/loop/run-job.sh"
   contains "$output" "TimeoutStartSec=7800"
   lacks "$output" "EnvironmentFile"
   lacks "$output" "network-online.target"
@@ -91,11 +91,11 @@ in_proc() {
 }
 
 @test "launchd plist: label, program args without a login shell, HOME/PATH, calendar, one log file" {
-  rs render_launchd_plist io.the-grid.issue-loop.owner-name /Users/you /srv/repo /Users/you/.grid/logs daily:02:00 /bin/bash /srv/repo/loop/run-issues.sh
+  rs render_launchd_plist io.the-grid.issue-loop.owner-name /Users/you /srv/repo /Users/you/.grid/logs daily:02:00 /bin/bash /srv/repo/loop/run-job.sh
   [ "$status" -eq 0 ]
   contains "$output" "<string>io.the-grid.issue-loop.owner-name</string>"
   contains "$output" "<string>/bin/bash</string>"
-  contains "$output" "<string>/srv/repo/loop/run-issues.sh</string>"
+  contains "$output" "<string>/srv/repo/loop/run-job.sh</string>"
   lacks "$output" "<string>-l</string>"
   lacks "$output" "-lc"
   contains "$output" "<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/you/.local/bin</string>"
@@ -121,9 +121,9 @@ in_proc() {
 }
 
 @test "crontab line: daily and weekly" {
-  rs render_crontab_line daily:02:00 /home/user/.grid/logs/issue-loop-owner-name.log /srv/repo /bin/bash /srv/repo/loop/run-issues.sh
+  rs render_crontab_line daily:02:00 /home/user/.grid/logs/issue-loop-owner-name.log /srv/repo /bin/bash /srv/repo/loop/run-job.sh
   [ "$status" -eq 0 ]
-  [ "$output" = "00 02 * * * mkdir -p /home/user/.grid/logs && cd /srv/repo && /bin/bash /srv/repo/loop/run-issues.sh >> /home/user/.grid/logs/issue-loop-owner-name.log 2>&1" ]
+  [ "$output" = "00 02 * * * mkdir -p /home/user/.grid/logs && cd /srv/repo && /bin/bash /srv/repo/loop/run-job.sh >> /home/user/.grid/logs/issue-loop-owner-name.log 2>&1" ]
   rs render_crontab_line weekly:Sun:04:30 /l/x.log /srv/repo /bin/true
   [ "$output" = "30 04 * * 0 mkdir -p /l && cd /srv/repo && /bin/true >> /l/x.log 2>&1" ]
 }

@@ -8,8 +8,7 @@
 #   stub_issue <N> <title> <body> [label...]   # fixture for `gh issue view N`
 #
 # make_stubs creates a temp stub dir, PREPENDS it to PATH and writes fake
-#   gh  claude  curl  loginctl  timeout  systemctl  launchctl  crontab
-# plus a GitHub-App token minter exported as $GRID_APP_TOKEN_BIN.
+#   gh  claude  loginctl  timeout  systemctl  launchctl  crontab
 # Every stub appends one line of its argv to $STUB_LOG (empty args are shown as
 # "", newlines as spaces, so one call is one line and `--tools ""` greps
 # literally). Nothing here makes a network call or a model call.
@@ -77,24 +76,11 @@
 #     STUB_DIFF_LINES          lines `gh pr diff` prints (default 5)
 #     STUB_COMMENTS            file collecting "<cmd> <number>: <body-file text>" for issue/pr comments
 #                              (default $STUB_DIR/comments.log)
-#     STUB_REPO                owner/name in the installation-repositories answer (default owner/name)
+#     STUB_REPO                owner/name in the URL `gh pr create` prints (default owner/name)
 #     STUB_AUTHOR_ASSOC[_N]    `author_association` of issue N (default OWNER); `gh api repos/R/issues/N`
 #                              answers the stub_issue fixture (title, body, labels) plus that field;
 #                              STUB_ISSUE_API_FAIL=1 makes it fail
 #     STUB_COMMENTS_JSON[_N]   answer of `gh api repos/R/issues/N/comments` (default []); STUB_COMMENTS_FAIL=1 fails it
-#     STUB_ISSUE_LABEL         the opt-in label in the default `labeled` event (default ready-for-agent)
-#     STUB_EVENTS_JSON[_N]     answer of `gh api --paginate repos/*/issues/N/events`
-#                              (default one `labeled` event by `trusted`)
-#     STUB_EDITORS_JSON[_N]    answer of `gh api graphql` (default: no body edits)
-#     STUB_RULES_JSON          answer of `gh api repos/*/rules/branches/*` (default one pull_request rule)
-#     STUB_INSTALL_REPOS_JSON  answer of `gh api /installation/repositories` (default lists $STUB_REPO)
-#     STUB_API_USER_OK         1 makes `gh api user` succeed (models a PAT); default it fails with HTTP 403
-#
-#   mint stub ($GRID_APP_TOKEN_BIN; prints {"token":...,"permissions":...})
-#     STUB_APP_TOKEN           token (default abc);  STUB_APP_TOKEN_SEQ=1 makes it tok1, tok2, ... per call
-#     STUB_APP_PERMS           permissions object JSON (default contents/pull_requests/issues write, metadata read)
-#     STUB_APP_MINT_FAIL=1     fail with a stderr line;  STUB_APP_MINT_FAIL_AFTER=N fails every call after the Nth
-#     STUB_MINT_LOG            one line per call (default $STUB_DIR/mint.log)
 #
 #   loginctl
 #     STUB_LINGER              value printed for `show-user ... --value` (default yes)
@@ -107,12 +93,6 @@
 #   systemctl, launchctl, crontab
 #     Log their argv and do nothing: a test asserts they were never called.
 #
-#   curl  (answers the GitHub App token endpoints; honours -o FILE and -w '%{http_code}')
-#     STUB_INSTALLATIONS_JSON   body of GET  */app/installations   (default one element, id 4242)
-#     STUB_INSTALLATIONS_CODE   its HTTP status                      (default 200)
-#     STUB_TOKEN_JSON           body of POST */access_tokens        (default token + expires_at + permissions)
-#     STUB_TOKEN_CODE           its HTTP status                      (default 201)
-#     any other URL answers 404 {}. The whole argv is logged on one line.
 
 make_stubs() {
   local claude_in_local_bin=0
@@ -125,8 +105,7 @@ make_stubs() {
   : > "$STUB_LOG"
   export STUB_ENV_LOG="$STUB_DIR/env.log"
   export STUB_COMMENTS="$STUB_DIR/comments.log"
-  export STUB_MINT_LOG="$STUB_DIR/mint.log"
-  : > "$STUB_ENV_LOG"; : > "$STUB_COMMENTS"; : > "$STUB_MINT_LOG"
+  : > "$STUB_ENV_LOG"; : > "$STUB_COMMENTS"
 
   local claude_dir="$STUB_DIR"
   if [ "$claude_in_local_bin" = 1 ]; then
@@ -387,31 +366,8 @@ case "${1:-} ${2:-}" in
     exit 0 ;;
   "issue edit") exit 0 ;;
 esac
-repos_default="{\"repositories\":[{\"full_name\":\"$repo\"}]}"
-rules_default='[{"type":"pull_request"}]'
 if [ "${1:-}" = api ]; then
   case "$*" in
-    *graphql*)
-      n=""; prev=""
-      for a in "$@"; do
-        if [ "$prev" = "-F" ]; then case "$a" in n=*) n="${a#n=}" ;; esac; fi
-        prev="$a"
-      done
-      default_ed='{"data":{"repository":{"issue":{"userContentEdits":{"nodes":[]}}}}}'
-      ed="$(pick EDITORS_JSON "$n")"
-      printf '%s\n' "${ed:-$default_ed}"; exit 0 ;;
-    *user)
-      if [ "${STUB_API_USER_OK:-0}" = 1 ]; then echo '{"login":"a-pat-user"}'; exit 0; fi
-      echo "gh: Resource not accessible by integration (HTTP 403)" >&2; exit 1 ;;
-    */installation/repositories*|*" installation/repositories"*)
-      printf '%s\n' "${STUB_INSTALL_REPOS_JSON:-$repos_default}"; exit 0 ;;
-    */rules/branches/*)
-      printf '%s\n' "${STUB_RULES_JSON:-$rules_default}"; exit 0 ;;
-    */issues/*/events)
-      allargs="$*"; n="${allargs%/events}"; n="${n##*/}"
-      default_ev="[{\"event\":\"labeled\",\"label\":{\"name\":\"${STUB_ISSUE_LABEL:-ready-for-agent}\"},\"actor\":{\"login\":\"trusted\"}}]"
-      ev="$(pick EVENTS_JSON "$n")"
-      printf '%s\n' "${ev:-$default_ev}"; exit 0 ;;
     */issues/*/comments*)
       # comments of issue N: STUB_COMMENTS_JSON[_N] (default no comments); STUB_COMMENTS_FAIL=1 fails the call
       allargs="$*"; n="${allargs%/comments*}"; n="${n##*/}"
@@ -434,26 +390,6 @@ exit 0
 EOF
   } > "$STUB_DIR/gh"
   chmod +x "$STUB_DIR/gh"
-
-  # ---- GitHub App token minter ($GRID_APP_TOKEN_BIN) ----
-  {
-    printf '%s\n' '#!/bin/bash'
-    printf '. %s\n' "$lib"
-    cat <<'EOF'
-log="${STUB_MINT_LOG:-/dev/null}"
-echo "mint $*" >> "$log"
-count="$(wc -l < "$log" | tr -d ' ')"
-if [ "${STUB_APP_MINT_FAIL:-0}" = 1 ] || { [ -n "${STUB_APP_MINT_FAIL_AFTER:-}" ] && [ "$count" -gt "$STUB_APP_MINT_FAIL_AFTER" ]; }; then
-  echo "gh-app-token: stub mint failure" >&2
-  exit 1
-fi
-if [ "${STUB_APP_TOKEN_SEQ:-0}" = 1 ]; then tok="tok$count"; else tok="${STUB_APP_TOKEN:-abc}"; fi
-default_perms='{"contents":"write","pull_requests":"write","issues":"write","metadata":"read"}'
-printf '{"token":"%s","permissions":%s}\n' "$tok" "${STUB_APP_PERMS:-$default_perms}"
-EOF
-  } > "$STUB_DIR/mint-token"
-  chmod +x "$STUB_DIR/mint-token"
-  export GRID_APP_TOKEN_BIN="$STUB_DIR/mint-token"
 
   # ---- loginctl ----
   {
@@ -503,39 +439,6 @@ EOF
     chmod +x "$STUB_DIR/$sched"
   done
 
-  # ---- curl (GitHub App token endpoints only) ----
-  {
-    printf '%s\n' '#!/bin/bash'
-    printf '. %s\n' "$lib"
-    cat <<'EOF'
-stub_log curl "$@"
-out=""; fmt=""; url=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -o) out="$2"; shift 2 ;;
-    -w) fmt="$2"; shift 2 ;;
-    # options whose VALUE is a separate word: consume it so it is not mistaken for the URL (R16.qa.F10)
-    -X|-H|-d|--data|--max-time|--retry|--retry-delay|--connect-timeout|-u|--user) shift 2 ;;
-    -*) shift ;;
-    *) url="$1"; shift ;;
-  esac
-done
-tok_default='{"token":"ghs_FAKE_TOKEN_123","expires_at":"2099-01-01T00:00:00Z","permissions":{"contents":"write","pull_requests":"write","issues":"write","metadata":"read"},"repository_selection":"selected"}'
-inst_default='[{"id":4242}]'
-case "$url" in
-  */access_tokens)
-    body="${STUB_TOKEN_JSON:-$tok_default}"; code="${STUB_TOKEN_CODE:-201}" ;;
-  */app/installations)
-    body="${STUB_INSTALLATIONS_JSON:-$inst_default}"; code="${STUB_INSTALLATIONS_CODE:-200}" ;;
-  *) body='{}'; code=404 ;;
-esac
-if [ -n "$out" ]; then printf '%s' "$body" > "$out"; else printf '%s' "$body"; fi
-case "$fmt" in *http_code*) printf '%s' "$code" ;; esac
-exit 0
-EOF
-  } > "$STUB_DIR/curl"
-  chmod +x "$STUB_DIR/curl"
-
   PATH="$STUB_DIR:$PATH"
   export PATH
 }
@@ -572,10 +475,10 @@ stub_issue() {
 }
 
 # After this PATH still lists the removed stub dir, so a command a test left running in the
-# background (a detached hook) resolves the REAL gh/claude/curl from then on. The "no network,
+# background (a detached hook) resolves the REAL gh/claude from then on. The "no network,
 # no model call" promise in the header holds only while the stub dir exists: wait for
 # background work to finish before calling this (see tests/test_issue_loop_hooks.bats).
 clean_stubs() {
   if [ -n "${STUB_DIR:-}" ]; then rm -rf "$STUB_DIR"; fi
-  unset STUB_DIR STUB_LOG STUB_ENV_LOG STUB_COMMENTS STUB_MINT_LOG GRID_CLAUDE GRID_APP_TOKEN_BIN
+  unset STUB_DIR STUB_LOG STUB_ENV_LOG STUB_COMMENTS GRID_CLAUDE
 }

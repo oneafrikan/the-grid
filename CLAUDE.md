@@ -97,7 +97,7 @@ submodules into two tiers:
   Voice rule: text rendered into other people's agents, skills, hooks or rules says "the
   operator", never the author's name; prose docs may name the author. `GRID_REQUIRE_DENYLIST=1`
   makes a missing denylist a failure; set it for any unattended build so it cannot pass on
-  the generic half alone (the retired issue-loop set it in its `VERIFY_CMD`). CI has no denylist, so it runs the
+  the generic half alone (a cut of the issue-loop into this repo should set it in its `VERIFY_CMD`). CI has no denylist, so it runs the
   generic half only (`GRID_PRIVATE_DENYLIST=` disables the private half on purpose).
 - `docs/model-selection.md` — which model for which job, with prices, independent
   benchmarks, worked cost maths, and a dated expiry watchlist. Refreshed on demand
@@ -106,7 +106,8 @@ submodules into two tiers:
   business repo (`the-grid-<business>`) published as a plugin marketplace. Unbuilt; gated on
   whether Cowork delegates to plugin subagents. Start at its `README.md`; issue #274.
 - `evals/` + `agent-factory/run_evals.py` — golden cases for roles (opt-in, capped, tool-less runs; `--validate` runs in the gate). See `evals/README.md`.
-- **RETIRED, do not deploy:** the-grid's own issue-loop instance (`loop/`, `scripts/instantiate.sh`, `scripts/lib/gh-app-token.sh`, its four bats files) is quarantined under `_retired/issue-loop/` and excluded from the gate, CI and bats; see `_retired/issue-loop/RETIRED.md` (why, known defects, GitHub-side cleanup). Uplift is built by worktree agents and PRs to `main`. Not retired: the factory pattern `automation-factory/patterns/issue-loop/` and `scripts/lib/render-schedule.sh` (shared by the usage and instincts schedulers).
+- `scripts/instantiate.sh` + `automation-factory/patterns/issue-loop/` — the issue-loop. `bash scripts/instantiate.sh issue-loop <repo> --profile work` cuts a tracked `loop/` (verbatim copies, `loop.conf` rendered once, labels created) into a repo; the cut repo's `loop/run-issue.sh` (started by hand) works ONE labelled issue headlessly: the runner runs `VERIFY_CMD` itself, then pushes `issue-<N>` and opens the PR. It never merges and never classifies. The push/merge guard reaches only the worker, through the runner's per-run `--settings`; it is never wired into the-grid's own `.claude/settings.json` (so merge-on-green sessions here are not blocked). Config is `loop/loop.conf` (`ISSUE_REPO` lets issues live in a separate tracker). See the pattern README. Uplift is built by worktree agents and PRs to `main`. `scripts/lib/render-schedule.sh` is shared by the usage and instincts schedulers.
+- `_retired/` — archive, not gated, linted or deployed; removal waits for the operator's GitHub-side cleanup.
 - `scripts/instincts.sh` — habit learning from your own sessions (opt-in per project with `learning: on`): capture, weekly analysis, injection, `clusters` for tank `evolve`. Data stays in `${GRID_STATE_DIR:-~/.grid}` and the private repo. See `docs/instincts.md`.
 - `scripts/run-record.sh` — appends one JSON line per agent run to a local private log (`${GRID_RUN_LOG:-~/.the-grid-private/runs.jsonl}`); `docs/agent-retro.md` is the review loop that starts from it.
 - `policy.yaml` — vetting policy read by `scripts/audit.py`: rule regexes with severities (`high` blocks, `low` warns), file classes, `owned_roots`, and `sources.allowed_repos` (the single source allowlist; no other file carries one). Restricted-YAML subset read by `scripts/lib/miniyaml.py` (it rejects any bare scalar PyYAML would type differently, such as `True`, `010`, `1:30` or a date: quote it; an unknown top-level key is exit 2); every regex is a single-quoted scalar.
