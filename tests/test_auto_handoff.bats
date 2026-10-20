@@ -1912,6 +1912,44 @@ inc_conf() { printf '[core]\n\tpager = cat\n' > "$1"; touch -t 202001010000 "$1"
   grep -F "reason=unexpected-file" "$LOG" | grep -qF ".ssh/conf-a"
 }
 
+# NF-077 VF1: an ssh Include glob whose directory holds the cwd made the worker's OWN handoff
+# count as an include-dir change, so every run ended unexpected-file.
+@test "NF-077 VF1: an ssh Include glob covering the cwd does not turn the worker's own handoff into unexpected-file" {
+  P="$HOME/projects/proj"; mkdir -p "$P/LOGS"
+  git -C "$P" init -q; git -C "$P" config user.email t@example.com; git -C "$P" config user.name t
+  echo base > "$P/base.txt"; git -C "$P" add base.txt; git -C "$P" commit -q -m base; age_tree "$P"
+  mkdir -p "$HOME/.ssh"
+  printf 'Include ~/projects/*\n' > "$HOME/.ssh/config"; touch -t 202001010000 "$HOME/.ssh/config"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  log_has "action=done"
+}
+
+# VS1: a dotfile that is a link into a dotfiles repo: state_lines never follows a link, so an
+# edit made through it (the child writing ~/.zshrc lands in the repo file) was invisible.
+@test "VS1: a symlinked shell rc file is watched through the link: a write to its target is unexpected-file" {
+  mkdir -p "$HOME/dotfiles"
+  printf 'export A=1\n' > "$HOME/dotfiles/zshrc"; touch -t 202001010000 "$HOME/dotfiles/zshrc"
+  ln -s "$HOME/dotfiles/zshrc" "$HOME/.zshrc"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$HOME/.zshrc"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "dotfiles/zshrc"
+}
+
+# VS2 (cheap part): ~/.bash_aliases is sourced by the default Ubuntu .bashrc, so it runs code
+# at every shell start like .bashrc does.
+@test "VS2: a changed ~/.bash_aliases is unexpected-file" {
+  printf 'alias a=b\n' > "$HOME/.bash_aliases"; touch -t 202001010000 "$HOME/.bash_aliases"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$HOME/.bash_aliases"
+  run_worker
+  log_has "action=error reason=unexpected-file"
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF ".bash_aliases"
+}
+
 # VS7: a deletion is a change like any other (the child only ever creates files).
 @test "H-02: a file the child deletes is reported" {
   mk_tx 6
