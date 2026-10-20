@@ -651,7 +651,8 @@ if [ "$ISSUE_REPO" = "$GH_REPO" ]; then
 fi
 printf 'refs %s#%s\n\nOpened by the issue-loop runner after its own run of the verify command passed. Needs human review and merge.\n' \
   "$ISSUE_REPO" "$N" > "$TMP/pr-body.txt"
-if ! gh_t pr create --repo "$GH_REPO" --base "$BASE_BRANCH" --head "issue-$N" \
+# --draft: CI skips draft PRs, so heavy checks wait until the operator marks it ready.
+if ! gh_t pr create --draft --repo "$GH_REPO" --base "$BASE_BRANCH" --head "issue-$N" \
       --title "$pr_title" --body-file "$TMP/pr-body.txt" > "$TMP/pr.out" 2> "$TMP/pr.err"; then
   blocked "the branch was pushed but gh pr create failed: $(cut_bytes 300 "$(cat "$TMP/pr.err")")"
 fi
