@@ -27,7 +27,10 @@
 # nothing behind in the user's shell.
 _grid_ctx_dir=""
 if [ -n "${GRID_DIR:-}" ] && [ -d "$GRID_DIR/contexts" ]; then
-  _grid_ctx_dir="$(cd "$GRID_DIR/contexts" 2>/dev/null && pwd)"
+  # `--` keeps a relative GRID_DIR starting with "-" from being read as a cd option; an empty
+  # CDPATH and >/dev/null stop cd from printing the resolved dir, which would add a second
+  # line to the captured value.
+  _grid_ctx_dir="$(CDPATH='' cd -- "$GRID_DIR/contexts" >/dev/null 2>&1 && pwd)"
 fi
 if [ -z "$_grid_ctx_dir" ]; then
   _grid_ctx_src=""
@@ -39,7 +42,7 @@ if [ -z "$_grid_ctx_dir" ]; then
   fi
   if [ -n "$_grid_ctx_src" ] && [ -f "$_grid_ctx_src" ]; then
     # cd + pwd makes the path absolute, so the aliases work from any cwd.
-    _grid_ctx_dir="$(cd "$(dirname "$_grid_ctx_src")" 2>/dev/null && pwd)"
+    _grid_ctx_dir="$(CDPATH='' cd -- "$(dirname -- "$_grid_ctx_src")" >/dev/null 2>&1 && pwd)"
   fi
   [ -n "$_grid_ctx_dir" ] || _grid_ctx_dir="$HOME/.the-grid/contexts"
 fi
