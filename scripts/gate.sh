@@ -34,6 +34,8 @@
 #                skip is listed; skipped if the script is absent
 #   rules        rule packs under rules/ lint clean (rules.py lint; offline; skipped with a
 #                notice if python3 or scripts/rules.py is absent)
+#   map          MAP.md is current              (map.py --check: drift only, never signal counts;
+#                skipped with a notice if python3 or scripts/map.py is absent)
 #   bats         the test suite
 #
 # Modes:
@@ -368,6 +370,15 @@ run_rules_check() {
   GRID_DIR="$GRID_DIR" python3 scripts/rules.py lint
 }
 check rules      run_rules_check
+# MAP.md is generated (like SKILLS.md): a stale or missing one fails, an absent tool skips loudly
+# and is recorded. map.py --check exits 1 on drift, 2 on an error; both fail the gate.
+run_map_check() {
+  if ! command -v python3 >/dev/null || [ ! -f scripts/map.py ]; then
+    echo "    python3 or scripts/map.py absent — skipped"; SKIPPED+=(map); return 0
+  fi
+  python3 scripts/map.py --check --root "$GRID_DIR"
+}
+check map        run_map_check
 check bats       run_bats
 
 echo
