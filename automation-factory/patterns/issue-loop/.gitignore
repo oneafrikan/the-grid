@@ -1,3 +1,5 @@
 # Generated from loop-prompt.template.md by setup.sh — bakes in this machine's
 # absolute path, so it's derived output, not source. Regenerate after any move.
 loop-prompt.md
+# Machine-local PATH/HOME for cron, written by instantiate.sh --cron-every
+cron.env

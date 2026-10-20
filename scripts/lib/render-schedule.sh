@@ -20,7 +20,8 @@
 #     systemd, plist and cron text never needs quoting.
 #   - DESC must match ^[A-Za-z0-9_./@+ -]+$ (spaces allowed, nothing else).
 #   - SCHEDULE is daily:HH:MM or weekly:DOW:HH:MM (DOW one of Mon Tue Wed Thu Fri Sat Sun,
-#     HH 00-23, MM 00-59, two digits each).
+#     HH 00-23, MM 00-59, two digits each). render_crontab_line alone also takes every:N
+#     (N = 1-59, minutes), a poll interval; systemd and launchd return 2 for it.
 #   - RANDOM_DELAY (optional) matches ^[0-9]+(s|min|h)?$.
 #
 # Bash 3.2 compatible. No side effects. printf only, no heredocs.
@@ -62,6 +63,7 @@ _rs_parse_schedule() {
   local s="$1" rest dow hh mm
   _RS_KIND=""; _RS_DOW=""; _RS_HH=""; _RS_MM=""
   case "$s" in
+    every:*) _rs_fail "SCHEDULE '$s': every: is cron-only"; return 1 ;;
     daily:*)
       rest="${s#daily:}"
       hh="${rest%%:*}"; mm="${rest#*:}"
@@ -198,11 +200,27 @@ render_launchd_plist() {
 render_crontab_line() {
   local sched="${1:-}" logfile="${2:-}" workdir="${3:-}" w dow="*" logdir
   if [ $# -lt 4 ]; then _rs_fail "render_crontab_line SCHEDULE LOG_FILE WORKDIR CMD [ARG...]"; return 2; fi
-  _rs_parse_schedule "$sched" || return 2
+  # every:N (cron only): a poll interval in minutes, rendered as */N. Handled before the
+  # daily/weekly parser, which rejects it.
+  local every=""
+  case "$sched" in
+    every:*)
+      every="${sched#every:}"
+      case "$every" in
+        [1-9]|[1-5][0-9]) ;;
+        *) _rs_fail "malformed SCHEDULE '$sched' (want every:N with N 1-59)"; return 2 ;;
+      esac ;;
+    *) _rs_parse_schedule "$sched" || return 2 ;;
+  esac
   _rs_safe LOG_FILE "$logfile" || return 2
   _rs_safe WORKDIR "$workdir" || return 2
   shift 3
   for w in "$@"; do _rs_safe "command word" "$w" || return 2; done
+  if [ -n "$every" ]; then
+    case "$logfile" in */*) logdir="${logfile%/*}"; [ -n "$logdir" ] || logdir="/" ;; *) logdir="." ;; esac
+    printf '*/%s * * * * mkdir -p %s && cd %s && %s >> %s 2>&1\n' "$every" "$logdir" "$workdir" "$*" "$logfile"
+    return 0
+  fi
   if [ "$_RS_KIND" = weekly ]; then
     case "$_RS_DOW" in Sun) dow=0 ;; Mon) dow=1 ;; Tue) dow=2 ;; Wed) dow=3 ;; Thu) dow=4 ;; Fri) dow=5 ;; *) dow=6 ;; esac
   fi
