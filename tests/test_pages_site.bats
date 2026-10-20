@@ -24,7 +24,9 @@ stage() { GRID_DIR="$FIX" bash "$REPO_ROOT/scripts/stage-site.sh" "$OUT"; }
   [ "$status" -eq 0 ]
   [ -f "$OUT/index.html" ]
   [ -f "$OUT/pic.png" ]
-  [ "$(find "$OUT" -type f | wc -l | tr -d ' ')" -eq 2 ]
+  # the third file is the sentinel that marks the dir as safe to wipe on the next run
+  [ "$(find "$OUT" -type f | wc -l | tr -d ' ')" -eq 3 ]
+  [ -f "$OUT/.stage-site-out" ]
   [ ! -e "$OUT/not-listed.txt" ]
 }
 
@@ -251,6 +253,79 @@ nested_fixture() {
   run env GRID_DIR="$FIX" bash "$REPO_ROOT/scripts/stage-site.sh" "$BATS_TEST_TMPDIR/new/parent/site"
   [ "$status" -eq 0 ]
   [ -f "$BATS_TEST_TMPDIR/new/parent/site/index.html" ]
+}
+
+# --- out dir must be absent, empty or marked; --adopt takes over a foreign dir ---------------------
+
+@test "a non-empty unmarked out dir (or a plain file) exits 2, rm is never called and nothing changes" {
+  stub_rm_setup
+  printf 'index.html\n' > "$FIX/site-files.txt"
+  mkdir -p "$BATS_TEST_TMPDIR/other/sub"
+  printf 'precious\n' > "$BATS_TEST_TMPDIR/other/sub/keep.txt"
+  : > "$BATS_TEST_TMPDIR/afile"
+  local before; before="$(list_fixture "$BATS_TEST_TMPDIR/other")"
+  local bad
+  for bad in "$BATS_TEST_TMPDIR/other" "$BATS_TEST_TMPDIR/afile"; do
+    run env PATH="$STUBBIN:$PATH" GRID_DIR="$FIX" bash "$REPO_ROOT/scripts/stage-site.sh" "$bad"
+    [ "$status" -eq 2 ]
+    [ ! -s "$RMLOG" ]
+  done
+  [ "$(list_fixture "$BATS_TEST_TMPDIR/other")" = "$before" ]
+  [ -f "$BATS_TEST_TMPDIR/afile" ]
+}
+
+@test "HOME as the out dir exits 2 and rm is never called" {
+  stub_rm_setup
+  printf 'index.html\n' > "$FIX/site-files.txt"
+  # HOME is a throwaway dir with content: same shape as a real home, nothing real at risk
+  mkdir -p "$BATS_TEST_TMPDIR/home"
+  printf 'x\n' > "$BATS_TEST_TMPDIR/home/.profile"
+  run env HOME="$BATS_TEST_TMPDIR/home" PATH="$STUBBIN:$PATH" GRID_DIR="$FIX" \
+    bash "$REPO_ROOT/scripts/stage-site.sh" "$BATS_TEST_TMPDIR/home"
+  [ "$status" -eq 2 ]
+  [ ! -s "$RMLOG" ]
+  [ -f "$BATS_TEST_TMPDIR/home/.profile" ]
+}
+
+@test "an empty existing out dir is accepted" {
+  printf 'index.html\n' > "$FIX/site-files.txt"
+  mkdir -p "$OUT"
+  run stage
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/index.html" ]
+}
+
+@test "a dir the script created is re-run cleanly: same listing, stale files gone" {
+  printf 'index.html\n' > "$FIX/site-files.txt"
+  stage >/dev/null
+  printf 'stale\n' > "$OUT/stale.html"
+  local first; first="$(list_fixture "$OUT" | grep -v stale)"
+  run stage
+  [ "$status" -eq 0 ]
+  [ "$(list_fixture "$OUT")" = "$first" ]
+}
+
+@test "--adopt takes over a non-empty unmarked dir once; the next run needs no flag" {
+  printf 'index.html\n' > "$FIX/site-files.txt"
+  mkdir -p "$OUT"
+  printf 'old\n' > "$OUT/old.txt"
+  run stage
+  [ "$status" -eq 2 ]
+  [ -f "$OUT/old.txt" ]
+  run env GRID_DIR="$FIX" bash "$REPO_ROOT/scripts/stage-site.sh" --adopt "$OUT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$OUT/old.txt" ]
+  [ -f "$OUT/.stage-site-out" ]
+  run stage
+  [ "$status" -eq 0 ]
+}
+
+@test "a sentinel that is a symlink does not mark the dir" {
+  printf 'index.html\n' > "$FIX/site-files.txt"
+  mkdir -p "$OUT"
+  ln -s "$FIX/index.html" "$OUT/.stage-site-out"
+  run stage
+  [ "$status" -eq 2 ]
 }
 
 # --- WP-044: CI config (workflows are read as text, nothing is run) ----------------------------

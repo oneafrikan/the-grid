@@ -2,7 +2,7 @@
 # stage-site.sh — copy exactly the files listed in site-files.txt into a fresh
 # output dir, ready for the GitHub Pages artifact upload.
 #
-#   bash scripts/stage-site.sh <out-dir>
+#   bash scripts/stage-site.sh [--adopt] <out-dir>
 #
 # Why a list and not "publish the repo": the repo root holds ~544 MB of
 # third-party submodule trees (repos/) that must never be served.
@@ -15,8 +15,12 @@
 # a symlink, or starts with repos/ .git or .github), the out dir is unsafe, or bad usage.
 #
 # The out dir is deleted and recreated, so it must never be, contain or alias the repo.
-# Inside the repo only a top-level untracked '_name' is accepted (CI uses _site);
-# anything outside the repo is fine.
+# Inside the repo only a top-level untracked '_name' is accepted (CI uses _site).
+# Outside the repo the out dir must be absent, empty, or hold the sentinel file
+# (.stage-site-out) that a previous run wrote; anything else exits 2 so a mistyped
+# path (HOME, /tmp, a project dir) is never wiped. '--adopt' lets ONE run take over an
+# existing non-empty dir; that run then writes the sentinel. The sentinel is staged into
+# the site and published with it (a one-line dotfile, harmless).
 #
 # Env: GRID_DIR (default: parent of scripts/) — tests point it at a fixture.
 set -euo pipefail
@@ -24,8 +28,11 @@ export LC_ALL=C
 
 src="${BASH_SOURCE[0]:-$0}"
 GRID_DIR="${GRID_DIR:-$(cd "$(dirname "$src")/.." && pwd)}"
+SENTINEL=".stage-site-out"
+adopt=0
+if [ "${1:-}" = "--adopt" ]; then adopt=1; shift; fi   # only this exact word; '-rf' stays a path
 out="${1:-}"
-[ -n "$out" ] || { echo "usage: stage-site.sh <out-dir>" >&2; exit 2; }
+[ -n "$out" ] || { echo "usage: stage-site.sh [--adopt] <out-dir>" >&2; exit 2; }
 
 # The out dir is recreated with rm -rf below, so resolve it to a physical path first and
 # refuse anything that is, contains or aliases the repo. A string compare is not enough:
@@ -77,6 +84,19 @@ case "$out_phys" in
     fi ;;
 esac
 
+# The out dir will be wiped: only an absent or empty dir, or one marked by a previous run,
+# is safe. A plain file, a symlinked sentinel or any other content is refused unless --adopt.
+if [ -e "$out_phys" ]; then
+  if [ ! -d "$out_phys" ]; then
+    echo "stage-site: refusing out dir '$out': it exists and is not a directory" >&2; exit 2
+  fi
+  if [ -f "$out_phys/$SENTINEL" ] && [ ! -L "$out_phys/$SENTINEL" ]; then
+    :   # written by a previous run
+  elif [ -n "$(find "$out_phys" -mindepth 1 -print -quit)" ] && [ "$adopt" -ne 1 ]; then
+    echo "stage-site: refusing out dir '$out': it is not empty and has no $SENTINEL marker (pass --adopt to take it over)" >&2; exit 2
+  fi
+fi
+
 list="$GRID_DIR/site-files.txt"
 [ -f "$list" ] || { echo "stage-site: no $list" >&2; exit 1; }
 
@@ -126,6 +146,7 @@ done < "$list"
 out="$out_phys"
 rm -rf -- "$out"
 mkdir -p -- "$out"
+printf 'staged by scripts/stage-site.sh; safe to wipe on the next run\n' > "$out/$SENTINEL"
 for p in ${paths[@]+"${paths[@]}"}; do
   mkdir -p -- "$out/$(dirname -- "$p")"
   cp -R -P -- "$GRID_DIR/$p" "$out/$p"
