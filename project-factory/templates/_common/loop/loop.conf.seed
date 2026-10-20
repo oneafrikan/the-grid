@@ -6,7 +6,7 @@ GH_REPO=''                 # owner/name of the code repo; blank = detected from 
 ISSUE_REPO=''              # owner/name the issues live in; blank = GH_REPO (set a private tracker to keep issue text out of a public repo)
 BASE_BRANCH=''             # PR target and worktree base; blank = the origin/HEAD branch, else main
 ISSUE_LABEL='ready-for-agent'   # the opt-in label: only issues carrying it are worked
-MODE='pr'                  # pr (the loop opens PRs and never merges); direct is for an interactive /loop only
+MODE='pr'                  # pr (the loop opens draft PRs and never merges); direct (no PR: the runner pushes the verified commit to the base branch)
 VERIFY_CMD=''              # REQUIRED: the check the runner runs before it pushes anything; empty = the loop refuses to run
 VERIFY_TIMEOUT='900'       # seconds
 SETUP_CMD=''               # run in each issue worktree before the worker (install deps, create a database, ...)
