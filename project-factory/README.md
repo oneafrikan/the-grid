@@ -37,6 +37,33 @@ handoff shape regardless of stack. That shape lives once, in
   correctness + invariants passes, with this repo's own invariants left as `<fill>` markers.
 - `prompts/autonomous-coding-loop.template.md` — the pre-flight/`{{VERIFY_CMD}}`
   gap `issue-loop` leaves to the project.
+- `PURPOSE.md`, `GUARDRAILS.md`, `BEHAVIOUR.md` — the charter files (see below), as `<fill>` stubs.
+- `signals/README.md`, `knowledge/README.md`, `knowledge/canon/.gitkeep` — the signal and knowledge conventions.
+- `scripts/map.py` — generates `MAP.md`; a byte-identical mirror of the-grid's `scripts/map.py`.
+- `.githooks/pre-commit` — a shim that runs `python3 scripts/map.py --check` (no CI job is seeded).
+
+### Charter files — what a cold agent reads first
+
+Every cut project gets a small set of files so an agent that knows nothing about the
+project learns its purpose, limits and layout from about three short reads:
+
+- `PURPOSE.md` is the problem, the intended solution and the outcome. `GUARDRAILS.md` lists
+  the must-nots, one `G<n>` line each, with how each is checked. `BEHAVIOUR.md` lists only
+  this project's additions to the grid-wide agent defaults.
+- `MAP.md` is **generated, not copied**: `cut-project.sh` runs the target's own
+  `scripts/map.py` after the copy, and only when `MAP.md` did not exist. If `python3` is
+  missing it prints `run: python3 scripts/map.py` instead and still exits 0.
+- A `CLAUDE.md` trailhead block (`trailhead.md`, between `<!-- charter-trailhead -->` markers)
+  tells the agent what to read when. The four templates carry it. A retrofit never has its
+  `CLAUDE.md` edited: if it lacks the marker, the block is printed for you to paste.
+- A seed sets `core.hooksPath=.githooks` so the shim is armed. A retrofit never touches git
+  config; it prints `git config core.hooksPath .githooks`.
+- `scripts/map.py` is canonical in the-grid repo; the copy here is mirrored and a bats test
+  compares them with `cmp`, so change the canonical one and copy it over.
+- `RELATED.md` is optional and never seeded by default. `cut-project.sh --with-related`
+  copies [`related.md`](related.md) (a short list of neighbouring projects) to `RELATED.md`
+  under the same never-overwrite rule. Name only repos at the same or greater privacy; that
+  rule is checked by a human, nothing here verifies it.
 
 ### `SPECS.md` — spec-driven development, on by default
 
@@ -125,12 +152,13 @@ see its own `README.md`.
 ## Usage
 
 ```bash
-bash ~/.the-grid/project-factory/scripts/cut-project.sh <template> <target-dir>
+bash ~/.the-grid/project-factory/scripts/cut-project.sh [--with-related] <template> <target-dir>
 ```
 
 Mode (seed vs. retrofit) is auto-detected from whether `<target-dir>` already has
 files — no flag to remember. Safe to re-run: re-running after a partial retrofit
-only adds whatever's still missing.
+only adds whatever's still missing. The one flag, `--with-related`, is optional and
+may sit anywhere among the arguments (see Charter files above).
 
 ## Roadmap
 

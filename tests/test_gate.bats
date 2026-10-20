@@ -408,6 +408,17 @@ mk_plugin_tree() {
   grep -qx 'hooks/scripts/x.sh' "$G/shellcheck.args"
 }
 
+# change charter-files: the pre-commit shim every cut project receives is linted by the gate.
+@test "lint check: shellcheck is given the _common .githooks pre-commit shim" {
+  mkdir -p "$G/project-factory/templates/_common/.githooks"
+  : > "$G/project-factory/templates/_common/.githooks/pre-commit"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/shellcheck.args"\nexit 0\n' "$G" > "$G/stubbin/shellcheck"
+  chmod +x "$G/stubbin/shellcheck"
+  run run_gate
+  [ "$status" -eq 0 ]
+  grep -qx 'project-factory/templates/_common/.githooks/pre-commit' "$G/shellcheck.args"
+}
+
 # --- the quarantined issue-loop is excluded from lint (WP-043) --------------------------------
 # _retired/ holds the abandoned loop, archived byte-for-byte with stale paths. The gate must
 # never hand it to shellcheck (it would be linted at its archived paths and rot the gate), and
@@ -537,6 +548,7 @@ arm_checks() {
   # the venv python: records its args, fails --lint-roles / --check through rc/lint-roles, rc/compose-check
   printf '#!/usr/bin/env bash\necho "$*" >> "%s/venv.log"\ncase "$*" in\n  *--lint-roles*) [ -f "%s/rc/lint-roles" ] && exit "$(cat "%s/rc/lint-roles")" ;;\n  *--check*) [ -f "%s/rc/compose-check" ] && exit "$(cat "%s/rc/compose-check")" ;;\nesac\nexit 0\n' "$G" "$G" "$G" "$G" "$G" > "$G/agent-factory/.venv/bin/python"
   : > "$G/scripts/budget.py"; : > "$G/scripts/rules.py"; : > "$G/scripts/build-plugins.py"; : > "$G/scripts/grid"
+  : > "$G/scripts/map.py"
   printf '#!/usr/bin/env bash\n[ -f "%s/rc/personas" ] && exit "$(cat "%s/rc/personas")"\nexit 0\n' "$G" "$G" > "$G/scripts/build-personas.sh"
   # catalog.sh and sources.sh record the baseline pin / args they were run with (WP-046)
   {
@@ -562,7 +574,7 @@ arm_checks() {
   # `compose` does not hide behind `compose-core`)
   local list n
   list=" $(skipped_list) "
-  for n in lock budget rules catalog sources plugins personas audit compose; do
+  for n in lock budget rules map catalog sources plugins personas audit compose; do
     case "$list" in *" $n "*) echo "check '$n' was skipped, not run: $list" >&3; return 1 ;; esac
   done
 }
@@ -585,6 +597,40 @@ arm_checks() {
   run run_gate
   [ "$status" -eq 1 ]
   [[ "$output" == *"gate: FAIL — rules"* ]] || false
+}
+
+# --- map check (change charter-files): a stale MAP.md fails the commit gate ------------------
+@test "a stale MAP.md (map.py --check exits 1) fails the gate and names map" {
+  arm_checks
+  echo 1 > "$G/rc/map.py"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — map"* ]] || false
+}
+
+@test "map.py --check exiting 2 (an error) also fails the gate" {
+  arm_checks
+  echo 2 > "$G/rc/map.py"
+  run run_gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — map"* ]] || false
+}
+
+@test "map check: python3 hidden from PATH is a loud, recorded skip of map" {
+  # the stub PATH has no python3 unless a test links one in; scripts/map.py is present
+  : > "$G/scripts/map.py"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python3 or scripts/map.py absent"* ]] || false
+  [[ " $(skipped_list) " == *" map "* ]] || false
+}
+
+@test "map check: scripts/map.py absent is a loud, recorded skip of map" {
+  arm_checks
+  rm "$G/scripts/map.py"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ " $(skipped_list) " == *" map "* ]] || false
 }
 
 @test "a failing catalog check fails the gate and names catalog" {
