@@ -1,6 +1,6 @@
 # Tasks
 
-Stages: **B1** groups 1-8 (runner, hooks, config, seed, migration, end-to-end proof), **B2** groups 9-10 (waker), **B3** groups 11-12 (backoff, stale lock). Order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12. B2 may merge before B3, but the cron line stays UNINSTALLED until group 12 passes (D11); the target poll is 15 minutes with a 60-minute floor until then. All `wake.sh` and cron-line work is in B2 (groups 9-10); B1 contains none of it.
+Stages: **B1** groups 1-8 (runner, hooks, config, seed, migration, end-to-end proof), **B2** groups 9-10 (waker), **B3** groups 11-12 (backoff, stale lock). Order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12. The waker was built as a per-repo cron line (`loop/cron-run.sh`, `instantiate.sh --cron-every N`), not `wake.sh`, and backoff and stale-lock takeover are built, so the 60-minute floor and the "uninstalled until group 12 passes" wording (D11) are dropped from the README and `instantiate.sh` output; the target poll is 15 minutes. The HUMAN proofs (groups 10 and 12) are not done, and the poison-issue rule (11.2) is not built. Group 13 records what was built beyond this plan.
 
 Preconditions: `next` is merged into `main`; the loop does not exist yet, so every group is built by a worktree agent and merged by the operator. PRs target the integration branch (`next`; UNVERIFIED whether that changes after the merge). No group assumes `loop/` exists in the-grid, and no group touches a live GitHub repo, the real crontab, `~/.claude/settings.json`, or any machine other than a temp dir, except the HUMAN items in groups 8, 10 and 12 (throwaway repo only) and the opt-in e2e test in group 8 (real `claude`, temp local repos, `GRID_E2E=1`).
 
@@ -119,15 +119,15 @@ Spec: `loop-runner` (scripted scenarios), `loop-hooks`.
 
 ## 9. B2: Waker
 
-Files: new `automation-factory/patterns/issue-loop/wake.sh`, `scripts/lib/render-schedule.sh` (additive `every:N`), `tests/test_render_schedule.bats` (add cases), new `tests/test_issue_loop_waker.bats`, `scripts/instantiate.sh` (print the cron line, copy `wake.sh`), pattern README (waker section).
+Files as built: new `automation-factory/patterns/issue-loop/cron-run.sh` (replaces the planned `wake.sh`), `scripts/lib/render-schedule.sh` (additive `every:N`), `scripts/instantiate.sh` (`--cron-every`, `--cron-log`), pattern README ("Unattended" section), and `tests/test_issue_loop_cron_verify.bats` (replaces the planned `test_issue_loop_waker.bats`).
 Spec: `loop-waker`.
 
-- [ ] 9.1 `render-schedule.sh`: `_rs_parse_schedule` accepts `every:N` (1..59); `render_crontab_line` emits `*/N`; the systemd and launchd renderers return 2 "every: is cron-only". Daily/weekly output byte-identical.
-- [ ] 9.2 `wake.sh` per spec (lock check without importing the runner; `gh issue list --repo "$ISSUE_REPO" --json number`; `exec bash loop/run-issue.sh`).
-- [ ] 9.3 `instantiate.sh` (B2 addition): copy `wake.sh` into `loop/`, add `--waker-interval N` (default 15), print the rendered line, the `crontab -e` instruction and the sentence "do not install until B3 passes; until then use an interval of at least 60 minutes"; never run `crontab`.
-- [ ] 9.4 Tests: all `loop-waker` scenarios with stub `gh`, stub `crontab` that fails if called, stub `run-issue.sh` recording its pid; the existing render-schedule, usage and instincts schedule tests pass unmodified.
-- [ ] 9.5 README waker section with the stripped-environment command, the 15-minute target, the 60-minute floor and "uninstalled until B3 passes".
-- Acceptance: `bats tests/test_issue_loop_waker.bats tests/test_render_schedule.bats tests/test_usage_schedule.bats tests/test_instincts_schedule.bats` passes.
+- [x] 9.1 `render-schedule.sh`: `_rs_parse_schedule` accepts `every:N` (1..59); `render_crontab_line` emits `*/N`; the systemd and launchd renderers return 2 "every: is cron-only". Daily/weekly output byte-identical.
+- [x] 9.2 Built as `cron-run.sh` instead of `wake.sh`: sources `loop/cron.env`, `cd`s to the repo, `exec bash loop/run-issue.sh`. No `gh issue list` pre-check: the runner's lock, backoff and empty-queue exit do that job (see `loop-waker`).
+- [x] 9.3 `instantiate.sh`: `--cron-every N` (pr mode, 1-59) and `--cron-log` print one crontab line per repo plus the idempotent command that adds it, and write the gitignored `loop/cron.env`; never runs `crontab`. No `--waker-interval`, and no "do not install until B3" sentence (backoff and stale lock now exist).
+- [x] 9.4 Tests in `tests/test_issue_loop_cron_verify.bats`: `every:N` render (valid, 0, 60, junk, systemd refuses), `--cron-every` output and `cron.env`, stub `crontab` never called, no output without the option. Not covered: a stripped-environment run of `cron-run.sh`, the two-ticks race.
+- [x] 9.5 README "Unattended: one cron line per repo" section with the stripped-environment check and the 15-minute poll. The 60-minute floor and "uninstalled until B3 passes" wording is intentionally absent.
+- Acceptance: `bats tests/test_issue_loop_cron_verify.bats tests/test_render_schedule.bats tests/test_usage_schedule.bats tests/test_instincts_schedule.bats` passes.
 - Verify: `bash scripts/gate.sh`
 
 ## 10. B2, HUMAN: Prove the waker on the throwaway repo
@@ -141,13 +141,13 @@ Spec: `loop-waker`.
 
 ## 11. B3: Backoff, poison issue, stale lock
 
-Files: `automation-factory/patterns/issue-loop/run-issue.sh`, `wake.sh` (backoff check line), `tests/test_issue_loop_runner.bats`, `tests/test_issue_loop_waker.bats`, pattern README.
-Spec: `loop-runner` (the two requirements marked B3), `loop-waker` (backoff line).
+Files: `automation-factory/patterns/issue-loop/run-issue.sh`, `tests/test_issue_loop_runner.bats`, pattern README (no `wake.sh` exists).
+Spec: `loop-runner` ("Backoff on infra failure and rate limits", "Stale lock takeover").
 
-- [ ] 11.1 `backoff` state file (`until fails issue issue_fails`), written on infra failure and on a rate-limit signal; deleted on any issue-level outcome; checked at start by `run-issue.sh` and `wake.sh`. Rate-limit pattern list in one commented variable at the top of `run-issue.sh`.
-- [ ] 11.2 Poison rule: third consecutive infra failure on the same issue -> `blocked` with a comment.
-- [ ] 11.3 Stale lock: `kill -0` (ESRCH vs EPERM), `ps -p PID -o command=` contains `run-issue.sh`, pid-less lock older than 10 minutes (use a portable mtime comparison: `find LOCK -maxdepth 0 -mmin +10`), atomic `mv` reclaim, removal of the old run's leftover worktree.
-- [ ] 11.4 Tests: all B3 scenarios including the doubling table with a test hook for "now" (`GRID_LOOP_NOW`), the race (two reclaimers in parallel, repeated 20 times), SIGKILL of a stub-worker run, pid reuse (lock names `$$` of the test shell, which is not a runner), and that B1 behaviour (busy exit) is unchanged for a live holder.
+- [x] 11.1 `backoff` state file, written on infra failure (including a worker cut off by a usage or rate limit); deleted on any issue-level outcome and on an empty queue; checked at start by `run-issue.sh` (an explicit issue number ignores it). As built: the file holds `until=<epoch> fails=<n>` only (no `issue`/`issue_fails`), and the rate-limit pattern list is an inline `grep -E` in the no-outcome branch, not a variable at the top.
+- [ ] 11.2 NOT BUILT (another agent is building it). Poison rule: third consecutive infra failure on the same issue -> `blocked` with a comment.
+- [x] 11.3 Stale lock takeover: `ps -p PID` finds no process, or its command line lacks `run-issue.sh`; atomic `mv` to `lock.stale.$$` then `mkdir`; logs "took over a stale lock". Not built, and left out of the spec: the pid-less lock older than 10 minutes rule (`find LOCK -maxdepth 0 -mmin +10`; such a lock is treated as busy), `kill -0` EPERM handling (`ps -p` is used), and removal of another issue's leftover worktree.
+- [ ] 11.4 Tests, partly done: the doubling (first two windows), inside-window quiet exit, reset, usage-limit backoff, dead-pid takeover and pid-reuse takeover are in `tests/test_issue_loop_runner.bats`. Still missing: the `GRID_LOOP_NOW` hook and the full doubling table with the 6 h cap mutation, the parallel-reclaim race, a SIGKILL of a real stub-worker run, and the poison scenario. Original list: all B3 scenarios including the doubling table with a test hook for "now" (`GRID_LOOP_NOW`), the race (two reclaimers in parallel, repeated 20 times), SIGKILL of a stub-worker run, pid reuse (lock names `$$` of the test shell, which is not a runner), and that B1 behaviour (busy exit) is unchanged for a live holder.
 - Acceptance: the B3 cases pass; the B1 cases still pass; the doubling test fails if `min(..., 6h)` is removed (mutate and paste).
 - Verify: `bash scripts/gate.sh`
 
@@ -156,5 +156,16 @@ Spec: `loop-runner` (the two requirements marked B3), `loop-waker` (backoff line
 - [ ] 12.1 Kill -9 a running `run-issue.sh` (worker mid-flight); start `wake.sh`; observe "reclaimed stale lock" and a completed run. Confirm no orphan `claude` process (`ps`) or, if one remains, record it as the documented R10.qa.F10 gap.
 - [ ] 12.2 Backoff with a fake `claude`: set `GRID_CLAUDE` to a script that exits 1; run twice; observe the second run exit 0 "backing off until", no `gh` write; a third failure on the same issue (using `GRID_LOOP_NOW` or a hand-edited `until`) marks it `blocked`.
 - [ ] 12.3 Capture one real rate-limit sample if one occurs naturally (do not provoke one); paste the text/JSON, and set the pattern list from it. Until a sample exists the signal list is UNVERIFIED and unknown errors fall back to the generic infra backoff.
-- [ ] 12.4 Remove the "do not install until B3 passes / 60-minute floor" sentence from `instantiate.sh` output and the README only now (a small follow-up PR), keeping the 15-minute default. Delete the throwaway repo. Operator then decides whether to install a waker for a real repo (and the-grid cut is a separate step, see `loop-migration`).
+- [ ] 12.4 (The sentence removal is done: the "do not install until B3 passes / 60-minute floor" wording is gone from the README and `instantiate.sh` output, without the group 12 proof. Still open:) Delete the throwaway repo after the proof; keep the 15-minute default. Delete the throwaway repo. Operator then decides whether to install a waker for a real repo (and the-grid cut is a separate step, see `loop-migration`).
 - Acceptance: pasted output for 12.1-12.3.
+
+## 13. Built beyond the original plan
+
+Added after the groups above, each with tests in `tests/test_issue_loop_runner.bats`, `tests/test_instantiate.bats` or `tests/test_issue_loop_cron_verify.bats`. Specs: `loop-runner`, `loop-waker`.
+
+- [x] 13.1 Headless `MODE=direct`: after the runner's own verify, rebase onto the base (re-verify if it moved), push to `BASE_BRANCH` without force, comment the sha, relabel `ready-for-human`, close the issue. Rebase conflict or rejected push: `blocked`, work kept on local `issue-N`. `instantiate.sh --mode direct` ships no runner, so headless direct is selected by `MODE=direct` in `loop.conf` of a `pr` cut.
+- [x] 13.2 `MAX_ISSUES_PER_DAY=0` means unlimited and is the default.
+- [x] 13.3 Infra failures keep the label (exit 1) and back off; a failing `gh pr list`/`ls-remote` or unreadable issue is infra; an issue number that is a pull request is refused (exit 2).
+- [x] 13.4 `--fast-verify` and `loop/verify.sh` (changed-files check; an explicit `--verify-cmd` wins).
+- [x] 13.5 `MODE=pr` opens draft PRs; a cross-repo PR title is the fixed `issue-loop: work for <tracker>#N`.
+- [x] 13.6 A timed-out worker's uncommitted work is saved as a WIP commit on local `issue-N`; a worker that wrote its outcome but never exits is stopped after `WORKER_EXIT_GRACE`.
