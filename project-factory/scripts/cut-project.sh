@@ -14,9 +14,9 @@
 #   - target exists with files                       -> RETROFIT
 #
 # Every cut lays down templates/_common/ (session-continuity scaffolding every
-# project needs: CONTEXT.md, LEARNINGS.md, handoffs/, the issue-loop pairing
-# prompt) followed by templates/<template>/ (the stack-specific pieces). Both
-# passes run the exact same copy rule: NEVER overwrite a file that already
+# project needs: CONTEXT.md, LEARNINGS.md, handoffs/, and the opt-in issue-loop
+# seed loop/loop.conf.seed + loop/ENABLE.md) followed by templates/<template>/
+# (the stack-specific pieces). Both passes run the exact same copy rule: NEVER overwrite a file that already
 # exists in the target and differs from the source. Retrofitting is
 # additive-only — anything skipped is listed at the end so you can review and
 # merge it by hand. A fresh (seed-mode) target is `git init`'d if it isn't a
