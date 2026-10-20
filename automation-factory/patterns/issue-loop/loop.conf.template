@@ -20,6 +20,6 @@ WORKER_EXIT_GRACE=${WORKER_EXIT_GRACE:-'30'}     # seconds a worker may keep run
 WORKER_PERMISSIONS=${WORKER_PERMISSIONS:-{{WORKER_PERMISSIONS}}}   # allowlist | bypass (bypass = --dangerously-skip-permissions; a fallback only, see the README)
 # Tools the headless worker may use (passed as --allowedTools). No git push, no gh. Append the project's test commands.
 WORKER_ALLOWED_TOOLS=${WORKER_ALLOWED_TOOLS:-{{WORKER_ALLOWED_TOOLS}}}
-MAX_ISSUES_PER_DAY=${MAX_ISSUES_PER_DAY:-{{MAX_ISSUES_PER_DAY}}}   # daily cap on issues handled
+MAX_ISSUES_PER_DAY=${MAX_ISSUES_PER_DAY:-{{MAX_ISSUES_PER_DAY}}}   # daily cap on issues handled; 0 = unlimited
 TRUST_GATE=${TRUST_GATE:-{{TRUST_GATE}}}         # on | off: on = only OWNER/MEMBER/COLLABORATOR issues and comments are read
 RUN_ROLE=${RUN_ROLE:-{{RUN_ROLE}}}              # run-record role when the issue has no agent:<name> label
