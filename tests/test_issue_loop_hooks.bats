@@ -780,3 +780,44 @@ SH
   done
   refute grep -niE 'retired|quarantin|abandoned' "$PAT_DIR/README.md"
 }
+
+# A guard that exits at once without reading its stdin must be judged by ITS OWN exit code. The old
+# self-test piped `jq | guard` under pipefail: when the guard exited before jq wrote, jq got EPIPE (exit
+# 2) and the pipeline status 2 was read as "the guard blocked it" (a broken guard could pass, and an
+# allowed command could look blocked). It needs SIGPIPE ignored (CI runners start jobs that way, so jq
+# reports EPIPE and exits 2 instead of dying by the signal): the jq wrapper ignores it and sleeps, so
+# the race is lost every time.
+slow_jq() {
+  mkdir -p "$T/slowbin"
+  real="$(command -v jq)"
+  printf '#!/bin/bash\ntrap "" PIPE\nsleep 0.3\nexec "%s" "$@"\n' "$real" > "$T/slowbin/jq"
+  chmod +x "$T/slowbin/jq"
+  export PATH="$T/slowbin:$PATH"
+}
+
+@test "setup: a guard that never blocks and never reads its input is reported as not blocking (no EPIPE mix-up)" {
+  install_clone "$T/race"
+  printf '#!/bin/bash\nexit 0\n' > "$T/race/loop/hooks/guard-main-push.sh"
+  slow_jq
+  run bash "$T/race/loop/setup.sh"
+  [ "$status" -ne 0 ]
+  contains "$output" "did NOT block"
+  lacks "$output" "guard blocked"
+}
+
+@test "setup: a guard that blocks everything without reading its input is reported as blocking an allowed push" {
+  install_clone "$T/race2"
+  printf '#!/bin/bash\nexit 2\n' > "$T/race2/loop/hooks/guard-main-push.sh"
+  slow_jq
+  run bash "$T/race2/loop/setup.sh"
+  [ "$status" -ne 0 ]
+  contains "$output" "guard blocked 'git push -u origin issue-1'"
+}
+
+@test "setup: the real guard still passes the self-test with a slow jq" {
+  install_clone "$T/race3"
+  slow_jq
+  run bash "$T/race3/loop/setup.sh"
+  [ "$status" -eq 0 ]
+  contains "$output" "Guard self-test passed"
+}
