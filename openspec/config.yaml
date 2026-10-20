@@ -31,8 +31,12 @@ rules:
     - Include a "Non-goals" section.
     - Name the use case for any new asset type.
   tasks:
-    - Each "## N." group must be independently implementable by an unattended
+    # Folded block scalars (>-): the text contains ": " which a plain scalar
+    # would parse as a mapping key.
+    - >-
+      Each "## N." group must be independently implementable by an unattended
       agent in one PR: list files to touch, the acceptance test, and the verify
       command (default: bash scripts/gate.sh).
-    - Record every judgement call as "Decided:" in design.md so the implementer
+    - >-
+      Record every judgement call as "Decided:" in design.md so the implementer
       never has to choose. Tasks needing human taste say "HUMAN:" in the title.
