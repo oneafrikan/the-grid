@@ -36,6 +36,16 @@ done
 
 cd "$GRID_DIR"
 
+# 0. Warn (never fail, never change config) when the global git email is empty
+#    or not a GitHub noreply address: GitHub rejects pushes that expose a
+#    private address. Only the users.noreply.github.com suffix is tested.
+git_email="$(git config --global user.email 2>/dev/null || true)"
+if [[ "$git_email" != *@users.noreply.github.com ]]; then
+  echo "WARN: global git user.email is ${git_email:-unset}, not a GitHub noreply address." >&2
+  echo "WARN: commits would publish it, and GitHub blocks pushes that expose a private address. Run:" >&2
+  echo "WARN:   git config --global user.email \"<id>+<login>@users.noreply.github.com\"" >&2
+fi
+
 # 1. Sync every skill submodule to the pointer this commit records.
 echo "==> [1/4] Syncing submodules (git submodule update --init --recursive)"
 git submodule update --init --recursive
