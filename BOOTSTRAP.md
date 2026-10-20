@@ -139,6 +139,11 @@ npm install -g @fission-ai/openspec@latest
 #    Dry run prints the command without running it:
 bash ~/.the-grid/scripts/runtime-setup.sh gstack --dry-run
 bash ~/.the-grid/scripts/runtime-setup.sh gstack
+
+# 9. Before your first commit or push: set the global git email to your GitHub
+#    noreply address (<id>+<login>@users.noreply.github.com), or GitHub rejects
+#    the push. scripts/bootstrap.sh warns when it is unset or not a noreply.
+git config --global user.email "<id>+<login>@users.noreply.github.com"
 ```
 
 Skills are live after step 4. Agents (subagents + orchestrator skills) are live after step 6.

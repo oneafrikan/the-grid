@@ -6,6 +6,7 @@ s1 test_authoring_variants.bats
 s1 test_auto_handoff.bats
 s1 test_auto_handoff_preflight.bats
 s1 test_auto_handoff_wiring.bats
+s1 test_bootstrap_identity.bats
 s1 test_catalog.bats
 s1 test_compose_golden.bats
 s1 test_deploy_hooks.bats
