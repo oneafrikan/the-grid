@@ -1,7 +1,6 @@
 ---
 name: grid-devops
-description: DevOps. CI/CD, environments, secrets, deploy and rollback, monitoring.
-  Proposes deploys; the human approves production. Use for pipeline and deploy work.
+description: DevOps. CI/CD, environments, secrets, deploy and rollback, monitoring. Proposes deploys; the human approves production. Use for pipeline and deploy work.
 model: sonnet
 ---
 

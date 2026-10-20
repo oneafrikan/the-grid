@@ -1,6 +1,5 @@
 ---
-description: Fixture fx-readonly. Fixture role fx-readonly. Use this subagent for
-  fx-readonly work.
+description: Fixture fx-readonly. Fixture role fx-readonly. Use this subagent for fx-readonly work.
 mode: subagent
 permission:
   edit: deny

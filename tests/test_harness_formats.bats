@@ -493,7 +493,8 @@ gemini_roles() {
   local g="$TMP/g/fx/_gemini-cli/agents/fx-fx-readonly.md" c="$TMP/c/fx/_claude-code/agents/fx-fx-readonly.md"
   # Everything after the closing frontmatter fence.
   [ "$(awk 'f{print} /^---$/{n++; if(n==2) f=1}' "$g")" = "$(awk 'f{print} /^---$/{n++; if(n==2) f=1}' "$c")" ]
-  [ "$(grep -A1 '^description:' "$g")" = "$(grep -A1 '^description:' "$c")" ]
+  # Descriptions are one line (the dumper no longer folds), so no -A1 continuation line.
+  [ "$(grep '^description:' "$g")" = "$(grep '^description:' "$c")" ]
 }
 
 # ---------------------------------------------------------------- real roles, every target

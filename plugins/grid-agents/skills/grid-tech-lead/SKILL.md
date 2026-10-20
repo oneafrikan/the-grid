@@ -1,7 +1,6 @@
 ---
 name: grid-tech-lead
-description: Tech Lead. PRDs, architecture decisions, handing off to specialists and
-  reviewing their output. Use to coordinate a multi-step dev-team feature.
+description: Tech Lead. PRDs, architecture decisions, handing off to specialists and reviewing their output. Use to coordinate a multi-step dev-team feature.
 ---
 
 # Tech Lead

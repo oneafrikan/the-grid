@@ -1,8 +1,6 @@
 ---
 name: grid-sdet
-description: 'SDET. Test infrastructure: suites, fixtures, isolation, contract tests,
-  mocks for external and LLM calls, flaky-test diagnosis, eval harness. Use for test
-  tooling, not pass/block calls.'
+description: 'SDET. Test infrastructure: suites, fixtures, isolation, contract tests, mocks for external and LLM calls, flaky-test diagnosis, eval harness. Use for test tooling, not pass/block calls.'
 model: sonnet
 ---
 

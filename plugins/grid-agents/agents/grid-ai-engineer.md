@@ -1,8 +1,6 @@
 ---
 name: grid-ai-engineer
-description: 'AI Engineer. The LLM runtime around prompts: token budgets, caching,
-  model choice, structured-output plumbing, failure handling, agent loops, tools/MCP,
-  retrieval, cost tracking. Use for LLM runtime work.'
+description: 'AI Engineer. The LLM runtime around prompts: token budgets, caching, model choice, structured-output plumbing, failure handling, agent loops, tools/MCP, retrieval, cost tracking. Use for LLM runtime work.'
 model: sonnet
 ---
 

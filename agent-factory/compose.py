@@ -650,7 +650,10 @@ def inject_roster(agents_md: str, agent: dict, slug: str | None = None) -> str:
 
 def _frontmatter(fields: dict) -> str:
     """A YAML frontmatter block (--- ... ---) from an ordered dict of fields."""
-    return "---\n" + yaml.safe_dump(fields, sort_keys=False, default_flow_style=False).strip() + "\n---\n"
+    # Huge width: PyYAML folds long strings at 80 cols into multi-line scalars, which the audit
+    # scanner flags as `frontmatter-complex`. One line per field keeps frontmatter plain.
+    return "---\n" + yaml.safe_dump(fields, sort_keys=False, default_flow_style=False,
+                                    width=2**31 - 1).strip() + "\n---\n"
 
 
 def _flattened_identity(agent: dict, slug: str | None = None) -> str:

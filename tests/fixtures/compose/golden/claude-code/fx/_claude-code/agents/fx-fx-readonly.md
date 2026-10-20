@@ -1,7 +1,6 @@
 ---
 name: fx-fx-readonly
-description: Fixture fx-readonly. Fixture role fx-readonly. Use this subagent for
-  fx-readonly work.
+description: Fixture fx-readonly. Fixture role fx-readonly. Use this subagent for fx-readonly work.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
