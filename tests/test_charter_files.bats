@@ -288,7 +288,9 @@ TEMPLATES="finance-agents-base lamp-agents-base python-agents-base python-astro-
 @test "template signals/README.md and knowledge/README.md: own-repo wording, honest sweep status, restated vocabulary" {
   s="$REPO_ROOT/$COMMON/signals/README.md"
   k="$REPO_ROOT/$COMMON/knowledge/README.md"
-  [ -f "$s" ] && [ -f "$k" ] && [ -f "$REPO_ROOT/$COMMON/knowledge/canon/.gitkeep" ]
+  [ -f "$s" ]
+  [ -f "$k" ]
+  [ -f "$REPO_ROOT/$COMMON/knowledge/canon/.gitkeep" ]
   for f in "$s" "$k"; do
     grep -qi 'own repo' "$f"
     grep -qi 'no sweep runs' "$f"

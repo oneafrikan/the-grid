@@ -104,7 +104,9 @@ EOF
   o=$(grep -n '^## Ontology$' "$R/MAP.md" | cut -d: -f1)
   t=$(grep -n '^## Topology$' "$R/MAP.md" | cut -d: -f1)
   e=$(grep -n '^## Epistemology$' "$R/MAP.md" | cut -d: -f1)
-  [ -n "$o" ] && [ -n "$t" ] && [ -n "$e" ]
+  [ -n "$o" ]
+  [ -n "$t" ]
+  [ -n "$e" ]
   [ "$o" -lt "$t" ]
   [ "$t" -lt "$e" ]
 }
