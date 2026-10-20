@@ -86,9 +86,10 @@ By default (`WORKER_PERMISSIONS=allowlist`) the worker SHALL be started with `--
 #### Scenario: Allowlist proof (needs a real `claude`; decides the fallback)
 - **WHEN** the opt-in e2e test runs a normal edit, test and commit task under `--allowedTools`
 - **THEN** it completes with no permission prompt and no push; if it cannot under `--allowedTools` alone, `--permission-mode acceptEdits` and `--permission-mode dontAsk`, the result is recorded and the operator decides on `bypass`
+- **RESULT (B1, RAN):** `--allowedTools` alone completes it, as does `acceptEdits`; `dontAsk` does not. No fallback is needed and the runner passes no `--permission-mode` by default. An unlisted Bash command is denied without a prompt or a hang, which also denies the project's own verify command and any command the operator's global rules trigger unless `WORKER_ALLOWED_TOOLS` names it
 
 ### Requirement: Gates before any model call
-Before a worktree is created the runner SHALL refuse the issue (relabel, comment, run-record `skipped`, exit 0) when: it also carries `severity:critical` or `severity:high`; an open PR or a remote branch `issue-N` already exists; or `TRUST_GATE=on` and the issue author's `author_association` is not OWNER, MEMBER or COLLABORATOR. A null or failed API answer SHALL count as untrusted.
+Before a worktree is created the runner SHALL refuse the issue (relabel, comment, run-record `skipped`, exit 0) when: it also carries `severity:critical` or `severity:high`; an open PR or a remote branch `issue-N` already exists; or `TRUST_GATE=on` and the issue author's `author_association` is not OWNER, MEMBER or COLLABORATOR. A null or empty `author_association` SHALL count as untrusted. (B1: a failed `gh api` read of the issue itself is an infrastructure failure, exit 1 with the label kept, because the labels cannot be read either; a failed comments read means no Agent Brief is shown.)
 
 #### Scenario: High severity
 - **WHEN** an issue carries `ready-for-agent` and `severity:high`

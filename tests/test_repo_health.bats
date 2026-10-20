@@ -23,6 +23,7 @@ SANDBOX_EXCEPTIONS=(
   "test_depersonalise.bats|read-only git ls-files/grep of the repo; writes nothing"
   "test_docs_factories.bats|read-only grep of tracked docs; writes nothing"
   "test_instincts_analyse.bats|HOME, state and learning dirs under BATS_TEST_TMPDIR, stubbed claude"
+  "test_issue_loop_e2e.bats|opt-in (GRID_E2E=1) and skipped by default; real claude with the real ~/.claude on purpose (task 8.4 needs the global rules); origin, clone and the gh stub live in temp dirs"
   "test_instincts_capture.bats|state and learning dirs env-redirected under BATS_TEST_TMPDIR"
   "test_instincts_desk.bats|text assertions on role files plus one run on a temp fixture store"
   "test_instincts_eval.bats|HOME under BATS_TEST_TMPDIR, stubbed claude"

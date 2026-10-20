@@ -14,6 +14,7 @@ Edit `loop/loop.conf.seed` (it seeds the real config), then cut the loop in:
 4. `ISSUE_LABEL`: the label that opts an issue in (default `ready-for-agent`).
 5. The three caps: `MAX_BUDGET_USD` (spend per issue), `ISSUE_TIMEOUT` (seconds per issue), `MAX_ISSUES_PER_DAY`.
 6. `SETUP_CMD`: whatever a fresh worktree needs before work starts (dependencies, a database). Project specific; blank if nothing.
+7. `WORKER_ALLOWED_TOOLS`: the worker is denied every command not listed, so add the ones your `VERIFY_CMD` and tests run.
 
 Also put branch protection on the base branch. The loop is not the security boundary, review of the PR is.
 
