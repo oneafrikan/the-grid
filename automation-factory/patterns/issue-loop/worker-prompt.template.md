@@ -12,6 +12,7 @@ BEFORE YOU EDIT
 - If GUARDRAILS.md exists, read it before you edit any file or commit.
 - Make ONLY the changes the issue requires. Do not refactor, reformat or "improve" unrelated code.
 - Run only the tests you added or changed (for example `bats -f '<name>' <file>`), never a whole test file. Never start background watchers or `sleep`-poll loops; write the outcome file and stop.
+- Add a test only when your change alters behaviour and no test covers it, and then one test at most per behaviour. Do not add tests for wording, docs or refactors unless the issue asks.
 
 WHAT YOU MAY DO
 - Read, edit and write files in the working directory; run the project's checks and tests; use git to add, commit, diff, log and show.

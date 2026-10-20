@@ -85,6 +85,7 @@ Order of events:
 5. A worktree off `origin/<base>`, `SETUP_CMD`, then the worker: `claude -p` with `--model`, `--max-budget-usd`, `--output-format json`, `--allowedTools`, a per-run `--settings` file holding only the guard, `--session-id` and `-n issue-<N>`, under `timeout -k 30 ISSUE_TIMEOUT`.
 6. Git-state check (on `issue-<N>`, clean, at least one commit ahead), then the **runner runs `VERIFY_CMD` itself**. The worker's own `done` never substitutes for it.
 7. Push `HEAD:refs/heads/issue-<N>` (never the base), `gh pr create`, swap labels, comment the PR URL, one `run-record.sh` line. The issue stays open.
+   The PR is opened as a draft: CI does not run until it is marked ready for review, and the operator marks it ready (`gh pr ready <n>`) when it is time to merge.
 
 Outcomes:
 
