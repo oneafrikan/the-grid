@@ -162,6 +162,9 @@ Label an issue `agent:<name>` (for example `agent:grid-backend-dev`) and the wor
 - On BOTH parsers a merge made through `gh api graphql` (a `mergePullRequest` mutation) is not recognised; only `gh pr merge` and `gh api` calls with `/merge` or a PUT, PATCH or DELETE method are.
 - A SIGKILL of the runner orphans the worker process. The next run takes over the stale lock but does not stop the orphan.
 - With `WORKER_PERMISSIONS=bypass` the worker can run any `gh` call the guard does not block.
+- The runner runs `VERIFY_CMD` on worker-authored files (for example a conftest) as the operator, outside the allowlist and guard.
+- The failing-gate tail (3000 bytes) is posted to the tracker; if the tracker is public and the code repo is private, private output leaks.
+- Issue text is in the worker argv, so it is visible via `ps` to local users.
 
 ## What the worker can and cannot do
 
