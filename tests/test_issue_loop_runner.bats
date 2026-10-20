@@ -793,7 +793,9 @@ add_agent() {
   [ "$status" -eq 0 ]
   git -C "$ORIGIN" rev-parse --verify -q refs/heads/issue-4
   [ "$(gh_lines | grep -c 'gh pr create')" -eq 1 ]
-  has_gh "gh pr create --repo owner/name --base next --head issue-4"
+  has_gh "gh pr create --draft --repo owner/name --base next --head issue-4"
+  # the PR is a draft so CI stays off until the operator marks it ready
+  contains "$(grep '^gh pr create' "$STUB_LOG")" " --draft "
   has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label ready-for-human"
   contains "$(cat "$STUB_COMMENTS")" "https://github.com/owner/name/pull/101"
   refute has_gh "gh issue close"
@@ -866,7 +868,7 @@ EOF
   has_gh "gh issue edit 4 --repo owner/tracker --remove-label ready-for-agent --add-label ready-for-human"
   has_gh "gh issue comment 4 --repo owner/tracker"
   has_gh "gh pr list --repo owner/name --head issue-4"
-  has_gh "gh pr create --repo owner/name --base next --head issue-4"
+  has_gh "gh pr create --draft --repo owner/name --base next --head issue-4"
   refute has_gh "gh issue list --repo owner/name"
   refute has_gh "gh issue edit 4 --repo owner/name"
   refute has_gh "repos/owner/name/issues"
@@ -884,7 +886,7 @@ EOF
   run_runner
   [ "$status" -eq 0 ]
   has_gh "gh issue list --repo owner/name"
-  has_gh "gh pr create --repo owner/name"
+  has_gh "gh pr create --draft --repo owner/name"
   contains "$(cat "$STUB_DIR/pr-create.body")" "refs owner/name#4"
 }
 
