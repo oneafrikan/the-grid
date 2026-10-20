@@ -7,11 +7,16 @@
 
 | Path | What | Read when |
 |---|---|---|
+| `PURPOSE.md` | What this project is for: problem, intended solution, outcome | session start |
 | `MAP.md` | This map (generated; do not edit) | session start |
+| `GUARDRAILS.md` | Must-nots, one per line with an ID and how each is checked | before editing, committing or opening a PR |
+| `BEHAVIOUR.md` | This project's additions to the grid-wide agent defaults | before filing a signal or changing how agents work here |
 | `CLAUDE.md` | Conventions and commands for agents | loaded automatically; conventions |
 | `LEARNINGS.md` | Durable lessons from past work | on demand: debugging, or before repeating a past mistake |
 | `openspec/` | Specs (current truth) and in-flight changes | before implementing: specs and in-flight changes |
 | `SKILLS.md` | Generated index of every skill | choosing a skill |
+| `signals/` | Knowledge signals filed by agents and humans; agent handoffs | filing a signal |
+| `knowledge/` | Claims by stage; knowledge/canon/ is human-approved | you need a claim below canon |
 
 ### Roles
 
@@ -24,6 +29,10 @@
 
 - root-owned: caveman, gh-issues-by-severity, grid-help, grill-me, handoff, mine-learnings, openspec-help, rubber-duck, setup-repo-skills, skill-scout, spec-scout, standup, tighten, un-claudish
 - Full index of every skill: `SKILLS.md`
+
+### Knowledge
+
+Entries live under `knowledge/<stage>/`; canon under `knowledge/canon/`. Entries below canon are not listed here (token cap). Counts: `python3 scripts/map.py status`.
 
 ## Topology
 
@@ -40,6 +49,10 @@
 - Sweep: none configured
 
 ## Epistemology
+
+### Canon
+
+No canon entries yet.
 
 ### Memory
 
