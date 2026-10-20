@@ -1,5 +1,4 @@
 # Purpose
-<!-- DRAFT: wording derived from the README and CLAUDE.md intro; pending the operator's review. -->
 
 ## Problem
 
