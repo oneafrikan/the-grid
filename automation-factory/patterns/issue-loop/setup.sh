@@ -111,22 +111,30 @@ SETTINGS=".claude/settings.json"
 # The guard is a mistake-catcher, but one that silently does nothing is worse than none (R10.qa.F1
 # was exactly that). It must block a push of the base branch in the plain, quoted and
 # path-qualified forms (R10.qa.F14) and allow a push of an issue branch.
+# guard_rc <command> — the guard's OWN exit code for a PreToolUse payload naming <command>.
+# The payload goes in through a temp FILE, never a pipe: a guard that exits without reading its
+# input (a stub, a broken guard) would otherwise make the writer die of EPIPE, and under pipefail
+# that writer's status (2 where SIGPIPE is ignored) is indistinguishable from "the guard blocked".
+guard_rc() {
+  local payload rc=0
+  payload="$(mktemp)"
+  jq -n --arg c "$1" --arg d "$REPO_ROOT" '{tool_name:"Bash",tool_input:{command:$c},cwd:$d}' > "$payload"
+  bash "$GUARD_HOOK" < "$payload" >/dev/null 2>&1 || rc=$?
+  rm -f "$payload"
+  printf '%s' "$rc"
+}
 selftest_guard() {
   local base rc form
   base="$( (. loop/loop.conf >/dev/null 2>&1; printf '%s' "${BASE_BRANCH:-main}") 2>/dev/null || true)"
   [ -n "$base" ] || base="main"
   for form in "git push origin $base" "git push origin '$base'" "/usr/bin/git push origin $base"; do
-    rc=0
-    jq -n --arg c "$form" --arg d "$REPO_ROOT" '{tool_name:"Bash",tool_input:{command:$c},cwd:$d}' \
-      | bash "$GUARD_HOOK" >/dev/null 2>&1 || rc=$?
+    rc="$(guard_rc "$form")"
     if [ "$rc" -ne 2 ]; then
       echo "setup.sh: ERROR guard did NOT block '$form' (exit $rc); inspect $GUARD_HOOK" >&2
       exit 1
     fi
   done
-  rc=0
-  jq -n --arg d "$REPO_ROOT" '{tool_name:"Bash",tool_input:{command:"git push -u origin issue-1"},cwd:$d}' \
-    | bash "$GUARD_HOOK" >/dev/null 2>&1 || rc=$?
+  rc="$(guard_rc "git push -u origin issue-1")"
   if [ "$rc" -ne 0 ]; then
     echo "setup.sh: ERROR guard blocked 'git push -u origin issue-1' (exit $rc); inspect $GUARD_HOOK" >&2
     exit 1
