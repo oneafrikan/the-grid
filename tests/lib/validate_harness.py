@@ -172,7 +172,8 @@ def check_skill(path: Path) -> list[str]:
 # The Gemini tool names agent-factory/compose.py GEMINI_TOOLS maps to (stdlib only here, so it
 # cannot import compose). tests/test_harness_formats.bats fails if the two lists drift apart.
 GEMINI_TOOL_NAMES = {"read_file", "read_many_files", "grep_search", "glob", "list_directory",
-                     "run_shell_command", "replace", "write_file", "web_fetch", "google_web_search"}
+                     "run_shell_command", "replace", "write_file", "web_fetch", "google_web_search",
+                     "activate_skill"}
 
 
 @command("gemini-agent")

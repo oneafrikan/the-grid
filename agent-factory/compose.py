@@ -1262,11 +1262,18 @@ def toml_multiline(s: str) -> str:
     return '"""\n' + out + '"""'
 
 
+# Roles whose documented work writes files THROUGH THE SHELL (allowlist has Bash but no
+# Edit/Write). A Codex read-only sandbox also blocks those shell writes and would break them,
+# so they get no sandbox_mode. Every other role without Edit/Write stays read-only.
+# See the mapping table in docs/harnesses.md.
+CODEX_SHELL_WRITERS = frozenset({"finance-sentinel", "data-analyst"})
+
+
 def emit_codex_agent(agent: dict, slug: str) -> tuple[str, str]:
     """A specialist role → one Codex subagent `<name>.toml`. Returns (filename, contents).
 
     Key order is name, description, sandbox_mode (only when the role has a `tools:` allowlist
-    with neither Edit nor Write), developer_instructions. `model` is never written, so Codex
+    with neither Edit nor Write and is not in CODEX_SHELL_WRITERS), developer_instructions. `model` is never written, so Codex
     uses the session's model.
 
     `sandbox_mode = "read-only"` is a best-effort default, NOT an enforced least-privilege
@@ -1280,7 +1287,8 @@ def emit_codex_agent(agent: dict, slug: str) -> tuple[str, str]:
     lines = [f"name = {toml_basic(name)}", f"description = {toml_basic(subagent_description(role))}"]
     tools = role_tools(role)
     if tools and not {"Edit", "Write"} & set(tools):
-        lines.append('sandbox_mode = "read-only"')
+        if role not in CODEX_SHELL_WRITERS:
+            lines.append('sandbox_mode = "read-only"')
     elif tools and "Bash" not in tools:
         # Edit or Write but no Bash: Claude gives this role no shell, Codex cannot say so.
         print(f"warning: role {role} gets a shell on Codex (its allowlist has no Bash, "
@@ -1348,6 +1356,8 @@ GEMINI_TOOLS: dict[str, list[str]] = {
     "Write": ["write_file"],
     "WebFetch": ["web_fetch"],
     "WebSearch": ["google_web_search"],
+    # Gemini CLI's skill tool (geminicli.com/docs/cli/skills: "it calls the `activate_skill` tool").
+    "Skill": ["activate_skill"],
 }
 
 
@@ -2048,6 +2058,12 @@ def main() -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rendered = writers[args.target](name, config, Path(tmp))
             on_disk = args.out / rendered.relative_to(tmp)
+            # Write mode refuses a symlinked project dir (vet_target); --check must too, else a
+            # link to an identical copy reads as "up to date" while a real compose would refuse.
+            if (args.out / name).is_symlink():
+                print(f"STALE '{name}' ({args.target}): {args.out / name} is a symlink, not a dir",
+                      file=sys.stderr)
+                sys.exit(1)
             # The legacy target shares <project>/ with its siblings' _<target> dirs: ignore them.
             problems = diff_trees(rendered, on_disk, skip_top="_" if args.target == "openclaw" else "")
         if problems:

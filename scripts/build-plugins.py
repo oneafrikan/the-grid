@@ -147,7 +147,11 @@ def reject_odd(path):
     if not stat.S_ISDIR(mode):
         raise GuardError(f"{path}: not a regular file or directory")
     # followlinks=False: a linked dir is listed in dirnames but never descended into.
-    for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+    # os.walk swallows scandir errors by default: an unreadable subdir would be skipped, the
+    # guard would pass, and do_write would then delete the tree it could not fully list. Raise.
+    def unreadable(e):
+        raise GuardError(f"{e.filename}: cannot read: {e}")
+    for dirpath, dirnames, filenames in os.walk(path, followlinks=False, onerror=unreadable):
         for n in dirnames + filenames:
             p = os.path.join(dirpath, n)
             m = os.lstat(p).st_mode
