@@ -84,6 +84,23 @@ enable_audit() {
   unset GRID_SKIP_AUDIT
 }
 
+# resolve_deepest <path> — physical (symlink-free) absolute form of <path>, even when the
+# leaf does not exist yet: walk up to the deepest existing directory, resolve that with
+# pwd -P, and re-append the missing tail. A plain `cd <path> && pwd -P || echo <path>` fell
+# back to the raw spelling for a nonexistent path, so a symlinked spelling (macOS /var ->
+# /private/var) or a relative path (cwd inside the real ~/.claude) dodged the guard.
+resolve_deepest() {
+  local p="$1" tail=""
+  case "$p" in /*) ;; *) p="$PWD/$p" ;; esac
+  while [ ! -d "$p" ] && [ "$p" != "/" ]; do
+    tail="/${p##*/}$tail"
+    p="${p%/*}"
+    [ -n "$p" ] || p="/"
+  done
+  p="$(cd "$p" 2>/dev/null && pwd -P || echo "$p")"
+  printf '%s%s' "${p%/}" "$tail"
+}
+
 # Abort the test (loudly) if a wire/catalog/hook target points at the real ~/.claude,
 # ~/.grid or ~/.the-grid-private, or if the claude tripwire has been unset.
 assert_sandboxed() {
@@ -93,10 +110,10 @@ assert_sandboxed() {
   local real d real_dirs r
   real="${REAL_HOME:-$HOME}/.claude"
   # Resolve symlinks on both sides (macOS /var -> /private/var) so spelling can't dodge the guard.
-  real="$(cd "$real" 2>/dev/null && pwd -P || echo "$real")"
+  real="$(resolve_deepest "$real")"
   for d in "${SKILLS_DIR:-}" "${AGENTS_DIR:-}" "${RULES_DIR:-}"; do
     [ -n "$d" ] || continue
-    case "$(cd "$d" 2>/dev/null && pwd -P || echo "$d")" in
+    case "$(resolve_deepest "$d")" in
       "$real"|"$real"/*) echo "REFUSING: test target $d is inside the real $real" >&2; return 1 ;;
     esac
   done
@@ -106,9 +123,9 @@ assert_sandboxed() {
   for d in "${CLAUDE_CONFIG_DIR:-}" "${GRID_HOOK_LOG_DIR:-}" "${GRID_HOOK_STATE_DIR:-}" \
            "${GRID_HANDOFF_FALLBACK_DIR:-}" "${GRID_PRIVATE_DIR:-}"; do
     [ -n "$d" ] || continue
-    d="$(cd "$d" 2>/dev/null && pwd -P || echo "$d")"
+    d="$(resolve_deepest "$d")"
     for r in "${real_dirs[@]}"; do
-      r="$(cd "$r" 2>/dev/null && pwd -P || echo "$r")"
+      r="$(resolve_deepest "$r")"
       case "$d" in
         "$r"|"$r"/*) echo "REFUSING: test dir $d is inside the real $r" >&2; return 1 ;;
       esac
@@ -117,10 +134,10 @@ assert_sandboxed() {
   # Whole-home targets: state, learning store and scheduler unit dirs default to places
   # under ~ that are NOT one of the three roots above (~/.config/systemd/user,
   # ~/Library/LaunchAgents), so these are compared against the real home itself.
-  r="$(cd "${REAL_HOME:-$HOME}" 2>/dev/null && pwd -P || echo "${REAL_HOME:-$HOME}")"
+  r="$(resolve_deepest "${REAL_HOME:-$HOME}")"
   for d in "${GRID_STATE_DIR:-}" "${GRID_LEARNING_DIR:-}" "${LAUNCH_AGENTS_DIR:-}" "${SYSTEMD_USER_DIR:-}"; do
     [ -n "$d" ] || continue
-    d="$(cd "$d" 2>/dev/null && pwd -P || echo "$d")"
+    d="$(resolve_deepest "$d")"
     case "$d" in
       "$r"|"$r"/*) echo "REFUSING: test dir $d is inside the real home $r" >&2; return 1 ;;
     esac
@@ -128,10 +145,10 @@ assert_sandboxed() {
   # The live user runtime dir holds the systemd manager's private socket: a test that
   # runs systemd-analyze/systemctl against it can unlink that socket.
   if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
-    d="$(cd "$XDG_RUNTIME_DIR" 2>/dev/null && pwd -P || echo "$XDG_RUNTIME_DIR")"
+    d="$(resolve_deepest "$XDG_RUNTIME_DIR")"
     for r in "${REAL_XDG_RUNTIME_DIR:-}" "/run/user/$(id -u)"; do
       [ -n "$r" ] || continue
-      r="$(cd "$r" 2>/dev/null && pwd -P || echo "$r")"
+      r="$(resolve_deepest "$r")"
       case "$d" in
         "$r"|"$r"/*) echo "REFUSING: XDG_RUNTIME_DIR $d is the real runtime dir $r (or inside it)" >&2; return 1 ;;
       esac
@@ -143,8 +160,8 @@ assert_sandboxed() {
     echo "REFUSING: GRID_HARNESS_HOME is unset or empty (harness dirs would resolve into the real home)" >&2
     return 1
   fi
-  r="$(cd "${REAL_HOME:-$HOME}" 2>/dev/null && pwd -P || echo "${REAL_HOME:-$HOME}")"
-  d="$(cd "$GRID_HARNESS_HOME" 2>/dev/null && pwd -P || echo "$GRID_HARNESS_HOME")"
+  r="$(resolve_deepest "${REAL_HOME:-$HOME}")"
+  d="$(resolve_deepest "$GRID_HARNESS_HOME")"
   case "$d" in
     "$r"|"$r"/*) echo "REFUSING: GRID_HARNESS_HOME $d is the real home $r (or inside it)" >&2; return 1 ;;
   esac
