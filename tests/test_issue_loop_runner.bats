@@ -211,11 +211,11 @@ add_agent() {
   [ ! -d "$STATE/lock" ]
 }
 
-@test "preflight: direct mode is refused" {
-  set_conf MODE direct
+@test "preflight: MODE must be pr or direct" {
+  set_conf MODE whatever
   run_runner
   [ "$status" -eq 2 ]
-  contains "$output" "headless runs are pr-only; use direct mode from an interactive /loop"
+  contains "$output" "MODE must be"
 }
 
 @test "preflight: a missing guard script exits 2 naming the file and instantiate.sh" {
@@ -239,13 +239,17 @@ add_agent() {
   contains "$output" "WORKER_PERMISSIONS"
 }
 
-@test "preflight: claude not logged in, gh not logged in, no GH_REPO, no base branch on origin: exit 2 each" {
+@test "preflight: claude or gh not logged in is infra (exit 1, backoff, nothing relabelled); no GH_REPO or no base branch on origin: exit 2" {
   STUB_CLAUDE_LOGGED_IN=0 run_runner
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 1 ]
   contains "$output" "claude is not logged in"
+  rm -f "$STATE/backoff"
   STUB_GH_STORED_LOGIN=0 run_runner
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 1 ]
   contains "$output" "gh is not logged in"
+  [ -f "$STATE/backoff" ]
+  refute has_gh "gh issue edit"
+  rm -f "$STATE/backoff"   # the window would otherwise end the next runs quietly
   set_conf GH_REPO ''
   set_conf ISSUE_REPO ''
   run_runner
@@ -259,6 +263,47 @@ add_agent() {
   [ "$(claude_calls)" -eq 0 ]
 }
 
+@test "backoff: an infra failure opens a window that doubles; inside it a tick exits quietly; an issue-level outcome clears it" {
+  happy_env
+  # first failure: 15 min window
+  STUB_CLAUDE_LOGGED_IN=0 run_runner
+  [ "$status" -eq 1 ]
+  contains "$(cat "$STATE/backoff")" "fails=1"
+  until1="$(sed -n 's/^until=\([0-9]*\).*/\1/p' "$STATE/backoff")"
+  [ "$((until1 - $(date +%s)))" -gt 800 ]
+  [ "$((until1 - $(date +%s)))" -le 900 ]
+  # inside the window: quiet exit 0, no gh call, no claude call; an explicit issue number ignores it
+  : > "$STUB_LOG"
+  run_runner
+  [ "$status" -eq 0 ]
+  contains "$output" "backing off"
+  [ -z "$(cat "$STUB_LOG")" ]
+  # window over, still failing: the next window is twice as long
+  printf 'until=1 fails=1\n' > "$STATE/backoff"
+  STUB_CLAUDE_LOGGED_IN=0 run_runner
+  contains "$(cat "$STATE/backoff")" "fails=2"
+  until2="$(sed -n 's/^until=\([0-9]*\).*/\1/p' "$STATE/backoff")"
+  [ "$((until2 - $(date +%s)))" -gt 1700 ]
+  # a manual run for one issue ignores the window and, reaching an issue-level outcome, clears it
+  run_runner 4
+  [ "$status" -eq 0 ]
+  [ ! -f "$STATE/backoff" ]
+}
+
+@test "backoff: a worker cut off by a usage limit keeps the label and backs off; a plain missing outcome is still blocked" {
+  export STUB_NO_OUTCOME=1
+  export STUB_CLAUDE_JSON='{"type":"result","subtype":"success","is_error":false,"result":"Claude AI usage limit reached","total_cost_usd":0}'
+  run_runner
+  [ "$status" -eq 1 ]
+  refute has_gh "gh issue edit"
+  [ -f "$STATE/backoff" ]
+  rm -f "$STATE/backoff"
+  export STUB_CLAUDE_JSON='{"type":"result","subtype":"success","is_error":false,"result":"all done","total_cost_usd":0}'
+  run_runner
+  [ "$status" -eq 0 ]
+  has_gh "--add-label blocked"
+}
+
 @test "preflight: a missing timeout binary exits 2" {
   PATH="$(path_without timeout gtimeout)" run_runner
   [ "$status" -eq 2 ]
@@ -268,7 +313,9 @@ add_agent() {
 # ======================================================================= lock ===
 
 @test "lock: a second start while the lock is held exits 0 busy, naming the holder, and touches nothing" {
-  sleep 30 &
+  # the holder must look like a runner (its command line names run-issue.sh), else it counts as a reused pid
+  printf '#!/bin/bash\nsleep 30\n' > "$T/run-issue.sh"
+  bash "$T/run-issue.sh" &
   holder=$!
   mkdir -p "$STATE/lock"
   echo "$holder" > "$STATE/lock/pid"
@@ -282,6 +329,29 @@ add_agent() {
   [ "$(claude_calls)" -eq 0 ]
   refute has_gh "gh issue edit"
   [ "$(rr_lines)" -eq 0 ]
+}
+
+@test "lock: a lock whose pid is dead, or reused by something that is not a runner, is taken over and the run proceeds" {
+  happy_env
+  true &
+  dead=$!
+  wait "$dead"
+  mkdir -p "$STATE/lock"
+  echo "$dead" > "$STATE/lock/pid"
+  run_runner
+  [ "$status" -eq 0 ]
+  contains "$output" "took over a stale lock"
+  has_gh "gh pr create"
+  [ ! -d "$STATE/lock" ]
+  # a live pid that is not run-issue.sh (pid reuse after a reboot) is stale too
+  sleep 30 &
+  other=$!
+  mkdir -p "$STATE/lock"
+  echo "$other" > "$STATE/lock/pid"
+  run_runner
+  kill "$other" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  contains "$output" "took over a stale lock"
 }
 
 @test "lock: SIGTERM mid-worker leaves no worktree and no lock" {
@@ -358,6 +428,22 @@ add_agent() {
   refute has_gh "gh pr create"
 }
 
+@test "caps: a timed-out worker's uncommitted work is saved as a WIP commit on local issue-N, and the issue is still blocked" {
+  use_real_timeout
+  export STUB_CLAUDE_SLEEP=20
+  wrapper_claude 'case " $* " in *" --model "*) echo half-done > wip-file.txt ;; esac'
+  set_conf ISSUE_TIMEOUT 1
+  run_runner
+  [ "$status" -eq 0 ]
+  has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label blocked"
+  contains "$(cat "$STUB_COMMENTS")" "WIP commit on the local branch issue-4"
+  contains "$(git -C "$REPO" log -1 --format=%s issue-4)" "WIP"
+  [ "$(git -C "$REPO" show issue-4:wip-file.txt)" = "half-done" ]
+  # nothing is pushed
+  run git -C "$ORIGIN" rev-parse --verify -q refs/heads/issue-4
+  [ "$status" -ne 0 ]
+}
+
 @test "caps: a worker that wrote done but never exits is stopped after WORKER_EXIT_GRACE and the PR is opened" {
   use_real_timeout
   happy_env
@@ -408,6 +494,17 @@ add_agent() {
   refute has_gh "gh issue edit"
   refute has_gh "gh issue comment"
   [ "$(rr_lines)" -eq 0 ]
+}
+
+@test "caps: MAX_ISSUES_PER_DAY=0 means unlimited, however many were handled today" {
+  happy_env
+  set_conf MAX_ISSUES_PER_DAY 0
+  today="$(date '+%Y-%m-%d')"
+  mkdir -p "$STATE"
+  for i in 1 2 3 4 5 6 7; do echo "$today $i ok" >> "$STATE/runs.log"; done
+  run_runner
+  [ "$status" -eq 0 ]
+  has_gh "gh pr create"
 }
 
 @test "caps: yesterday's lines do not count against today's cap" {
@@ -525,6 +622,27 @@ add_agent() {
   [ "$status" -eq 0 ]
   has_gh "--add-label ready-for-human"
   [ "$(claude_calls)" -eq 0 ]
+}
+
+@test "gate: an item with a pull_request key is not an issue: refused by number, exit 2, nothing touched" {
+  printf '{"title":"a PR","body":"x","labels":[{"name":"ready-for-agent"}],"pull_request":{"url":"u"}}\n' > "$STUB_DIR/issue-4.json"
+  run_runner 4
+  [ "$status" -eq 2 ]
+  contains "$output" "is a pull request"
+  [ "$(claude_calls)" -eq 0 ]
+  refute has_gh "gh issue edit"
+  [ "$(rr_lines)" -eq 0 ]
+}
+
+@test "gate: a failing gh pr list is an infra failure, not 'no PR': exit 1, label kept, no worker" {
+  mkdir -p "$T/ghwrap"
+  printf '#!/bin/bash\nif [ "${1:-} ${2:-}" = "pr list" ]; then echo "gh: HTTP 502" >&2; exit 1; fi\nexec "%s" "$@"\n' "$STUB_DIR/gh" > "$T/ghwrap/gh"
+  chmod +x "$T/ghwrap/gh"
+  PATH="$T/ghwrap:$PATH" run_runner
+  [ "$status" -eq 1 ]
+  contains "$output" "gh pr list failed"
+  [ "$(claude_calls)" -eq 0 ]
+  refute has_gh "gh issue edit"
 }
 
 @test "gate: a stranger's issue (TRUST_GATE=on, association NONE) gets needs-human and no model call" {
@@ -856,6 +974,65 @@ EOF
 
 # ======================================================================= ISSUE_REPO ===
 
+# ======================================================================= direct mode ===
+# MODE=direct lands the verified commit on the base branch. ORIGIN is a local bare repo, so every
+# push in these tests stays on disk.
+
+@test "direct: a verified commit is pushed to the base branch, no PR, no issue-N branch, the issue is commented, relabelled and closed" {
+  happy_env
+  set_conf MODE direct
+  run_runner
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$ORIGIN" show next:stub-work-4.txt)" = "work for issue 4" ]
+  run git -C "$ORIGIN" rev-parse --verify -q refs/heads/issue-4
+  [ "$status" -ne 0 ]
+  refute has_gh "gh pr create"
+  sha="$(git -C "$ORIGIN" rev-parse --short next)"
+  has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label ready-for-human"
+  contains "$(cat "$STUB_COMMENTS")" "landed commit $sha on next"
+  has_gh "gh issue close 4 --repo owner/name"
+  [ "$(rr_field 1 outcome)" = "ok" ]
+}
+
+@test "direct: a base that moved during the run is rebased onto, verified again, then pushed" {
+  happy_env
+  set_conf MODE direct
+  wrapper_claude "git clone -q '$ORIGIN' '$T/other' && echo other > '$T/other/other.txt' && git -C '$T/other' add -A && git -C '$T/other' commit -q -m other && git -C '$T/other' push -q origin next"
+  run_runner
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$ORIGIN" show next:other.txt)" = "other" ]
+  [ "$(git -C "$ORIGIN" show next:stub-work-4.txt)" = "work for issue 4" ]
+  # the worker's commit now sits on top of the other one
+  contains "$(git -C "$ORIGIN" log -2 --format=%s next)" "stub work #4"
+}
+
+@test "direct: a rebase conflict blocks the issue, pushes nothing, and keeps the work on local issue-N" {
+  happy_env
+  set_conf MODE direct
+  wrapper_claude "git clone -q '$ORIGIN' '$T/other' && echo conflicting > '$T/other/stub-work-4.txt' && git -C '$T/other' add -A && git -C '$T/other' commit -q -m other && git -C '$T/other' push -q origin next"
+  run_runner
+  [ "$status" -eq 0 ]
+  # the base still carries only the other commit's version of the file
+  [ "$(git -C "$ORIGIN" show next:stub-work-4.txt)" = "conflicting" ]
+  has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label blocked"
+  contains "$(cat "$STUB_COMMENTS")" "conflicted"
+  [ "$(git -C "$REPO" show issue-4:stub-work-4.txt)" = "work for issue 4" ]
+  refute has_gh "gh issue close"
+}
+
+@test "direct: a rejected push blocks the issue and keeps the work on local issue-N" {
+  happy_env
+  set_conf MODE direct
+  printf '#!/bin/sh\necho "protected branch" >&2\nexit 1\n' > "$ORIGIN/hooks/pre-receive"
+  chmod +x "$ORIGIN/hooks/pre-receive"
+  run_runner
+  [ "$status" -eq 0 ]
+  has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label blocked"
+  contains "$(cat "$STUB_COMMENTS")" "rejected"
+  [ "$(git -C "$REPO" show issue-4:stub-work-4.txt)" = "work for issue 4" ]
+  refute has_gh "gh issue close"
+}
+
 @test "issue repo: issue calls target ISSUE_REPO, push and PR calls target GH_REPO, PR text carries only a reference" {
   happy_env
   set_conf ISSUE_REPO owner/tracker
@@ -949,9 +1126,13 @@ EOF
   happy_env
   run_runner
   [ "$(rr_lines)" -eq 1 ]
+  printf '#!/bin/bash\nsleep 30\n' > "$T/run-issue.sh"
+  bash "$T/run-issue.sh" &
+  holder=$!
   mkdir -p "$STATE/lock"
-  echo "$$" > "$STATE/lock/pid"
+  echo "$holder" > "$STATE/lock/pid"
   run_runner
+  kill "$holder" 2>/dev/null || true
   [ "$status" -eq 0 ]
   contains "$output" "busy"
   [ "$(rr_lines)" -eq 1 ]
