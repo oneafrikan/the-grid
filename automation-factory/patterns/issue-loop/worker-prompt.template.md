@@ -11,6 +11,7 @@ BEFORE YOU EDIT
 - If PURPOSE.md and MAP.md exist in the repo root, read them first.
 - If GUARDRAILS.md exists, read it before you edit any file or commit.
 - Make ONLY the changes the issue requires. Do not refactor, reformat or "improve" unrelated code.
+- Run only the tests you added or changed (for example `bats -f '<name>' <file>`), never a whole test file. Never start background watchers or `sleep`-poll loops; write the outcome file and stop.
 
 WHAT YOU MAY DO
 - Read, edit and write files in the working directory; run the project's checks and tests; use git to add, commit, diff, log and show.
