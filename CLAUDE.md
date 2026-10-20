@@ -312,6 +312,7 @@ Agents and sessions must not leave stale worktrees or local branches behind.
 - Never leave scratch worktrees under `.claude/worktrees` or `/tmp` registered in `git worktree list`; run `git worktree prune`.
 - Session start: run `git worktree list`, report and prune stale entries. Session end: list any worktree left open and why.
 - Untracked `__pycache__` is not a reason to keep a worktree.
+- A fresh worktree has empty submodule dirs and no `agent-factory/.venv`. The pre-commit hook inits `tests/lib/bats-core` itself; any other submodule a test needs (for example `repos/ecc`) and the venv (`cd agent-factory && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`) are yours to set up. Venv-gated tests skip on a plain `bats` run but fail under the gate (`GRID_REQUIRE_VENV=1`). To commit without either, use `GRID_SKIP_HOOK=1` and run the gate before readying the branch.
 
 ## wire.sh contract
 
