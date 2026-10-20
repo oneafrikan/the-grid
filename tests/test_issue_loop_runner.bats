@@ -624,6 +624,27 @@ add_agent() {
   [ "$(claude_calls)" -eq 0 ]
 }
 
+@test "gate: an item with a pull_request key is not an issue: refused by number, exit 2, nothing touched" {
+  printf '{"title":"a PR","body":"x","labels":[{"name":"ready-for-agent"}],"pull_request":{"url":"u"}}\n' > "$STUB_DIR/issue-4.json"
+  run_runner 4
+  [ "$status" -eq 2 ]
+  contains "$output" "is a pull request"
+  [ "$(claude_calls)" -eq 0 ]
+  refute has_gh "gh issue edit"
+  [ "$(rr_lines)" -eq 0 ]
+}
+
+@test "gate: a failing gh pr list is an infra failure, not 'no PR': exit 1, label kept, no worker" {
+  mkdir -p "$T/ghwrap"
+  printf '#!/bin/bash\nif [ "${1:-} ${2:-}" = "pr list" ]; then echo "gh: HTTP 502" >&2; exit 1; fi\nexec "%s" "$@"\n' "$STUB_DIR/gh" > "$T/ghwrap/gh"
+  chmod +x "$T/ghwrap/gh"
+  PATH="$T/ghwrap:$PATH" run_runner
+  [ "$status" -eq 1 ]
+  contains "$output" "gh pr list failed"
+  [ "$(claude_calls)" -eq 0 ]
+  refute has_gh "gh issue edit"
+}
+
 @test "gate: a stranger's issue (TRUST_GATE=on, association NONE) gets needs-human and no model call" {
   STUB_AUTHOR_ASSOC=NONE run_runner
   [ "$status" -eq 0 ]

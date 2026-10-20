@@ -439,6 +439,12 @@ jq -e 'type == "object"' "$TMP/issue.json" >/dev/null 2>&1 || infra_fail "the an
 jq -r '[.labels[]? | (if type == "object" then .name else . end)] | .[]' "$TMP/issue.json" > "$TMP/labels.txt"
 has_label() { grep -qxF -- "$1" "$TMP/labels.txt"; }
 
+# The issues endpoint also answers for pull requests (they carry a pull_request key). A PR is never
+# work for the worker, so refuse it by number as well as by label (nothing touched, exit 2).
+if jq -e 'has("pull_request")' "$TMP/issue.json" >/dev/null 2>&1; then
+  N=""   # not handled: no record, no label change
+  die_pre "$ISSUE_REPO#$CUR_ISSUE is a pull request, not an issue"
+fi
 if ! has_label "$ISSUE_LABEL"; then
   N=""   # not handled: no record, no label change
   die_pre "$ISSUE_REPO#$CUR_ISSUE does not carry the label '$ISSUE_LABEL'; add it or pick another issue"
@@ -464,9 +470,12 @@ done
 
 # an open PR or a remote branch for this issue already exists
 pr_line=""
+# A failing `gh pr list` is an outage, not "no PR": carrying on could open a second PR.
 if gh_t pr list --repo "$GH_REPO" --head "issue-$N" --state open --json number,url \
-     --jq '.[0] | "\(.number) \(.url)"' > "$TMP/pr.txt" 2>/dev/null; then
+     --jq '.[0] | "\(.number) \(.url)"' > "$TMP/pr.txt" 2> "$TMP/prlist.err"; then
   pr_line="$(sed -n '1p' "$TMP/pr.txt")"
+else
+  infra_fail "gh pr list failed: $(cut_bytes 200 "$(cat "$TMP/prlist.err")")"
 fi
 case "$pr_line" in null*|"") pr_line="" ;; esac
 if [ -n "$pr_line" ]; then
@@ -475,9 +484,14 @@ if [ -n "$pr_line" ]; then
   [ "$pr_url" != "$pr_line" ] || pr_url=""
   conclude ready-for-human skipped "issue-loop skipped this: an open pull request already exists for it (#$pr_num${pr_url:+, $pr_url}). A human should review it." "gate: existing PR $pr_num"
 fi
-if git_t -C "$REPO_ROOT" ls-remote --exit-code --heads origin "refs/heads/issue-$N" >/dev/null 2>&1; then
-  conclude ready-for-human skipped "issue-loop skipped this: the branch \`issue-$N\` already exists on the remote. A human should look at it." "gate: branch issue-$N exists"
-fi
+# ls-remote --exit-code: 0 = the branch exists, 2 = absent, anything else = the remote is unreachable
+_rc=0
+git_t -C "$REPO_ROOT" ls-remote --exit-code --heads origin "refs/heads/issue-$N" >/dev/null 2>&1 || _rc=$?
+case "$_rc" in
+  0) conclude ready-for-human skipped "issue-loop skipped this: the branch \`issue-$N\` already exists on the remote. A human should look at it." "gate: branch issue-$N exists" ;;
+  2) ;;
+  *) infra_fail "could not check origin for the branch issue-$N (git ls-remote exit $_rc)" ;;
+esac
 
 # trust gate: only OWNER / MEMBER / COLLABORATOR issues are worked. A null/empty association is untrusted.
 if [ "$TRUST_GATE" = "on" ] && ! is_trusted_assoc "$ASSOC"; then
