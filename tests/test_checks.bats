@@ -93,6 +93,24 @@ assert_sandboxed_without_home() ( unset HOME; assert_sandboxed )
   [[ "$output" == *"REFUSING"* ]] || false
 }
 
+# NF-004: a nonexistent leaf used to fall back to the raw spelling, so these two shapes
+# were not refused. The deepest existing ancestor is resolved instead.
+@test "tripwire refuses a nonexistent leaf reached through a symlinked spelling of the real home" {
+  fake_home="$BATS_TEST_TMPDIR/fake-home"; mkdir -p "$fake_home/.claude"
+  ln -s "$fake_home" "$BATS_TEST_TMPDIR/home-link"
+  REAL_HOME="$fake_home" SKILLS_DIR="$BATS_TEST_TMPDIR/home-link/.claude/not-created-yet" run assert_sandboxed
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"inside the real"* ]] || false
+}
+
+@test "tripwire refuses a relative nonexistent target when cwd is inside the real ~/.claude" {
+  fake_home="$BATS_TEST_TMPDIR/fake-home"; mkdir -p "$fake_home/.claude"
+  cd "$fake_home/.claude"
+  REAL_HOME="$fake_home" SKILLS_DIR="not-created-yet" run assert_sandboxed
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"inside the real"* ]] || false
+}
+
 @test "tripwire refuses an empty HOME" {
   HOME= run assert_sandboxed
   [ "$status" -eq 1 ]
