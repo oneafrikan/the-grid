@@ -474,3 +474,251 @@ EOF
   wait_for_review_post
   grep -q 'REVIEW_RUNNING=1' "$T/env.log"
 }
+
+# -------------------------------------------------------------- setup.sh ---
+
+# install_clone <dir> — a fresh clone-like dir with the pattern in loop/ and no .claude/.
+install_clone() {
+  mkdir -p "$1/loop"
+  cp -R "$REPO/loop/hooks" "$1/loop/hooks"
+  cp "$REPO/loop/setup.sh" "$REPO/loop/loop-prompt.template.md" "$REPO/loop/loop.conf" "$1/loop/"
+  git init -q -b next "$1"
+}
+
+@test "setup: default run renders the prompt, self-tests the guard and leaves .claude/settings.json absent" {
+  install_clone "$T/clone"
+  run bash "$T/clone/loop/setup.sh"
+  [ "$status" -eq 0 ]
+  contains "$output" "Guard self-test passed"
+  [ -f "$T/clone/loop/loop-prompt.md" ]
+  [ ! -e "$T/clone/.claude/settings.json" ]
+}
+
+@test "setup: default run leaves an existing settings.json byte-identical" {
+  install_clone "$T/clone"
+  mkdir -p "$T/clone/.claude"
+  printf '{"permissions":{"allow":["Bash(ls)"]}}\n' > "$T/clone/.claude/settings.json"
+  cp "$T/clone/.claude/settings.json" "$T/before.json"
+  run bash "$T/clone/loop/setup.sh"
+  [ "$status" -eq 0 ]
+  cmp "$T/before.json" "$T/clone/.claude/settings.json"
+}
+
+@test "setup --interactive: fresh clone gets guard and review entries; second run is byte-identical" {
+  install_clone "$T/clone"
+  run bash "$T/clone/loop/setup.sh" --interactive
+  [ "$status" -eq 0 ]
+  root="$(cd "$T/clone" && pwd -P)"
+  jq -e --arg g "$root/loop/hooks/guard-main-push.sh" \
+    '.hooks.PreToolUse[0].matcher == "Bash" and .hooks.PreToolUse[0].hooks[0].command == $g' "$T/clone/.claude/settings.json"
+  jq -e --arg r "$root/loop/hooks/post-commit-review.sh" \
+    '.hooks.PostToolUse[0].hooks[0].command == $r' "$T/clone/.claude/settings.json"
+  cp "$T/clone/.claude/settings.json" "$T/first.json"
+  run bash "$T/clone/loop/setup.sh" --interactive
+  [ "$status" -eq 0 ]
+  cmp "$T/first.json" "$T/clone/.claude/settings.json"
+}
+
+@test "setup --interactive: foreign hooks survive and a stale review path is replaced after a move" {
+  install_clone "$T/moved"
+  mkdir -p "$T/moved/.claude"
+  cat > "$T/moved/.claude/settings.json" <<'JSON'
+{
+  "permissions": {"allow": ["Bash(ls)"]},
+  "hooks": {
+    "PostToolUse": [
+      {"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "/usr/local/bin/other-tool-hook.sh"},
+        {"type": "command", "command": "/old/place/loop/hooks/post-commit-review.sh"}
+      ]},
+      {"matcher": "Edit", "hooks": [{"type": "command", "command": "/usr/local/bin/edit-watcher.sh"}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "Write", "hooks": [{"type": "command", "command": "/usr/local/bin/write-guard.sh"}]},
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "/old/place/loop/hooks/guard-main-push.sh"}]}
+    ]
+  }
+}
+JSON
+  run bash "$T/moved/loop/setup.sh" --interactive
+  [ "$status" -eq 0 ]
+  s="$T/moved/.claude/settings.json"
+  root="$(cd "$T/moved" && pwd -P)"
+  jq -e '.permissions.allow == ["Bash(ls)"]' "$s"
+  [ "$(jq '[.hooks.PostToolUse[].hooks[].command | select(endswith("/post-commit-review.sh"))] | length' "$s")" -eq 1 ]
+  jq -e --arg r "$root/loop/hooks/post-commit-review.sh" '[.hooks.PostToolUse[].hooks[].command] | index($r) != null' "$s"
+  jq -e '[.hooks.PostToolUse[].hooks[].command] | index("/usr/local/bin/other-tool-hook.sh") != null' "$s"
+  # the main-branch bug: an unrelated PostToolUse matcher entry used to be overwritten
+  jq -e '[.hooks.PostToolUse[].hooks[].command] | index("/usr/local/bin/edit-watcher.sh") != null' "$s"
+  jq -e '[.hooks.PreToolUse[].hooks[].command] | index("/usr/local/bin/write-guard.sh") != null' "$s"
+  [ "$(jq '[.hooks.PreToolUse[].hooks[].command | select(endswith("/guard-main-push.sh"))] | length' "$s")" -eq 1 ]
+  refute grep -q '/old/place' "$s"
+}
+
+@test "setup --unwire: removes only our two entries" {
+  install_clone "$T/clone"
+  mkdir -p "$T/clone/.claude"
+  echo '{"hooks":{"PostToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"/x/edit-watcher.sh"}]}]}}' > "$T/clone/.claude/settings.json"
+  bash "$T/clone/loop/setup.sh" --interactive
+  [ "$(jq '[.. | .command? // empty | select(endswith("guard-main-push.sh") or endswith("post-commit-review.sh"))] | length' "$T/clone/.claude/settings.json")" -eq 2 ]
+  run bash "$T/clone/loop/setup.sh" --unwire
+  [ "$status" -eq 0 ]
+  s="$T/clone/.claude/settings.json"
+  [ "$(jq '[.. | .command? // empty | select(endswith("guard-main-push.sh") or endswith("post-commit-review.sh"))] | length' "$s")" -eq 0 ]
+  jq -e '[.hooks.PostToolUse[].hooks[].command] == ["/x/edit-watcher.sh"]' "$s"
+}
+
+@test "setup: a guard that never blocks makes setup exit non-zero, in every mode" {
+  install_clone "$T/bad"
+  printf '#!/bin/bash\nexit 0\n' > "$T/bad/loop/hooks/guard-main-push.sh"
+  run bash "$T/bad/loop/setup.sh"
+  [ "$status" -ne 0 ]
+  contains "$output" "did NOT block"
+  run bash "$T/bad/loop/setup.sh" --interactive
+  [ "$status" -ne 0 ]
+}
+
+@test "setup: the self-test covers the quoted and path-qualified forms (a guard that misses them fails)" {
+  install_clone "$T/weak"
+  # a guard that only blocks the plain form: the old F14 behaviour
+  cat > "$T/weak/loop/hooks/guard-main-push.sh" <<'SH'
+#!/bin/bash
+c="$(jq -r .tool_input.command)"
+case "$c" in "git push origin next") exit 2 ;; esac
+exit 0
+SH
+  run bash "$T/weak/loop/setup.sh"
+  [ "$status" -ne 0 ]
+  contains "$output" "did NOT block"
+}
+
+@test "setup --interactive: a missing guard file removes its stale entry instead of wiring it" {
+  install_clone "$T/noguard"
+  rm "$T/noguard/loop/hooks/guard-main-push.sh"
+  mkdir -p "$T/noguard/.claude"
+  echo '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/gone/loop/hooks/guard-main-push.sh"}]}]}}' > "$T/noguard/.claude/settings.json"
+  run bash "$T/noguard/loop/setup.sh" --interactive
+  [ "$status" -eq 0 ]
+  jq -e '(.hooks.PreToolUse // []) | length == 0' "$T/noguard/.claude/settings.json"
+  jq -e '.hooks.PostToolUse | length == 1' "$T/noguard/.claude/settings.json"
+}
+
+@test "setup --interactive and --unwire: settings.json that is not valid JSON exits 1, file untouched" {
+  install_clone "$T/broken"
+  mkdir -p "$T/broken/.claude"
+  echo '{not json' > "$T/broken/.claude/settings.json"
+  run bash "$T/broken/loop/setup.sh" --interactive
+  [ "$status" -eq 1 ]
+  [ "$(cat "$T/broken/.claude/settings.json")" = '{not json' ]
+  run bash "$T/broken/loop/setup.sh" --unwire
+  [ "$status" -eq 1 ]
+  [ "$(cat "$T/broken/.claude/settings.json")" = '{not json' ]
+}
+
+@test "setup: an unknown flag is a usage error" {
+  install_clone "$T/clone"
+  run bash "$T/clone/loop/setup.sh" --wire-everything
+  [ "$status" -eq 2 ]
+}
+
+# ------------------------------------------------------ prompt templates ---
+
+@test "template: loop-prompt rendered from loop.conf (pr): base, pr block, no MODE markers, no placeholders, template unchanged" {
+  install_clone "$T/clone"
+  cp "$PAT_DIR/loop-prompt.template.md" "$T/tpl.before"
+  run bash "$T/clone/loop/setup.sh"
+  [ "$status" -eq 0 ]
+  out="$(cat "$T/clone/loop/loop-prompt.md")"
+  contains "$out" "next"
+  contains "$out" "gh pr create --repo owner/name --base next"
+  contains "$out" "Never push next"
+  lacks "$out" "git push origin next"
+  lacks "$out" "MODE:"
+  lacks "$out" "{{"
+  lacks "$out" "gh issue close"
+  # the tracked template is byte-identical to the pattern file: nothing rewrote it (R10.qa.F5)
+  cmp "$T/tpl.before" "$T/clone/loop/loop-prompt.template.md"
+  cmp "$T/tpl.before" "$PAT_DIR/loop-prompt.template.md"
+}
+
+@test "template: direct block pushes the base and closes the issue, with no PR" {
+  install_clone "$T/clone"
+  echo "MODE='direct'" >> "$T/clone/loop/loop.conf"
+  run bash "$T/clone/loop/setup.sh"
+  [ "$status" -eq 0 ]
+  out="$(cat "$T/clone/loop/loop-prompt.md")"
+  contains "$out" "git push origin next"
+  contains "$out" "gh issue close"
+  lacks "$out" "gh pr create"
+  lacks "$out" "MODE:"
+}
+
+@test "template: issue calls use ISSUE_REPO, the PR call uses GH_REPO and the PR text carries only a reference" {
+  install_clone "$T/clone"
+  echo "ISSUE_REPO=\${ISSUE_REPO:-'owner/tracker'}" >> "$T/clone/loop/loop.conf"
+  run bash "$T/clone/loop/setup.sh"
+  [ "$status" -eq 0 ]
+  out="$(cat "$T/clone/loop/loop-prompt.md")"
+  contains "$out" "gh issue list --repo owner/tracker"
+  contains "$out" "gh issue view <N> --repo owner/tracker"
+  contains "$out" 'gh pr create --repo owner/name'
+  contains "$out" 'refs owner/tracker#<N>'
+  lacks "$out" "Closes #"
+}
+
+@test "template: values with & and {{...}} are inserted literally in a single pass" {
+  install_clone "$T/clone"
+  echo "PROJECT_CONTEXT='R&D {{GH_REPO}} tool (it'\\''s ok)'" >> "$T/clone/loop/loop.conf"
+  run bash "$T/clone/loop/setup.sh"
+  [ "$status" -eq 0 ]
+  contains "$(cat "$T/clone/loop/loop-prompt.md")" "Project:           R&D {{GH_REPO}} tool (it's ok)"
+}
+
+@test "template: mode blocks are present and balanced; no hard-coded main" {
+  f="$PAT_DIR/loop-prompt.template.md"
+  [ "$(grep -c '^<!-- MODE:pr -->$' "$f")" -ge 1 ]
+  [ "$(grep -c '^<!-- MODE:direct -->$' "$f")" -ge 1 ]
+  opens="$(grep -c '^<!-- MODE:' "$f")"
+  closes="$(grep -c '^<!-- /MODE -->$' "$f")"
+  [ "$opens" -eq "$closes" ]
+  refute grep -nE 'origin/main|--base main|push origin main' "$f"
+}
+
+@test "template: the verify-failure revert removes tracked changes AND untracked files" {
+  cmd="$(grep -o 'git -C {{WORKING_DIR}} reset --hard HEAD && git -C {{WORKING_DIR}} clean -fd' "$PAT_DIR/loop-prompt.template.md" | sed -n '1p')"
+  [ -n "$cmd" ]
+  echo changed >> "$REPO/seed.txt"
+  echo new > "$REPO/untracked.txt"
+  [ -n "$(git -C "$REPO" status --porcelain)" ]
+  cmd="${cmd//\{\{WORKING_DIR\}\}/$REPO}"
+  run bash -c "$cmd"
+  [ "$status" -eq 0 ]
+  [ -z "$(git -C "$REPO" status --porcelain)" ]
+  refute grep -q 'checkout -- \.' "$PAT_DIR/loop-prompt.template.md"
+}
+
+@test "worker prompt: has the placeholders, the unattended statement and the outcome protocol" {
+  f="$PAT_DIR/worker-prompt.template.md"
+  local p
+  for p in ISSUE_NUMBER ISSUE_TITLE ISSUE_BODY AGENT_BRIEF WORKING_DIR VERIFY_CMD OUTCOME_FILE; do
+    grep -q "{{$p}}" "$f" || { echo "missing placeholder $p"; return 1; }
+  done
+  grep -q 'UNATTENDED' "$f"
+  grep -q 'No human is present' "$f"
+  grep -qi 'checking in after a number of tool calls' "$f"
+  grep -q 'needs-human' "$f"
+  grep -q 'PURPOSE.md' "$f"
+  grep -q 'MAP.md' "$f"
+  grep -q 'GUARDRAILS.md' "$f"
+}
+
+@test "worker prompt: tells the worker not to push, open a PR or edit labels, and contains none of those commands" {
+  f="$PAT_DIR/worker-prompt.template.md"
+  grep -qi 'do not push' "$f"
+  grep -qi 'do not open a pull request' "$f"
+  grep -qi 'do not edit labels' "$f"
+  refute grep -q 'gh pr create' "$f"
+  refute grep -q 'git push origin' "$f"
+  refute grep -q -- '--add-label' "$f"
+  refute grep -q 'gh issue close' "$f"
+}

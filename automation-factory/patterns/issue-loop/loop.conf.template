@@ -1,23 +1,24 @@
-# loop/loop.conf — sourced by loop/run-issues.sh (and read by the hooks). Edit to tune; env vars override.
-# Tracked, plain assignments only, NO SECRETS. Credentials, trusted actors and the
-# operator-home path live in the loop user's env file, not here (see README).
-# Rendered once by instantiate.sh; re-running it never overwrites this file.
-GH_REPO=${GH_REPO:-{{GH_REPO}}}
-BASE_BRANCH=${BASE_BRANCH:-{{BASE_BRANCH}}}
-ISSUE_LABEL=${ISSUE_LABEL:-{{ISSUE_LABEL}}}
-MODE=${MODE:-{{MODE}}}                      # pr | direct (direct = interactive /loop only; the runner refuses it)
-LABEL_BUDGETS=${LABEL_BUDGETS:-}      # space-separated label=usd pairs raising the worker cap, e.g. "ws:rule-packs=15"
-VERIFY_CMD=${VERIFY_CMD:-{{VERIFY_CMD}}}
-SETUP_CMD=${SETUP_CMD:-{{SETUP_CMD}}}              # run in the worktree before the agent (e.g. npm ci); empty = none
-PROJECT_CONTEXT=${PROJECT_CONTEXT:-{{PROJECT_CONTEXT}}}
-REVIEW_FOCUS=${REVIEW_FOCUS:-{{REVIEW_FOCUS}}}
-MAX_ISSUES=${MAX_ISSUES:-{{MAX_ISSUES}}}           # K issues per run
-MAX_TURNS=${MAX_TURNS:-{{MAX_TURNS}}}            # passed as --max-turns only if the claude CLI supports it
-MAX_BUDGET_USD=${MAX_BUDGET_USD:-5}   # worker --max-budget-usd, always passed
-REVIEW_BUDGET_USD=${REVIEW_BUDGET_USD:-2} # review --max-budget-usd, always passed
-ISSUE_TIMEOUT=${ISSUE_TIMEOUT:-{{ISSUE_TIMEOUT}}}  # seconds, per worker run
-REVIEW_TIMEOUT=${REVIEW_TIMEOUT:-600} # seconds, per review run
-WORKER_MODEL=${WORKER_MODEL:-{{WORKER_MODEL}}}
-REVIEW_MODEL=${REVIEW_MODEL:-{{REVIEW_MODEL}}}
-REVIEW_DIFF_LINES=${REVIEW_DIFF_LINES:-1500}
-RUN_ROLE=${RUN_ROLE:-issue-loop}
+# loop/loop.conf — the single source of config for the issue-loop (runner, hooks, setup.sh).
+# Tracked, plain assignments only, NO SECRETS and no machine paths. The runner uses the
+# operator's own `gh` and `claude` logins; nothing here is a credential.
+# Rendered ONCE by scripts/instantiate.sh; re-running it never overwrites this file.
+# Every line is KEY=${KEY:-'value'}, so an exported environment variable overrides the file.
+GH_REPO=${GH_REPO:-{{GH_REPO}}}                  # owner/name: code, branches, pushes and PRs
+ISSUE_REPO=${ISSUE_REPO:-{{ISSUE_REPO}}}         # owner/name the issues are read from (default: GH_REPO); a private tracker keeps issue text out of a public repo
+BASE_BRANCH=${BASE_BRANCH:-{{BASE_BRANCH}}}      # PR target and worktree base
+ISSUE_LABEL=${ISSUE_LABEL:-{{ISSUE_LABEL}}}      # opt-in label the loop works on
+MODE=${MODE:-{{MODE}}}                           # pr | direct (direct = interactive /loop only; the runner refuses it)
+VERIFY_CMD=${VERIFY_CMD:-{{VERIFY_CMD}}}         # run by the RUNNER before any push; empty = the runner refuses to start
+VERIFY_TIMEOUT=${VERIFY_TIMEOUT:-{{VERIFY_TIMEOUT}}}   # seconds
+SETUP_CMD=${SETUP_CMD:-{{SETUP_CMD}}}            # run in the worktree before the worker (e.g. npm ci); empty = none
+PROJECT_CONTEXT=${PROJECT_CONTEXT:-{{PROJECT_CONTEXT}}}   # one line for prompts and the review hook
+REVIEW_FOCUS=${REVIEW_FOCUS:-{{REVIEW_FOCUS}}}   # one line for the review hook
+WORKER_MODEL=${WORKER_MODEL:-{{WORKER_MODEL}}}   # always passed as --model
+MAX_BUDGET_USD=${MAX_BUDGET_USD:-{{MAX_BUDGET_USD}}}   # worker --max-budget-usd, always passed
+ISSUE_TIMEOUT=${ISSUE_TIMEOUT:-{{ISSUE_TIMEOUT}}}      # seconds, worker
+WORKER_PERMISSIONS=${WORKER_PERMISSIONS:-{{WORKER_PERMISSIONS}}}   # allowlist | bypass (bypass = --dangerously-skip-permissions; a fallback only, see the README)
+# Tools the headless worker may use (passed as --allowedTools). No git push, no gh. Append the project's test commands.
+WORKER_ALLOWED_TOOLS=${WORKER_ALLOWED_TOOLS:-{{WORKER_ALLOWED_TOOLS}}}
+MAX_ISSUES_PER_DAY=${MAX_ISSUES_PER_DAY:-{{MAX_ISSUES_PER_DAY}}}   # daily cap on issues handled
+TRUST_GATE=${TRUST_GATE:-{{TRUST_GATE}}}         # on | off: on = only OWNER/MEMBER/COLLABORATOR issues and comments are read
+RUN_ROLE=${RUN_ROLE:-{{RUN_ROLE}}}              # run-record role when the issue has no agent:<name> label
