@@ -37,30 +37,39 @@ grid_env_isolate() {
 # --- python helpers ------------------------------------------------------------
 # tree_digest <dir>: sorted relative paths plus content hashes (and symlink
 # targets) on stdout, so two calls can be compared for "byte-identical before
-# and after". Prints nothing for an empty directory.
+# and after". Prints nothing for an empty directory. One row per path: a backslash or
+# newline in a name is escaped ("\\" / "\n") so a newline-named file stays one row.
+# <dir>/.git/index is skipped: git rewrites it on a status refresh (the NF-046 hypothesis),
+# which is a stat-cache update, not a change to the tree.
 tree_digest() {
   python3 -B -c '
 import hashlib, os, sys
 top = sys.argv[1]
 rows = []
+def esc(text):
+    return text.replace("\\", "\\\\").replace("\n", "\\n")
 for root, dirs, files in os.walk(top):
     for name in dirs + files:
         full = os.path.join(root, name)
         rel = os.path.relpath(full, top)
+        if rel == os.path.join(".git", "index"):
+            continue
         if os.path.islink(full):
-            rows.append("l %s %s" % (rel, os.readlink(full)))
+            rows.append("l %s %s" % (esc(rel), esc(os.readlink(full))))
         elif os.path.isfile(full):
             with open(full, "rb") as fh:
-                rows.append("f %s %s" % (rel, hashlib.sha256(fh.read()).hexdigest()))
+                rows.append("f %s %s" % (esc(rel), hashlib.sha256(fh.read()).hexdigest()))
         else:
-            rows.append("d %s" % rel)
+            rows.append("d %s" % esc(rel))
 print("\n".join(sorted(rows)))
 ' "$1"
 }
 
 # tree_digest_changed <before> <after>: given two tree_digest outputs, prints one line per
-# path that was added, removed or changed ("<kind> <path>"; content hashes and file content
-# are never printed). For failure diagnostics next to a `[ "$after" = "$before" ]` assert.
+# path that was added, removed or changed ("<change> <kind> <path>": change is added, removed
+# or modified; kind is the tree_digest row type f, l or d; the path keeps the tree_digest
+# escaping, so a newline name stays on one line). Content hashes and file content are never
+# printed. For failure diagnostics next to a `[ "$after" = "$before" ]` assert.
 tree_digest_changed() {
   python3 -B -c '
 import sys
@@ -75,9 +84,16 @@ def rows(text):
         out[(kind, name)] = digest
     return out
 a, b = rows(sys.argv[1]), rows(sys.argv[2])
-for key in sorted(set(a) | set(b)):
-    if a.get(key) != b.get(key):
-        print("%s %s" % key)
+for key in sorted(set(a) | set(b), key=lambda k: (k[1], k[0])):
+    if key not in a:
+        change = "added"
+    elif key not in b:
+        change = "removed"
+    elif a[key] != b[key]:
+        change = "modified"
+    else:
+        continue
+    print("%s %s %s" % (change, key[0], key[1]))
 ' "$1" "$2"
 }
 

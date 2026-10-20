@@ -272,8 +272,8 @@ snapshot() { tree_digest "$GREAL"; echo "--"; tree_digest "$SKILLS_DIR"; echo "-
   [ ! -e "$GRID_TRACE_FETCH" ]
 }
 
-# NF-046 helper contract: names and kinds only, no hashes and no file content.
-@test "tree_digest_changed names added, removed and modified paths and prints no content" {
+# NF-046 helper contract: change type, kind and name only, no hashes and no file content.
+@test "tree_digest_changed names added, removed and modified paths with the change type and prints no content" {
   mkdir -p "$T/d/sub"
   printf 'one SECRET-CONTENT\n' > "$T/d/keep.txt"
   printf 'two\n' > "$T/d/sub/gone.txt"
@@ -284,10 +284,45 @@ snapshot() { tree_digest "$GREAL"; echo "--"; tree_digest "$SKILLS_DIR"; echo "-
   after=$(tree_digest "$T/d")
   run tree_digest_changed "$before" "$after"
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf 'f added.txt\nf keep.txt\nf sub/gone.txt')" ]
+  [ "$output" = "$(printf 'added f added.txt\nmodified f keep.txt\nremoved f sub/gone.txt')" ]
   [[ "$output" != *SECRET* ]]
   run tree_digest_changed "$before" "$before"
   [ -z "$output" ]
+}
+
+@test "tree_digest_changed keeps a newline-named file on one line" {
+  mkdir -p "$T/d"
+  printf 'x\n' > "$T/d/plain.txt"
+  before=$(tree_digest "$T/d")
+  printf 'y\n' > "$T/d/$(printf 'two\nlines.txt')"
+  after=$(tree_digest "$T/d")
+  # one digest row per path, so no bare hash line from a split name
+  [ "$(printf '%s\n' "$after" | wc -l)" -eq 2 ]
+  run tree_digest_changed "$before" "$after"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'added f two\nlines.txt' ]
+  # changing its content is a modification of that one path
+  printf 'z\n' > "$T/d/$(printf 'two\nlines.txt')"
+  run tree_digest_changed "$after" "$(tree_digest "$T/d")"
+  [ "$output" = 'modified f two\nlines.txt' ]
+}
+
+@test "tree_digest ignores .git/index but still sees other .git changes" {
+  mkdir -p "$T/d"
+  git -C "$T/d" init -q
+  printf 'x\n' > "$T/d/f.txt"
+  git -C "$T/d" add f.txt
+  before=$(tree_digest "$T/d")
+  # a stat-dirty file plus a status refresh rewrites the index (same content, so no new object);
+  # the digest must not move
+  touch -d '2001-01-01 00:00:00' "$T/d/f.txt"
+  git -C "$T/d" status > /dev/null
+  [ "$(tree_digest "$T/d")" = "$before" ] || { tree_digest_changed "$before" "$(tree_digest "$T/d")" >&2; false; }
+  [[ "$before" != *" .git/index"* ]]
+  # any other .git file is still tracked
+  printf 'ref\n' > "$T/d/.git/extra"
+  run tree_digest_changed "$before" "$(tree_digest "$T/d")"
+  [ "$output" = "added f .git/extra" ]
 }
 
 # --- uninstall ------------------------------------------------------------------------------
