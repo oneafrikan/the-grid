@@ -369,6 +369,15 @@ nested_fixture() {
   grep -qE '^[[:space:]]*timeout-minutes:[[:space:]]*45[[:space:]]*$' "$REPO_ROOT/.github/workflows/tests.yml"
 }
 
+@test "tests.yml: draft PRs skip the gate, ready_for_review runs it, the job is still named gate, pushes to main still run" {
+  local f="$REPO_ROOT/.github/workflows/tests.yml"
+  grep -qE '^[[:space:]]*types:[[:space:]]*\[opened, synchronize, reopened, ready_for_review\]' "$f"
+  grep -qF "if: github.event_name != 'pull_request' || github.event.pull_request.draft == false" "$f"
+  # the main ruleset requires a check called `gate`: the job id must not change
+  grep -qE '^  gate:[[:space:]]*$' "$f"
+  grep -qE '^[[:space:]]*branches:[[:space:]]*\[main\]' "$f"
+}
+
 @test "dependabot keeps the github-actions pins current" {
   grep -q 'package-ecosystem: "github-actions"' "$REPO_ROOT/.github/dependabot.yml"
 }

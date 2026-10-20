@@ -19,7 +19,7 @@ setup() {
   ( cd "$G" && git init -q && git config user.email t@t && git config user.name t \
       && git add -A && git commit -q -m init )
   # PATH with essentials but no shellcheck (tr/wc/xargs: needed by the real check-personal.sh)
-  for t in git bash env dirname grep cat rm mktemp uname sed tr wc xargs; do
+  for t in git bash env dirname grep cat rm mkdir mktemp uname sed tr wc xargs; do
     ln -s "$(command -v $t)" "$G/stubbin/$t" 2>/dev/null || true
   done
 }
@@ -138,11 +138,123 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GA
   [ "$(cat "$BATS_TEST_TMPDIR/bats-require-venv")" = "1" ]
 }
 
-@test "--pre-commit aborts on unstaged changes to tracked files" {
+# --- --pre-commit: the FAST, staged-files-only mode ------------------------------------------------
+# The full gate is merge-time (CI, plain `bash scripts/gate.sh`); the hook only checks what is staged.
+
+# stub_bats_logging — a bats stub that appends the targets it was asked to run to $G/bats.calls.
+stub_bats_logging() {
+  printf '#!/usr/bin/env bash\necho "$*" >> "%s/bats.calls"\necho "1..0"\nexit 0\n' "$G" > "$G/tests/lib/bats-core/bin/bats"
+  bats_answers_version "$G/tests/lib/bats-core/bin/bats"
+}
+
+# stub_shellcheck_logging <exit> — shellcheck stub: logs its args and the content of each file it got.
+stub_shellcheck_logging() {
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >> "%s/shellcheck.args"\nfor f in "$@"; do [ -f "$f" ] && cat "$f" >> "%s/shellcheck.seen"; done\nexit %s\n' "$G" "$G" "$1" > "$G/stubbin/shellcheck"
+  chmod +x "$G/stubbin/shellcheck"
+}
+
+@test "--pre-commit with nothing staged: fast note, no full-gate checks, bats not run" {
+  stub_bats_logging
+  run run_gate --pre-commit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pre-commit: fast check; the full gate runs in CI and via 'bash scripts/gate.sh'"* ]] || false
+  [[ "$output" != *"==> catalog"* ]] || false
+  [[ "$output" != *"==> compose"* ]] || false
+  [[ "$output" != *"==> audit"* ]] || false
+  [ ! -e "$G/bats.calls" ]
+  [[ "$output" == *"gate: PASS"* ]] || false
+}
+
+@test "--pre-commit lints only staged shell files, with the full gate's flags" {
+  stub_shellcheck_logging 0
+  echo 'echo staged' > "$G/scripts/new.sh"; echo 'echo other' > "$G/scripts/other.sh"
+  ( cd "$G" && git add scripts/new.sh )
+  run run_gate --pre-commit
+  echo "$output"
+  [ "$status" -eq 0 ]
+  grep -qx -e '-S' "$G/shellcheck.args"
+  grep -qx 'warning' "$G/shellcheck.args"
+  grep -qx 'scripts/new.sh' "$G/shellcheck.args"
+  ! grep -q 'other.sh' "$G/shellcheck.args"
+}
+
+@test "--pre-commit: a shellcheck failure on a staged file fails the gate and names shellcheck" {
+  stub_shellcheck_logging 1
+  echo 'echo x' > "$G/scripts/bad.sh"
+  ( cd "$G" && git add scripts/bad.sh )
+  run run_gate --pre-commit
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate: FAIL — shellcheck"* ]] || false
+}
+
+@test "--pre-commit lints the STAGED blob, not the working-tree edit" {
+  stub_shellcheck_logging 0
+  echo 'echo staged-version' > "$G/scripts/p.sh"
+  ( cd "$G" && git add scripts/p.sh )
+  echo 'echo unstaged-version' >> "$G/scripts/p.sh"
+  run run_gate --pre-commit
+  [ "$status" -eq 0 ]
+  grep -q 'staged-version' "$G/shellcheck.seen"
+  ! grep -q 'unstaged-version' "$G/shellcheck.seen"
+}
+
+@test "--pre-commit: no abort on unstaged edits to files that are not staged .bats" {
   echo x >> "$G/scripts/catalog.sh"
+  run run_gate --pre-commit
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ABORT"* ]] || false
+}
+
+@test "--pre-commit runs bats for staged tests/*.bats files only, never the whole suite" {
+  stub_bats_logging
+  mkdir -p "$G/tests"
+  printf '@test "a" { true; }\n' > "$G/tests/test_a.bats"
+  echo '# mentions scripts/gate.sh' > "$G/tests/test_c.bats"
+  ( cd "$G" && git add tests/test_c.bats && git commit -q -m "c" )
+  echo '# edit, unstaged' >> "$G/tests/test_c.bats"
+  ( cd "$G" && git add tests/test_a.bats )
+  run run_gate --pre-commit
+  echo "$output"
+  [ "$status" -eq 0 ]
+  # exactly one bats run, with exactly the one staged file (the --version probe is not logged as a run
+  # because the stub answers it before logging)
+  [ "$(cat "$G/bats.calls")" = "tests/test_a.bats" ]
+}
+
+@test "--pre-commit aborts when a staged .bats file also has unstaged changes" {
+  stub_bats_logging
+  mkdir -p "$G/tests"
+  printf '@test "a" { true; }\n' > "$G/tests/test_a.bats"
+  ( cd "$G" && git add tests/test_a.bats )
+  echo '# unstaged' >> "$G/tests/test_a.bats"
   run run_gate --pre-commit
   [ "$status" -eq 1 ]
   [[ "$output" == *"ABORT"* ]] || false
+  [ ! -e "$G/bats.calls" ]
+}
+
+@test "--pre-commit syntax-checks staged python only" {
+  ln -s "$(command -v python3)" "$G/stubbin/python3"
+  printf 'x = (\n' > "$G/broken_unstaged.py"
+  printf 'x = 1\n' > "$G/ok.py"
+  ( cd "$G" && git add ok.py )
+  run run_gate --pre-commit
+  [ "$status" -eq 0 ]
+  ( cd "$G" && git add broken_unstaged.py )
+  run run_gate --pre-commit
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"broken_unstaged.py"* ]] || false
+  [[ "$output" == *"gate: FAIL — pysyntax"* ]] || false
+}
+
+@test "a plain gate run is unchanged: all checks run and there is no fast-mode note" {
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"==> shellcheck"* ]] || false
+  [[ "$output" == *"==> pysyntax"* ]] || false
+  [[ "$output" == *"==> catalog"* ]] || false
+  [[ "$output" == *"==> bats"* ]] || false
+  [[ "$output" != *"pre-commit: fast check"* ]] || false
 }
 
 @test "the first run installs the hook path in the repo it runs in" {
@@ -504,13 +616,16 @@ skipped_list() {
   [[ "$output" == *"gate: FAIL (unexpected skip: plugins)"* ]] || false
 }
 
-@test "strict: --strict and --pre-commit combine in either order" {
+@test "strict: --strict and --pre-commit combine in either order (fast scope, strict skips)" {
+  # a staged shell file with no shellcheck on PATH is a skip, which --strict makes a failure
+  echo 'echo x' > "$G/scripts/s.sh"
+  ( cd "$G" && git add scripts/s.sh )
   run run_gate --pre-commit --strict
   [ "$status" -eq 1 ]
-  [[ "$output" == *"unexpected skip"* ]] || false
+  [[ "$output" == *"unexpected skip: shellcheck"* ]] || false
   run run_gate --strict --pre-commit
   [ "$status" -eq 1 ]
-  [[ "$output" == *"unexpected skip"* ]] || false
+  [[ "$output" == *"unexpected skip: shellcheck"* ]] || false
 }
 
 @test "strict: a missing audit script is an unexpected skip, a present one is not" {
@@ -755,15 +870,13 @@ run_hook() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GA
   [[ "$output" != *"==>"* ]] || false
 }
 
-@test "the real pre-commit hook runs gate.sh --pre-commit and aborts on an unstaged change" {
+@test "the real pre-commit hook runs gate.sh --pre-commit (fast mode), not the full gate" {
   install_real_hook
   run run_hook
   [ "$status" -eq 0 ]
-  [[ "$output" == *"==> bats"* ]] || false
-  echo x >> "$G/scripts/catalog.sh"
-  run run_hook
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"ABORT"* ]] || false
+  [[ "$output" == *"pre-commit: fast check"* ]] || false
+  [[ "$output" != *"==> catalog"* ]] || false
+  [[ "$output" == *"no staged tests/*.bats files"* ]] || false
 }
 
 # --- lint coverage (WP-045) -----------------------------------------------------------------------
