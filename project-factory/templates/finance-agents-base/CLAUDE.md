@@ -36,9 +36,9 @@ because it's easier to express there.
 
 ## Autonomous loop
 
-This repo pairs with automation-factory's `issue-loop` pattern (see
-`_common`'s `prompts/autonomous-coding-loop.template.md`) for maintaining
-*this codebase* — its `{{VERIFY_CMD}}` should be:
+This repo can opt in to automation-factory's `issue-loop` pattern (off by default; see
+`loop/ENABLE.md`) for maintaining *this codebase*. Set `VERIFY_CMD` in `loop/loop.conf`,
+seeded from `loop/loop.conf.seed`, to:
 
 ```
 pytest

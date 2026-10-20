@@ -55,13 +55,12 @@ Read-only data in, proposals out; only a human executes. See `CLAUDE.md`.
    plumbing without it.
 2. Implement `guardrail/rules.py` as pure code against `POLICY.md`'s hard
    limits, with tests, before wiring up `strategist/`.
-3. Once this repo has a GitHub issue backlog, instantiate
-   `automation-factory`'s `issue-loop` pattern into `loop/`, and fill in
-   `_common`'s `prompts/autonomous-coding-loop.template.md` with the
-   `{{VERIFY_CMD}}` from this template's `CLAUDE.md`. Note: that loop is for
-   an agent autonomously *maintaining this codebase* — a separate concern
-   from the watcher's own runtime heartbeat (cron/scheduler, not GitHub
-   issues).
+3. Optional: once this repo has a GitHub issue backlog, opt in to
+   `automation-factory`'s `issue-loop` pattern (see `loop/ENABLE.md`): set
+   `VERIFY_CMD` in `loop/loop.conf` (seeded from `loop/loop.conf.seed`) from
+   this template's `CLAUDE.md`, then instantiate the loop. Note: that loop is
+   for an agent *maintaining this codebase* — a separate concern from the
+   watcher's own runtime heartbeat (cron/scheduler, not GitHub issues).
 
 ## Setup
 
