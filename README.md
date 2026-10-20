@@ -246,7 +246,7 @@ never touches its history.
     wire.sh             ← creates ~/.claude/skills/ + ~/.claude/agents/ symlinks (idempotent)
     catalog.sh          ← regenerates SKILLS.md
     sources.sh          ← regenerates docs/SOURCES.md; --check link-checks every URL
-    reconcile.sh        ← removes stale skill shadows on a new machine
+    reconcile.sh        ← moves stale skill shadows aside (dated backup dir) on a new machine
     check-grid.sh       ← full bats suite + broken-symlink scan (CI / pre-push gate)
     instantiate.sh      ← cuts an automation-factory pattern into a target repo (issue-loop; idempotent)
     rules.py            ← lints, lists and emits the rule packs (rules/)

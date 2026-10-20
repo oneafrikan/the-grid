@@ -1830,7 +1830,7 @@ bash scripts/wire.sh
             </tr>
             <tr>
               <td><code>scripts/reconcile.sh</code></td>
-              <td>Removes stale shadowing dirs on a fresh machine so the-grid owns the slot, then re-wires.</td>
+              <td>Moves stale shadowing dirs aside to a dated backup dir on a fresh machine so the-grid owns the slot, then re-wires.</td>
             </tr>
             <tr>
               <td><code>tests/</code></td>
@@ -1915,7 +1915,7 @@ cd .. &amp;&amp; bash scripts/wire.sh
         <div class="command-block">
           <h3>Reconcile stale shadows on a fresh machine</h3>
           <pre><code>bash scripts/reconcile.sh          # dry run — list shadowing dirs
-bash scripts/reconcile.sh --force  # remove + re-wire</code></pre>
+bash scripts/reconcile.sh --force  # move aside to a dated backup dir + re-wire</code></pre>
         </div>
 
         <div class="command-block">

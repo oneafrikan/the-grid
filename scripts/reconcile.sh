@@ -3,8 +3,9 @@
 #
 # wire.sh will NOT clobber a *real* directory that shadows a grid skill
 # (a safety rule). On a fresh machine those shadows are often stale copies
-# installed by something else (frequently root-owned). This script removes
-# those shadows so the-grid can own the slot, then re-wires.
+# installed by something else (frequently root-owned). This script moves
+# those shadows aside into a dated backup dir (nothing is deleted) so the-grid
+# can own the slot, then re-wires.
 #
 # Cleverness: we don't hardcode any skill names. We run wire.sh once into a
 # THROWAWAY home (GRID_DRY_HOME) to learn exactly which skill names it would
@@ -15,10 +16,10 @@
 # SAFETY:
 #   - Dry-run by default: nothing outside a temp dir is written (no links, no
 #     settings.json, no SKILLS.md, no manifest). Pass --force to actually
-#     delete + re-wire.
+#     move the shadows aside + re-wire.
 #   - Only ever touches paths that are a REAL dir AND not a symlink.
 #   - Only touches names wire.sh itself flagged as shadowing a grid skill.
-#   - Uses sudo only when a shadow is not removable as the current user.
+#   - Uses sudo only when a shadow is not movable as the current user.
 #
 # Usage:
 #   bash reconcile.sh            # dry run — show what would change
@@ -49,7 +50,7 @@ GRID_DRY_HOME="$tmp/home" bash "$GRID_DIR/scripts/wire.sh" >/dev/null
 # A name is a shadow when the grid would link it AND the live slot is a real dir (not a
 # symlink): the same condition wire_skill uses to print "skip (real dir, not managed)".
 # A submodule-root link (repos/<r>, the gstack runtime root) is not a skill: wire.sh skips an
-# occupied runtime slot on purpose, so it is never offered for removal. A name with a line
+# occupied runtime slot on purpose, so it is never offered for moving. A name with a line
 # break is skipped (one name per line below).
 grid_phys="$(cd "$GRID_DIR" && pwd -P)"
 shadows=""
@@ -75,7 +76,7 @@ echo "$shadows" | sed 's/^/  - /'
 
 if [ "$FORCE" -ne 1 ]; then
   echo
-  echo "Dry run. Re-run with --force to remove these and re-wire:"
+  echo "Dry run. Re-run with --force to move these to a dated backup dir and re-wire:"
   echo "  bash reconcile.sh --force"
   exit 0
 fi
