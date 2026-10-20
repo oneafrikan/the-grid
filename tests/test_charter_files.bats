@@ -226,9 +226,21 @@ base_section() { awk -v h="## $1" '$0 == h {on=1; next} /^## / {on=0} on' "$REPO
   [ -z "$output" ]
 }
 
-@test "AGENTS_base: the handoff section is byte-identical to origin/main (skipped without that ref)" {
+# change_base — set BASEREV to the commit this change branched from, or skip. These three cases
+# compare the working tree with the pre-change text, so they only make sense while the change is
+# open: they skip once openspec/changes/charter-files is archived, without origin/main, or where
+# no merge-base exists (a shallow CI clone). The merge-base (not the moving origin/main tip) is
+# used so a PR that landed on main after this branch was cut is never counted as part of it.
+change_base() {
+  [ -d "$REPO_ROOT/openspec/changes/charter-files" ] || skip "change archived; nothing to compare against"
   git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null || skip "origin/main absent"
-  git -C "$REPO_ROOT" show "origin/main:$BASE" > "$T/old"
+  BASEREV="$(git -C "$REPO_ROOT" merge-base origin/main HEAD 2>/dev/null)" || skip "no merge-base (shallow clone)"
+  [ -n "$BASEREV" ] || skip "no merge-base (shallow clone)"
+}
+
+@test "AGENTS_base: the handoff section is byte-identical to its pre-change text (skipped when not comparable)" {
+  change_base
+  git -C "$REPO_ROOT" show "$BASEREV:$BASE" > "$T/old"
   sect() { sed -n '/^## Signal Protocol (handoff)$/,/^## Scope$/p' "$1" | sed '$d'; }
   sect "$T/old" > "$T/old.sect"
   sect "$REPO_ROOT/$BASE" > "$T/new.sect"
@@ -237,15 +249,15 @@ base_section() { awk -v h="## $1" '$0 == h {on=1; next} /^## / {on=0} on' "$REPO
 }
 
 @test "AGENTS_base: the change adds lines only (nothing in the old text is edited or removed)" {
-  git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null || skip "origin/main absent"
-  run git -C "$REPO_ROOT" diff -U0 origin/main -- "$BASE"
+  change_base
+  run git -C "$REPO_ROOT" diff -U0 "$BASEREV" -- "$BASE"
   [ "$status" -eq 0 ]
   ! printf '%s\n' "$output" | grep -E '^-[^-]' || false
 }
 
-@test "no compose.py and no role file is modified by this change (skipped without origin/main)" {
-  git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null || skip "origin/main absent"
-  run git -C "$REPO_ROOT" diff --name-only origin/main
+@test "no compose.py and no role file is modified by this change (skipped when not comparable)" {
+  change_base
+  run git -C "$REPO_ROOT" diff --name-only "$BASEREV"
   [ "$status" -eq 0 ]
   ! printf '%s\n' "$output" | grep -E '(^|/)compose\.py$' || false
   ! printf '%s\n' "$output" | grep -E '^agent-factory/roles/' || false
