@@ -115,7 +115,7 @@ check_fixture() { # $1 = repo dir
 
 @test "real repos/ecc: only skills/ paths, count equals tracked skills/ SKILL.md" {
   [ -e "$REPO_ROOT/repos/ecc/.git" ] || skip "repos/ecc not initialised"
-  local out n want
+  local out rel n want
   # H-15: discovery is a pure-bash loop over ~1000 tracked paths. Inside bats' shell every one of
   # its commands pays the DEBUG trap (~0.8 ms), which made this ~8 s on CI; a child bash has no
   # trap. Same function, same inputs, same assertions below.
@@ -126,10 +126,13 @@ check_fixture() { # $1 = repo dir
   # No literal count: it moves with every ECC bump. Must be non-empty though.
   [ "$want" -gt 0 ]
   [ "$n" -eq "$want" ]
-  printf '%s\n' "$out" | lacks '/docs/'
-  printf '%s\n' "$out" | lacks '/\.'
-  # Every path sits under repos/ecc/skills/.
-  [ "$(printf '%s\n' "$out" | grep -vc "^$REPO_ROOT/repos/ecc/skills/")" -eq 0 ]
+  # Assert on paths relative to repos/ecc: the absolute prefix may itself contain a dot-dir
+  # (a checkout under .claude/worktrees), which made the '/\.' check fail for the wrong reason.
+  rel="${out//"$REPO_ROOT/repos/ecc/"/}"
+  printf '%s\n' "$rel" | lacks '/docs/'
+  printf '%s\n' "$rel" | lacks '/\.'
+  # Every path sits under skills/.
+  [ "$(printf '%s\n' "$rel" | grep -vc '^skills/')" -eq 0 ]
 }
 
 @test "catalog: .kiro copy is not counted, skills/ skill is (count 1)" {
