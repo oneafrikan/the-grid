@@ -75,6 +75,25 @@ teardown() {
   grep -qF '## Versions' "$REPO_ROOT/rules/django/README.md"
 }
 
+@test "flask/blueprints: endpoint prefix bullet covers the blueprint name and the relative form" {
+  grep -qF 'Prefix endpoints with the blueprint name in `url_for("admin.index")`' "$REPO_ROOT/rules/flask/blueprints.md"
+  grep -qF 'or use `url_for(".index")` inside the same blueprint' "$REPO_ROOT/rules/flask/blueprints.md"
+}
+
+@test "django/orm: select_related bullet does not claim a version-free per-row cost" {
+  grep -qF 'by default, related access that was not loaded up front costs one query per row' "$REPO_ROOT/rules/django/orm.md"
+}
+
+@test "ruby/rails-controllers: url_from is conditional on the Rails version" {
+  grep -qF 'where your Rails version provides `url_from`' "$REPO_ROOT/rules/ruby/rails-controllers.md"
+}
+
+@test "rules/README: a hand-edited BEGIN marker is user text, and no private decision id is cited" {
+  grep -qF 'so a hand-edited BEGIN line is treated as user text and the next emit appends a fresh' "$REPO_ROOT/rules/README.md"
+  run grep -E '\bD[0-9]{2}\b' "$REPO_ROOT/rules/README.md"
+  [ "$status" -eq 1 ]
+}
+
 @test "django, flask, ruby, golang, rust: every bullet is at most 240 characters" {
   [ -z "$(over_cap_bullets django flask ruby golang rust)" ]
 }

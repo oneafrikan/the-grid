@@ -6,7 +6,7 @@ paths:
 # Django ORM
 
 ## Queries
-- Use `select_related()` for ForeignKey and OneToOne relations read per row; unprefetched related access costs one query per row.
+- Use `select_related()` for ForeignKey and OneToOne relations read per row; by default, related access that was not loaded up front costs one query per row.
 - Use `prefetch_related()` for many-to-many and many-to-one relations (separate lookup, joined in Python); pass `Prefetch(..., queryset=...)` to filter or order the related rows.
 - Use `exists()` to test for rows and `count()` for a number when the objects will not be evaluated anyway; use `len()` only when you iterate the queryset anyway.
 - Use `F("field")` for in-database arithmetic (`update(n=F("n") + 1)`); a read-modify-write in Python is a race condition.

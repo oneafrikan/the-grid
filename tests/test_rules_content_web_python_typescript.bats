@@ -73,6 +73,10 @@ teardown() {
   grep -qF 'jsconfig.json' "$REPO_ROOT/rules/typescript/README.md"
 }
 
+@test "typescript/tsconfig: bundler bullet does not say extensions are never required" {
+  grep -qF '`bundler` resolution does not require file extensions on relative imports' "$REPO_ROOT/rules/typescript/tsconfig.md"
+}
+
 @test "web, python, typescript: every bullet is at most 240 characters" {
   [ -z "$(over_cap_bullets web python typescript)" ]
 }
