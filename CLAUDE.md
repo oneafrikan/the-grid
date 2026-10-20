@@ -202,9 +202,11 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 
 ## Drift checks, the commit gate, and per-project agents
 
-- `scripts/gate.sh` — commit gate; `.githooks/pre-commit` delegates to it and it
-  self-installs `core.hooksPath` on first run. `--pre-commit` aborts on unstaged
-  changes. `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
+- `scripts/gate.sh` — the gate. A plain run (and `--strict` in CI) is the heavy merge-time gate;
+  `.githooks/pre-commit` runs only `gate.sh --pre-commit`, a FAST check of staged files (shellcheck on
+  staged `.sh`/`.bash`, python syntax on staged `.py`, bats for staged `tests/*.bats` only; it aborts
+  only if a staged `.bats` file also has unstaged edits). The script self-installs `core.hooksPath`
+  on first run. Run `bash scripts/gate.sh` before readying a branch. `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
   `--strict` (CI) fails on any skip not named in `GRID_GATE_EXPECT_SKIPPED` (see `.github/workflows/tests.yml`).
   `catalog`, `sources` (`sources.sh --check-drift`) and `budget` run against the TRACKED `baseline-submodules.example.txt` (`GRID_BASELINE` pin; `wire.sh` pins it for SKILLS.md too), so SKILLS.md, docs/SOURCES.md and the ratchet are machine-independent; a personal baseline is never gated.
   It runs `check-personal.sh` as the `personal` check; with no private denylist on the

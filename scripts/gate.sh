@@ -39,17 +39,23 @@
 #   bats         the test suite
 #
 # Modes:
-#   gate.sh               run all checks
-#   gate.sh --pre-commit  same, but first abort if tracked files have unstaged
-#                         changes (the checks read the disk, so a divergent index
-#                         would pass while a different, unchecked version is committed)
-#   gate.sh --strict      same, but a check that was SKIPPED and is not named in
+#   gate.sh               run all checks (the heavy, merge-time gate; CI runs it via --strict)
+#   gate.sh --pre-commit  FAST check of what is STAGED only (the commit hook): shellcheck on
+#                         staged *.sh/*.bash, a python syntax parse of staged *.py (both read
+#                         the staged blob from the index, so partial staging is fine) and bats
+#                         for staged tests/*.bats files only (not tests that merely mention a
+#                         changed script). Everything else is skipped, with a one-line note:
+#                         the full gate runs in CI and via a plain `bash scripts/gate.sh`.
+#                         bats runs the file on disk, so a staged .bats file that also has
+#                         unstaged changes aborts (a different version would be tested).
+#   gate.sh --strict      the full gate, but a check that was SKIPPED and is not named in
 #                         GRID_GATE_EXPECT_SKIPPED (space-separated) fails the gate:
 #                         "gate: FAIL (unexpected skip: ...)". CI runs this, so a removed
 #                         venv step or check script cannot silently drop a check. An
 #                         explicit flag, not CI=true detection, so a local run under a
 #                         CI-like environment behaves as before.
-#   (the flags combine, in any order)
+#   (the flags combine, in any order; --pre-commit keeps its fast scope and --strict then
+#   applies to its skips, e.g. a missing shellcheck)
 #
 # Installing: running this script once sets core.hooksPath=.githooks, so a fresh
 # clone is armed by the first manual run. Git refuses to auto-run versioned hooks.
@@ -80,12 +86,42 @@ if [ "$(git config --get core.hooksPath || true)" != ".githooks" ]; then
   echo "gate: installed hook (core.hooksPath=.githooks)"
 fi
 
-# --- pre-commit: refuse a divergent index --------------------------------------
-if [ "$PRE_COMMIT" = 1 ] && ! git diff --quiet; then
-  echo "gate: ABORT — unstaged changes to tracked files; the checks would lint a" >&2
-  echo "      different tree than the one being committed. Stage them, or:" >&2
-  echo "      git stash push --keep-index" >&2
-  exit 1
+# --- pre-commit: collect the STAGED files (fast mode only) ----------------------
+# Done BEFORE the git env is unset below: inside a hook GIT_INDEX_FILE may name a temporary
+# index (git commit -a / <paths>), and only that index holds what is being committed.
+# Staged .sh/.bash/.py blobs are copied to a scratch dir, so the checks see exactly what
+# will be committed even when the working tree differs (partial staging).
+STAGE_DIR=""
+STAGED_SH=()
+STAGED_PY=()
+STAGED_BATS=()
+if [ "$PRE_COMMIT" = 1 ]; then
+  STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/grid-stage.XXXXXX")"
+  trap 'rm -rf "$STAGE_DIR"' EXIT
+  # ACMR: added/copied/modified/renamed (a deleted file has nothing to check).
+  while IFS= read -r -d '' f; do
+    case "$f" in
+      _retired/*|*/_retired/*|tests/lib/*) continue ;;   # archived / vendored: never linted
+      *.sh|*.bash) STAGED_SH+=("$f") ;;
+      *.py)        STAGED_PY+=("$f") ;;
+      tests/*.bats)
+        # bats runs the file on disk; a staged file with unstaged edits would test other code.
+        if ! git diff --quiet -- "$f"; then
+          echo "gate: ABORT — $f has unstaged changes; bats would run a different version" >&2
+          echo "      than the one being committed. Stage them, or: git stash push --keep-index" >&2
+          exit 1
+        fi
+        STAGED_BATS+=("$f")
+        continue ;;
+      *) continue ;;
+    esac
+    # A failed extraction must not read as "nothing to check".
+    if ! { mkdir -p "$STAGE_DIR/$(dirname "$f")" && git show ":$f" > "$STAGE_DIR/$f"; }; then
+      echo "gate: ABORT — could not read the staged version of $f" >&2
+      exit 1
+    fi
+  done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+  echo "pre-commit: fast check; the full gate runs in CI and via 'bash scripts/gate.sh'" >&2
 fi
 
 # git exports GIT_INDEX_FILE / GIT_DIR into hooks; inherited, they make the git
@@ -100,6 +136,37 @@ check() {
   local name="$1"; shift
   echo "==> $name"
   if "$@"; then echo "    PASS"; else echo "    FAIL"; FAILED+=("$name"); fi
+}
+
+# summarise — print the verdict and exit. Shared by the full gate and the fast pre-commit path.
+summarise() {
+  echo
+  # --strict: every skip must be expected. GRID_GATE_EXPECT_SKIPPED is a space-separated list of
+  # check names (the names in the "skipped:" summary). Whole-word match, so `compose` does not
+  # hide behind `compose-core`.
+  local UNEXPECTED=() s
+  if [ "$STRICT" = 1 ]; then
+    for s in ${SKIPPED[@]+"${SKIPPED[@]}"}; do
+      case " ${GRID_GATE_EXPECT_SKIPPED:-} " in
+        *" $s "*) ;;
+        *) UNEXPECTED+=("$s") ;;
+      esac
+    done
+  fi
+
+  if [ "${#FAILED[@]}" -gt 0 ]; then
+    echo "gate: FAIL — ${FAILED[*]}" >&2
+    [ "${#UNEXPECTED[@]}" -eq 0 ] || echo "gate: FAIL (unexpected skip: ${UNEXPECTED[*]})" >&2
+    exit 1
+  elif [ "${#UNEXPECTED[@]}" -gt 0 ]; then
+    echo "gate: FAIL (unexpected skip: ${UNEXPECTED[*]})" >&2
+    exit 1
+  elif [ "${#SKIPPED[@]}" -gt 0 ]; then
+    echo "gate: PASS (skipped: ${SKIPPED[*]})"
+  else
+    echo "gate: PASS"
+  fi
+  exit 0
 }
 
 run_shellcheck() {
@@ -143,7 +210,12 @@ run_pysyntax() {
   while IFS= read -r f; do files+=("$f"); done < <(git ls-files '*.py')
   [ -f scripts/grid ] && files+=(scripts/grid)
   [ "${#files[@]}" -gt 0 ] || return 0
-  python3 - "${files[@]}" <<'PYEOF'
+  py_parse_files "${files[@]}"
+}
+
+# py_parse_files <path>... — ast.parse each file (relative to the cwd); names the ones that fail.
+py_parse_files() {
+  python3 - "$@" <<'PYEOF'
 import ast, sys
 bad = 0
 for name in sys.argv[1:]:
@@ -157,8 +229,12 @@ sys.exit(1 if bad else 0)
 PYEOF
 }
 
-check shellcheck run_shellcheck
-check pysyntax   run_pysyntax
+# The full gate's first two checks; --pre-commit runs its own staged-only versions below
+# (the fast path ends in `summarise`, which exits, so nothing after it runs in that mode).
+if [ "$PRE_COMMIT" = 0 ]; then
+  check shellcheck run_shellcheck
+  check pysyntax   run_pysyntax
+fi
 # SKILLS.md, docs/SOURCES.md and the budget ratchet are all rendered/measured from the TRACKED
 # example baseline (baseline-submodules.example.txt), never the personal gitignored one, so the
 # same inputs give the same answer in CI and on every machine (a personal baseline is not gated).
@@ -242,6 +318,8 @@ run_personal_check() {
 # (tests/test_gate.bats checks that). Bump both together when the submodule pointer moves.
 PINNED_BATS_VERSION="1.13.0"
 
+# run_bats [<bats file>...] — no arguments runs the whole suite (tests/); the fast pre-commit
+# path passes only the staged test files.
 run_bats() {
   # A fresh worktree has no submodule checkouts, so the hook would block every commit there
   # until someone ran the init by hand. Try that one init (only this submodule; it reuses the
@@ -270,7 +348,7 @@ run_bats() {
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/grid-bats.XXXXXX")"
   # GRID_REQUIRE_VENV=1: the venv-gated tests (agent-factory) must RUN here. Without it
   # they skip, bats exits 0, and a machine with no venv passes the gate (R16.qa.F5).
-  TMPDIR="$tmp" GRID_REQUIRE_VENV=1 tests/lib/bats-core/bin/bats tests/ || rc=$?
+  TMPDIR="$tmp" GRID_REQUIRE_VENV=1 tests/lib/bats-core/bin/bats "${@:-tests/}" || rc=$?
   shopt -s nullglob dotglob
   leftovers=("$tmp"/*)
   shopt -u nullglob dotglob
@@ -295,8 +373,33 @@ run_bats() {
   return "$rc"
 }
 
+# --- pre-commit: the fast path ------------------------------------------------------
+# Only what is staged (collected above). Everything else belongs to the full gate, which CI
+# and a plain `bash scripts/gate.sh` run. Same check functions and flags as the full gate.
+if [ "$PRE_COMMIT" = 1 ]; then
+  # The shell and python checks lint the staged blobs in STAGE_DIR (subshell: cwd stays the repo root).
+  fast_shellcheck() {
+    [ "${#STAGED_SH[@]}" -gt 0 ] || { echo "    no staged shell files"; return 0; }
+    command -v shellcheck >/dev/null || { echo "    shellcheck not installed — skipped"; SKIPPED+=(shellcheck); return 0; }
+    ( cd "$STAGE_DIR" && shellcheck -S warning "${STAGED_SH[@]}" )
+  }
+  fast_pysyntax() {
+    [ "${#STAGED_PY[@]}" -gt 0 ] || { echo "    no staged python files"; return 0; }
+    command -v python3 >/dev/null || { echo "    python3 absent — skipped"; SKIPPED+=(pysyntax); return 0; }
+    ( cd "$STAGE_DIR" && py_parse_files "${STAGED_PY[@]}" )
+  }
+  fast_bats() {
+    [ "${#STAGED_BATS[@]}" -gt 0 ] || { echo "    no staged tests/*.bats files"; return 0; }
+    run_bats "${STAGED_BATS[@]}"
+  }
+  check shellcheck fast_shellcheck
+  check pysyntax   fast_pysyntax
+  check bats       fast_bats
+  summarise
+fi
+
 check catalog    run_catalog_check
-check sources    run_sources_check
+check sources   run_sources_check
 check lock       run_lock_check
 check budget     run_budget_check
 check compose    run_compose_check
@@ -382,29 +485,4 @@ run_map_check() {
 check map        run_map_check
 check bats       run_bats
 
-echo
-# --strict: every skip must be expected. GRID_GATE_EXPECT_SKIPPED is a space-separated list of
-# check names (the names in the "skipped:" summary). Whole-word match, so `compose` does not
-# hide behind `compose-core`.
-UNEXPECTED=()
-if [ "$STRICT" = 1 ]; then
-  for s in ${SKIPPED[@]+"${SKIPPED[@]}"}; do
-    case " ${GRID_GATE_EXPECT_SKIPPED:-} " in
-      *" $s "*) ;;
-      *) UNEXPECTED+=("$s") ;;
-    esac
-  done
-fi
-
-if [ "${#FAILED[@]}" -gt 0 ]; then
-  echo "gate: FAIL — ${FAILED[*]}" >&2
-  [ "${#UNEXPECTED[@]}" -eq 0 ] || echo "gate: FAIL (unexpected skip: ${UNEXPECTED[*]})" >&2
-  exit 1
-elif [ "${#UNEXPECTED[@]}" -gt 0 ]; then
-  echo "gate: FAIL (unexpected skip: ${UNEXPECTED[*]})" >&2
-  exit 1
-elif [ "${#SKIPPED[@]}" -gt 0 ]; then
-  echo "gate: PASS (skipped: ${SKIPPED[*]})"
-else
-  echo "gate: PASS"
-fi
+summarise

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# pre-commit — thin shim; all logic lives in scripts/gate.sh (shellcheck, catalog
-# drift, composed-agent drift, bats) so the same gate can be run by hand.
+# pre-commit — thin shim; all logic lives in scripts/gate.sh. It runs the FAST mode
+# (gate.sh --pre-commit): shellcheck and python syntax on staged files, bats for staged
+# tests/*.bats only. The heavy checks (catalog/compose drift, audit, the whole bats suite)
+# run in CI and via a plain `bash scripts/gate.sh`, not on every commit.
 #
 # Activated by:  git config core.hooksPath .githooks  (scripts/bootstrap.sh and
 # the first run of scripts/gate.sh both do this).
