@@ -1,8 +1,6 @@
 ---
 name: grid-data-scientist
-description: 'Data Scientist. Statistical modeling and experiments: A/B testing, causal
-  inference, feature engineering, ML models. Use for validated models and experiment
-  readouts.'
+description: 'Data Scientist. Statistical modeling and experiments: A/B testing, causal inference, feature engineering, ML models. Use for validated models and experiment readouts.'
 model: sonnet
 ---
 

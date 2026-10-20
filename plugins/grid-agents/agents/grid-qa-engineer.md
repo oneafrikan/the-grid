@@ -1,8 +1,6 @@
 ---
 name: grid-qa-engineer
-description: 'QA Engineer. The release gate: test plans, verification against PRD
-  acceptance criteria, edge-case review; blocks release on critical issues. Use to
-  verify work before release.'
+description: 'QA Engineer. The release gate: test plans, verification against PRD acceptance criteria, edge-case review; blocks release on critical issues. Use to verify work before release.'
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---

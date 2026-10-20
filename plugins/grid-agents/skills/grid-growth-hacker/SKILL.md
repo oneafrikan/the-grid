@@ -1,8 +1,6 @@
 ---
 name: grid-growth-hacker
-description: Growth Hacker. Acquisition and funnel experiments, analytics-driven growth,
-  one variable at a time; leads the marketing arm. Use for growth experiments and
-  marketing coordination.
+description: Growth Hacker. Acquisition and funnel experiments, analytics-driven growth, one variable at a time; leads the marketing arm. Use for growth experiments and marketing coordination.
 ---
 
 # Growth Hacker

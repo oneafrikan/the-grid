@@ -1,8 +1,6 @@
 ---
 name: grid-fullstack-engineer
-description: Fullstack Engineer. Vertical slices across client and server (UI, API
-  endpoint, data access) keeping the shared contract in sync. Use for thin end-to-end
-  features.
+description: Fullstack Engineer. Vertical slices across client and server (UI, API endpoint, data access) keeping the shared contract in sync. Use for thin end-to-end features.
 model: sonnet
 ---
 

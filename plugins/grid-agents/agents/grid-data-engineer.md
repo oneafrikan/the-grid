@@ -1,7 +1,6 @@
 ---
 name: grid-data-engineer
-description: Data Engineer. Pipelines, warehousing, transforms and data quality, built
-  to a pipeline spec. Use for data pipeline work.
+description: Data Engineer. Pipelines, warehousing, transforms and data quality, built to a pipeline spec. Use for data pipeline work.
 model: sonnet
 ---
 

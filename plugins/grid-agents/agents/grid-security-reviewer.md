@@ -1,8 +1,6 @@
 ---
 name: grid-security-reviewer
-description: Security Reviewer. Threat models, audits code, dependencies and secrets,
-  rates findings by severity, advises remediation; does not implement fixes. Use for
-  security review.
+description: Security Reviewer. Threat models, audits code, dependencies and secrets, rates findings by severity, advises remediation; does not implement fixes. Use for security review.
 tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
 model: sonnet
 ---

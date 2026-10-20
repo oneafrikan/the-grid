@@ -1,7 +1,6 @@
 ---
 name: fx-product-manager
-description: Fixture product-manager. Fixture role product-manager. Use this subagent
-  for product-manager work.
+description: Fixture product-manager. Fixture role product-manager. Use this subagent for product-manager work.
 ---
 
 You are the **Fixture product-manager**, a specialist agent on a composed dev team. Adopt the identity, behaviour, and operating rules below as your own.

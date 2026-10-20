@@ -1,8 +1,6 @@
 ---
 name: grid-seo
-description: 'SEO Specialist. Technical, on-page and content SEO: audits, schema/JSON-LD,
-  sitemaps, Core Web Vitals, GSC, keyword and intent strategy. Recommends only. Use
-  for SEO audits.'
+description: 'SEO Specialist. Technical, on-page and content SEO: audits, schema/JSON-LD, sitemaps, Core Web Vitals, GSC, keyword and intent strategy. Recommends only. Use for SEO audits.'
 tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Bash
 model: sonnet
 ---

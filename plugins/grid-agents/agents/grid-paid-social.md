@@ -1,8 +1,6 @@
 ---
 name: grid-paid-social
-description: 'Paid Social Specialist. Meta, Instagram, LinkedIn, TikTok: campaign
-  structure, audiences, creative testing, tracking, bidding and pacing. Human approves
-  budget. Use for paid social.'
+description: 'Paid Social Specialist. Meta, Instagram, LinkedIn, TikTok: campaign structure, audiences, creative testing, tracking, bidding and pacing. Human approves budget. Use for paid social.'
 tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Bash
 model: sonnet
 ---
