@@ -232,6 +232,8 @@ never touches its history.
   contexts/             ← opt-in working-mode prompts (claude-dev / claude-research / claude-review)
   dist/                 ← GENERATED portable single-file personas (scripts/build-personas.sh)
   openspec/             ← OpenSpec changes (proposals, design, tasks) for the-grid itself
+  signals/              ← claims filed for the knowledge flow, plus agent handoffs (signals/README.md)
+  knowledge/            ← recorded claims by stage; canon/ is human-approved (knowledge/README.md)
   _retired/             ← quarantined code, not gated or deployed (issue-loop; see its RETIRED.md)
   repos/                ← sibling repos as git submodules
     gstack/             (each may contain many skill dirs)
@@ -250,6 +252,7 @@ never touches its history.
     rules.py            ← lints, lists and emits the rule packs (rules/)
     audit.sh, audit.py  ← the vetting scan that wire.sh runs before touching any link
     gate.sh             ← the commit gate: shellcheck, catalog, role lint, composed output, tests
+    map.py              ← generates MAP.md; `status` prints stage and signal counts (never edit MAP.md)
     run-record.sh       ← appends one line per agent run to a local private log
   tests/
     test_wiring.bats, test_catalog.bats, test_skill_format.bats, test_repo_health.bats
@@ -259,6 +262,8 @@ never touches its history.
     lib/bats-core/      ← test runner (submodule, no install needed)
   CLAUDE.md               ← full project context for Claude sessions
   SKILLS.md               ← generated skill index (never edit by hand)
+  MAP.md                  ← generated session-start map (scripts/map.py; never edit by hand)
+  PURPOSE.md, GUARDRAILS.md, BEHAVIOUR.md ← what the grid is for, its must-nots, its agent-behaviour additions (drafts until approved)
   LEARNINGS.md            ← durable lessons mined from project history
   policy.yaml             ← vetting policy read by scripts/audit.py
   grid.yaml, grid.lock    ← where wired skills come from, and the pinned commits (scripts/grid)
