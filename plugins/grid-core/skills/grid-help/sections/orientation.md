@@ -9,7 +9,7 @@
   kept in the private store outside this repo.
 - **Want a one-off capability?** A wired skill is a slash command — e.g.
   `/standup`, `/ponytail`, `/skill-scout`. Ask "is there a skill for X?" and
-  check [SKILLS.md](../../../SKILLS.md) if unsure.
+  check [SKILLS.md](https://github.com/oneafrikan/the-grid/blob/main/SKILLS.md) if unsure.
 - **Want a role to do work for you?**
   - **Orchestrator** (`grid-ceo-orchestrator`, `grid-tech-lead`,
     `grid-growth-hacker`, `finance-desk-finance-manager`, plus `tron`,
@@ -41,5 +41,5 @@
   `/spec-scout` audits adoption + spec↔code drift. Needs the CLI
   (`npm i -g @fission-ai/openspec@1.12.0`) or the skills dead-end.
 - **Want to know which model to use for a job?**
-  [docs/model-selection.md](../../../docs/model-selection.md) — prices, independent
+  [docs/model-selection.md](https://github.com/oneafrikan/the-grid/blob/main/docs/model-selection.md) — prices, independent
   benchmarks, worked cost maths, and an explicit list of what is *not* known.
