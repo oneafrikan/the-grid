@@ -584,11 +584,24 @@ done
 # based). A link is watched as itself (state_lines never follows) and so is where it points.
 INC_WATCH=(); INC_MAX=64
 SSH_DIR="$HOME/.ssh"; SSH_DIR_REAL="$HOME_REAL/.ssh"
+# covers_run_dir <path>: true when <path> is, or is a directory above, a place this run itself
+# writes (the cwd, the fallback dir, the target dir). Watching it would count the worker's own
+# handoff as a change by the child: an ssh `Include ~/projects/*` made every run end
+# unexpected-file (NF-077 VF1). Those places are scanned anyway, as ROOTS, below.
+covers_run_dir() {
+  local p="${1%/}" r
+  for r in "$CWD" "$CWD_REAL" "$FALLBACK" "$FALLBACK_REAL" "$TARGET_REAL"; do
+    [ -n "$r" ] || continue
+    case "$r/" in "$p"/*) return 0 ;; esac
+  done
+  return 1
+}
 # inc_add <path>: remember it. Returns 1 when it is not watchable or already known, which is
 # also what ends an include cycle.
 inc_add() {
   local p="$1" x l t
   case "$p" in *$'\n'*|*/../*|*/..) return 1 ;; esac
+  covers_run_dir "$p" && return 1
   case "$p" in "$HOME"/*|"$HOME_REAL"/*) ;; *) return 1 ;; esac
   # (SSH_DIR rather than the literal path: the audit's credential-read rule flags `$HOME/.ssh/`
   # followed by anything but config or known_hosts, and this only COMPARES against the name)
@@ -667,7 +680,7 @@ ssh_includes "$HOME/.ssh/config" 0
 home_watch() {
   local f
   for f in .bashrc .bash_profile .bash_login .profile .bash_logout .zshrc .zshenv .zprofile \
-           .zlogin .zlogout .gitconfig .xprofile .npmrc .pam_environment .ssh/authorized_keys .ssh/authorized_keys2 \
+           .zlogin .zlogout .bash_aliases .gitconfig .xprofile .npmrc .pam_environment .ssh/authorized_keys .ssh/authorized_keys2 \
            .ssh/config .ssh/config.d .ssh/rc .ssh/environment .config/git/config .config/git/attributes .config/autostart .bashrc.d; do
     printf '%s\n' "$HOME/$f"
   done
@@ -678,13 +691,30 @@ home_watch() {
   # What the user's git and ssh config include (found once, above).
   if [ "${#INC_WATCH[@]}" -gt 0 ]; then printf '%s\n' "${INC_WATCH[@]}"; fi
 }
+# watch_through_links: stdin = paths, stdout = the same paths plus, for each one that is a
+# symlink, where it finally points. state_lines never follows a link, so a dotfile that links
+# into a dotfiles repo would otherwise show only its link text and hide every content edit made
+# through it (VS1). A target that holds the run's own write dirs is dropped (see covers_run_dir).
+watch_through_links() {
+  local p t l hops
+  while IFS= read -r p; do
+    printf '%s\n' "$p"
+    t="$p"; hops=0
+    while [ -L "$t" ] && [ "$hops" -lt 8 ]; do
+      l="$(readlink "$t")" || break
+      case "$l" in /*) t="$l" ;; *) t="$(dirname "$t")/$l" ;; esac
+      hops=$((hops + 1))
+    done
+    if [ "$t" != "$p" ] && [ ! -L "$t" ] && ! covers_run_dir "$t"; then printf '%s\n' "$t"; fi
+  done
+}
 # Big directories: names, types, link targets and sizes only (no content hashing, no
 # following links). ~/.local/bin holds the claude launcher link into a ~1 GB versions
 # directory; hashing that would be slow, and a self-update mid-run would be a false alarm
 # on content. A same-size rewrite of a file there is not seen (documented in the README).
 home_watch_lite() { printf '%s\n' "$HOME/.local/bin"; }
 # home_state: the whole home-side state, in one stable order.
-home_state() { { home_watch | state_lines; home_watch_lite | state_lines lite; } | sort -u; }
+home_state() { { home_watch | watch_through_links | state_lines; home_watch_lite | state_lines lite; } | sort -u; }
 home_state > "$SNAP_DIR/home.state"
 
 # Roots the verification scans: ONLY the directories the child may write to: the cwd, the
