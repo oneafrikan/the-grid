@@ -2,7 +2,7 @@
 # check-grid.sh — "is the grid healthy?" check: the full test suite plus a link scan.
 #
 # Two signals, no wall of bats output (the suite is the whole of tests/, so it takes
-# many minutes: roughly 15 on CI, longer locally; it is not a quick check):
+# many minutes: the CI `gate` job that includes it ran 18 to 30 minutes in recent Actions runs; it is not a quick check):
 #   1. Run the full bats suite, print one PASS/FAIL line. On failure (only then)
 #      replay the full bats output so you can see what broke.
 #   2. Scan the live Claude skills + agents dirs for BROKEN symlinks that point
