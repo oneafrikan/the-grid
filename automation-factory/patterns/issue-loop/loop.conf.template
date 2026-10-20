@@ -16,6 +16,7 @@ REVIEW_FOCUS=${REVIEW_FOCUS:-{{REVIEW_FOCUS}}}   # one line for the review hook
 WORKER_MODEL=${WORKER_MODEL:-{{WORKER_MODEL}}}   # always passed as --model
 MAX_BUDGET_USD=${MAX_BUDGET_USD:-{{MAX_BUDGET_USD}}}   # worker --max-budget-usd, always passed
 ISSUE_TIMEOUT=${ISSUE_TIMEOUT:-{{ISSUE_TIMEOUT}}}      # seconds, worker
+WORKER_EXIT_GRACE=${WORKER_EXIT_GRACE:-'30'}     # seconds a worker may keep running after writing its outcome before the runner stops it
 WORKER_PERMISSIONS=${WORKER_PERMISSIONS:-{{WORKER_PERMISSIONS}}}   # allowlist | bypass (bypass = --dangerously-skip-permissions; a fallback only, see the README)
 # Tools the headless worker may use (passed as --allowedTools). No git push, no gh. Append the project's test commands.
 WORKER_ALLOWED_TOOLS=${WORKER_ALLOWED_TOOLS:-{{WORKER_ALLOWED_TOOLS}}}

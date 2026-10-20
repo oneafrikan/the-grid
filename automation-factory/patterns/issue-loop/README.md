@@ -61,6 +61,7 @@ Tracked, plain assignments, **no secrets**. Every line is `KEY=${KEY:-'value'}`,
 | `WORKER_MODEL` | `sonnet` | always passed as `--model` |
 | `MAX_BUDGET_USD` | `5` | worker `--max-budget-usd`, always passed |
 | `ISSUE_TIMEOUT` | `1800` | seconds, worker |
+| `WORKER_EXIT_GRACE` | `30` | seconds a worker may keep running after writing a valid outcome; then the runner stops its process group and carries on as if it had exited |
 | `WORKER_PERMISSIONS` | `allowlist` | `allowlist`, or `bypass` (a fallback, see below) |
 | `WORKER_ALLOWED_TOOLS` | `Read`, `Edit`, `Write`, `Glob`, `Grep` and `Bash(git <sub>:*)` for status, diff, log, show, add, commit | passed as `--allowedTools`; add your test commands. No `git push`, no `gh` |
 | `MAX_ISSUES_PER_DAY` | `5` | daily cap |

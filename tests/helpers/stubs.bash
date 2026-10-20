@@ -39,6 +39,7 @@
 #     STUB_WORKER_COMMIT[_N]=1 a worker call (LOOP_OUTCOME_FILE set) creates and commits a file in its cwd
 #     STUB_OUTCOME[_N]         line written to $LOOP_OUTCOME_FILE (default "done"); STUB_NO_OUTCOME=1 writes none
 #     STUB_CLAUDE_SLEEP[_N]    seconds a worker call sleeps first; $STUB_STARTED (a path) is touched when it starts
+#     STUB_HANG_AFTER_OUTCOME  seconds a worker call keeps running after writing its outcome, with no result printed
 #     STUB_PLANT_PREPUSH       path: the worker plants a pre-push hook that touches it
 #     STUB_CLAUDE_ARGV         path: the last `-p` call's argv is written there, NUL separated
 #     STUB_STDIN_DUMP          path: the last `-p` call's stdin is copied there
@@ -277,6 +278,9 @@ if [ -n "${LOOP_OUTCOME_FILE:-}" ]; then
     oc="$(pick OUTCOME "$n")"
     printf '%s\n' "${oc:-done}" > "$LOOP_OUTCOME_FILE"
   fi
+  # STUB_HANG_AFTER_OUTCOME=<seconds>: keep running after the outcome is written, printing no result
+  # (a worker whose background watcher keeps the session alive).
+  if [ -n "${STUB_HANG_AFTER_OUTCOME:-}" ]; then sleep "$STUB_HANG_AFTER_OUTCOME"; fi
   rc="$(pick CLAUDE_EXIT "$n")"
   js="$(pick CLAUDE_JSON "$n")"
   default_json='{"type":"result","subtype":"success","is_error":false,"result":"stub result","total_cost_usd":0.01}'

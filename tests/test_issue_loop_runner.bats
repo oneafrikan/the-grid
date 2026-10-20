@@ -358,6 +358,45 @@ add_agent() {
   refute has_gh "gh pr create"
 }
 
+@test "caps: a worker that wrote done but never exits is stopped after WORKER_EXIT_GRACE and the PR is opened" {
+  use_real_timeout
+  happy_env
+  export STUB_HANG_AFTER_OUTCOME=300
+  set_conf WORKER_EXIT_GRACE 1
+  start="$SECONDS"
+  run_runner
+  [ "$status" -eq 0 ]
+  # well inside ISSUE_TIMEOUT (60): grace 1s + poll slack, not the timeout path
+  [ $((SECONDS - start)) -lt 30 ]
+  has_gh "gh pr create"
+  refute has_gh "--add-label blocked"
+  [ "$(rr_field 1 outcome)" = "ok" ]
+}
+
+@test "caps: a worker that exits by itself inside WORKER_EXIT_GRACE is unaffected" {
+  use_real_timeout
+  happy_env
+  set_conf WORKER_EXIT_GRACE 1
+  run_runner
+  [ "$status" -eq 0 ]
+  has_gh "gh pr create"
+  [ "$(rr_field 1 outcome)" = "ok" ]
+}
+
+@test "caps: a worker that never writes an outcome still hits ISSUE_TIMEOUT and is blocked" {
+  use_real_timeout
+  happy_env
+  export STUB_NO_OUTCOME=1 STUB_CLAUDE_SLEEP=20
+  set_conf ISSUE_TIMEOUT 2
+  set_conf WORKER_EXIT_GRACE 1
+  run_runner
+  [ "$status" -eq 0 ]
+  has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label blocked"
+  contains "$(cat "$STUB_COMMENTS")" "ISSUE_TIMEOUT"
+  [ "$(rr_field 1 outcome)" = "error" ]
+  refute has_gh "gh pr create"
+}
+
 @test "caps: the daily cap stops a new issue with no gh write and no claude call" {
   today="$(date '+%Y-%m-%d')"
   mkdir -p "$STATE"
