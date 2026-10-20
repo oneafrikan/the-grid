@@ -229,6 +229,38 @@ agree() {
   agree '---\nname: indented\ndescription: Closes early\n  ---\nmore: x\n---\n'
 }
 
+# Table-driven: each fixture was once read differently by the two readers (NF-064). One
+# fixture per line, printf format; a fixture that disagrees prints itself and fails the test.
+@test "agrees with skill_frontmatter.py: the shapes the two readers once disagreed on" {
+  local fx fixtures=(
+    '---\nname: b\ndescription: |\n  one\n\n  two\n---\n'          # blank line inside a block scalar
+    '---\nname: x\n  cont\ndescription: D.\n---\n'                # indented line under name:
+    "---\nname: 'it''s'\ndescription: D.\n---\n"                  # doubled quote in a single-quoted name
+    "---\nname: n\ndescription: 'it''s'\n---\n"                   # ... and in a description
+    '---\nname: >\n  folded\ndescription: D.\n---\n'              # name as a folded block
+    '---\nname: |\n  piped\ndescription: D.\n---\n'               # name as a literal block
+    '---\nname: foo # c\ndescription: D.\n---\n'                  # plain name with a comment
+  )
+  for fx in "${fixtures[@]}"; do
+    agree "$fx" || { echo "differs on: $fx"; return 1; }
+  done
+}
+
+# The documented differences (catalog.sh header): awk splits lines on LF only, python also on a
+# lone CR, U+0085 and U+2028, so such a file is "no frontmatter" here. Pinned so a change to
+# either reader shows up as a failure here instead of as a silent drift.
+@test "catalog.sh reads a lone CR, U+0085 or U+2028 line break as no frontmatter (documented difference)" {
+  local dir="$MOCK_GRID/skills/brk-dir" fx
+  mkdir -p "$dir"
+  for fx in '---\rname: cr\rdescription: D.\r---\r' \
+            '---\xc2\x85name: nel\xc2\x85description: D.\xc2\x85---\xc2\x85' \
+            '---\xe2\x80\xa8name: ls\xe2\x80\xa8description: D.\xe2\x80\xa8---\xe2\x80\xa8'; do
+    printf -- "$fx" > "$dir/SKILL.md"
+    GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
+    grep -qxF -- '- **brk-dir** — _(no description)_' "$OUT" || { echo "not a fallback: $fx"; return 1; }
+  done
+}
+
 # --- WP-047: ordering and cap -------------------------------------------------------------
 
 # A locale whose collation differs from C, if this machine has one (else the test cannot bite).
