@@ -737,7 +737,8 @@ PYEOF
 
 @test "wording: no emitter or doc claims read-only roles are read-only on every harness" {
   run grep -n "errs safe\|stay read-only on every harness" \
-    "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/docs/harnesses.md"
+    "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/docs/harnesses.md" \
+    "$REPO_ROOT/openspec/changes/multi-harness/design.md"
   echo "$output"
   [ "$status" -eq 1 ]
   grep -qi "best-effort" "$REPO_ROOT/docs/harnesses.md"
@@ -1383,4 +1384,57 @@ time.sleep(30)' "$out/fx" "$TMP/locked" &
     [ -f "$out/fx/some-role/SOUL.md" ]
     [ ! -e "$out/fx.old" ]
   done
+}
+
+# ---------------------------------------------------------------- H-21 compose fidelity ----
+
+@test "H-21 codex: roles that write through the shell get no read-only sandbox; other read-only roles keep it" {
+  # Real roles, private tree disabled (empty var), so the shipped role.yaml files decide.
+  printf 'project: zz\nslug: zz\nagents:\n  - role: finance-sentinel\n  - role: data-analyst\n  - role: qa-engineer\n  - role: finance-strategist\n' > "$TMP/zz.yaml"
+  export GRID_PRIVATE_ROLES_DIR=""
+  export GRID_USER_CONFIG="$REPO_ROOT/agent-factory/user.public.yaml"
+  export GRID_MODELS_FILE="$REPO_ROOT/agent-factory/models.yaml"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target codex --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  local d="$TMP/out/zz/_codex/agents"
+  lacks '^sandbox_mode' "$d/zz-finance-sentinel.toml" "$d/zz-data-analyst.toml"
+  grep -qx 'sandbox_mode = "read-only"' "$d/zz-qa-engineer.toml"
+  grep -qx 'sandbox_mode = "read-only"' "$d/zz-finance-strategist.toml"
+}
+
+@test "H-21 gemini: a Skill allowlist entry maps to activate_skill" {
+  gemini_roles zz-sk=Read,Skill
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target gemini-cli --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  grep -qx -- '- activate_skill' "$TMP/out/zz/_gemini-cli/agents/zz-zz-sk.md"
+}
+
+@test "H-21 check: --check refuses a project dir that is a symlink to an identical copy" {
+  gemini_env
+  local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$TMP/out"
+  [ "$status" -eq 0 ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$TMP/out" --check
+  [ "$status" -eq 0 ]
+  mv "$TMP/out/fx" "$TMP/real-fx"
+  ln -s "$TMP/real-fx" "$TMP/out/fx"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target claude-code --out "$TMP/out" --check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"symlink"* ]]
+}
+
+@test "H-21 docs: the persona size range in docs/harnesses.md matches dist/personas" {
+  # KB = 1000 bytes, one decimal, as the doc writes it.
+  local want
+  want=$(python3 -I - "$REPO_ROOT/dist/personas" <<'PYEOF'
+import os, sys
+sizes = [os.path.getsize(os.path.join(sys.argv[1], f)) for f in os.listdir(sys.argv[1]) if f.endswith(".md")]
+print("Sizes are %.1f to %.1f KB" % (min(sizes) / 1000, max(sizes) / 1000))
+PYEOF
+)
+  echo "want: $want"
+  grep -qF "$want" "$REPO_ROOT/docs/harnesses.md"
 }

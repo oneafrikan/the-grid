@@ -176,7 +176,7 @@ A role's `tools:` allowlist is translated, not enforced identically. What a harn
 | Harness | What the allowlist becomes | What it does not give you |
 |---|---|---|
 | Claude Code | `tools:` on the subagent | A role that lists `Bash` can still write through the shell |
-| Codex CLI | `sandbox_mode = "read-only"` only when neither `Edit` nor `Write` is listed | A best-effort default: a subagent inherits the parent session's sandbox, and `--yolo` or `/permissions` override the agent file. Codex cannot express "no Bash" |
+| Codex CLI | `sandbox_mode = "read-only"` only when neither `Edit` nor `Write` is listed (not for the two roles that write through the shell, see "Codex CLI") | A best-effort default: a subagent inherits the parent session's sandbox, and `--yolo` or `/permissions` override the agent file. Codex cannot express "no Bash" |
 | OpenCode | `permission` keys `edit`, `bash`, `webfetch` set to `deny` where the allowlist lacks the tool | A partial denylist: every other tool (`task`, MCP servers) keeps OpenCode's default |
 | Gemini CLI | `tools:` in Gemini's own tool names | A role that lists `Bash` keeps `run_shell_command` |
 
@@ -206,7 +206,14 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
 
 - Required keys are `name`, `description` and `developer_instructions`. `name` is the agent's identity, not the filename.
 - Key order is fixed: `name`, `description`, `sandbox_mode`, `developer_instructions`.
-- Sandbox mapping: `sandbox_mode = "read-only"` is written only when the role's `role.yaml` has a `tools:` allowlist containing neither `Edit` nor `Write` (for example `qa-engineer` and `security-reviewer`; the composed `_codex/agents/*.toml` files show the full set). A role with no allowlist, or one that can edit, gets no `sandbox_mode` and inherits Codex's default.
+- Sandbox mapping: `sandbox_mode = "read-only"` is written only when the role's `role.yaml` has a `tools:` allowlist containing neither `Edit` nor `Write`, except for the two roles in the table below (`CODEX_SHELL_WRITERS` in `compose.py`). A role with no allowlist, or one that can edit, gets no `sandbox_mode` and inherits Codex's default.
+
+  | Role | Documented write need | Codex sandbox |
+  |---|---|---|
+  | `finance-sentinel` | writes one run-record line per run through `scripts/run-record.sh` (shell) | none (inherits) |
+  | `data-analyst` | saves each query and its result (shell) | none (inherits) |
+  | `qa-engineer`, `security-reviewer`, `finance-risk-officer`, `finance-strategist` | none (report only) | `read-only` |
+  | every role with `Edit` or `Write` | writes files | none (inherits) |
 - `sandbox_mode = "read-only"` is a best-effort default, not an enforced control (see "What each harness enforces"). While it applies it also blocks writes through Bash, which is stricter than Claude, where an allowlisted Bash can still write.
 - A role whose allowlist has `Edit` or `Write` but no `Bash` gets no `sandbox_mode`, so it runs with a shell on Codex; compose prints one `warning: role <name> gets a shell on Codex` line to stderr for each (the files are unchanged).
 - `model` and the other optional keys (`model_reasoning_effort`, `mcp_servers`, `skills.config`) are never written.
@@ -266,7 +273,7 @@ Single-file personas for chat-UI Projects: `dist/personas/<role>.md`
 - These are harness-oriented exports, not chat-native prompts. The text still carries
   harness references (Signal Protocol hand-offs, subagents, `~/.claude`), which mean
   nothing in a chat UI; they are not stripped.
-- Sizes are 6.9 to 18.6 KB. No size cap is claimed: the limit of a given chat UI is
+- Sizes are 6.9 to 18.7 KB. No size cap is claimed: the limit of a given chat UI is
   unverified, so check it before pasting a large persona.
 - The private learning store path is written as `<private-dir>/` in these files; the
   role sources keep the real path.
@@ -314,8 +321,9 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
   | `Write` | `write_file` |
   | `WebFetch` | `web_fetch` |
   | `WebSearch` | `google_web_search` |
+  | `Skill` | `activate_skill` |
 
-- An unknown tool name is rejected on every harness, not just Gemini: role lint reports `E_TOOL_UNKNOWN` (the known names are the eight keys in the table above, case-sensitive), and each agent emitter exits `E_TOOL_UNMAPPED: <role>: tool '<tool>' is not a known tool` (also for an empty or malformed `tools:`), exit 1. The check runs before the `_gemini-cli` dir is replaced, so a failed compose leaves the previous output (and any other target) untouched. Dropping the tool silently would change what a role can do.
+- An unknown tool name is rejected on every harness, not just Gemini: role lint reports `E_TOOL_UNKNOWN` (the known names are the nine keys in the table above, case-sensitive), and each agent emitter exits `E_TOOL_UNMAPPED: <role>: tool '<tool>' is not a known tool` (also for an empty or malformed `tools:`), exit 1. The check runs before the `_gemini-cli` dir is replaced, so a failed compose leaves the previous output (and any other target) untouched. Dropping the tool silently would change what a role can do.
 - The docs say only "tool names" for `tools`, with no syntax shown, so the list is a YAML block list (the natural form). Not verified on a real Gemini CLI yet (the real-install smoke test is a later, optional, human step).
 - `tests/lib/validate_harness.py gemini-agent FILE...` checks a generated file: `name` matches `^[a-z0-9_-]+$`, `description` is non-empty, `tools` (if present) is a block list, and there is no `model`.
 - Subagents cannot call subagents on Gemini CLI, so a role that delegates (an orchestrator) is never emitted as an agent file; it reaches Gemini as a skill.

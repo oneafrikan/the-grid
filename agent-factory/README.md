@@ -234,7 +234,7 @@ narrowing aid, not a sandbox.
 
 **What it does**
 - Limits a Claude Code subagent to the named built-in tools (`Read`, `Grep`, `Glob`, `Bash`, `Edit`,
-  `Write`, `WebFetch`, `WebSearch`). A tool not listed is not available to that subagent.
+  `Write`, `WebFetch`, `WebSearch`, `Skill`). A tool not listed is not available to that subagent.
 - Is written into the generated agent files for Claude Code (`tools:`) and Gemini (each name mapped
   to its own tool). Runtime enforcement by those vendors is not verified here.
 - This factory's `KNOWN_TOOLS` validation does not accept MCP tool names. Whether the vendor runtime
