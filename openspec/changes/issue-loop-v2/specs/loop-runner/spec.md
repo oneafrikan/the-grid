@@ -1,6 +1,6 @@
 ## Purpose
 
-Work one labelled GitHub issue per invocation, headless, with caps, and hand a verified PR to a human. Use case: an operator's own machine, own `gh` and `claude` logins, working the low-risk `ready-for-agent` backlog that gh-triage prepared. The runner never merges and never classifies. Requirements marked (B3) are built in stage B3; everything else is B1.
+Work one labelled GitHub issue per invocation, headless, with caps, and either hand a verified draft PR to a human (`MODE=pr`) or land the verified commit on the base branch itself (`MODE=direct`). Use case: an operator's own machine, own `gh` and `claude` logins, working the low-risk `ready-for-agent` backlog that gh-triage prepared. The runner never classifies and never calls `gh pr merge`; only `MODE=direct` lands code without a human merge. Direct mode, stale-lock takeover and infra backoff are built; the poison-issue rule and the pid-less-lock age rule are not (marked below).
 
 ## ADDED Requirements
 
@@ -20,22 +20,26 @@ Work one labelled GitHub issue per invocation, headless, with caps, and hand a v
 - **THEN** it exits 2 naming the label, and no worktree is created
 
 ### Requirement: Preflight refuses to run unsafe
-Before any worktree, lock or model call it SHALL exit 2 with one stderr line naming the fix when: `MODE` is not `pr`; `VERIFY_CMD` is empty; `git`, `gh`, `jq`, `claude` or a `timeout`/`gtimeout` binary is missing; `claude auth status --json` does not report `loggedIn: true`; `gh auth status` fails; `GH_REPO` is empty; `origin/BASE_BRANCH` does not exist on the remote; `loop/hooks/guard-main-push.sh` is missing or not executable; `WORKER_PERMISSIONS` is neither `allowlist` nor `bypass`.
+Before any worktree, lock or model call it SHALL exit 2 with one stderr line naming the fix when: `MODE` is neither `pr` nor `direct`; `VERIFY_CMD` is empty; `git`, `gh`, `jq`, `claude` or a `timeout`/`gtimeout` binary is missing; `GH_REPO` is empty; `origin/BASE_BRANCH` does not exist on the remote; `loop/hooks/guard-main-push.sh` is missing or not executable; `WORKER_PERMISSIONS` is neither `allowlist` nor `bypass`.
 
 #### Scenario: No verify command
 - **WHEN** `VERIFY_CMD` is empty in `loop/loop.conf`
 - **THEN** exit 2, message contains `VERIFY_CMD`, `claude` is never called
 
-#### Scenario: Direct mode
-- **WHEN** `MODE=direct`
-- **THEN** exit 2 with "headless runs are pr-only; use direct mode from an interactive /loop"
+#### Scenario: Unknown mode
+- **WHEN** `MODE` is neither `pr` nor `direct`
+- **THEN** exit 2 naming the value; `MODE=direct` is accepted (see "Direct mode")
+
+#### Scenario: Not logged in is infrastructure
+- **WHEN** `claude` or `gh` is not logged in (stub)
+- **THEN** it is not a preflight failure: exit 1, the issue keeps its label, nothing is relabelled, a backoff window opens (see "Backoff on infra failure")
 
 #### Scenario: Guard script missing
 - **WHEN** `loop/hooks/guard-main-push.sh` is absent
 - **THEN** exit 2 naming the file and "re-run instantiate.sh"
 
 ### Requirement: Lock
-The runner SHALL hold a `mkdir` lock at `<git-common-dir>/issue-loop/lock` for its whole run, writing `pid`, `issue`, `started` and (when the worker starts) `worker` into it. A second invocation while the lock is held SHALL exit 0 printing the holder's pid and the lock path. The lock and the worktree SHALL be removed on every exit path including SIGINT, SIGTERM and SIGHUP.
+The runner SHALL hold a `mkdir` lock at `<git-common-dir>/issue-loop/lock` for its whole run, writing `pid`, `issue`, `started` and (when the worker starts) `worker` into it. A second invocation while a live runner holds the lock SHALL exit 0 printing the holder's pid and the lock path (a stale lock is taken over, see "Stale lock takeover"). The lock and the worktree SHALL be removed on every exit path including SIGINT, SIGTERM and SIGHUP.
 
 #### Scenario: Concurrent start
 - **WHEN** a run is in progress and `run-issue.sh` is started again
@@ -50,7 +54,7 @@ The runner SHALL hold a `mkdir` lock at `<git-common-dir>/issue-loop/lock` for i
 - **THEN** the lock is still created in the repo's git common dir
 
 ### Requirement: Caps
-Every worker call SHALL pass `--model WORKER_MODEL`, `--max-budget-usd MAX_BUDGET_USD` and run under `timeout -k 30 ISSUE_TIMEOUT`. The runner SHALL NOT pass `--max-turns`. It SHALL refuse to start a new issue (exit 0, nothing touched) once `MAX_ISSUES_PER_DAY` issues have been handled today, counted from `runs.log`.
+Every worker call SHALL pass `--model WORKER_MODEL`, `--max-budget-usd MAX_BUDGET_USD` and run under `timeout -k 30 ISSUE_TIMEOUT`. The runner SHALL NOT pass `--max-turns`. When `MAX_ISSUES_PER_DAY` is above 0 it SHALL refuse to start a new issue (exit 0, nothing touched) once that many issues have been handled today, counted from `runs.log`; the default is `0`, which means unlimited and is never checked.
 
 #### Scenario: Flags present
 - **WHEN** a worker is started with default config
@@ -58,11 +62,15 @@ Every worker call SHALL pass `--model WORKER_MODEL`, `--max-budget-usd MAX_BUDGE
 
 #### Scenario: Timeout
 - **WHEN** the worker exceeds `ISSUE_TIMEOUT` (exit 124 or 137)
-- **THEN** the issue is relabelled `blocked` with a timeout comment, the run-record outcome is `error`, the exit status is 0
+- **THEN** the issue is relabelled `blocked` with a timeout comment, the run-record outcome is `error`, the exit status is 0, and any uncommitted work is saved as a WIP commit on the local branch `issue-N`
 
 #### Scenario: Daily cap
-- **WHEN** `runs.log` holds `MAX_ISSUES_PER_DAY` lines dated today
+- **WHEN** `MAX_ISSUES_PER_DAY` is above 0 and `runs.log` holds that many lines dated today
 - **THEN** it exits 0 with "daily cap reached" and calls neither `gh` writes nor `claude`
+
+#### Scenario: Unlimited by default
+- **WHEN** `MAX_ISSUES_PER_DAY=0` and `runs.log` holds any number of lines dated today
+- **THEN** the next issue is worked
 
 ### Requirement: Worker permissions and guard are per-run, not repo-wide (D4, D5)
 By default (`WORKER_PERMISSIONS=allowlist`) the worker SHALL be started with `--allowedTools "$WORKER_ALLOWED_TOOLS"` and SHALL NOT receive `--dangerously-skip-permissions`; the default allowlist SHALL contain no `git push` and no `gh`. With `WORKER_PERMISSIONS=bypass` (a fallback, see proposal assumption 1) it SHALL receive `--dangerously-skip-permissions` instead. In both modes the runner SHALL write a temporary settings file containing only a PreToolUse entry for the repo's `loop/hooks/guard-main-push.sh` and pass it with `--settings`; the file SHALL be deleted on exit. The runner SHALL NOT read or write `<repo>/.claude/settings.json`.
@@ -176,18 +184,41 @@ After a worker reports `done` the runner SHALL check, in order: the worktree is 
 - **THEN** treated as a failed gate with "verify timed out"
 
 ### Requirement: Integration is the runner's job
-On a green gate the runner SHALL push with an explicit refspec `HEAD:refs/heads/issue-N` (never the base branch), open the PR with `gh pr create --base BASE_BRANCH --head issue-N`, remove `ISSUE_LABEL`, add `ready-for-human`, and comment the PR URL on the issue. It SHALL NOT close the issue and SHALL NOT call `gh pr merge`.
+With `MODE=pr`, on a green gate the runner SHALL push with an explicit refspec `HEAD:refs/heads/issue-N` (never the base branch), open the PR as a draft with `gh pr create --draft --base BASE_BRANCH --head issue-N`, remove `ISSUE_LABEL`, add `ready-for-human`, and comment the PR URL on the issue. It SHALL NOT close the issue and SHALL NOT call `gh pr merge`. The PR body is only `refs <tracker>#N` plus a fixed sentence; when `ISSUE_REPO` differs from `GH_REPO` the PR title is the fixed `issue-loop: work for <tracker>#N`, else the worker's commit subject, so the issue title and body never reach the PR text.
 
 #### Scenario: Happy path
 - **WHEN** the stub worker commits a file and writes `done` and `VERIFY_CMD` passes (temp bare origin, stub `gh`)
-- **THEN** one push whose refspec ends `refs/heads/issue-N`, one `gh pr create --base next`, labels `ready-for-human`, issue still open, worktree gone, branch kept
+- **THEN** one push whose refspec ends `refs/heads/issue-N`, one `gh pr create --draft --base next`, labels `ready-for-human`, issue still open, worktree gone, branch kept
 
 #### Scenario: Push rejected
 - **WHEN** the push fails
 - **THEN** the issue is `blocked` with the first 300 bytes of git's message and no PR exists
 
+### Requirement: Direct mode
+With `MODE=direct`, after the runner's own `VERIFY_CMD` passes (and not before), the runner SHALL fetch `BASE_BRANCH`; if the base moved, rebase `issue-N` onto `origin/BASE_BRANCH` and run `VERIFY_CMD` again; then push `HEAD:refs/heads/BASE_BRANCH` without force. It SHALL comment the short sha on the issue, remove `ISSUE_LABEL`, add `ready-for-human` and close the issue, with run-record outcome `ok`. It SHALL open no PR and push no `issue-N` branch. A rebase conflict or a rejected push SHALL leave the issue `blocked` (comment, nothing pushed) with the work kept on the local branch `issue-N`. A failing fetch is infrastructure (exit 1, label kept). The worker's own restrictions are unchanged: it cannot push, and the guard still blocks it from pushing the base branch. Headless direct is not reachable through `instantiate.sh --mode direct` (that cut ships no runner): cut `pr` and set `MODE=direct` in `loop/loop.conf`, or export `MODE=direct` for the run. There is no review step: branch protection and `VERIFY_CMD` are the only checks.
+
+#### Scenario: Landed
+- **WHEN** the stub worker commits, `VERIFY_CMD` passes and the base has not moved
+- **THEN** the commit is pushed to the base branch, no PR is created, no `issue-N` branch exists on origin, the issue is commented, relabelled `ready-for-human` and closed
+
+#### Scenario: Base moved
+- **WHEN** the base gained a commit while the worker ran
+- **THEN** `issue-N` is rebased onto it, `VERIFY_CMD` runs a second time, then the push lands
+
+#### Scenario: Rebase conflict
+- **WHEN** the rebase conflicts
+- **THEN** the issue is `blocked`, nothing is pushed, and local `issue-N` still holds the work
+
+#### Scenario: Rejected push
+- **WHEN** the push to the base is rejected (branch protection, or the base moved again)
+- **THEN** the issue is `blocked`, nothing landed, and local `issue-N` still holds the work
+
+#### Scenario: Known gap
+- **WHEN** `gh` fails between the push and the label swap
+- **THEN** the issue stays labelled `ready-for-agent` with its commit already landed, and the next tick works it again (not handled)
+
 ### Requirement: Label invariant
-For every exit with status 0 after an issue was selected, that issue SHALL no longer carry `ISSUE_LABEL`, and SHALL carry exactly one of `ready-for-human`, `needs-human` or `blocked` as given by the outcome table in `design.md`. A worker outcome `needs-human <reason>` SHALL map to `needs-human` with the reason (cut at 500 bytes) in the comment; a missing or unrecognised outcome line SHALL map to `blocked`.
+For every exit with status 0 after an issue was selected, that issue SHALL no longer carry `ISSUE_LABEL`, and SHALL carry exactly one of `ready-for-human`, `needs-human` or `blocked` as given by the outcome table in `design.md` (in `MODE=direct` a landed commit also closes the issue). The exception is an infrastructure failure, which exits 1 and keeps `ISSUE_LABEL`. A worker outcome `needs-human <reason>` SHALL map to `needs-human` with the reason (cut at 500 bytes) in the comment; a missing or unrecognised outcome line SHALL map to `blocked`.
 
 #### Scenario: Skipped issue does not starve the queue (R10.qa.F3)
 - **WHEN** issue 3 is refused by any gate and issue 4 is also labelled
@@ -198,7 +229,7 @@ For every exit with status 0 after an issue was selected, that issue SHALL no lo
 - **THEN** exit status 1, the issue keeps `ISSUE_LABEL`, no issue comment is posted, one run-record line has outcome `error`
 
 ### Requirement: Run record
-The runner SHALL append exactly one `scripts/run-record.sh` line per handled issue: `--role` the agent name or `RUN_ROLE`, `--action work-issue`, `--target OWNER/REPO#N`, `--outcome` ok (PR opened), skipped (gate refusal or worker needs-human), or error (everything else), `--cost-usd` from the worker JSON when present, `--note` at most 500 bytes including the session id. A missing `run-record.sh` SHALL warn and not fail the run. No line SHALL be written for "nothing to do", "busy" or "daily cap".
+The runner SHALL append exactly one `scripts/run-record.sh` line per handled issue: `--role` the agent name or `RUN_ROLE`, `--action work-issue`, `--target OWNER/REPO#N`, `--outcome` ok (PR opened, or commit landed in direct mode), skipped (gate refusal or worker needs-human), or error (everything else), `--cost-usd` from the worker JSON when present, `--note` at most 500 bytes including the session id. A missing `run-record.sh` SHALL warn and not fail the run. No line SHALL be written for "nothing to do", "busy" or "daily cap".
 
 #### Scenario: One line per issue
 - **WHEN** a run opens a PR
@@ -226,12 +257,13 @@ The worker SHALL be started with `--session-id <uuid>` (when a uuid source exist
 - **WHEN** a run is in progress
 - **THEN** `cat <lock>/worker` prints a live pid whose command line contains `claude`
 
-### Requirement: Backoff on infra failure and rate limits (B3)
-After an infra failure the runner SHALL write `<state>/backoff` with `fails` incremented and `until = now + min(15 min * 2^(fails-1), 6 h)`. While `now < until`, a start SHALL exit 0 with "backing off until <time>" and touch nothing. A rate-limit signal in the worker's stdout or stderr SHALL set the backoff, record outcome `stopped` with note `rate-limited`, and keep the issue label. Any run reaching an issue-level outcome SHALL delete `backoff`. Three consecutive infra failures on the same issue SHALL mark that issue `blocked` with a comment.
+
+### Requirement: Backoff on infra failure and rate limits
+An infrastructure failure is: `claude` or `gh` logged out, `gh` or `origin` unreachable (including a failing `gh pr list` or `ls-remote`, an unreadable issue, a failed fetch), or a worker with no recognised outcome line whose output shows a usage limit, rate limit or similar service cut-off (a fixed pattern list in `run-issue.sh`). After one the runner SHALL exit 1, keep `ISSUE_LABEL`, record outcome `error` with an `infra:` note, and write `<state>/backoff` as `until=<epoch> fails=<n>` with `fails` incremented and the window `min(15 min * 2^(fails-1), 6 h)`. While `now < until`, a start with no issue number SHALL exit 0 with "backing off" and touch nothing; `run-issue.sh <N>` ignores the window. Any run reaching an issue-level outcome, or finding the queue empty, SHALL delete `backoff`. A worker with no outcome line and no such pattern is an issue-level `blocked`. Not built: the poison-issue rule (three consecutive infra failures on the same issue block that issue); `backoff` carries no per-issue counter, so a persistently failing issue is retried once per window, at most every 6 hours.
 
 #### Scenario: Doubling and cap
-- **WHEN** consecutive infra failures occur on different issues (so the poison rule does not fire)
-- **THEN** the waits are 15, 30, 60, 120 and 240 min; the sixth and later are 6 h (the cap)
+- **WHEN** consecutive infra failures occur
+- **THEN** the waits are 15, 30, 60, 120 and 240 min; the sixth and later are 6 h (the cap). Tested for the first two windows only; the cap itself is read from the code (UNTESTED)
 
 #### Scenario: Inside the window
 - **WHEN** `backoff` has `until` in the future
@@ -241,29 +273,29 @@ After an infra failure the runner SHALL write `<state>/backoff` with `fails` inc
 - **WHEN** a run ends `blocked` or `ok`
 - **THEN** `backoff` no longer exists
 
-#### Scenario: Poison issue
+#### Scenario: Usage limit
+- **WHEN** the (stub) worker result reads "usage limit reached" and no outcome line was written
+- **THEN** exit 1, the label stays, `backoff` is set; a plain missing outcome line stays `blocked`
+
+#### Scenario: Poison issue (NOT BUILT)
 - **WHEN** issue 9 fails with an infra error three runs in a row (window waited out each time)
 - **THEN** issue 9 is `blocked` with a comment naming the repeated failure, and the next run selects another issue
 
-#### Scenario: Rate limit
-- **WHEN** the (stub) worker output contains a configured rate-limit pattern
-- **THEN** exit 1, outcome `stopped` note `rate-limited`, the label stays, `backoff` is set
-
-### Requirement: Stale lock reclaim (B3)
-A held lock SHALL be reclaimed (atomically, via `mv` to `lock.stale.$$` then `mkdir`) when `lock/pid` names a process that does not exist (EPERM counts as existing), or names a live process whose command line does not contain `run-issue.sh`, or when `lock/` has no readable `pid` and is older than 10 minutes. Otherwise the start exits 0 as busy. Two simultaneous reclaimers SHALL NOT both win.
+### Requirement: Stale lock takeover
+A held lock SHALL be taken over (atomically, via `mv` to `lock.stale.$$` then `mkdir`, logging "took over a stale lock") when `lock/pid` holds a number naming a process that does not exist, or a live process whose command line does not contain `run-issue.sh` (pid reuse after a crash or reboot). Otherwise the start exits 0 as busy. Not built: reclaiming a lock that has no readable `pid` once it is older than 10 minutes (such a lock is treated as busy), and removing a leftover worktree for any issue other than the one next selected (the next run for the same issue recreates its own).
 
 #### Scenario: Killed runner
-- **WHEN** a runner is SIGKILLed mid-run and a new one starts
-- **THEN** the new run logs "reclaimed stale lock (pid N)" and proceeds, and the leftover worktree for the old issue is removed
+- **WHEN** a runner is SIGKILLed mid-run (its pid is gone) and a new one starts
+- **THEN** the new run logs "took over a stale lock" and proceeds
 
 #### Scenario: Pid reuse
 - **WHEN** `lock/pid` holds the pid of an unrelated live process
-- **THEN** the lock is reclaimed
+- **THEN** the lock is taken over
 
 #### Scenario: Live holder
 - **WHEN** `lock/pid` names a live `run-issue.sh`
 - **THEN** exit 0 busy; the lock is untouched
 
 #### Scenario: Race
-- **WHEN** two starts reclaim the same stale lock simultaneously
-- **THEN** exactly one proceeds and the other exits 0 busy
+- **WHEN** two starts take over the same stale lock simultaneously
+- **THEN** exactly one proceeds and the other exits 0 busy (by construction of the atomic `mv`; no parallel test, UNTESTED)
