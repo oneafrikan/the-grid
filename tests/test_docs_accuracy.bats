@@ -155,6 +155,28 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
   done < <(sed -n -E '/^## Library submodules/,/^## Reference/ s/^- \*\*repos\/([^*]+)\*\* — ([0-9]+) skills.*/\1 \2/p' SKILLS.md)
 }
 
+# NF-063: the index.html wired catalogue lists exactly the names SKILLS.md lists as wired.
+# Sorted lists (not sets) are compared, so a missing, extra or duplicated name all fail. A
+# name that two repos both ship (grill-me) appears twice in both files, which is correct.
+@test "F11: index.html wired-skill names equal the SKILLS.md wired names, one for one" {
+  awk '/^## Library submodules/{exit} /^- \*\*/{match($0,/\*\*[^*]+\*\*/); print substr($0,RSTART+2,RLENGTH-4)}' SKILLS.md | sort > "$BATS_TEST_TMPDIR/md"
+  grep -o 'class="skill-name">[^<]*' index.html | sed 's/.*">//' | sort > "$BATS_TEST_TMPDIR/html"
+  [ -s "$BATS_TEST_TMPDIR/md" ]
+  run diff "$BATS_TEST_TMPDIR/md" "$BATS_TEST_TMPDIR/html"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+# The reference rows were only checked by count above; check each name too.
+@test "F11: every SKILLS.md reference submodule has its own index.html table row" {
+  n=0
+  while read -r repo; do
+    n=$((n + 1))
+    grep -q "<tr><td><code>repos/$repo</code></td><td>—</td><td>Reference (index)</td></tr>" index.html || { echo "index.html reference row missing for $repo"; false; }
+  done < <(sed -n -E '/^## Reference submodules/,$ s/^- \*\*repos\/([^*]+)\*\*.*/\1/p' SKILLS.md)
+  [ "$n" -gt 0 ]
+}
+
 @test "F11: BOOTSTRAP gives no hard-coded test or skill totals that drift" {
   ! grep -n -E 'All [0-9]+ tests|the other ~?[0-9]+ skills' BOOTSTRAP.md || false
 }
@@ -168,12 +190,22 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
     total=$((total + $(printf '%s\n' "$out" | grep -c ' -> CC ')))
     orch=$((orch + $(printf '%s\n' "$out" | grep -c 'CC skill (orchestrator)')))
     spec=$((spec + $(printf '%s\n' "$out" | grep -c 'CC subagent (specialist)')))
+    # CLAUDE.md types the grid project's own split (VD8/VD9): remember it for the check below
+    if [ "$cfg" = agent-factory/examples/grid.yaml ]; then
+      gt=$(printf '%s\n' "$out" | grep -c ' -> CC ')
+      go=$(printf '%s\n' "$out" | grep -c 'CC skill (orchestrator)')
+      gs=$(printf '%s\n' "$out" | grep -c 'CC subagent (specialist)')
+    fi
   done
   [ "$total" -eq $((orch + spec)) ]
   flat="$(tr '\n' ' ' < README.md | tr -s ' ')"
   [[ "$flat" == *"$total composed AI agents across 4 ready-to-run teams ($orch orchestrators, $spec specialists)"* ]]
   [[ "$flat" == *"$total ready-made AI roles"* ]]
   grep -q "the other $spec roles" USAGE.md
+  # CLAUDE.md's hand-typed counts: the grid project's split and the all-public-roles total
+  flatc="$(tr '\n' ' ' < CLAUDE.md | tr -s ' ')"
+  [[ "$flatc" == *"$gt roles: $go orchestrators → CC skills, $gs specialists → CC subagents"* ]]
+  [[ "$flatc" == *"all $total composed public roles"* ]]
 }
 
 # --- F12: four public projects, four factories ---

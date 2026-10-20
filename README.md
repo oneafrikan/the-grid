@@ -246,7 +246,7 @@ never touches its history.
     wire.sh             ← creates ~/.claude/skills/ + ~/.claude/agents/ symlinks (idempotent)
     catalog.sh          ← regenerates SKILLS.md
     sources.sh          ← regenerates docs/SOURCES.md; --check link-checks every URL
-    reconcile.sh        ← removes stale skill shadows on a new machine
+    reconcile.sh        ← moves stale skill shadows aside (dated backup dir) on a new machine
     check-grid.sh       ← full bats suite + broken-symlink scan (CI / pre-push gate)
     instantiate.sh      ← cuts an automation-factory pattern into a target repo (issue-loop; idempotent)
     rules.py            ← lints, lists and emits the rule packs (rules/)
@@ -284,7 +284,7 @@ bash scripts/check-grid.sh
 ```
 
 Runs the full bats suite (one-line PASS/FAIL — full output only on failure; it takes
-many minutes, roughly 15 on CI) and scans for broken grid-owned symlinks. Exits
+many minutes; the CI `gate` job that includes it ran 18 to 30 minutes in recent Actions runs) and scans for broken grid-owned symlinks. Exits
 non-zero if anything's wrong, so it works as a CI / pre-push gate. A `pre-commit`
 hook (in `.githooks/`, activated by `bootstrap.sh`) runs `scripts/gate.sh` before
 every commit; bypass with
