@@ -102,6 +102,7 @@ KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):(?:[ \t]+(.*))?$")
 QUOTED_KEY_RE = re.compile(r"""^["'][A-Za-z_][\w-]*["']\s*:""")
 BOM = "\ufeff"
 NO_FRONTMATTER = "no `---` frontmatter block at the top of the file"
+NOT_A_FILE = "not a regular file (for example a symlink to a directory), so nothing can be measured"
 # str.splitlines() also breaks on these; YAML 1.2 readers keep U+0085/U+2028/U+2029 inside the
 # line and none of the others is a YAML break at all (a bare CR is, to some readers). A reader
 # that breaks where another does not sees a different key set, so `description: short<sep>...`
@@ -306,15 +307,26 @@ def skill_entry(name, skill_md, rel, truncate_at):
 
 def dangling(path):
     """True for a symlink whose target is missing: os.path.isfile() calls that False too, so
-    the entry used to be skipped without a word (NF-055 VF6)."""
-    return os.path.islink(path) and not os.path.exists(path)
+    the entry used to be skipped without a word (NF-055 VF6). A dangling symlink as the
+    skill's or role's own directory counts too: the file under it cannot exist (NF-060 VG3)."""
+    parent = os.path.dirname(path)
+    return ((os.path.islink(path) and not os.path.exists(path))
+            or (os.path.islink(parent) and not os.path.exists(parent)))
 
 
-def dangling_entry(name, rel, truncate_at):
-    """An owned entry for a dangling SKILL.md / role.yaml symlink: nothing to measure, so only
-    the problem (which fails --check by path) and a zero body."""
-    e = make_entry(name, rel, "", True, "", False, truncate_at,
-                   ["dangling symlink (its target does not exist), so nothing can be measured"])
+def not_a_file(path):
+    """True when something sits at `path` but is not a regular file (for example SKILL.md
+    symlinked to a directory), which os.path.isfile() calls False and was skipped silently
+    (NF-060 VG3). A missing path is not this: a directory without SKILL.md is not a skill."""
+    return os.path.lexists(path) and not os.path.isfile(path)
+
+
+def dangling_entry(name, rel, truncate_at,
+                   why="dangling symlink (its target does not exist), so nothing can be measured"):
+    """An owned entry for a SKILL.md / role.yaml that cannot be measured (dangling symlink, or
+    not a regular file): nothing to measure, so only the problem (which fails --check by path)
+    and a zero body."""
+    e = make_entry(name, rel, "", True, "", False, truncate_at, [why])
     e["body_bytes"] = 0
     e["unreadable"] = True
     return e
@@ -337,6 +349,8 @@ def measure(grid, truncate_at):
             entries["skills"].append(dangling_entry(name, rel, truncate_at))
         elif os.path.isfile(md):
             entries["skills"].append(skill_entry(name, md, rel, truncate_at))
+        elif not_a_file(md):
+            entries["skills"].append(dangling_entry(name, rel, truncate_at, NOT_A_FILE))
 
     # owned roles: measured from role.yaml source, never from composed output or
     # private roles, so the number is the same on every machine.
@@ -348,6 +362,11 @@ def measure(grid, truncate_at):
         if dangling(ry):
             entries["agent_roles"].append(dangling_entry(
                 name, os.path.join("agent-factory", "roles", name, "role.yaml"), truncate_at))
+            continue
+        if not_a_file(ry):
+            entries["agent_roles"].append(dangling_entry(
+                name, os.path.join("agent-factory", "roles", name, "role.yaml"), truncate_at,
+                NOT_A_FILE))
             continue
         if not os.path.isfile(ry):
             continue
