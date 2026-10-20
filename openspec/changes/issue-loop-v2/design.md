@@ -132,3 +132,33 @@ Self-healing: if a `gh issue edit` fails after the PR exists, the next run hits 
 - `--agent` plus `--model`: which wins.
 - `gh` and `claude` authentication under cron.
 - Whether `.github/CODEOWNERS` or branch protection exists on this repo (not needed by the loop; relevant to the PR-only rule).
+
+## As built: B1 findings (2026-10-20, claude 2.1.304, bash 5.2)
+
+Changes the code forced on the text above, and facts observed by running the real `claude` through `tests/test_issue_loop_e2e.bats` (RAN) or read in the code (READ). The specs in `specs/` were amended where noted.
+
+### Changes to the design
+
+- **Guard:** the shared parser unwraps `bash -c` and `eval` once, so that gap exists only on the built-in splitter (spec `loop-hooks` amended). A script that calls git internally is a gap on both.
+- **Worker argv:** the prompt sits immediately after `-p`, because `--allowedTools` is variadic and a trailing prompt could be read as another tool name. `--add-dir <run temp dir>` is passed so the worker may Write the outcome file, and the worker prompt carries one more placeholder, `{{OUTCOME_FILE}}` (the allowlist has no `echo` or redirect to name it with). `WORKER_PERMISSION_MODE` (optional, empty by default) exists so the allowlist proof could try `acceptEdits` and `dontAsk`.
+- **Reading the issue:** a failed `gh api` read of the issue is an infrastructure failure (exit 1, label kept), not "untrusted"; a null or empty `author_association` is untrusted; a failed comments read means "no Agent Brief", never "trust everyone".
+- **PR text:** with `ISSUE_REPO` the PR title is the worker's commit subject and the body is `refs <tracker>#N`, in both the same-repo and cross-repo case.
+- **`instantiate.sh`:** gained `--issue-repo`. `loop.conf` is "left alone" whenever it exists (it used to say "unchanged" when the re-render matched).
+- **`loop-migration`:** `wake.sh` is not asserted by the factory and gate tests yet (B2 adds it). The runbook keeps the usage-schedule step 8.3, whose `enable-linger` line is about the weekly usage job, not the loop. `tests/test_render_schedule.bats` uses a neutral example script name so the old runner's name is gone from `tests/`. `_retired/` and the two comments in `scripts/gate.sh` and `scripts/stage-site.sh` that describe it stay because `_retired/` stays (task 7.0).
+
+### Facts (RAN unless marked)
+
+| Question | Answer |
+|---|---|
+| `claude -p --output-format json` fields | one object: `type:"result"`, `subtype:"success"`, `is_error`, `total_cost_usd`, `result`, `session_id`, `permission_denials`, `terminal_reason`, `num_turns` |
+| exhausted `--max-budget-usd` | exit 1, `is_error:true`, `subtype:"error_max_budget_usd"`, `terminal_reason:"budget_exhausted"`, `result:null`; the runner maps it to `blocked` |
+| tracked `CLAUDE.md` loaded from the worktree cwd | yes: a canary commit-message rule in the fixture's `CLAUDE.md` was followed in every 8.1 run |
+| `--settings <file>` guard next to the user's own hooks | yes, in `allowlist` and in `bypass`: the push of the base was refused with the guard's text |
+| an unlisted tool under `--allowedTools` | denied, no prompt, no hang; the call returns and `permission_denials` lists the denied command |
+| allowlist alone (no `--permission-mode`) | completes a normal edit, check, commit task (the runner default, no `bypass` needed); `acceptEdits` completes too; `dontAsk` denies unlisted Bash and the worker ends `blocked` |
+| operator's global rules in a headless `-p` run | loaded (about 42k tokens of context); the unattended sentence in the worker prompt kept an 11-call task from stalling for a go-ahead |
+| `PURPOSE.md` / `MAP.md` / `GUARDRAILS.md` | read before the first change, via `cat` in Bash rather than the Read tool, because the worker prompt says so (not auto-loaded) |
+| a confident worker with a red runner gate | nothing pushed, issue `blocked` (gate green only in the worker's environment) |
+| `--agent` with `--model`, rate-limit signal, `gh`/`claude` under cron | UNTESTED (8.8 and B2/B3 are the operator's) |
+
+**What the allowlist costs.** It denies every Bash command not on it, including the project's own verify command and any command the operator's global rules make a worker run. In the first full e2e run, 3 of the 11 tests failed this way (the worker could not run its own checks, or an identity check, and ended `blocked`). One cause was a global rule that checks the git identity before a commit (`git config user.email`, a script): the worker could not run it and refused to commit. The fix is configuration, not code: name those commands in `WORKER_ALLOWED_TOOLS` in `loop.conf` (the e2e test takes them from `GRID_E2E_EXTRA_TOOLS`). With them named, two full e2e runs passed 11 of 11.
