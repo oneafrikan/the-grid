@@ -27,12 +27,19 @@
 #   --setup-cmd <cmd>           run in each issue worktree before the worker (e.g. npm ci)
 #   --worker-model <model>      model for the headless worker (default: sonnet)
 #   --agent-labels <a,b>        also create an agent:<name> label for each name
+#   --fast-verify               VERIFY_CMD='bash loop/verify.sh' (changed-files check, seconds) unless
+#                               --verify-cmd or an existing loop.conf already sets one
+#   --cron-every <N>            (pr mode) render this repo's own cron line: poll every N minutes
+#                               (1-59), plus loop/cron.env with PATH and HOME for cron's bare
+#                               environment. Printed, never installed: crontab is a human step.
+#   --cron-log <file>           log for that line (default: ~/.grid/logs/issue-loop-<repo>.log)
 #
 # Idempotent: safe to re-run. Shipped files are copied verbatim and only rewritten if the bytes
 # differ; loop/loop.conf is rendered ONCE and never overwritten (hand edits survive); an existing
 # CLAUDE.md is never touched. An existing loop/loop.conf, or else loop/loop.conf.seed, supplies
 # the values for any option not given. Writes NO scheduler file and NO .claude/settings.json hook
-# entry (the guard reaches the worker through the runner's per-run --settings).
+# entry (the guard reaches the worker through the runner's per-run --settings). --cron-every only
+# PRINTS a crontab line and its activation command (and writes the gitignored loop/cron.env).
 #
 # Needs: git, gh (logged in), jq, awk. The runner needs claude, but instantiating does not run it.
 
@@ -49,6 +56,7 @@ usage() {
   echo "Profiles:  personal | work | mac-mini"
   echo "Options:   --repo --issue-repo --project-context --verify-cmd --label --review-focus"
   echo "           --base-branch --mode --setup-cmd --worker-model --agent-labels"
+  echo "           --fast-verify --cron-every --cron-log"
   echo ""
   echo "Example:"
   echo "  instantiate.sh issue-loop ~/projects/my-app --profile work --verify-cmd 'pytest -q'"
@@ -77,6 +85,7 @@ MODE=""
 SETUP_CMD=""
 WORKER_MODEL=""
 AGENT_LABELS=""
+FAST_VERIFY=0; CRON_EVERY=""; CRON_LOG=""
 # Keys with no option: taken from conf/seed, else the default below.
 VERIFY_TIMEOUT=""; MAX_BUDGET_USD=""; ISSUE_TIMEOUT=""; WORKER_PERMISSIONS=""
 WORKER_ALLOWED_TOOLS=""; MAX_ISSUES_PER_DAY=""; TRUST_GATE=""; RUN_ROLE=""
@@ -85,6 +94,8 @@ WORKER_ALLOWED_TOOLS=""; MAX_ISSUES_PER_DAY=""; TRUST_GATE=""; RUN_ROLE=""
 need_value() { [[ "$2" -ge 2 ]] || { echo "Error: $1 needs a value"; usage; }; }
 
 while [[ $# -gt 0 ]]; do
+  # --fast-verify is the one flag without a value
+  if [[ "$1" == "--fast-verify" ]]; then FAST_VERIFY=1; shift; continue; fi
   need_value "$1" "$#"
   case "$1" in
     --profile)          PROFILE="$2";          shift 2 ;;
@@ -99,6 +110,8 @@ while [[ $# -gt 0 ]]; do
     --setup-cmd)        SETUP_CMD="$2";        shift 2 ;;
     --worker-model)     WORKER_MODEL="$2";     shift 2 ;;
     --agent-labels)     AGENT_LABELS="$2";     shift 2 ;;
+    --cron-every)       CRON_EVERY="$2";       shift 2 ;;
+    --cron-log)         CRON_LOG="$2";         shift 2 ;;
     *) echo "Unknown option: $1"; usage ;;
   esac
 done
@@ -108,8 +121,9 @@ done
 [[ "$PATTERN" == "issue-loop" ]] || { echo "Error: unknown pattern '$PATTERN' (available: issue-loop)"; exit 1; }
 [[ -z "$MODE" || "$MODE" =~ ^(pr|direct)$ ]] || { echo "Error: --mode must be pr or direct"; exit 1; }
 [[ -z "$AGENT_LABELS" || "$AGENT_LABELS" =~ ^[A-Za-z0-9._,-]+$ ]] || { echo "Error: --agent-labels is a comma-separated list of agent names ([A-Za-z0-9._-])"; exit 1; }
+[[ -z "$CRON_EVERY" || "$CRON_EVERY" =~ ^([1-9]|[1-5][0-9])$ ]] || { echo "Error: --cron-every is a number of minutes (1-59)"; exit 1; }
 # one-line values only: they are written into single-line assignments
-for v in GH_REPO ISSUE_REPO PROJECT_CONTEXT VERIFY_CMD ISSUE_LABEL REVIEW_FOCUS BASE_BRANCH SETUP_CMD WORKER_MODEL; do
+for v in GH_REPO ISSUE_REPO PROJECT_CONTEXT VERIFY_CMD ISSUE_LABEL REVIEW_FOCUS BASE_BRANCH SETUP_CMD WORKER_MODEL CRON_LOG; do
   case "${!v}" in
     *$'\n'*) echo "Error: the value for $v must be a single line"; exit 1 ;;
   esac
@@ -252,6 +266,47 @@ detect_base_branch() {
 }
 
 # ---------------------------------------------------------------------------
+# cron schedule (--cron-every): ONE crontab line per repo
+# ---------------------------------------------------------------------------
+# Every cut repo has its own loop/, lock and log, so each gets its own line; repos run
+# concurrently and a repo never overlaps itself (the runner's lock). Writes only the
+# machine-local loop/cron.env; the crontab line and its activation command are PRINTED.
+# cron's environment is bare (PATH=/usr/bin:/bin), so the dirs of the tools the runner calls
+# are resolved NOW and baked into loop/cron.env, which loop/cron-run.sh sources.
+print_cron_schedule() {
+  local log="${CRON_LOG:-${GRID_STATE_DIR:-$HOME/.grid}/logs/issue-loop-${GH_REPO##*/}.log}"
+  local extra="" tool path d line
+  # sourced only here: the renderer is needed for --cron-every alone
+  # shellcheck source=lib/render-schedule.sh
+  . "$SCRIPT_DIR/lib/render-schedule.sh"
+  for tool in gh claude jq git awk timeout; do
+    path="$(command -v "$tool" 2>/dev/null)" || path=""
+    # macOS ships GNU timeout as gtimeout
+    if [[ -z "$path" && "$tool" == "timeout" ]]; then path="$(command -v gtimeout 2>/dev/null)" || path=""; fi
+    if [[ -z "$path" ]]; then echo "  Warning: '$tool' not found on PATH here; the cron run will fail until it is installed"; continue; fi
+    d="$(dirname "$path")"
+    case ":/usr/local/bin:/usr/bin:/bin$extra:" in *":$d:"*) ;; *) extra="$extra:$d" ;; esac
+  done
+  # System dirs first, resolved dirs appended: a system binary always wins over a user-dir one.
+  write_if_changed "$TARGET_DIR/loop/cron.env" "# loop/cron.env: machine-local (ignored by version control), written by instantiate.sh --cron-every.
+# Sourced by loop/cron-run.sh because cron starts with a bare PATH.
+export HOME=$(shq "$HOME")
+export PATH=$(shq "/usr/local/bin:/usr/bin:/bin$extra")"
+
+  line="$(render_crontab_line "every:$CRON_EVERY" "$log" "$TARGET_DIR" bash loop/cron-run.sh)" || {
+    echo "Error: could not render the cron line (see above); loop/ is cut, re-run with a different --cron-log or path"
+    exit 2
+  }
+  section "Cron (printed, not installed)"
+  echo "  One line per repo. Nothing was added to any crontab. Add it yourself:"
+  echo ""
+  echo "$line"
+  echo ""
+  echo "  Activate (idempotent, safe to paste twice):"
+  echo "  $(render_activation_commands cron "$line")"
+}
+
+# ---------------------------------------------------------------------------
 # issue-loop instantiation
 # ---------------------------------------------------------------------------
 instantiate_issue_loop() {
@@ -276,6 +331,9 @@ instantiate_issue_loop() {
     done
   fi
 
+  # --fast-verify fills only an empty VERIFY_CMD: --verify-cmd and a hand-tuned loop.conf win.
+  if [[ "$FAST_VERIFY" -eq 1 && -z "$VERIFY_CMD" ]]; then VERIFY_CMD="bash loop/verify.sh"; fi
+
   section "Prereqs"
   check_prereqs
 
@@ -296,6 +354,7 @@ instantiate_issue_loop() {
     esac
   fi
   [[ "$MODE" =~ ^(pr|direct)$ ]] || { echo "Error: MODE must be pr or direct (got '$MODE')"; exit 1; }
+  [[ -z "$CRON_EVERY" || "$MODE" == "pr" ]] || { echo "Error: --cron-every needs pr mode (it schedules the headless runner)"; exit 1; }
   echo "  mode:    $MODE"
 
   # defaults for keys with no option and no conf/seed value
@@ -362,10 +421,12 @@ instantiate_issue_loop() {
   if [[ "$MODE" == "pr" ]]; then
     section "PR mode: runner, worker prompt, guard hook, worktree helper"
     copy_if_changed "$pattern_dir/run-issue.sh" "$loop_dir/run-issue.sh"
+    copy_if_changed "$pattern_dir/cron-run.sh" "$loop_dir/cron-run.sh"
+    copy_if_changed "$pattern_dir/verify.sh" "$loop_dir/verify.sh"
     copy_if_changed "$pattern_dir/worker-prompt.template.md" "$loop_dir/worker-prompt.template.md"
     copy_if_changed "$pattern_dir/hooks/guard-main-push.sh" "$hooks_dir/guard-main-push.sh"
     copy_if_changed "$pattern_dir/hooks/new-agent-worktree.sh" "$hooks_dir/new-agent-worktree.sh"
-    chmod +x "$loop_dir/run-issue.sh" "$hooks_dir/guard-main-push.sh" "$hooks_dir/new-agent-worktree.sh"
+    chmod +x "$loop_dir/run-issue.sh" "$loop_dir/cron-run.sh" "$loop_dir/verify.sh" "$hooks_dir/guard-main-push.sh" "$hooks_dir/new-agent-worktree.sh"
   fi
 
   # setup.sh renders loop/loop-prompt.md from the template + loop.conf and self-tests the guard.
@@ -503,6 +564,7 @@ CLAUDEMD
     echo '    /loop $(cat loop/loop-prompt.md)'
   fi
   echo ""
+  if [[ -n "$CRON_EVERY" ]]; then print_cron_schedule; echo ""; fi
 }
 
 # ---------------------------------------------------------------------------
