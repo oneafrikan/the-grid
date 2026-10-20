@@ -764,13 +764,11 @@ SH
   done
 }
 
-@test "README: states that the first run is by hand, the waker is installed by the operator, and what is not built yet" {
+@test "README: states that the first run is by hand and documents the per-repo cron line" {
   readme="$(cat "$PAT_DIR/README.md")"
   contains "$readme" "The first run is started by hand"
   contains "$readme" "bash loop/run-issue.sh"
-  contains "$readme" "the operator installs"
-  contains "$readme" "Planned, not built yet"
-  contains "$readme" "Stale-lock reclaim"
+  contains "$readme" "Unattended: one cron line per repo"
 }
 
 @test "README: documents every loop.conf key and carries no retirement language" {
