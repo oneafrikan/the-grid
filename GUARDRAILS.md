@@ -1,5 +1,4 @@
 # Guardrails
-<!-- DRAFT: derived from openspec/config.yaml and CLAUDE.md only; pending the operator's review. -->
 
 Read before editing, committing or opening a PR. One must-not per line.
 
