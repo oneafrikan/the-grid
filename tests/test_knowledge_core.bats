@@ -335,3 +335,91 @@ except knowledge.KnowledgeError as e:
   run pent 'knowledge.parse_entry(ent(updated=None))'
   [ "$output" = "E_ENTRY updated: required" ]
 }
+
+# paddr <expr> — evaluate an expression against a throwaway knowledge tree under
+# $BATS_TEST_TMPDIR. put(dir, claim) writes a rendered entry into knowledge/<dir>/ and
+# returns its id; move(a, b) moves every file from dir a to dir b; R(addr) resolves.
+# Prints the result, or "<code> <message>" on KnowledgeError.
+paddr() {
+  python3 -I -c '
+import os, sys
+sys.path.insert(0, sys.argv[1] + "/scripts")
+import knowledge
+
+ROOT = sys.argv[3]
+
+def put(d, claim="use the gate", name=None):
+    h = knowledge.claim_hash(claim)
+    f = {"id": "K-" + h[:8], "claim": claim, "claim_hash": h, "stage": "provisional",
+         "created": "2026-10-18", "updated": "2026-10-19"}
+    ev = [{"signal": "20261018T101500Z-agent-1-abc123.md", "filed_by": "agent-1",
+           "stage": "provisional", "warrant": "ran bats"}]
+    os.makedirs(os.path.join(ROOT, "knowledge", d), exist_ok=True)
+    name = name or "%s-%s.md" % (f["id"], knowledge.slug(claim))
+    with open(os.path.join(ROOT, "knowledge", d, name), "w") as fh:
+        fh.write(knowledge.render_entry(f, ev))
+    return f["id"]
+
+def move(a, b):
+    os.makedirs(os.path.join(ROOT, "knowledge", b), exist_ok=True)
+    for n in os.listdir(os.path.join(ROOT, "knowledge", a)):
+        os.rename(os.path.join(ROOT, "knowledge", a, n), os.path.join(ROOT, "knowledge", b, n))
+
+def R(addr):
+    return knowledge.resolve_address(ROOT, addr)
+
+try:
+    r = eval(sys.argv[2])
+    print("ok" if r is None else r)
+except knowledge.KnowledgeError as e:
+    print(e.code, e)
+' "$REPO_ROOT" "$1" "$BATS_TEST_TMPDIR/kroot"
+}
+
+@test "heading_slugs lower-cases, drops punctuation, hyphenates and skips code fences" {
+  run py 'knowledge.heading_slugs("# Title\n## Whats New, Here?\ntext\n```\n# not a heading\n```\n### Done ##")'
+  [ "$output" = "['title', 'whats-new-here', 'done']" ]
+}
+
+@test "resolve_address: K-hash8 resolves to the entry path" {
+  run paddr 'R(put("provisional"))'
+  [[ "$output" == "('knowledge/provisional/K-"*"-use-the-gate.md', None)" ]]
+}
+
+@test "resolve_address: K-hash8#evidence resolves and survives a move to established" {
+  run paddr 'R(put("provisional") + "#evidence")[1]'
+  [ "$output" = "evidence" ]
+  run paddr '(move("provisional", "established"), R(knowledge.entry_id("use the gate") + "#evidence"))[1]'
+  [[ "$output" == "('knowledge/established/K-"*"-use-the-gate.md', 'evidence')" ]]
+}
+
+@test "resolve_address: a slug that is not a heading fails with no heading <slug>" {
+  run paddr 'R(put("provisional") + "#notes")'
+  [ "$output" = "E_ADDRESS no heading notes" ]
+}
+
+@test "resolve_address: two files with one K-hash8 fail and the message lists both" {
+  run paddr '(put("provisional"), put("established", name=knowledge.entry_id("use the gate") + "-copy.md"), R(knowledge.entry_id("use the gate")))[2]'
+  [[ "$output" == "E_ADDRESS ambiguous K-"*"knowledge/established/K-"*"-copy.md, knowledge/provisional/K-"*"-use-the-gate.md" ]]
+}
+
+@test "resolve_address: an unknown id fails" {
+  run paddr '(put("provisional"), R("K-00000000"))[1]'
+  [ "$output" = "E_ADDRESS no entry matches K-00000000" ]
+}
+
+@test "resolve_address: path form works while the file is there and fails after a move" {
+  run paddr 'R("knowledge/provisional/%s-use-the-gate.md#claim" % put("provisional"))[1]'
+  [ "$output" = "claim" ]
+  run paddr '(move("provisional", "established"), R("knowledge/provisional/%s-use-the-gate.md" % knowledge.entry_id("use the gate")))[1]'
+  [[ "$output" == "E_ADDRESS no such file: knowledge/provisional/K-"* ]]
+}
+
+@test "resolve_address: .. and absolute paths in the path form fail" {
+  run paddr 'R("knowledge/../K-0123abcd-x.md")'
+  [[ "$output" == "E_ADDRESS path form must be"* ]]
+  run paddr 'R("/etc/passwd")'
+  [[ "$output" == "E_ADDRESS address must be"* ]]
+  run paddr 'R("knowledge/provisional/../../x/K-0123abcd-x.md")'
+  [[ "$output" == "E_ADDRESS path form must be"* ]]
+}
