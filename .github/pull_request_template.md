@@ -9,3 +9,4 @@
       file under `tests/fixtures/compose/golden/` and each change is intended. `--update`
       blesses whatever the emitters produce, so the diff review is the only check.
 - [ ] Generated files (goldens, `plugins/`, `dist/personas/`) were regenerated with their scripts, never edited by hand.
+- [ ] No path under `knowledge/canon/` changed, or a human is merging this: `git diff --name-only origin/main...HEAD -- knowledge/canon` (non-empty output means a human merges).

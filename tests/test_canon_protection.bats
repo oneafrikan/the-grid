@@ -20,3 +20,10 @@ teardown() {
   [ "${#lines[@]}" -eq 1 ]
   [[ "${lines[0]}" =~ ^knowledge/canon/\ @[A-Za-z0-9._-]+$ ]]
 }
+
+@test "PR template carries the canon checkbox with the exact detection command" {
+  # The merger runs this one command to learn whether a human must merge; the
+  # base is origin/main because the retired next branch no longer exists.
+  run grep -F -- '- [ ] No path under `knowledge/canon/` changed, or a human is merging this: `git diff --name-only origin/main...HEAD -- knowledge/canon`' "$REPO_ROOT/.github/pull_request_template.md"
+  [ "$status" -eq 0 ]
+}
