@@ -760,6 +760,22 @@ def claim_state(ledger, claim_hash):
     return {"escalated_open": escalated_open, "rejected": rejected}
 
 
+def open_escalations(ledger):
+    """Every `escalated` disposition line with no later `resolution` for its claim hash, oldest
+    first, as {"claim_hash", "signal", "issue", "pr"}. The role checks each against the real PR
+    state; the ledger alone cannot know whether it merged.
+    """
+    open_lines = []
+    for rec in ledger:
+        if rec["event"] == "disposition" and rec["disposition"] == "escalated":
+            open_lines.append(rec)
+        elif rec["event"] == "resolution":
+            # A resolution closes every earlier escalation of that claim, not just the latest.
+            open_lines = [r for r in open_lines if r["claim_hash"] != rec["claim_hash"]]
+    return [{"claim_hash": r["claim_hash"], "signal": r["signal"], "issue": r["issue"],
+             "pr": r["pr"]} for r in open_lines]
+
+
 # --- 8. tree check -----------------------------------------------------------------
 # E_ADDR is a finding for a cross-link whose address does not resolve. It is the finding code;
 # resolve_address itself raises E_ADDRESS, which check_entry turns into this.
@@ -952,20 +968,30 @@ def build_plan(root, cap=DEFAULT_CAP):
     `invalid` with the finding codes in `reasons`; every other one is `pending` for now (later
     changes replace that with the real dispositions). Later changes add fields to each signal
     entry, never remove one. A grammatically valid signal that holds a token-shaped value is
-    `secret` (reasons: the pattern name only, no claim_hash). Raises KnowledgeError(E_READ) for
+    `secret` (reasons: the pattern name only, no claim_hash). A valid, non-secret signal whose
+    claim has an open escalation is `duplicate` (reasons name the issue); one whose claim was
+    rejected with no later reopen is `repeat-rejected`. `reconcile` lists the escalations with no
+    resolution yet; each takes one slot of the cap. Raises KnowledgeError(E_READ) for
     a file that cannot be opened or when the secret scanner is missing or fails, and E_LEDGER
     for a bad ledger.
     """
     # Fail closed before looking at any signal: no scanner means no sweep.
     secret_lib = find_secret_patterns()
     paths, _ = iter_signals(root)
-    seen = processed_signals(read_ledger(root))
+    ledger = read_ledger(root)
+    seen = processed_signals(ledger)
     seen.update(rel.rsplit("/", 1)[-1] for rel in iter_done(root))
     pending = [rel for rel in paths if rel.rsplit("/", 1)[-1] not in seen]
 
+    # Unresolved escalations come first and each takes one slot of the cap, so the role's
+    # per-run work stays bounded; those past the cap are counted in `deferred`, not dropped.
+    open_all = open_escalations(ledger)
+    reconcile = open_all[:cap]
+    slots = cap - len(reconcile)
+
     signals = []
     counts = {}
-    for rel in pending[:cap]:
+    for rel in pending[:slots]:
         findings = check_signal(root, rel)
         entry = {"claim_hash": None, "disposition": "pending", "entry": None,
                  "file": rel.rsplit("/", 1)[-1], "needs_judgement": [], "reasons": [],
@@ -986,10 +1012,21 @@ def build_plan(root, cap=DEFAULT_CAP):
                 # Valid, so it parses; the hash is the claim's identity for the later rules.
                 with open(full, "rb") as fh:
                     entry["claim_hash"] = claim_hash(parse_signal(fh.read().decode("utf-8"))["claim"])
+                # Ledger rules, by claim hash only. An open escalation wins over a stale
+                # rejection (claim_state clears `rejected` only on reopen, and a re-escalation
+                # needs a reopen first); a later `reopen` lets the claim through to later rules.
+                state = claim_state(ledger, entry["claim_hash"])
+                if state["escalated_open"] is not None:
+                    entry["disposition"] = "duplicate"
+                    entry["reasons"] = ["open issue %s" % state["escalated_open"]]
+                elif state["rejected"]:
+                    entry["disposition"] = "repeat-rejected"
+                    entry["reasons"] = ["rejected"]
         counts[entry["disposition"]] = counts.get(entry["disposition"], 0) + 1
         signals.append(entry)
-    return {"cap": cap, "counts": counts, "deferred": len(pending) - len(signals),
-            "pending": len(pending), "reconcile": [], "signals": signals}
+    return {"cap": cap, "counts": counts,
+            "deferred": len(pending) - len(signals) + len(open_all) - len(reconcile),
+            "pending": len(pending), "reconcile": reconcile, "signals": signals}
 
 
 # --- 10. command line --------------------------------------------------------------
