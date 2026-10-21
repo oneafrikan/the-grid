@@ -55,11 +55,15 @@ EOF
 # Tests that mention a changed script by basename (scripts/stage-site.sh -> test_pages_site.bats).
 if [ "${#sh_files[@]}" -gt 0 ]; then
   for f in "${sh_files[@]}"; do
-    # A shared test helper (tests/helpers/stubs.bash) is mentioned by most bats files, so expanding it
-    # runs the whole suite and outlasts the worker. Helper edits run only the bats files the branch changed.
+    # A shared helper or a script nearly every test names (tests/helpers/stubs.bash, scripts/gate.sh) would
+    # expand to most of the suite and outlast the worker. Only a script with a few dedicated tests expands;
+    # for the rest the branch's own changed bats files are the check (the full gate runs in CI).
     case "$f" in tests/helpers/*|tests/lib/*) continue ;; esac
+    related="$(grep -l -F "$(basename "$f")" tests/*.bats 2>/dev/null || true)"
+    [ -n "$related" ] || continue
+    [ "$(printf '%s\n' "$related" | wc -l)" -le 3 ] || continue
     while IFS= read -r t; do bats_files+=("$t"); done <<EOF
-$(grep -l -F "$(basename "$f")" tests/*.bats 2>/dev/null || true)
+$related
 EOF
   done
 fi
@@ -71,6 +75,20 @@ if [ "${#bats_files[@]}" -gt 0 ]; then
   done <<EOF
 $(printf '%s\n' "${bats_files[@]}" | sort -u)
 EOF
+fi
+
+# Repo-wide lints that a changed-files check cannot see (a new test file that skips the sandbox, a new
+# top-level dir the README layout must list). loop/verify-always.txt lists bats files, one per line, that
+# always run; the file is optional and a missing bats file is skipped.
+always="$(cd "$(dirname "$0")" && pwd)/verify-always.txt"
+if [ -f "$always" ]; then
+  while IFS= read -r t; do
+    case "$t" in ''|'#'*) continue ;; esac
+    [ -f "$t" ] || continue
+    dup=0
+    for u in ${uniq_bats[@]+"${uniq_bats[@]}"}; do [ "$u" = "$t" ] && dup=1; done
+    [ "$dup" -eq 1 ] || uniq_bats+=("$t")
+  done < "$always"
 fi
 
 # 1. shellcheck
