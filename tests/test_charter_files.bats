@@ -112,7 +112,8 @@ stage_names() { printf '%s\n' wip provisional established canonical superseded r
   grep -q '`claim`' "$f"
   grep -q 'scripts/map.py' "$f"
   grep -qi 'own repo' "$f"
-  grep -qi 'no sweep runs' "$f"
+  grep -qi 'knowledge sweep' "$f"
+  grep -q 'gh-triage' "$f"
 }
 
 # --- the trailhead block ---------------------------------------------------------------
@@ -307,10 +308,11 @@ TEMPLATES="finance-agents-base lamp-agents-base python-agents-base python-astro-
     grep -qi 'own repo' "$f"
     grep -qi 'no secrets' "$f"
   done
-  # the signals README names the real sweep; the knowledge README still says none runs (next issue changes it)
-  grep -qi 'knowledge sweep' "$s"
-  grep -q 'gh-triage' "$s"
-  grep -qi 'no sweep runs' "$k"
+  # both READMEs name the real sweep, not "none runs"
+  for f in "$s" "$k"; do
+    grep -qi 'knowledge sweep' "$f"
+    grep -q 'gh-triage' "$f"
+  done
   grep -q '→' "$s"
   grep -qi 'not knowledge signals' "$s"
   sec=$(awk '/^## Evidence and stages/ {on=1; next} /^## / {on=0} on' "$s")
