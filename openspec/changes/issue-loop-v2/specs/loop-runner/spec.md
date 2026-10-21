@@ -298,4 +298,4 @@ A held lock SHALL be taken over (atomically, via `mv` to `lock.stale.$$` then `m
 
 #### Scenario: Race
 - **WHEN** two starts take over the same stale lock simultaneously
-- **THEN** exactly one proceeds and the other exits 0 busy (by construction of the atomic `mv`; no parallel test, UNTESTED)
+- **THEN** exactly one proceeds and the other exits 0 busy (by construction of the atomic `mv`; tested: `tests/test_issue_loop_runner.bats` starts two runners on one stale lock 20 times and asserts both exit 0, exactly one says busy, exactly one worker call, no `lock.stale.*` left and no lock)
