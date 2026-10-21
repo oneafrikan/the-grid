@@ -1,5 +1,5 @@
 # grid.yaml — the dev-team project: engineering, product, and marketing.
-# Orchestrators (ceo-orchestrator, tech-lead, growth-hacker) emit as Claude
+# Orchestrators (ceo-orchestrator, tech-lead, growth-hacker, gsd) emit as Claude
 # Code skills; the specialists emit as CC subagents. Models come from each
 # role.yaml default unless overridden here.
 #
@@ -15,6 +15,7 @@
 #   ceo  → tech-lead, product-manager, growth-hacker          (the three leads)
 #   tech-lead     → engineering + data specialists
 #   growth-hacker → the marketing arm (player-coach lead)
+#   gsd           → light fan-out for small fixes; standalone, not under the ceo
 # delegates_to entries must name a role present in this team.
 #
 # General-purpose research is NOT on this team — the `researcher` role moved
@@ -22,7 +23,7 @@
 # routes research to core-researcher via the Signal Protocol instead.
 project: grid
 slug: grid
-description: Dev-team project — 3 orchestrators + 21 specialists, all 5-file model.
+description: Dev-team project — 4 orchestrators + 21 specialists, all 5-file model.
 paperclip: false
 
 agents:
@@ -47,6 +48,19 @@ agents:
       - project-manager
   - role: growth-hacker   # player-coach lead of the marketing arm -> CC skill
     delegates_to: [copywriter, ad-copy, seo, paid-search, paid-social, data-analyst]
+  # light fan-out for small fixes -> CC skill /gsd (bare: true); standalone, so it is
+  # deliberately absent from ceo-orchestrator's delegates_to
+  - role: gsd
+    bare: true
+    delegates_to:
+      - backend-dev
+      - frontend-dev
+      - fullstack-engineer
+      - devops
+      - data-engineer
+      - sdet
+      - qa-engineer
+      - technical-writer
   # product + delivery
   - role: product-manager
   - role: project-manager

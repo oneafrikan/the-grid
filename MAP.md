@@ -22,7 +22,7 @@
 
 - core: context-engineer, gh-triage, librarian, platform-engineer, researcher, tron
 - finance-desk: finance-analyst, finance-manager, finance-risk-officer, finance-scribe, finance-sentinel, finance-strategist
-- grid: ad-copy, ai-engineer, backend-dev, ceo-orchestrator, copywriter, data-analyst, data-engineer, data-scientist, designer, devops, frontend-dev, fullstack-engineer, growth-hacker, paid-search, paid-social, product-manager, project-manager, prompt-engineer, qa-engineer, sdet, security-reviewer, seo, tech-lead, technical-writer
+- grid: ad-copy, ai-engineer, backend-dev, ceo-orchestrator, copywriter, data-analyst, data-engineer, data-scientist, designer, devops, frontend-dev, fullstack-engineer, growth-hacker, gsd, paid-search, paid-social, product-manager, project-manager, prompt-engineer, qa-engineer, sdet, security-reviewer, seo, tech-lead, technical-writer
 - learning-desk: morpheus, oracle, tank
 
 ### Skills
@@ -41,6 +41,7 @@ Entries live under `knowledge/<stage>/`; canon under `knowledge/canon/`. Entries
 - ceo-orchestrator -> growth-hacker, product-manager, tech-lead
 - finance-manager -> finance-analyst, finance-risk-officer, finance-scribe, finance-sentinel, finance-strategist
 - growth-hacker -> ad-copy, copywriter, data-analyst, paid-search, paid-social, seo
+- gsd -> backend-dev, data-engineer, devops, frontend-dev, fullstack-engineer, qa-engineer, sdet, technical-writer
 - tech-lead -> ai-engineer, backend-dev, data-engineer, data-scientist, designer, devops, frontend-dev, fullstack-engineer, project-manager, prompt-engineer, qa-engineer, sdet, security-reviewer, technical-writer
 
 ### Signals

@@ -290,7 +290,7 @@ PR-capable web roles have it; `finance-analyst` has no PR step and stays without
 5. `Write` is unscoped on all seven roles: it can overwrite shell rc files, hook scripts and similar.
 6. `tools:` is not applied on every runtime (OpenCode, Codex; see above). On those targets the lists
    give no protection beyond the few OpenCode denials named above.
-7. Roles outside this list. 17 of the 39 public roles (implementers and orchestrators) carry no
+7. Roles outside this list. 18 of the 40 public roles (implementers and orchestrators) carry no
    `tools:` and inherit every tool. Roles outside this repo (private desks) that read untrusted web
    content may also lack `tools:`; this repo does not track them. `security-reviewer` already has
    `Bash` plus the web tools, so these residuals are wider than the seven-role table.
@@ -373,7 +373,7 @@ independently and are gated independently:
 
 | Config | Roles | Shape |
 |---|---|---|
-| `examples/grid.yaml` | 24 | 3 orchestrators (`ceo-orchestrator`, `tech-lead`, `growth-hacker`) + 21 specialists — the dev team |
+| `examples/grid.yaml` | 25 | 4 orchestrators (`ceo-orchestrator`, `tech-lead`, `growth-hacker`, `gsd`) + 21 specialists — the dev team. `gsd` is the light fan-out for small fixes (`/gsd`, standalone, not under the CEO) |
 | `examples/finance-desk.yaml` | 6 | `finance-manager` → sentinel/analyst/strategist/risk-officer/scribe. Standalone: deliberately not in anyone's `delegates_to` |
 | `examples/core.yaml` | 6 | `gh-triage`, `librarian`, `researcher`, `platform-engineer`, `context-engineer`, `tron` (the front door, `/tron`) — cross-desk infra, no delegation chain, meant to stay wired everywhere |
 | `examples/learning-desk.yaml` | 3 | `morpheus` (Socratic tutor), `oracle` (learns about the operator), `tank` (agent-to-agent lessons). All manual. `bare_names: true` so they are `/morpheus`, `/oracle`, `tank`. Data is private: `~/.the-grid-private/learning/` |

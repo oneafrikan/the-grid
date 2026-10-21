@@ -753,7 +753,7 @@
           <li><strong>~130 curated skills as slash commands</strong>
             (<code>/standup</code>, <code>/review</code>, <code>/ship</code>, <code>/skill-scout</code>&hellip;).
             Another ~100 are searchable but kept switched off.</li>
-          <li><strong>38 ready-made AI roles you can call on:</strong> a dev team (tech lead,
+          <li><strong>40 ready-made AI roles you can call on:</strong> a dev team (tech lead,
             backend, QA, security&hellip;), a finance desk, a Socratic tutor
             (<code>/morpheus</code>), and a front door (<code>/tron</code>) that tells you
             which one to use.</li>
@@ -925,7 +925,7 @@
             </tr>
             <tr>
               <td><strong>Subagent</strong> (specialist)</td>
-              <td>the other 31 roles</td>
+              <td>the other 32 roles</td>
               <td>Not a slash command. Delegate: <em>"Use the grid-backend-dev subagent to…"</em>, or let an orchestrator hand off automatically.</td>
             </tr>
           </tbody>
@@ -1066,11 +1066,12 @@ bash scripts/wire.sh
         <h2 id="agents-heading">Agents</h2>
 
         <p>
-          agent-factory produces 39 roles across four independently composed
+          agent-factory produces 40 roles across four independently composed
           and gated public projects (plus any private desk composed the same
-          way, sourcing roles from outside this repo — see CLAUDE.md). Seven
+          way, sourcing roles from outside this repo — see CLAUDE.md). Eight
           roles are <strong>orchestrators</strong> — they become Claude Code
-          skills invoked as slash commands; four coordinate a team, and three
+          skills invoked as slash commands; five coordinate a team (one,
+          <code>gsd</code>, is the light fan-out for small fixes), and three
           (<code>tron</code>, <code>morpheus</code>, <code>oracle</code>) talk to you directly.
           The other 32 are <strong>specialists</strong> —
           subagents delegated to by an orchestrator or called directly.
