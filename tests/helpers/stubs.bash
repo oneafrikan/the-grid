@@ -82,6 +82,8 @@
 #                              answers the stub_issue fixture (title, body, labels) plus that field;
 #                              STUB_ISSUE_API_FAIL=1 makes it fail
 #     STUB_COMMENTS_JSON[_N]   answer of `gh api repos/R/issues/N/comments` (default []); STUB_COMMENTS_FAIL=1 fails it
+#     STUB_REPO_VIEW_JSON      answer of `gh repo view` (default: empty description/homepage, repositoryTopics null);
+#                              `gh repo edit` just logs its argv and exits 0
 #
 #   loginctl
 #     STUB_LINGER              value printed for `show-user ... --value` (default yes)
@@ -369,6 +371,11 @@ case "${1:-} ${2:-}" in
     fi
     exit 0 ;;
   "issue edit") exit 0 ;;
+  "repo view")
+    # scripts/repo-metadata.sh; default is a repo with no metadata (gh prints null for no topics)
+    empty_repo='{"description":"","homepageUrl":"","repositoryTopics":null}'
+    printf '%s\n' "${STUB_REPO_VIEW_JSON:-$empty_repo}"
+    exit 0 ;;
 esac
 if [ "${1:-}" = api ]; then
   case "$*" in
