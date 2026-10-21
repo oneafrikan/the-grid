@@ -592,6 +592,89 @@ mk_doc() {
   [[ "$output" == *"outside the repo root"* ]]
 }
 
+# fenced_block <readme> — print the first fenced block of a README, without the fence lines.
+# Both READMEs hold exactly one fenced block (the template, the entry example), so the first
+# one is the one the docs tell people to copy.
+fenced_block() {
+  awk '/^```/ { if (inblock) exit; inblock = 1; next } inblock { print }' "$1"
+}
+
+# commit_map — commit what the test added, then regenerate and commit MAP.md, so a clean-tree
+# case fails only on the lint and never on a stale map.
+commit_map() {
+  git -C "$P" add -A
+  git -C "$P" commit -q -m add
+  python3 "$P/scripts/map.py" --root "$P"
+  git -C "$P" add -A
+  git -C "$P" commit -q -m map3
+}
+
+@test "template: the signal template in each README lints clean as a signal" {
+  local readme n=0
+  for readme in signals/README.md project-factory/templates/_common/signals/README.md; do
+    # A fresh fixture per README, so the second pass never sees the first one's files.
+    P="$BATS_TEST_TMPDIR/proj-sig$((n++))"
+    mk_proj
+    mkdir -p "$P/signals"
+    # "Fill in" step of the README: the placeholder filer slug must match the file name.
+    fenced_block "$REPO_ROOT/$readme" | sed 's/^filed_by: your-slug$/filed_by: human-alex/' \
+      > "$P/signals/20261018T101500Z-human-alex-abc123.md"
+    # A guard against an empty extraction passing the lint by having nothing to read.
+    grep -q '^filed_by:' "$P/signals/20261018T101500Z-human-alex-abc123.md"
+    commit_map
+    lint
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "template: the entry example in each README lints clean as a provisional entry" {
+  local readme n=0
+  for readme in knowledge/README.md project-factory/templates/_common/knowledge/README.md; do
+    P="$BATS_TEST_TMPDIR/proj-ent$((n++))"
+    mk_proj
+    mkdir -p "$P/knowledge/provisional"
+    fenced_block "$REPO_ROOT/$readme" \
+      > "$P/knowledge/provisional/K-7483b737-scripts-that-write-committed-output-pin.md"
+    grep -q '^claim_hash:' "$P/knowledge/provisional/"K-7483b737-*.md
+    commit_map
+    lint
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "template: each README block equals its _common copy" {
+  [ "$(fenced_block "$REPO_ROOT/signals/README.md")" = \
+    "$(fenced_block "$REPO_ROOT/project-factory/templates/_common/signals/README.md")" ]
+  [ "$(fenced_block "$REPO_ROOT/knowledge/README.md")" = \
+    "$(fenced_block "$REPO_ROOT/project-factory/templates/_common/knowledge/README.md")" ]
+}
+
+@test "no venv: a PATH holding only the system python3 and git exits 0 on a clean tree" {
+  mk_proj with-signals
+  # A directory with symlinks to just the two tools the lint needs, so nothing from the
+  # agent-factory venv (or any other PATH entry) can be picked up.
+  local bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$bin"
+  ln -s "$(readlink -f "$(command -v python3)")" "$bin/python3"
+  ln -s "$(command -v git)" "$bin/git"
+  PATH="$bin" run python3 "$P/scripts/map.py" --check --root "$P"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "real repository: map.py --check exits 0" {
+  # Guards the-grid's own gate: no tracked signal or entry may fail the lint.
+  run python3 "$REPO_ROOT/scripts/map.py" --check --root "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "grammar: map.py carries no second copy of the knowledge grammar" {
+  # The grammar lives in knowledge.py only; a hit here means map.py grew its own.
+  ! grep -qE 'untested|hashlib' "$REPO_ROOT/scripts/map.py" || false
+}
+
 @test "path addr: foo.md#bar in a signal body is never scanned" {
   mk_proj
   mkdir -p "$P/signals"
