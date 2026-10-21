@@ -55,6 +55,9 @@ EOF
 # Tests that mention a changed script by basename (scripts/stage-site.sh -> test_pages_site.bats).
 if [ "${#sh_files[@]}" -gt 0 ]; then
   for f in "${sh_files[@]}"; do
+    # A shared test helper (tests/helpers/stubs.bash) is mentioned by most bats files, so expanding it
+    # runs the whole suite and outlasts the worker. Helper edits run only the bats files the branch changed.
+    case "$f" in tests/helpers/*|tests/lib/*) continue ;; esac
     while IFS= read -r t; do bats_files+=("$t"); done <<EOF
 $(grep -l -F "$(basename "$f")" tests/*.bats 2>/dev/null || true)
 EOF
