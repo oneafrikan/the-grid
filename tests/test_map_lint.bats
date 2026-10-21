@@ -208,6 +208,90 @@ mk_signal() {
   ! grep -q '^E_' <<<"$output" || false
 }
 
+# edit_sig — change the body of the committed signal. Appending after the closing fence keeps
+# the frontmatter valid, so E_EDITED is the only thing that can fire.
+edit_sig() {
+  printf 'a later remark\n' >> "$P/signals/$SIG"
+}
+
+@test "edited: a signal changed in a later commit gives E_EDITED and exit 1" {
+  mk_proj with-signals
+  edit_sig
+  git -C "$P" add -A
+  git -C "$P" commit -q -m edit
+  lint
+  [ "$status" -eq 1 ]
+  grep -q "^E_EDITED signals/$SIG: " <<<"$output"
+}
+
+@test "edited: a signal changed in the working tree gives E_EDITED and exit 1" {
+  mk_proj with-signals
+  edit_sig
+  lint
+  [ "$status" -eq 1 ]
+  grep -q "^E_EDITED signals/$SIG: " <<<"$output"
+}
+
+@test "edited: a signal changed and staged gives E_EDITED and exit 1" {
+  mk_proj with-signals
+  edit_sig
+  git -C "$P" add signals
+  lint
+  [ "$status" -eq 1 ]
+  grep -q "^E_EDITED signals/$SIG: " <<<"$output"
+}
+
+@test "edited: the sweep's move into signals/done/ with a ledger line stays green" {
+  mk_proj with-signals
+  # A hand-written disposition line carrying every key the ledger requires.
+  mkdir -p "$P/signals/done"
+  printf '%s\n' '{"event":"disposition","signal":"'"$SIG"'","claim_hash":"h","disposition":"invalid","entry":null,"issue":null,"pr":null,"run":"r1"}' \
+    > "$P/signals/done/ledger.jsonl"
+  git -C "$P" mv "signals/$SIG" "signals/done/$SIG"
+  git -C "$P" add -A
+  git -C "$P" commit -q -m sweep
+  map_before=$(git -C "$P" hash-object "$P/MAP.md")
+  lint
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # MAP.md is neither stale nor rewritten by the move.
+  [ "$map_before" = "$(git -C "$P" hash-object "$P/MAP.md")" ]
+  [ -z "$(git -C "$P" status --porcelain)" ]
+}
+
+@test "no git: the history check is skipped with one notice and the other rules still apply" {
+  mk_proj with-signals
+  # A second signal with an unknown stage, so there are two signals and one rule violation.
+  mk_signal 20261018T101600Z-agent-b-abc124.md 'filed_by: agent-b' 'claim: a draft' \
+    'stage: draft' 'warrant: seen in CI' 'status: pending'
+  # Copy the tree without .git; the ceiling stops git finding a repository further up.
+  N="$BATS_TEST_TMPDIR/nogit"
+  mkdir -p "$N"
+  cp -R "$P/scripts" "$P/signals" "$P/MAP.md" "$N/"
+  export GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR"
+  run python3 "$N/scripts/map.py" --check --root "$N"
+  # Whatever the drift result, the notice shows exactly once, however many signals there are.
+  [ "$(grep -c 'signal history check skipped' <<<"$output")" -eq 1 ]
+  # The format rule still fires without git.
+  grep -q '^E_[A-Z]* signals/20261018T101600Z-agent-b-abc124.md: ' <<<"$output"
+  [ "$status" -eq 1 ]
+  ! grep -q '^E_EDITED' <<<"$output" || false
+}
+
+@test "no git: a clean tree gives one notice and exit 0" {
+  mk_proj with-signals
+  N="$BATS_TEST_TMPDIR/nogit"
+  mkdir -p "$N"
+  cp -R "$P/scripts" "$P/signals" "$N/"
+  export GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR"
+  # Outside git MAP.md lists the filesystem, so it is generated here rather than copied.
+  python3 "$N/scripts/map.py" --root "$N"
+  run python3 "$N/scripts/map.py" --check --root "$N"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | wc -l)" -eq 1 ]
+  [[ "$output" == "map.py: signal history check skipped ("*")" ]]
+}
+
 @test "signal: hand-off files and the README are not reported" {
   mk_proj with-signals
   # Neither is a signal, so neither has frontmatter the lint should read.
