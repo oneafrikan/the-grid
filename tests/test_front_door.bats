@@ -196,3 +196,51 @@ SPLIT_DOCS="docs/roadmap.md docs/private-projects.md"
 @test "front door: docs/private-projects.md keeps the overwrite warning" {
   phrase_in docs/private-projects.md 'overwrites'
 }
+
+# Drift guards (openspec change front-door, task 2.6 cases b to d). They read the tracked tree
+# with git ls-files, so a new file must be `git add`ed before these can see it. A later change
+# that adds a script, a doc or a write target fails here until the docs name it.
+
+# Case b: every top-level tracked directory (bar the exempt ones and dot-dirs) and every tracked
+# file under scripts/ is named in docs/architecture.md.
+@test "front door: docs/architecture.md names every top-level directory and every script" {
+  cd "$GRID_ROOT"
+  missing=""
+  # Top-level directories = first path segment of every tracked path that has a slash.
+  for d in $(git ls-files | grep / | cut -d/ -f1 | sort -u); do
+    case "$d" in repos|openspec|tests|LOGS|.*) continue ;; esac
+    grep -qF -- "$d" docs/architecture.md || missing="$missing $d/"
+  done
+  # Scripts match by file name, so a mention like `lib/foo.sh` or `foo.sh` both count.
+  while IFS= read -r f; do
+    grep -qF -- "$(basename "$f")" docs/architecture.md || missing="$missing $f"
+  done < <(git ls-files scripts)
+  [ -z "$missing" ] || { echo "docs/architecture.md is missing:$missing" >&2; return 1; }
+}
+
+# Case c: every tracked docs/*.md (top level of docs/ only) is linked from README.md or
+# docs/architecture.md, so no doc is orphaned.
+@test "front door: every docs/*.md is linked from README.md or docs/architecture.md" {
+  cd "$GRID_ROOT"
+  missing=""
+  while IFS= read -r f; do
+    name="$(basename "$f")"
+    # architecture.md is the hub that links the others; a self-link would be vacuous.
+    [ "$f" != "docs/architecture.md" ] || continue
+    # From README.md the link reads docs/<name>; from docs/architecture.md it reads <name>.
+    grep -qF -- "](docs/$name" README.md || grep -qF -- "]($name" docs/architecture.md \
+      || grep -qF -- "](docs/$name" docs/architecture.md || missing="$missing $f"
+  done < <(git ls-files 'docs/*.md' | grep -E '^docs/[^/]+\.md$')
+  [ -z "$missing" ] || { echo "not linked from README.md or docs/architecture.md:$missing" >&2; return 1; }
+}
+
+# Case d: write targets named in scripts/wire.sh must be disclosed in INSTALL.md. SECURITY.md
+# does not exist yet; a later change adds it and extends this case to require it there too.
+@test "front door: INSTALL.md discloses the write targets wire.sh uses" {
+  if grep -qF -- 'settings.json' "$GRID_ROOT/scripts/wire.sh"; then
+    phrase_in INSTALL.md 'settings.json'
+  fi
+  if grep -qF -- 'RULES_DIR' "$GRID_ROOT/scripts/wire.sh"; then
+    phrase_in INSTALL.md 'rules'
+  fi
+}
