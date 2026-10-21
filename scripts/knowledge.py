@@ -987,13 +987,23 @@ def _check_target(root, arg):
     return "/".join(parts)
 
 
-def _cmd_check(root, *paths):
+def _cmd_check(root, *paths, address=None):
     """Print one finding per line, sorted by path; exit 0 when there are none, 1 otherwise.
 
     With PATH arguments only those signal files are checked; with none, check_tree: every
     pending and done signal and every entry. Findings are collected before anything is printed,
     so an unreadable file (exit 2) leaves stdout empty. Output never carries claim text.
+
+    With --address ADDR (no PATH allowed) it resolves one address instead: the resolved
+    relative path (plus `#slug` when given) goes to stdout and the exit is 0; an address that
+    does not resolve raises E_ADDRESS, which main prints on stderr with exit 1.
     """
+    if address is not None:
+        if paths:
+            raise UsageError("--address cannot be combined with PATH arguments")
+        rel, slug = resolve_address(root, address)
+        print(rel if slug is None else "%s#%s" % (rel, slug))
+        return 0
     findings = []
     skipped = []
     try:
@@ -1024,7 +1034,7 @@ def _cmd_check(root, *paths):
 # A later subcommand is one new entry here plus its handler.
 SUBCOMMANDS = {
     "hash": (1, {}, _cmd_hash),
-    "check": (None, {}, _cmd_check),
+    "check": (None, {"--address": "address"}, _cmd_check),
     "file": (0, dict([("--filer", "filer"), ("--claim", "claim"), ("--stage", "stage"),
                       ("--warrant", "warrant"), ("--body-file", "body_file")]
                      + [("--" + k, k) for k in _FILE_OPTIONAL]), _cmd_file),
