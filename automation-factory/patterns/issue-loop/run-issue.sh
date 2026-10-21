@@ -749,6 +749,14 @@ if [ "$RESULT_OK" = 1 ]; then
 fi
 
 if [ "$WORKER_RC" -eq 124 ] || [ "$WORKER_RC" -eq 137 ]; then
+  # A claude that hangs silently (an unreachable API retries without printing, see README) looks like a
+  # timeout, but a worker that printed no result AND left no edit and no commit did nothing: that is
+  # an outage, not a bad issue. Keep the label and back off; no poison count (it is not the issue's
+  # fault). A worker that timed out after producing work takes the WIP/blocked path below.
+  if [ "$RESULT_OK" != 1 ] && [ -z "$(git -C "$WT" status --porcelain 2>/dev/null)" ] \
+     && [ "$(git -C "$WT" rev-list --count "origin/$BASE_BRANCH..HEAD" 2>/dev/null || echo 0)" -eq 0 ]; then
+    infra_fail "the worker hit ISSUE_TIMEOUT (${ISSUE_TIMEOUT}s) having printed nothing and changed nothing; treating it as a claude/network outage"
+  fi
   # The cleanup trap removes the worktree, so uncommitted work would be lost: commit it as WIP on the
   # local branch issue-N (never pushed) first. A worker that switched branches is left alone.
   wip_note="Any commits it made are on the local branch issue-$N."

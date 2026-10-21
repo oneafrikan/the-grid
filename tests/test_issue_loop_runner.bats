@@ -537,6 +537,7 @@ EOF
 @test "caps: a worker that exceeds ISSUE_TIMEOUT is stopped, the issue is blocked, outcome error, exit 0" {
   use_real_timeout
   happy_env
+  wrapper_claude 'case " $* " in *" --model "*) echo partial > partial.txt ;; esac'
   export STUB_CLAUDE_SLEEP=20 STUB_STARTED="$T/started"
   set_conf ISSUE_TIMEOUT 1
   run_runner
@@ -588,9 +589,21 @@ EOF
   [ "$(rr_field 1 outcome)" = "ok" ]
 }
 
+@test "caps: a worker that times out having printed nothing and changed nothing is an outage (label kept, backoff, no poison count), not a blocked issue" {
+  use_real_timeout
+  export STUB_CLAUDE_SLEEP=20
+  set_conf ISSUE_TIMEOUT 1
+  run_runner
+  [ "$status" -eq 1 ]
+  refute has_gh "gh issue edit"
+  contains "$output" "INFRASTRUCTURE FAILURE"
+  contains "$(cat "$STATE/backoff")" "issue_fails=0"
+}
+
 @test "caps: a worker that never writes an outcome still hits ISSUE_TIMEOUT and is blocked" {
   use_real_timeout
   happy_env
+  wrapper_claude 'case " $* " in *" --model "*) echo partial > partial.txt ;; esac'
   export STUB_NO_OUTCOME=1 STUB_CLAUDE_SLEEP=20
   set_conf ISSUE_TIMEOUT 2
   set_conf WORKER_EXIT_GRACE 1
