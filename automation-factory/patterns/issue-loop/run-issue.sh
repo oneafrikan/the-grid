@@ -178,12 +178,22 @@ RUNS_LOG="$STATE/runs.log"
 BACKOFF="$STATE/backoff"
 mkdir -p "$STATE"
 
+# now_epoch prints the current epoch seconds for the backoff window only. GRID_LOOP_NOW is a TEST
+# HOOK that pins the clock so a test can check the doubling table and the cap without waiting; it is
+# unset in production, and anything but a plain integer is ignored.
+now_epoch() {
+  case "${GRID_LOOP_NOW:-}" in
+    ''|*[!0-9]*) date +%s ;;
+    *) printf '%s\n' "$GRID_LOOP_NOW" ;;
+  esac
+}
+
 # Inside the backoff window a cron tick exits quietly: a persistent outage (logged-out claude, gh
 # down, usage limit) must not be hammered every tick. A run for an explicit issue number is a human
 # asking, so it ignores the window.
 if [ -z "$ARG_ISSUE" ] && [ -f "$BACKOFF" ]; then
   _until="$(sed -n 's/^until=\([0-9]*\).*/\1/p' "$BACKOFF" 2>/dev/null || true)"
-  if [ -n "$_until" ] && [ "$(date +%s)" -lt "$_until" ]; then
+  if [ -n "$_until" ] && [ "$(now_epoch)" -lt "$_until" ]; then
     log "backing off after infrastructure failures until epoch $_until ($BACKOFF); exiting"
     exit 0
   fi
@@ -356,7 +366,7 @@ infra_fail() {
   local i=1
   while [ "$i" -lt "$fails" ] && [ "$win" -lt 21600 ]; do win=$((win * 2)); i=$((i + 1)); done
   [ "$win" -le 21600 ] || win=21600
-  printf 'until=%s fails=%s issue=%s issue_fails=%s\n' "$(( $(date +%s) + win ))" "$fails" "$pissue" "$pfails" > "$BACKOFF" 2>/dev/null || true
+  printf 'until=%s fails=%s issue=%s issue_fails=%s\n' "$(( $(now_epoch) + win ))" "$fails" "$pissue" "$pfails" > "$BACKOFF" 2>/dev/null || true
   exit 1
 }
 

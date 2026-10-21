@@ -263,7 +263,7 @@ An infrastructure failure is: `claude` or `gh` logged out, `gh` or `origin` unre
 
 #### Scenario: Doubling and cap
 - **WHEN** consecutive infra failures occur
-- **THEN** the waits are 15, 30, 60, 120 and 240 min; the sixth and later are 6 h (the cap). Tested for the first two windows only; the cap itself is read from the code (UNTESTED)
+- **THEN** the waits are 15, 30, 60, 120 and 240 min; the sixth and later are 6 h (the cap). The full table and the cap are tested with the `GRID_LOOP_NOW` clock hook (a test hook, unset in production); the test fails if the cap clamp is removed
 
 #### Scenario: Inside the window
 - **WHEN** `backoff` has `until` in the future
