@@ -308,7 +308,8 @@ for n, spec in enumerate(sys.argv[5:], 1):
     evidence.append({"signal": "20260101T0000%02dZ-%s-aaaaa%d.md" % (n, filer, n),
                      "filed_by": filer, "stage": stage, "warrant": warrant})
 fields = {"id": k.entry_id(claim), "claim": claim, "claim_hash": k.claim_hash(claim),
-          "stage": dirname, "created": "2026-01-01", "updated": "2026-01-01"}
+          "stage": "canonical" if dirname == "canon" else dirname,
+          "created": "2026-01-01", "updated": "2026-01-01"}
 os.makedirs(os.path.join(root, "knowledge", dirname), exist_ok=True)
 path = os.path.join(root, "knowledge", dirname, fields["id"] + ".md")
 with open(path, "w", encoding="utf-8") as fh:
@@ -400,4 +401,58 @@ expect_first() {
   commit_all
   plan_json
   expect_first duplicate provisional
+}
+
+# expect_escalated <reason> — the first plan signal is escalated with exactly that one reason and
+# carries no entry and no stage.
+expect_escalated() {
+  [ "$(jq_py "d['signals'][0]['disposition']")" = "escalated" ]
+  [ "$(jq_py "d['signals'][0]['reasons']")" = "['$1']" ]
+  [ "$(jq_py "d['signals'][0]['entry']")" = "None" ]
+  [ "$(jq_py "d['signals'][0]['stage']")" = "None" ]
+}
+
+@test "plan: a signal claiming stage canonical is escalated (canonical) with no entry or stage" {
+  fixture
+  esig agent-a canonical "seen in CI" "claim one"
+  commit_all
+  plan_json
+  expect_escalated canonical
+}
+
+@test "plan: a signal with supersedes is escalated (supersedes)" {
+  fixture
+  esig agent-a provisional "seen in CI" "claim one" --supersedes K-aaaaaaaa
+  commit_all
+  plan_json
+  expect_escalated supersedes
+}
+
+@test "plan: a signal with contradicts is escalated (contradicts)" {
+  fixture
+  esig agent-a provisional "seen in CI" "claim two" --contradicts K-aaaaaaaa
+  commit_all
+  plan_json
+  expect_escalated contradicts
+}
+
+@test "plan: a claim matching an entry in canon/ is escalated (canon-match)" {
+  fixture
+  mk_entry canon "claim one" "agent-a|canonical|seen in CI"
+  esig agent-b provisional "reproduced locally" "claim one"
+  commit_all
+  plan_json
+  expect_escalated canon-match
+}
+
+@test "plan: a forged entry with the same K-id but another claim_hash is escalated (id-collision)" {
+  fixture
+  id=$(python3 -I "$KN" hash "claim one" | cut -c1-8)
+  mkdir -p "$PROJ/knowledge/provisional"
+  # Only the name and the claim_hash line matter: the file does not parse, so it is read raw.
+  printf -- '---\nclaim_hash: 0000000000000000\n---\n' >"$PROJ/knowledge/provisional/K-$id-forged.md"
+  esig agent-a provisional "seen in CI" "claim one"
+  commit_all
+  plan_json
+  expect_escalated id-collision
 }
