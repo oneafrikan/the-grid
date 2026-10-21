@@ -231,6 +231,7 @@ never touches its history.
   plugins/              ← GENERATED Claude Code plugin bundles (scripts/build-plugins.py; never hand-edit)
   contexts/             ← opt-in working-mode prompts (claude-dev / claude-research / claude-review)
   dist/                 ← GENERATED portable single-file personas (scripts/build-personas.sh)
+  assets/               ← site assets published with index.html (favicon; scripts/build-site-assets.sh)
   openspec/             ← OpenSpec changes (proposals, design, tasks) for the-grid itself
   signals/              ← claims filed for the knowledge flow, plus agent handoffs (signals/README.md)
   knowledge/            ← recorded claims by stage; canon/ is human-approved (knowledge/README.md)
