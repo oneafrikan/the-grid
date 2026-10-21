@@ -87,3 +87,4 @@ s4 test_run_record.bats
 s4 test_submodule_sources.bats
 s4 test_wiring.bats
 s1 test_issue_loop_cron_verify.bats
+s4 test_site_assets.bats

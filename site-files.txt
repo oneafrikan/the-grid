@@ -3,3 +3,4 @@
 # the pages workflow runs. front-door appends its assets here.
 index.html
 the-grid.png
+assets/favicon.svg
