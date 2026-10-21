@@ -101,6 +101,9 @@ EOF2
       exit 1
     fi
     prev_issue="$issue"
+    # Pause so GitHub's label list has caught up with the label swap just made; without it the next run
+    # can pick the issue it just finished and exit 2. Backgrounded so a signal still ends the wait at once.
+    sleep "${DRAIN_PAUSE:-10}" & wait $! || true
     continue
   fi
 

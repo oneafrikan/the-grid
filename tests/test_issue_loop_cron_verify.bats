@@ -109,3 +109,24 @@ fast_verify_repo() {
   [ "$status" -eq 1 ]
   contains "$output" "leftover merge-conflict markers"
 }
+
+@test "verify.sh: bats files listed in verify-always.txt run even when the branch did not change them" {
+  # the lint file and verify.sh sit on the base branch, so the feature branch changes neither
+  mkdir -p "$REPO/tests" "$REPO/loop" "$BATS_TEST_TMPDIR/bin"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "ALWAYS-RAN"' > "$REPO/tests/lint.bats"
+  cp "$PAT_DIR/verify.sh" "$REPO/loop/verify.sh"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -q -m base-files
+  git -C "$REPO" branch -M main
+  fast_verify_repo "fine text"
+  # no vendored bats in the fixture repo: a stub on PATH just runs the files
+  printf '%s\n' '#!/usr/bin/env bash' 'for f in "$@"; do bash "$f" || exit 1; done' > "$BATS_TEST_TMPDIR/bin/bats"
+  chmod +x "$BATS_TEST_TMPDIR/bin/bats"
+  run bash -c 'cd "$1" && PATH="$2:$PATH" VERIFY_BASE=main bash loop/verify.sh' _ "$REPO" "$BATS_TEST_TMPDIR/bin"
+  [ "$status" -eq 0 ]
+  ! contains "$output" "ALWAYS-RAN" || false
+  printf '%s\n' '# repo-wide lints' 'tests/lint.bats' 'tests/missing.bats' > "$REPO/loop/verify-always.txt"
+  run bash -c 'cd "$1" && PATH="$2:$PATH" VERIFY_BASE=main bash loop/verify.sh' _ "$REPO" "$BATS_TEST_TMPDIR/bin"
+  [ "$status" -eq 0 ]
+  contains "$output" "ALWAYS-RAN"
+}

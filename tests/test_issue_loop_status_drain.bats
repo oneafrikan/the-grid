@@ -12,6 +12,7 @@ INST="$BATS_TEST_DIRNAME/../scripts/instantiate.sh"
 
 setup() {
   common_setup
+  export DRAIN_PAUSE=0   # tests use a fake runner; no label lag to wait out
   T="$(mktemp -d)"
   T="$(cd "$T" && pwd -P)"
   export HOME="$T/home"

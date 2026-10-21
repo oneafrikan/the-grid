@@ -170,6 +170,8 @@ Both ship in the runner cuts (`pr`, and `direct` via `--land`) next to `run-issu
 
 It exits 1 when nothing has changed. It is a sanity pass, not a replacement for CI on the pull request, which stays the authoritative gate. Bash 3.2 compatible.
 
+Optional `loop/verify-always.txt` lists bats files (one per line, `#` comments allowed) that run on every verify even when the branch did not change them: use it for repo-wide lints a changed-files check cannot see (the-grid lists `tests/test_docs_accuracy.bats`; a test that needs initialised submodules does not belong there, since the worker worktrees have none). A missing file is skipped.
+
 ## Role routing
 
 Label an issue `agent:<name>` (for example `agent:grid-backend-dev`) and the worker runs as `claude -p --agent <name>`. No label means a generic session. These end `blocked` with a comment, no worktree and no model call: a name with characters outside `[A-Za-z0-9._-]`, two `agent:` labels, no `<name>.md` in `~/.claude/agents` (or `$AGENTS_DIR`) or `.claude/agents`, or an agent whose frontmatter `tools:` line names neither `Edit` nor `Write` (read-only roles cannot build). The run record's role is the routed agent, else `RUN_ROLE`.
