@@ -120,6 +120,19 @@ tree_hash() {
   contains "$(cat "$REPO/loop/loop-prompt.md")" "git push origin main"
 }
 
+@test "--land direct ships the same runner files as pr, renders MODE=direct, and documents runner landing" {
+  inst --profile work --land direct
+  [ "$status" -eq 0 ]
+  [ "$(loop_conf_value MODE)" = "direct" ]
+  for f in run-issue.sh cron-run.sh verify.sh worker-prompt.template.md hooks/guard-main-push.sh hooks/new-agent-worktree.sh; do
+    [ -e "$REPO/loop/$f" ]
+  done
+  contains "$(cat "$REPO/CLAUDE.md")" "the RUNNER verifies, rebases"
+  # --land sets the runner's MODE, so a different --mode is a contradiction
+  inst --profile work --land direct --mode pr
+  [ "$status" -ne 0 ]
+}
+
 @test "profiles: pr mode ships the runner, the worker prompt, the guard and the worktree helper, verbatim and executable" {
   inst --profile work
   [ "$status" -eq 0 ]

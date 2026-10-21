@@ -66,6 +66,18 @@ teardown() {
   [ ! -e "$REPO/loop/cron.env" ]
 }
 
+@test "--cron-every works with --land direct, and is still refused for the interactive direct mode" {
+  run bash "$INST" issue-loop "$REPO" --profile work --land direct --repo owner/name --project-context x --review-focus y \
+    --cron-every 15 --cron-log "$T/logs/name.log"
+  [ "$status" -eq 0 ]
+  contains "$output" "*/15 * * * * mkdir -p $T/logs && cd $REPO && bash loop/cron-run.sh"
+  grep -q "^MODE=\${MODE:-'direct'}" "$REPO/loop/loop.conf"
+  rm -rf "$REPO/loop"
+  run bash "$INST" issue-loop "$REPO" --profile personal --repo owner/name --project-context x --review-focus y --cron-every 15
+  [ "$status" -ne 0 ]
+  contains "$output" "needs the headless runner"
+}
+
 @test "--fast-verify sets VERIFY_CMD to loop/verify.sh and ships it; an explicit --verify-cmd wins" {
   run bash "$INST" issue-loop "$REPO" --profile work --repo owner/name --project-context x --review-focus y --fast-verify
   [ "$status" -eq 0 ]

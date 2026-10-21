@@ -32,7 +32,9 @@ bash scripts/instantiate.sh issue-loop <target-repo> --profile <personal|work|ma
 | `work` | `pr` | yes |
 | `mac-mini` | `pr` | yes |
 
-Options: `--repo`, `--issue-repo`, `--base-branch` (default: `origin/HEAD`'s branch, else `main`), `--mode pr|direct`, `--verify-cmd`, `--label` (default `ready-for-agent`), `--project-context`, `--review-focus`, `--setup-cmd`, `--worker-model`, `--agent-labels a,b`, `--fast-verify`, `--cron-every N`, `--cron-log <file>`. Run it with no arguments for the list. It needs an authenticated `gh` (to create labels).
+Options: `--repo`, `--issue-repo`, `--base-branch` (default: `origin/HEAD`'s branch, else `main`), `--mode pr|direct`, `--land pr|direct`, `--verify-cmd`, `--label` (default `ready-for-agent`), `--project-context`, `--review-focus`, `--setup-cmd`, `--worker-model`, `--agent-labels a,b`, `--fast-verify`, `--cron-every N`, `--cron-log <file>`. Run it with no arguments for the list. It needs an authenticated `gh` (to create labels).
+
+`--mode direct` (and the `personal` profile) is the interactive `/loop` with no runner. `--land direct` is the headless one: the cut ships the same runner files as `pr` and renders `MODE='direct'` into `loop.conf`, so the runner lands the verified commit on the base branch with no PR (see "Direct mode"), and `--cron-every` is allowed. `--land` works with any profile and conflicts with a different `--mode`; `--cron-every` is refused for the interactive mode.
 
 What it does, idempotently (a second identical run prints no `wrote:` line):
 
@@ -131,7 +133,7 @@ A lock whose recorded pid is gone, or now belongs to something that is not a `ru
 ## Unattended: one cron line per repo
 
 ```bash
-bash scripts/instantiate.sh issue-loop <repo> --profile work --cron-every 15 [--cron-log <file>]
+bash scripts/instantiate.sh issue-loop <repo> --profile work [--land direct] --cron-every 15 [--cron-log <file>]
 ```
 
 Prints one crontab line for that repo (poll every N minutes, 1-59) and the command that adds it. Run it once per repo; each repo has its own `loop/`, lock and log, so repos run concurrently and a repo never overlaps itself. The guard against overlap is the runner's lock: a tick that finds it held exits 0 "busy".
