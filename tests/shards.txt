@@ -91,3 +91,4 @@ s4 test_site_assets.bats
 s3 test_repo_metadata.bats
 s4 test_stamp_counts.bats
 s4 test_factory_chain_doc.bats
+s4 test_front_door.bats
