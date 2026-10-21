@@ -39,9 +39,9 @@ Regenerate with:
 
 | # | Title | Labels or status |
 |---|-------|--------|
-| [#31](https://github.com/oneafrikan/the-grid/issues/31) | New compose.py target: opencode | built; real-install check pending |
-| [#33](https://github.com/oneafrikan/the-grid/issues/33) | New compose.py target: OpenAI Codex CLI | built; real-install check pending |
-| [#32](https://github.com/oneafrikan/the-grid/issues/32) | New compose.py target: Gemini CLI | built; real-install check pending |
+| [#31](https://github.com/oneafrikan/the-grid/issues/31) | New compose.py target: opencode | built; closed, real-install check tracked in #143 |
+| [#33](https://github.com/oneafrikan/the-grid/issues/33) | New compose.py target: OpenAI Codex CLI | built; closed, real-install check tracked in #143 |
+| [#32](https://github.com/oneafrikan/the-grid/issues/32) | New compose.py target: Gemini CLI | built; closed, real-install check tracked in #143 |
 | [#34](https://github.com/oneafrikan/the-grid/issues/34) | Amp: verify custom-agent mechanism before scoping a target | deferred, needs-info |
 | [#4](https://github.com/oneafrikan/the-grid/issues/4) | agent-factory target: async/autonomous via Paperclip | needs-info, severity:medium |
 
@@ -80,7 +80,7 @@ full-roster port) and chunked into single-session specialist work:
 ### Issue-loop (`openspec/changes/issue-loop-v2`, no issue yet)
 
 - **Working:** headless runner (`pr` draft PRs and `direct` landing on the base), runner-side verify, `--fast-verify`, `--cron-every` (one printed crontab line per repo, `loop/cron-run.sh`), unlimited daily count by default, stale-lock takeover, infra failures keep the label and back off (15 min doubling to 6 h).
-- **Outstanding:** poison-issue rule (three infra failures on one issue block it; being built separately); the group 7.0/7.4 `_retired/` decision; the HUMAN proofs on a throwaway repo (groups 8.7-8.9, 10, 12); remaining B3 tests (full doubling table with the 6 h cap, parallel stale-lock race, SIGKILL run).
+- **Outstanding:** the group 7.0/7.4 `_retired/` decision; the HUMAN proofs on a throwaway repo (groups 8.7-8.9, 10, 12); remaining B3 tests (full doubling table with the 6 h cap, parallel stale-lock race, SIGKILL run).
 - **Gaps to decide:** `instantiate.sh --mode direct` ships no runner and `--cron-every` refuses `direct`, so headless direct is only reachable by setting `MODE=direct` in a `pr` cut's `loop/loop.conf`.
 
 ### Deferred (no issue yet)
