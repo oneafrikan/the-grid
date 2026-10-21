@@ -19,15 +19,15 @@ can still get around them (see "Known gaps").
 
 ## Project profiles
 
-A project picks one profile; each profile includes everything below it. Guard hooks
-only.
+A project picks one profile; each profile includes everything below it. The profiles
+hold the two guards plus, at `strict`, `epistemic-stop`.
 
 | Profile | Adds | Model calls | Tokens |
 |---|---|---|---|
 | `off` | nothing | no | 0 |
 | `minimal` | `pre-bash-no-bypass` | no | 0 (about 60 tokens of stderr only when it blocks) |
 | `standard` | `pre-bash-secret-scan` | no | 0 (a short file:line list only when it blocks) |
-| `strict` | nothing yet (same set as `standard`) | no | 0 |
+| `strict` | `epistemic-stop` | no | 0 to run (a block adds one model turn) |
 
 ## Hooks and their cost
 
@@ -39,6 +39,7 @@ only.
 | `instincts-capture-failure` | PostToolUseFailure / same tools | open | Opt-in. Same, for a failed tool call, with an error flag. | 0 tokens; about 70 ms per failed call; prints nothing |
 | `instincts-capture-prompt` | UserPromptSubmit | open | Opt-in. Appends one scrubbed, truncated line per prompt to a local file. | 0 tokens; about 70 ms per prompt; prints nothing |
 | `instincts-inject` | SessionStart | open | Opt-in. Prints the project's learned habit hints into the session. | 0 tokens to run; about 100 to 300 tokens of hints when instincts exist, nothing otherwise |
+| `epistemic-stop` | Stop | open | `strict` profile only. When the last assistant message claims completion with none of the whole words RAN, READ or UNTESTED, exits 2 with a one-line reason asking for one of them. The message is read from the payload field `last_assistant_message`, with a bounded transcript-tail fallback when the key is absent. At most once per turn. | 0 tokens to run; about 60 ms per stop; a block adds one model turn, once per turn |
 | `auto-handoff` | SessionEnd | open | Writes a handoff with the real `/handoff` skill when a session of 5+ human turns did not run one. Machine-level, not a project profile. | One Sonnet run per qualifying session; capped by `--max-budget-usd 1.00`, `--max-turns 25` and a 900 s wall clock |
 
 The machine-readable version of this table is `catalogue.json` (the only place scope,
@@ -58,6 +59,26 @@ flag back to off and re-running removes exactly those four entries. In the catal
 carry `"opt_in": "learning"` in place of `min_profile`, and `--list` shows `opt-in:learning`
 in the profile column. What is captured, where it goes and how to forget it:
 `docs/instincts.md`.
+
+**Epistemic stop (`strict` only).** `epistemic-stop` is advisory and can be bypassed: it is
+a nudge, not a security boundary. It is off unless a project sets `profile: strict` in
+`.grid/project.yaml`; no project is switched on by default. A block costs one extra model
+turn and happens at most once per turn: the second Stop of a turn carries
+`stop_hook_active: true` and always passes. It fails open: a missing `jq`, unreadable input
+or any parse error exits 0. The kill switches `GRID_HOOKS=off` and
+`GRID_DISABLED_HOOKS=epistemic-stop` apply. The claim list is crude on purpose and fires on
+some non-claims (a chatty "done" question, a quoted "complete"). Observed with the real
+`claude` (probe run 2026-10-21, claude 2.1.x):
+
+- the Stop payload carries `last_assistant_message`;
+- a Stop hook that exits 2 with a stderr reason makes the model receive the reason, and the
+  turn continues;
+- the second Stop in that turn has `stop_hook_active: true`.
+
+The transcript-tail fallback is not observed: its line shape is taken from a fixture captured
+for another hook, and whether the transcript holds the final message at Stop time is unknown.
+This hook reads the Stop payload, not the PreToolUse one the "Other harnesses" section
+describes, so that section's "only seam" statement is about the two guards.
 
 ## How it fits together
 
