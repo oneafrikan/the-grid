@@ -1075,6 +1075,45 @@ def entry_disposition(sig, match):
     return "confirmed", match["id"], stage
 
 
+# Escalated signals one run may list; the rest stay pending for the next run.
+MAX_ESCALATIONS = 3
+# Canon one-liners handed to the model for the contradiction check (the same count MAP.md carries).
+CANON_CLAIMS_MAX = 20
+_GUARDRAIL_LINE_RE = re.compile(r"- (G[0-9]+): ")
+
+
+def guardrail_lines(root):
+    """{"G<n>": the verbatim `- G<n>: ...` line} from GUARDRAILS.md at the root, first one wins.
+
+    A missing file is an empty map (every citation is then guardrail-not-found). The text is
+    data for the model and is copied as is, never interpreted here.
+    """
+    lines = {}
+    try:
+        with open(os.path.join(root, "GUARDRAILS.md"), "rb") as fh:
+            text = fh.read().decode("utf-8")
+    except FileNotFoundError:
+        return lines
+    except (OSError, UnicodeDecodeError):
+        raise KnowledgeError(E_READ, "cannot read GUARDRAILS.md")
+    for line in text.splitlines():
+        found = _GUARDRAIL_LINE_RE.match(line)
+        if found:
+            lines.setdefault(found.group(1), line)
+    return lines
+
+
+def canon_entries(root):
+    """The parseable entries in knowledge/canon/, sorted by id."""
+    found = []
+    for dirname, rel in iter_entries(root):
+        if dirname == "canon":
+            entry = _load_entry(root, rel)
+            if entry is not None:
+                found.append(entry)
+    return sorted(found, key=lambda e: e["id"])
+
+
 def build_plan(root, cap=DEFAULT_CAP):
     """Read-only plan of the pending signals: a dict that json.dumps(sort_keys=True) renders
     byte-identically on an unchanged tree (no clock, no run id, no absolute paths).
@@ -1092,7 +1131,13 @@ def build_plan(root, cap=DEFAULT_CAP):
     `secret` (reasons: the pattern name only, no claim_hash). A valid, non-secret signal whose
     claim has an open escalation is `duplicate` (reasons name the issue); one whose claim was
     rejected with no later reopen is `repeat-rejected`. `reconcile` lists the escalations with no
-    resolution yet; each takes one slot of the cap. Raises KnowledgeError(E_READ) for
+    resolution yet; each takes one slot of the cap. A signal that is `wip`, `written` or
+    `confirmed` lists in `needs_judgement` what the model must still decide: `guardrail` (with
+    `guardrail_text`, the cited line from GUARDRAILS.md; a citation that is not there is
+    `escalated` with `guardrail-not-found`) and/or `canon` (when knowledge/canon/ holds an
+    entry; the plan-level `canon_claims` carries the first CANON_CLAIMS_MAX as id and claim,
+    sorted by id). At most MAX_ESCALATIONS `escalated` signals are listed; later ones leave
+    the list, stay pending and are counted in `deferred`. Raises KnowledgeError(E_READ) for
     a file that cannot be opened or when the secret scanner is missing or fails, and E_LEDGER
     for a bad ledger.
     """
@@ -1114,8 +1159,12 @@ def build_plan(root, cap=DEFAULT_CAP):
     # byte-identical on an unchanged tree).
     entries_by_hash, entries_by_id = open_entry_maps(root)
     closed_by_hash, closed_by_id, ids_on_disk = closed_entry_maps(root)
+    guardrails = guardrail_lines(root)
+    canon = canon_entries(root)
+    canon_claims = [{"id": e["id"], "claim": e["claim"]} for e in canon[:CANON_CLAIMS_MAX]]
     signals = []
     counts = {}
+    escalated = 0
     for rel in pending[:slots]:
         findings = check_signal(root, rel)
         entry = {"claim_hash": None, "disposition": "pending", "entry": None,
@@ -1162,9 +1211,31 @@ def build_plan(root, cap=DEFAULT_CAP):
                             or entries_by_id.get(sig.get("confirms"))
                         entry["disposition"], entry["entry"], entry["stage"] = \
                             entry_disposition(sig, match)
+                        cited = sig.get("guardrail")
+                        gid = cited.split("#", 1)[1] if cited else None
+                        # The model's two questions (design step 5); a `duplicate` adds
+                        # nothing, so it needs neither.
+                        if entry["disposition"] in ("wip", "written", "confirmed"):
+                            if gid and gid not in guardrails:
+                                # A citation the model cannot be shown is a human's to settle.
+                                entry["disposition"] = "escalated"
+                                entry["reasons"] = ["guardrail-not-found"]
+                                entry["entry"] = entry["stage"] = None
+                            else:
+                                if gid:
+                                    entry["needs_judgement"].append("guardrail")
+                                    entry["guardrail_text"] = guardrails[gid]
+                                if canon:
+                                    entry["needs_judgement"].append("canon")
+        if entry["disposition"] == "escalated":
+            escalated += 1
+            if escalated > MAX_ESCALATIONS:
+                # Over the per-run cap: not listed and not counted, left pending for a later
+                # run (it shows up in `deferred` through the length difference below).
+                continue
         counts[entry["disposition"]] = counts.get(entry["disposition"], 0) + 1
         signals.append(entry)
-    return {"cap": cap, "counts": counts,
+    return {"canon_claims": canon_claims, "cap": cap, "counts": counts,
             "deferred": len(pending) - len(signals) + len(open_all) - len(reconcile),
             "pending": len(pending), "reconcile": reconcile, "signals": signals}
 
