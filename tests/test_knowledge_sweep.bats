@@ -223,3 +223,72 @@ write_sig() {
   [ -z "$output" ]
   [[ "$stderr" == *"secret-patterns.sh not found"* ]]
 }
+
+# ledger_line <json> — append one hand-written ledger line (the shape from the design's "Ledger").
+ledger_line() {
+  mkdir -p "$PROJ/signals/done"
+  printf '%s\n' "$1" >>"$PROJ/signals/done/ledger.jsonl"
+}
+
+# esc_line <hash> <signal> <issue> — an `escalated` disposition line.
+esc_line() {
+  ledger_line "{\"claim_hash\":\"$1\",\"disposition\":\"escalated\",\"entry\":null,\"event\":\"disposition\",\"issue\":$3,\"pr\":null,\"run\":\"r1\",\"signal\":\"$2\"}"
+}
+
+# res_line <hash> <result> — a `resolution` line.
+res_line() {
+  ledger_line "{\"claim_hash\":\"$1\",\"event\":\"resolution\",\"pr\":null,\"result\":\"$2\",\"run\":\"r2\"}"
+}
+
+# claim_of_first — claim hash of the first listed signal of the plan in $output.
+claim_of_first() {
+  jq_py "d['signals'][0]['claim_hash']"
+}
+
+@test "plan: a claim with an open escalation is duplicate and the reason names the issue" {
+  fixture
+  fsig 1 >/dev/null
+  commit_all
+  plan_json
+  h=$(claim_of_first)
+  esc_line "$h" "20250101T000000Z-agent-a-old000.md" 77
+  plan_json
+  [ "$(jq_py "d['signals'][0]['disposition']")" = "duplicate" ]
+  [ "$(jq_py "d['signals'][0]['reasons']")" = "['open issue 77']" ]
+  [ "$(jq_py "d['counts']")" = "{'duplicate': 1}" ]
+}
+
+@test "plan: a rejected claim is repeat-rejected, and not after a later reopen" {
+  fixture
+  fsig 1 >/dev/null
+  commit_all
+  plan_json
+  h=$(claim_of_first)
+  res_line "$h" rejected
+  plan_json
+  [ "$(jq_py "d['signals'][0]['disposition']")" = "repeat-rejected" ]
+  [ "$(jq_py "d['counts']")" = "{'repeat-rejected': 1}" ]
+  ledger_line "{\"by\":\"operator\",\"claim_hash\":\"$h\",\"event\":\"reopen\",\"run\":\"r3\"}"
+  plan_json
+  [ "$(jq_py "d['signals'][0]['disposition']")" = "pending" ]
+}
+
+@test "plan: open escalations are reconcile items, each takes a cap slot, and an accepted one is not listed" {
+  fixture
+  for i in 1 2 3; do fsig "$i" >/dev/null; done
+  commit_all
+  esc_line aaaaaaaaaaaaaaaa "20250101T000001Z-agent-a-old001.md" 11
+  esc_line bbbbbbbbbbbbbbbb "20250101T000002Z-agent-a-old002.md" 12
+  esc_line cccccccccccccccc "20250101T000003Z-agent-a-old003.md" 13
+  res_line cccccccccccccccc accepted
+  plan_json --cap 3
+  [ "$(jq_py "[r['issue'] for r in d['reconcile']]")" = "[11, 12]" ]
+  [ "$(jq_py "sorted(d['reconcile'][0])")" = "['claim_hash', 'issue', 'pr', 'signal']" ]
+  [ "$(jq_py "len(d['signals'])")" = "1" ]
+  [ "$(jq_py "d['deferred']")" = "2" ]
+  # Items past the cap are counted in deferred, not dropped silently.
+  plan_json --cap 1
+  [ "$(jq_py "len(d['reconcile'])")" = "1" ]
+  [ "$(jq_py "len(d['signals'])")" = "0" ]
+  [ "$(jq_py "d['deferred']")" = "4" ]
+}
