@@ -36,6 +36,7 @@ s2 test_hooks.bats
 s2 test_instincts_schedule.bats
 s2 test_issue_loop_e2e.bats
 s2 test_issue_loop_runner.bats
+s2 test_issue_loop_status_drain.bats
 s2 test_project_factory.bats
 s2 test_prune_report.bats
 s2 test_render_schedule.bats

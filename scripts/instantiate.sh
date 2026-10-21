@@ -451,10 +451,12 @@ instantiate_issue_loop() {
     copy_if_changed "$pattern_dir/run-issue.sh" "$loop_dir/run-issue.sh"
     copy_if_changed "$pattern_dir/cron-run.sh" "$loop_dir/cron-run.sh"
     copy_if_changed "$pattern_dir/verify.sh" "$loop_dir/verify.sh"
+    copy_if_changed "$pattern_dir/status.sh" "$loop_dir/status.sh"
+    copy_if_changed "$pattern_dir/drain.sh" "$loop_dir/drain.sh"
     copy_if_changed "$pattern_dir/worker-prompt.template.md" "$loop_dir/worker-prompt.template.md"
     copy_if_changed "$pattern_dir/hooks/guard-main-push.sh" "$hooks_dir/guard-main-push.sh"
     copy_if_changed "$pattern_dir/hooks/new-agent-worktree.sh" "$hooks_dir/new-agent-worktree.sh"
-    chmod +x "$loop_dir/run-issue.sh" "$loop_dir/cron-run.sh" "$loop_dir/verify.sh" "$hooks_dir/guard-main-push.sh" "$hooks_dir/new-agent-worktree.sh"
+    chmod +x "$loop_dir/run-issue.sh" "$loop_dir/cron-run.sh" "$loop_dir/verify.sh" "$loop_dir/status.sh" "$loop_dir/drain.sh" "$hooks_dir/guard-main-push.sh" "$hooks_dir/new-agent-worktree.sh"
   fi
 
   # setup.sh renders loop/loop-prompt.md from the template + loop.conf and self-tests the guard.

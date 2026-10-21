@@ -15,6 +15,7 @@ It runs two ways from the same cut:
 | config | `loop.conf.template` | Rendered once into `loop/loop.conf`, the single source of config. |
 | guard | `hooks/guard-main-push.sh` | PreToolUse mistake-catcher for pushes and merges. Reaches the worker only through the runner's per-run `--settings` file. |
 | cron wrapper | `cron-run.sh` | What the cron line runs: sources `loop/cron.env` (PATH, HOME), then `exec`s the runner. |
+| watch and drain | `status.sh`, `drain.sh` | `status.sh`: read-only one-screen view of the queue, lock, backoff and recent runs. `drain.sh`: runs the runner repeatedly until the queue is empty. |
 | fast verify | `verify.sh` | Optional `VERIFY_CMD`: shellcheck, Python syntax, related bats, Markdown and rules lint on what changed. |
 | worktree helper | `hooks/new-agent-worktree.sh` | Cuts `issue-<N>` worktrees off `origin/<base>`. |
 | review hook | `hooks/post-commit-review.sh` | PostToolUse: reviews each commit of an interactive session and comments on the PR or issue. Stands down in headless runs. |
@@ -144,6 +145,18 @@ Prints one crontab line for that repo (poll every N minutes, 1-59) and the comma
 - Check the environment before trusting it: run the printed line's command under `env -i HOME=$HOME PATH=/usr/bin:/bin sh -c '...'` (everything after the five time fields) and read the log. It should show the runner's own messages, not "command not found".
 
 Backoff, the poison-issue rule and stale-lock takeover are described under "Failures that are not the issue's fault".
+
+## Watching and draining
+
+Both ship in the runner cuts (`pr`, and `direct` via `--land`) next to `run-issue.sh`, verbatim and executable. Neither is scheduled or installed by anything.
+
+- `bash loop/status.sh [path/to/loop.conf]` is read-only (no file, fetch, label or lock is written) and exits 0 unless `loop.conf` cannot be read (exit 2). With a path it reads that config and the state of the repo that owns it. It prints, on one screen:
+  - open issues per label in `ISSUE_REPO` (the opt-in label, `ready-for-human`, `blocked`, `needs-human`) and the issue the runner would pick next;
+  - the lock: pid, whether it is alive and is a `run-issue.sh`, and whether it is stale;
+  - the backoff window (until when, failure counts, the poison-issue counter);
+  - the last 10 `work-issue` records for this `ISSUE_REPO` from the run log (`GRID_RUN_LOG`, default `~/.the-grid-private/runs.jsonl`) and today's cost (UTC date, as the records are UTC);
+  - open `blocked` and `needs-human` issues by title, and the last commit on `BASE_BRANCH` (from `gh`, else the local copy).
+- `bash loop/drain.sh` runs `run-issue.sh` again and again, one at a time, with your environment, and prints one line per run (issue, outcome, elapsed). It stops when the queue is empty, when the runner exits non-zero (infrastructure failure: it reports it and exits 1; the backoff is already recorded), when the runner answers "busy", "backing off" or "daily cap reached", or when the same issue comes back twice in a row. Ctrl-C stops the runner cleanly and exits 130. It adds no cap of its own. "An issue was handled" is read from the runner's `runs.log`, not from its text; the text only names why it stopped.
 
 ## Fast verify
 
