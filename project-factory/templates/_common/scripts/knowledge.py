@@ -876,6 +876,71 @@ def check_tree(root, history_skipped=None):
 DEFAULT_CAP = 10
 
 
+# The scan runs in bash because the repository's one secret-pattern table is a bash library
+# (hooks/lib/secret-patterns.sh); a Python copy of it would drift. Fixed argv, no shell=True:
+# $1 is the library, $2 the signal. Strict mode (SECRET_STRICT=1) ignores the placeholder
+# words and the allow pragma, so a signal cannot opt out of the scan. It prints only the
+# pattern name (SECRET_MATCH_NAME), never the line, and exits 3 on a hit, 0 when clean.
+_SECRET_SCAN_SCRIPT = (
+    'export SECRET_STRICT=1\n'
+    '. "$1" || exit 4\n'
+    'while IFS= read -r line || [ -n "$line" ]; do\n'
+    '  if secret_match_long "$line"; then printf "%s" "$SECRET_MATCH_NAME"; exit 3; fi\n'
+    'done < "$2"\n'
+    'exit 0\n'
+)
+# A pattern name is lower-case words joined by dashes; anything else from the scanner is
+# not trusted into the plan.
+_SECRET_NAME_RE = re.compile(r"[a-z0-9-]{1,40}\Z")
+
+
+def find_secret_patterns():
+    """Path of secret-patterns.sh: $KNOWLEDGE_SECRET_PATTERNS if set, else the copy beside
+    this script's repo (<script dir>/../hooks/lib), else $GRID_DIR (default ~/.the-grid).
+
+    A project cut from the template has no hooks/ of its own, hence the last two. Raises
+    KnowledgeError(E_READ) when none exists: no scan means no sweep (fail closed). The set
+    variable is used alone, never falling through, so a typo cannot silently scan with
+    another table.
+    """
+    env = os.environ.get("KNOWLEDGE_SECRET_PATTERNS")
+    if env:
+        candidates = [env]
+    else:
+        here = os.path.dirname(os.path.abspath(__file__))
+        grid = os.environ.get("GRID_DIR") or os.path.join(os.path.expanduser("~"), ".the-grid")
+        candidates = [os.path.join(here, os.pardir, "hooks", "lib", "secret-patterns.sh"),
+                      os.path.join(grid, "hooks", "lib", "secret-patterns.sh")]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    raise KnowledgeError(E_READ, "secret-patterns.sh not found (set KNOWLEDGE_SECRET_PATTERNS)")
+
+
+def scan_secret(lib, path):
+    """Pattern name when the file at `path` holds a token-shaped value, else None.
+
+    Output of the scanner is captured and only a well-formed pattern name is returned, so
+    the matched text can reach neither stdout nor stderr. A scanner that fails in any other
+    way raises KnowledgeError(E_READ) rather than passing the signal.
+    """
+    env = dict(os.environ)
+    # BASH_ENV would run an arbitrary file inside the scan.
+    env.pop("BASH_ENV", None)
+    try:
+        proc = subprocess.run(["bash", "-c", _SECRET_SCAN_SCRIPT, "knowledge-secret-scan", lib, path],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, env=env)
+    except OSError:
+        raise KnowledgeError(E_READ, "cannot run the secret scan")
+    if proc.returncode == 0:
+        return None
+    name = proc.stdout.decode("utf-8", "replace")
+    if proc.returncode == 3 and _SECRET_NAME_RE.match(name):
+        return name
+    raise KnowledgeError(E_READ, "the secret scan failed")
+
+
 def build_plan(root, cap=DEFAULT_CAP):
     """Read-only plan of the pending signals: a dict that json.dumps(sort_keys=True) renders
     byte-identically on an unchanged tree (no clock, no run id, no absolute paths).
@@ -886,9 +951,13 @@ def build_plan(root, cap=DEFAULT_CAP):
     rest are counted in `deferred`, untouched. A signal with any check_signal finding is
     `invalid` with the finding codes in `reasons`; every other one is `pending` for now (later
     changes replace that with the real dispositions). Later changes add fields to each signal
-    entry, never remove one. Raises KnowledgeError(E_READ) for a file that cannot be opened and
-    E_LEDGER for a bad ledger.
+    entry, never remove one. A grammatically valid signal that holds a token-shaped value is
+    `secret` (reasons: the pattern name only, no claim_hash). Raises KnowledgeError(E_READ) for
+    a file that cannot be opened or when the secret scanner is missing or fails, and E_LEDGER
+    for a bad ledger.
     """
+    # Fail closed before looking at any signal: no scanner means no sweep.
+    secret_lib = find_secret_patterns()
     paths, _ = iter_signals(root)
     seen = processed_signals(read_ledger(root))
     seen.update(rel.rsplit("/", 1)[-1] for rel in iter_done(root))
@@ -906,9 +975,17 @@ def build_plan(root, cap=DEFAULT_CAP):
             # Codes only, never the message: it names the key but a code is all a reader needs.
             entry["reasons"] = sorted(set(f.code for f in findings))
         else:
-            # Valid, so it parses; the hash is the claim's identity for the later rules.
-            with open(os.path.join(root, *rel.split("/")), "rb") as fh:
-                entry["claim_hash"] = claim_hash(parse_signal(fh.read().decode("utf-8"))["claim"])
+            full = os.path.join(root, *rel.split("/"))
+            # The whole file is scanned before anything is read from it; a hit names the
+            # pattern and nothing else (no hash, no entry).
+            secret = scan_secret(secret_lib, full)
+            if secret:
+                entry["disposition"] = "secret"
+                entry["reasons"] = [secret]
+            else:
+                # Valid, so it parses; the hash is the claim's identity for the later rules.
+                with open(full, "rb") as fh:
+                    entry["claim_hash"] = claim_hash(parse_signal(fh.read().decode("utf-8"))["claim"])
         counts[entry["disposition"]] = counts.get(entry["disposition"], 0) + 1
         signals.append(entry)
     return {"cap": cap, "counts": counts, "deferred": len(pending) - len(signals),
