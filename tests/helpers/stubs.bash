@@ -44,6 +44,8 @@
 #     STUB_CLAUDE_ARGV         path: the last `-p` call's argv is written there, NUL separated
 #     STUB_STDIN_DUMP          path: the last `-p` call's stdin is copied there
 #     STUB_CLAUDE_STDIN        path: every `-p` call's drained stdin is copied there (same as STUB_STDIN_DUMP)
+#     STUB_CLAUDE_STDOUT       path: a file whose bytes every `-p` call prints verbatim on stdout (after draining
+#                              stdin), then exits STUB_CLAUDE_EXIT (default 0); used by the README translator tests
 #     Every call also records, in $STUB_DIR: claude.cwd, claude.child-env (GRID_AUTOHANDOFF_CHILD),
 #     claude.pgid, claude.pid, claude.umask, claude.env (the full environment it received)
 #     (auto-handoff tests). WP-016 modes: handoff-outside ($STUB_OUTSIDE_FILE), handoff-home-dotfile
@@ -259,6 +261,12 @@ if [ -n "${STUB_CLAUDE_STDIN:-}" ]; then cp "${TMPDIR:-/tmp}/stub-stdin.$$" "$ST
 rm -f "${TMPDIR:-/tmp}/stub-stdin.$$"
 printf 'GH_TOKEN=%s GITHUB_TOKEN=%s CLAUDE_CODE_OAUTH_TOKEN=%s stdin_bytes=%s cwd=%s\n' \
   "${GH_TOKEN-<unset>}" "${GITHUB_TOKEN-<unset>}" "${CLAUDE_CODE_OAUTH_TOKEN-<unset>}" "$bytes" "$(pwd)" >> "${STUB_ENV_LOG:-/dev/null}"
+
+# STUB_CLAUDE_STDOUT (a path): print that file as the reply and stop, whatever kind of call this is.
+if [ -n "${STUB_CLAUDE_STDOUT:-}" ]; then
+  cat "$STUB_CLAUDE_STDOUT"
+  exit "${STUB_CLAUDE_EXIT:-0}"
+fi
 
 if [ -n "${LOOP_OUTCOME_FILE:-}" ]; then
   # ---- worker call ----
