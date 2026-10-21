@@ -108,13 +108,25 @@ State lives in `<git-common-dir>/issue-loop/`: `lock/` (with `pid`, `issue`, `st
 
 `MODE=direct` is for a repo where the operator wants no PRs. After the runner's own `VERIFY_CMD` passes it fetches the base, rebases `issue-<N>` onto `origin/<BASE_BRANCH>` if the base moved (and runs `VERIFY_CMD` again, because the rebased tree is not the one that was verified), then pushes `HEAD:refs/heads/<BASE_BRANCH>` without force. It comments the short sha on the issue, swaps `ready-for-agent` for `ready-for-human` and closes the issue. A rebase conflict or a rejected push (branch protection, a base that moved again) labels the issue `blocked`, comments, pushes nothing and keeps the work on the local branch `issue-<N>`. The worker still cannot push; only the runner does, and the guard still blocks the worker from pushing to the base. With issues in another repo the commit message carries `refs <tracker>#<N>` as in `pr` mode, and the comment is on the tracker.
 
-There is no review step: **branch protection and the `VERIFY_CMD` gate are the only checks**, so use direct mode only where the base branch can take unreviewed commits. A `gh` outage between the push and the label swap leaves the issue labelled `ready-for-agent` with its commit already landed, and the next tick will work it again.
+There is no review step: **branch protection and the `VERIFY_CMD` gate are the only checks**, so use direct mode only where the base branch can take unreviewed commits. The runner writes `<state>/landed.<N>` (the commit sha) just before the push. If `gh` fails, or the runner is killed, between the push and the label swap, the issue keeps `ready-for-agent`; the next run that picks it finds the marker, sees the sha on `origin/<base>`, and finishes the label swap, comment and close **without working the issue again**. A marker whose sha is not on the base (the push never happened or was rejected) is dropped. Files that `VERIFY_CMD` rewrote in the worktree are discarded before a rebase, so a regenerated lockfile or snapshot does not turn a clean rebase into a "conflict".
 
 ### Failures that are not the issue's fault
 
-A logged-out `claude` or `gh`, an unreachable `gh` or `origin`, a failing `gh pr list`, and a worker whose output shows a usage or rate limit are infrastructure: the runner exits 1, the issue keeps `ready-for-agent`, and `backoff` records `until=<epoch> fails=<n>`. Ticks inside the window exit 0 quietly. The window is 15 minutes after the first failure and doubles with each consecutive one, up to 6 hours. Any issue-level outcome or an empty queue clears it, and `run-issue.sh <N>` ignores it. Verify failures, worker `blocked`, timeouts and the like still mark the issue `blocked` or `needs-human`.
+A logged-out `claude` or `gh`, an unreachable `gh` or `origin`, a failing `gh pr list`, and a worker whose error result or stderr shows a login, key, network or usage/rate-limit failure are infrastructure: the runner exits 1, the issue keeps `ready-for-agent`, and `backoff` records `until=<epoch> fails=<n>`. Ticks inside the window exit 0 quietly. The window is 15 minutes after the first failure and doubles with each consecutive one, up to 6 hours. Any issue-level outcome or an empty queue clears it, and `run-issue.sh <N>` ignores it. Verify failures, worker `blocked`, timeouts and the like still mark the issue `blocked` or `needs-human`.
 
-A lock whose recorded pid is gone, or now belongs to something that is not a `run-issue.sh`, is taken over with a log line (a crash, SIGKILL or reboot). A live runner keeps the lock and the new tick exits 0 "busy".
+The service patterns (`SERVICE_RE` in `run-issue.sh`) read only the worker's stderr and its result text when that result is an error: a normal final answer is never probed, so an issue about rate limiting is not mistaken for an outage. Checked against claude 2.1.305 (real output, captured by pointing it at an empty config dir, a dummy API key, and a closed port):
+
+| Case | Result text | Exit |
+|---|---|---|
+| not logged in | `Not logged in · Please run /login` | 1 |
+| invalid key | `Invalid API key · Fix external API key` | 1 |
+| unreachable API | `API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)` | 1, after about 3 minutes of internal retries |
+
+Not captured, patterns are best guesses: a real usage or rate limit and an overloaded API (they cannot be provoked without spending money or exhausting the account). An unknown model name was not captured either (the CLI warns on stderr and proceeds). With `HTTPS_PROXY` on a closed port claude printed nothing for 150 s: a worker in that state ends at `ISSUE_TIMEOUT` and is marked `blocked`, which an outage should not do (known gap).
+
+**Poison issue.** A worker failure the service patterns do not explain (a crash, or an error result with no login, key, network or limit text) is counted per issue in `backoff` (`issue=<n> issue_fails=<n>`). The third in a row on the same issue marks it `blocked` with one comment and the queue moves on. Outages and limits never count, and any issue-level outcome or an empty queue clears the counter. If the relabel itself fails, the normal backoff applies instead.
+
+A lock whose recorded pid is gone, or now belongs to something that is not a `run-issue.sh`, or that has no pid file and is older than 5 minutes, is taken over with a log line (a crash, SIGKILL or reboot). The takeover first stops the dead runner's orphaned `claude` worker (the pid in `lock/worker`, only if its command line contains `claude`), and hands the lock back if its pid changed during the takeover. A live runner keeps the lock and the new tick exits 0 "busy".
 
 ## Unattended: one cron line per repo
 
@@ -129,7 +141,7 @@ Prints one crontab line for that repo (poll every N minutes, 1-59) and the comma
 - Nothing is installed for you: `instantiate.sh` never runs `crontab`. The activation command it prints is idempotent (pasting it twice leaves one copy).
 - Check the environment before trusting it: run the printed line's command under `env -i HOME=$HOME PATH=/usr/bin:/bin sh -c '...'` (everything after the five time fields) and read the log. It should show the runner's own messages, not "command not found".
 
-Not built yet: a **poison-issue rule** (three infra failures on one issue block it). A stale lock from a crash or SIGKILL is taken over automatically; backoff is described under "Failures that are not the issue's fault".
+Backoff, the poison-issue rule and stale-lock takeover are described under "Failures that are not the issue's fault".
 
 ## Fast verify
 
@@ -160,7 +172,6 @@ Label an issue `agent:<name>` (for example `agent:grid-backend-dev`) and the wor
 - The guard is a mistake-catcher, not a boundary. On the built-in parser `bash -c '...'` and `eval` are not inspected (the shared parser unwraps them once); shell aliases and scripts that call git internally are not inspected on either path.
 - The built-in splitter (used when `${GRID_DIR:-$HOME/.the-grid}/hooks/lib/common.sh` is absent, as in a business repo with no the-grid checkout) only sees a command whose first word is `git` or `gh`. It lets through, checked by running it: a subshell `(git push origin main)`, a group `{ git push origin main; }`, a backgrounded `sleep 1 & git push origin main`, a wrapper such as `sudo`, `env`, `command`, `time` or `xargs` before `git push ...`, and a substitution `echo $(git push origin main)`. The shared parser blocks all of these.
 - On BOTH parsers a merge made through `gh api graphql` (a `mergePullRequest` mutation) is not recognised; only `gh pr merge` and `gh api` calls with `/merge` or a PUT, PATCH or DELETE method are.
-- A SIGKILL of the runner orphans the worker process. The next run takes over the stale lock but does not stop the orphan.
 - With `WORKER_PERMISSIONS=bypass` the worker can run any `gh` call the guard does not block.
 
 ## What the worker can and cannot do
