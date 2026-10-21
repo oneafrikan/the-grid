@@ -8,17 +8,20 @@ Sections (added as the change lands, in this order):
     4. Signal       KnowledgeError, parse_frontmatter, parse_signal, SIGNAL_NAME_RE, filer_slug
     5. Entry        parse_entry, render_entry, ENTRY_NAME_RE
     6. Address      heading_slugs, resolve_address
+    7. Ledger       ledger_path, read_ledger, append_ledger, processed_signals, claim_state
 
 Design rules:
   * Python 3 standard library only, valid on 3.8 (no `X | Y` annotations, no
     `str.removeprefix`).
-  * Pure functions: no git, no clock, and no file access except resolve_address, which only
-    reads under the root it is given. Same input, same output on every machine.
+  * Pure functions: no git, no clock, and no file access except resolve_address, read_ledger
+    and append_ledger, which only touch files under the root they are given. Same input, same
+    output on every machine.
   * Error text never echoes claim or warrant text (those may carry hostile content).
   * Sorting, where it appears, is plain code-point order.
 """
 import datetime
 import hashlib
+import json
 import os
 import re
 import unicodedata
@@ -465,3 +468,115 @@ def _find_by_id(root, entry_addr):
     if len(matches) > 1:
         raise _address_error("ambiguous %s: %s" % (entry_addr, ", ".join(matches)))
     return matches[0]
+
+
+# --- 7. ledger ---------------------------------------------------------------------
+# E_LEDGER is any ledger line that is not valid JSON, has an unknown event, or lacks a
+# required key. The ledger is append-only, so old bytes stay a prefix of the file and a
+# reader never sees a record change under it.
+E_LEDGER = "E_LEDGER"
+
+_DISPOSITIONS = ("wip", "written", "confirmed", "escalated", "invalid", "duplicate",
+                 "repeat-rejected", "secret")
+_RESULTS = ("accepted", "rejected")
+# Required keys per event. Extra keys are allowed so a later writer can add fields without
+# breaking older readers.
+_LEDGER_REQUIRED = {
+    "disposition": ("signal", "claim_hash", "disposition", "entry", "issue", "pr", "run"),
+    "resolution": ("claim_hash", "pr", "result", "run"),
+    "reopen": ("claim_hash", "by", "run"),
+}
+
+
+def ledger_path(root):
+    """Path of the ledger file under `root`."""
+    return os.path.join(root, "signals", "done", "ledger.jsonl")
+
+
+def _ledger_error(lineno, message):
+    # Line number only: the line itself may carry hostile text, so it is never echoed.
+    return KnowledgeError(E_LEDGER, "line %d: %s" % (lineno, message))
+
+
+def _check_ledger_record(lineno, rec):
+    if not isinstance(rec, dict):
+        raise _ledger_error(lineno, "not a JSON object")
+    event = rec.get("event")
+    if event not in _LEDGER_REQUIRED:
+        raise _ledger_error(lineno, "unknown event")
+    for key in _LEDGER_REQUIRED[event]:
+        if key not in rec:
+            raise _ledger_error(lineno, "%s needs key %s" % (event, key))
+    if event == "disposition" and rec["disposition"] not in _DISPOSITIONS:
+        raise _ledger_error(lineno, "unknown disposition")
+    if event == "resolution" and rec["result"] not in _RESULTS:
+        raise _ledger_error(lineno, "unknown result")
+
+
+def read_ledger(root):
+    """All ledger records under `root`, oldest first; `[]` when the file is absent.
+
+    Blank lines are skipped. Any other bad line raises KnowledgeError(E_LEDGER) naming its
+    1-based line number.
+    """
+    try:
+        with open(ledger_path(root), encoding="utf-8") as fh:
+            lines = fh.read().split("\n")
+    except FileNotFoundError:
+        return []
+    records = []
+    for lineno, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            raise _ledger_error(lineno, "not valid JSON")
+        _check_ledger_record(lineno, rec)
+        records.append(rec)
+    return records
+
+
+def append_ledger(root, records):
+    """Append each record as one compact JSON line, creating signals/done/ when missing.
+
+    The file is only ever opened in append mode ("a"), never "w" or "r+", so bytes already
+    written are never rewritten. Records are validated first so a bad one writes nothing.
+    """
+    lines = []
+    for i, rec in enumerate(records, 1):
+        _check_ledger_record(i, rec)
+        lines.append(json.dumps(rec, sort_keys=True, separators=(",", ":")) + "\n")
+    path = ledger_path(root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("".join(lines))
+
+
+def processed_signals(ledger):
+    """Set of signal file names that have a `disposition` line."""
+    return {rec["signal"] for rec in ledger if rec["event"] == "disposition"}
+
+
+def claim_state(ledger, claim_hash):
+    """State of one claim hash: {"escalated_open": issue or None, "rejected": bool}.
+
+    escalated_open is the issue of the latest `escalated` disposition with no `resolution`
+    after it. rejected is true when the latest resolution/reopen line is a rejected
+    resolution. Matching is by exact normalised claim hash, not meaning: a reworded claim
+    is a new claim.
+    """
+    escalated_open = None
+    rejected = False
+    for rec in ledger:
+        if rec["claim_hash"] != claim_hash:
+            continue
+        event = rec["event"]
+        if event == "disposition" and rec["disposition"] == "escalated":
+            escalated_open = rec["issue"]
+        elif event == "resolution":
+            escalated_open = None
+            rejected = rec["result"] == "rejected"
+        elif event == "reopen":
+            rejected = False
+    return {"escalated_open": escalated_open, "rejected": rejected}
