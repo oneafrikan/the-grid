@@ -89,8 +89,27 @@ set_conf() { printf "%s='%s'\n" "$1" "$2" >> "$REPO/loop/loop.conf"; }
 # run_runner [args] — run the runner from the repo root; $output holds stdout+stderr.
 run_runner() { run bash -c 'cd "$1" && shift && bash loop/run-issue.sh "$@"' _ "$REPO" "$@"; }
 
+# write_cron_env — loop/cron.env the way `instantiate.sh --cron-every` writes it: HOME, a PATH that
+# adds the stub dir (where gh, claude and timeout live) to cron's bare PATH, plus an `export` for
+# every variable the runner and stubs read, since `env -i` leaves nothing else behind. The queue is
+# empty (STUB_ISSUES=""), so a tick that works exits at "nothing to do" without a model call.
+write_cron_env() {
+  local v
+  {
+    echo "export HOME='$HOME'"
+    # stub dir FIRST (the installer appends it): a real gh on the host's /usr/bin would otherwise shadow the stub
+    echo "export PATH='$STUB_DIR:/usr/local/bin:/usr/bin:/bin'"
+    echo "export STUB_ISSUES=''"
+    for v in STUB_DIR STUB_LOG STUB_ENV_LOG STUB_COMMENTS STUB_GH_STORED_LOGIN GRID_RUN_RECORD \
+             GRID_RUN_LOG LOOP_WORKTREE_ROOT GRID_DIR GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM \
+             GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL; do
+      echo "export $v='${!v}'"
+    done
+  } > "$REPO/loop/cron.env"
+}
+
 # the stub log lines for one command family
-gh_lines()     { grep '^gh ' "$STUB_LOG" || true; }
+gh_lines()    { grep '^gh ' "$STUB_LOG" || true; }
 claude_calls() { grep -c '^claude ' "$STUB_LOG" || true; }
 # has_gh <fixed string> — a gh call line contains the string
 has_gh() { awk -v s="$1" 'index($0, s) && /^gh / { f = 1 } END { exit !f }' "$STUB_LOG"; }
@@ -1381,6 +1400,25 @@ EOF
     bash "$REPO/loop/run-issue.sh"
   [ "$status" -eq 0 ]
   has_gh "gh pr create"
+}
+
+@test "cron-run.sh: under env -i it finds its tools only through loop/cron.env" {
+  # cron-run.sh from the pattern, as the installer would have cut it
+  cp "$PAT_DIR/cron-run.sh" "$REPO/loop/cron-run.sh"
+  write_cron_env
+  # a different working directory: the script must cd to the repo itself
+  mkdir -p "$T/elsewhere"
+  run bash -c 'cd "$1" && env -i HOME="$2" PATH=/usr/bin:/bin bash "$3/loop/cron-run.sh"' _ "$T/elsewhere" "$HOME" "$REPO"
+  [ "$status" -eq 0 ]
+  contains "$output" "nothing to do"
+  has_gh "gh issue list"
+  [ "$(claude_calls)" -eq 0 ]
+  # without cron.env the bare PATH has no gh/claude/timeout: a fast preflight failure, not a hang
+  rm "$REPO/loop/cron.env"
+  : > "$STUB_LOG"
+  run bash -c 'cd "$1" && env -i HOME="$2" PATH=/usr/bin:/bin bash "$3/loop/cron-run.sh"' _ "$T/elsewhere" "$HOME" "$REPO"
+  [ "$status" -ne 0 ]
+  contains "$output" "not found"
 }
 
 @test "env: a GH_TOKEN canary appears in no output and no posted comment" {
