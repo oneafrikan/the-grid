@@ -47,7 +47,7 @@ Entries live under `knowledge/<stage>/`; canon under `knowledge/canon/`. Entries
 ### Signals
 
 - Filing: any agent or human writes one file to `signals/` (see `signals/README.md`).
-- Sweep: none configured
+- Sweep: `gh-triage knowledge sweep`
 
 ## Epistemology
 

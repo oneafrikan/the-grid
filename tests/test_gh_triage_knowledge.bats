@@ -46,6 +46,18 @@ section() {
   grep -qF 'knowledge-signal: <claim_hash>' "$skill"
 }
 
+# AGENTS.md carries the sweep scope and its widened channel; the role-authoring size cap still holds.
+@test "gh-triage AGENTS.md declares the sweep, keeps its hard rules, and stays under 4096 bytes" {
+  agents="$REPO_ROOT/agent-factory/roles/gh-triage/AGENTS.md"
+  [ "$(wc -c < "$agents")" -lt 4096 ]
+  # map.py has_sweep() keys on this exact heading.
+  grep -qx '## Knowledge sweep' "$agents"
+  grep -qF 'SAFE TARGET FIRST' "$agents"
+  grep -qF 'RUN RECORD' "$agents"
+  grep -qF 'gh pr merge' "$agents"
+  grep -F 'SINGLE OUTWARD CHANNEL' "$agents" | grep -qF 'knowledge/'
+}
+
 @test "gh-triage role.yaml tools line is unchanged by the sweep" {
   grep -qxF 'tools: [Read, Grep, Glob, Bash, Write]' "$REPO_ROOT/agent-factory/roles/gh-triage/role.yaml"
 }
