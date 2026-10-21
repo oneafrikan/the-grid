@@ -943,3 +943,118 @@ escalated_cleanly() {
   run --separate-stderr python3 -I "$KN" check --root "$PROJ"
   [ "$status" -eq 0 ]
 }
+
+# --- apply --proposal-for -----------------------------------------------------------------
+
+# wt_add — cut a linked worktree WT from the committed fixture, as the sweep does for a PR.
+wt_add() {
+  WT="$BATS_TEST_TMPDIR/wt"
+  git -C "$PROJ" worktree add -q -b proposal "$WT"
+}
+
+# wt_status — what the worktree shows as changed, untracked files listed one per line.
+wt_status() {
+  git -C "$WT" status --porcelain --untracked-files=all
+}
+
+# wt_untouched — the proposal moved no signal, wrote no ledger and took no lock, anywhere.
+wt_untouched() {
+  [ ! -e "$WT/signals/done" ]
+  [ ! -e "$(git -C "$WT" rev-parse --absolute-git-dir)/knowledge-sweep.lock" ]
+  [ ! -e "$PROJ/.git/knowledge-sweep.lock" ]
+  [ -z "$(git -C "$PROJ" status --porcelain)" ]
+}
+
+@test "apply --proposal-for: a canonical claim adds exactly one canon entry in the worktree and nothing else" {
+  fixture
+  esig agent-a canonical "seen in CI" "claim one"
+  commit_all
+  wt_add
+  sig=$(basename "$(ls "$PROJ"/signals/*.md)")
+  KNOWLEDGE_NOW=20261019T120000Z run --separate-stderr python3 -I "$KN" apply \
+    --proposal-for "$sig" --root "$WT"
+  [ "$status" -eq 0 ]
+  [ "$(wt_status | wc -l)" -eq 1 ]
+  [[ "$(wt_status)" =~ ^\?\?\ knowledge/canon/K-[0-9a-f]{8}-claim-one\.md$ ]]
+  f=$(ls "$WT"/knowledge/canon/K-*-claim-one.md)
+  grep -qx 'stage: canonical' "$f"
+  [ "$(grep -c '^- ' "$f")" -eq 1 ]
+  run --separate-stderr python3 -I "$KN" check --root "$WT"
+  [ "$status" -eq 0 ]
+  # The main checkout's canon/ is unchanged (it never existed), and the signal still sits in signals/.
+  [ ! -e "$PROJ/knowledge" ]
+  [ -e "$WT/signals/$sig" ]
+  wt_untouched
+  git -C "$PROJ" worktree remove --force "$WT"
+}
+
+@test "apply --proposal-for: an existing provisional entry for the claim is renamed into canon/ as canonical" {
+  fixture
+  mk_entry provisional "claim one" "agent-a|provisional|seen in CI"
+  id=$(python3 -I "$KN" hash "claim one" | cut -c1-8)
+  mv "$PROJ/knowledge/provisional/K-$id.md" "$PROJ/knowledge/provisional/K-$id-claim-one.md"
+  esig agent-b canonical "ran it twice" "claim one"
+  commit_all
+  wt_add
+  sig=$(basename "$(ls "$PROJ"/signals/*.md)")
+  # A path to the signal works as well as its name.
+  KNOWLEDGE_NOW=20261019T120000Z run --separate-stderr python3 -I "$KN" apply \
+    --proposal-for "signals/$sig" --root "$WT"
+  [ "$status" -eq 0 ]
+  [ "$(wt_status | wc -l)" -eq 1 ]
+  [[ "$(wt_status)" =~ ^R[M\ ]\ knowledge/provisional/K-$id-claim-one\.md\ -\>\ knowledge/canon/K-$id-claim-one\.md$ ]]
+  f="$WT/knowledge/canon/K-$id-claim-one.md"
+  grep -qx 'stage: canonical' "$f"
+  [ "$(grep -c '^- ' "$f")" -eq 2 ]
+  run --separate-stderr python3 -I "$KN" check --root "$WT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$PROJ/knowledge/canon" ]
+  [ -e "$PROJ/knowledge/provisional/K-$id-claim-one.md" ]
+  wt_untouched
+  git -C "$PROJ" worktree remove --force "$WT"
+}
+
+@test "apply --proposal-for: a guardrail-conflict signal adds only a provisional entry and GUARDRAILS.md is unchanged" {
+  fixture
+  write_guardrails
+  esig agent-a provisional "seen in CI" "claim one" --guardrail GUARDRAILS#G3
+  commit_all
+  wt_add
+  sig=$(basename "$(ls "$PROJ"/signals/*.md)")
+  KNOWLEDGE_NOW=20261019T120000Z run --separate-stderr python3 -I "$KN" apply \
+    --proposal-for "$sig" --root "$WT"
+  [ "$status" -eq 0 ]
+  [ "$(wt_status | wc -l)" -eq 1 ]
+  [[ "$(wt_status)" =~ ^\?\?\ knowledge/provisional/K-[0-9a-f]{8}-claim-one\.md$ ]]
+  cmp "$PROJ/GUARDRAILS.md" "$WT/GUARDRAILS.md"
+  [ ! -e "$WT/knowledge/canon" ]
+  run --separate-stderr python3 -I "$KN" check --root "$WT"
+  [ "$status" -eq 0 ]
+  wt_untouched
+  git -C "$PROJ" worktree remove --force "$WT"
+}
+
+@test "apply --proposal-for: a missing signal, another kind of signal or a dirty tree writes nothing" {
+  fixture
+  esig agent-a provisional "seen in CI" "claim one"
+  commit_all
+  wt_add
+  sig=$(basename "$(ls "$PROJ"/signals/*.md)")
+  # No such signal: exit 2.
+  run --separate-stderr python3 -I "$KN" apply --proposal-for 20261018T100031Z-agent-a-abcdef.md --root "$WT"
+  [ "$status" -eq 2 ]
+  # A plain provisional signal is neither a canon claim nor a guardrail conflict: exit 2.
+  run --separate-stderr python3 -I "$KN" apply --proposal-for "$sig" --root "$WT"
+  [ "$status" -eq 2 ]
+  # It cannot be combined with --plan.
+  run --separate-stderr python3 -I "$KN" apply --proposal-for "$sig" --plan "$BATS_TEST_TMPDIR/p.json" --root "$WT"
+  [ "$status" -eq 2 ]
+  [ -z "$(wt_status)" ]
+  wt_untouched
+  # A dirty worktree is refused (exit 4) before anything is read.
+  printf 'stray\n' >"$WT/stray.txt"
+  run --separate-stderr python3 -I "$KN" apply --proposal-for "$sig" --root "$WT"
+  [ "$status" -eq 4 ]
+  [ "$(wt_status)" = "?? stray.txt" ]
+  git -C "$PROJ" worktree remove --force "$WT"
+}
