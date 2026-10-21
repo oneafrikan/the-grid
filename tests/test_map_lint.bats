@@ -510,3 +510,100 @@ print(m.address_errors(sys.argv[1], knowledge, {"confirms": sys.argv[2] + "#evid
   grep -q "^E_ADDR signals/.*ambiguous $ID: .*knowledge/provisional/$ID-copy.md" <<<"$output"
   grep -q "^E_ADDR signals/.*$ENTRY" <<<"$output"
 }
+
+# path_addr <address> — run address_errors on a `confirms` field holding <address>. A path form
+# cannot sit in a parsed signal (knowledge.py accepts K- plus 8 hex only), so the resolver is
+# driven directly, as the K-...#slug case above does. Output is the Python list of errors.
+path_addr() {
+  run python3 -I -c '
+import os, sys
+sys.path.insert(0, os.path.join(sys.argv[1], "scripts"))
+import knowledge, map as m
+print(m.address_errors(sys.argv[1], knowledge, {"confirms": sys.argv[2]}, {}))
+' "$P" "$1"
+}
+
+# mk_doc — docs/x.md with a unique heading, a repeated heading and a punctuated heading.
+mk_doc() {
+  mkdir -p "$P/docs"
+  printf '# Title\n\n## Section\n\n## Notes\n\n## Notes\n\n## Why, really?\n' > "$P/docs/x.md"
+}
+
+@test "path addr: docs/x.md#section where the heading exists is clean" {
+  mk_proj
+  mk_doc
+  path_addr 'docs/x.md#section'
+  [ "$output" = "[]" ]
+}
+
+@test "path addr: a heading with punctuation resolves by its GitHub slug" {
+  mk_proj
+  mk_doc
+  path_addr 'docs/x.md#why-really'
+  [ "$output" = "[]" ]
+}
+
+@test "path addr: a missing heading gives an error naming it" {
+  mk_proj
+  mk_doc
+  path_addr 'docs/x.md#absent'
+  [[ "$output" == *"no heading absent"* ]]
+}
+
+@test "path addr: a path without .md resolves with .md appended" {
+  mk_proj
+  mk_doc
+  path_addr 'docs/x#section'
+  [ "$output" = "[]" ]
+}
+
+@test "path addr: a repeated heading resolves as #notes-1" {
+  mk_proj
+  mk_doc
+  path_addr 'docs/x.md#notes-1'
+  [ "$output" = "[]" ]
+}
+
+@test "path addr: ../outside.md is refused" {
+  mk_proj
+  printf '# Out\n' > "$BATS_TEST_TMPDIR/outside.md"
+  path_addr '../outside.md'
+  [[ "$output" == *"contains .."* ]]
+}
+
+@test "path addr: an address into signals/ is refused even though the file exists" {
+  mk_proj with-signals
+  path_addr "signals/$SIG"
+  [[ "$output" == *"points into signals/"* ]]
+}
+
+@test "path addr: a leading / is refused" {
+  mk_proj
+  mk_doc
+  path_addr "$P/docs/x.md"
+  [[ "$output" == *"is absolute"* ]]
+}
+
+@test "path addr: a symlink that leaves the repo root is refused" {
+  mk_proj
+  printf '# Out\n' > "$BATS_TEST_TMPDIR/outside.md"
+  ln -s "$BATS_TEST_TMPDIR/outside.md" "$P/link.md"
+  path_addr 'link.md'
+  [[ "$output" == *"outside the repo root"* ]]
+}
+
+@test "path addr: foo.md#bar in a signal body is never scanned" {
+  mk_proj
+  mkdir -p "$P/signals"
+  printf -- '---\nfiled_by: agent-b\nclaim: cite something\nstage: wip\nwarrant: seen in CI\nstatus: pending\n---\nSee foo.md#bar for context.\n' \
+    > "$P/signals/20261018T111500Z-agent-b-def456.md"
+  git -C "$P" add -A
+  git -C "$P" commit -q -m body
+  # signals/ is new to MAP.md, so regenerate it before the drift check.
+  python3 "$P/scripts/map.py" --root "$P"
+  git -C "$P" add -A
+  git -C "$P" commit -q -m map2
+  lint
+  [ "$status" -eq 0 ]
+  ! grep -q '^E_ADDR' <<<"$output" || false
+}
