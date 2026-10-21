@@ -15,7 +15,8 @@ Sections (added as the change lands, in this order):
     9. Plan         build_plan (read-only: which pending signals the sweep would look at)
    10. Command line main, SUBCOMMANDS (the one place a subcommand is registered); `file`
                     writes a signal, `check` lints signals and entries, `plan` prints build_plan,
-                    `apply` runs the safety guards (lock, clean tree, plan sanity), no writes yet
+                    `apply` runs the safety guards (lock, clean tree, plan sanity), then writes
+                    and updates entries in the working tree (nothing committed)
 
 Design rules:
   * Python 3 standard library only, valid on 3.8 (no `X | Y` annotations, no
@@ -1464,11 +1465,106 @@ def _read_plan(path):
     return plan
 
 
-def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=None):
-    """Guards for the writing run; so far it checks everything and writes nothing.
+def _today():
+    """UTC date `YYYY-MM-DD` for `created` / `updated`: from KNOWLEDGE_NOW when set (so tests are
+    deterministic), else the clock."""
+    now = _signal_time()
+    return "%s-%s-%s" % (now[:4], now[4:6], now[6:8])
 
-    Order: lock (exit 3), clean tree (exit 4), then the plan (exit 2). The helper never
-    commits: the role's commit step is the only writer to history. --verdicts and --escalations
+
+def _entry_rel(root, entry):
+    """Relative path of the open-stage file holding `entry` (parse_entry's dict), or None."""
+    for dirname, rel in iter_entries(root):
+        if dirname in _OPEN_ENTRY_DIRS:
+            found = _load_entry(root, rel)
+            if found is not None and found["claim_hash"] == entry["claim_hash"]:
+                return rel
+    return None
+
+
+def _write_text(root, rel, text):
+    """Write `text` at root-relative `rel`, creating the stage directory when needed."""
+    target = os.path.join(root, *rel.split("/"))
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def _apply_item(root, item, today):
+    """Write or update the entry for one `wip`, `written` or `confirmed` plan item.
+
+    The plan names the entry and its stage; the claim and warrant are read again from the
+    signal file, so the plan cannot smuggle text into an entry and the signal body is never
+    copied. Everything the plan holds is re-checked here: it is a file, so it may be forged
+    or stale. Nothing is committed and the signal file is left where it is.
+    """
+    name = item["file"]
+    entry_addr = item.get("entry")
+    stage = item.get("stage")
+    if not SIGNAL_NAME_RE.match(name) or not isinstance(entry_addr, str) \
+            or not _ENTRY_ADDR_RE.match(entry_addr) or stage not in STAGES_SIGNAL:
+        raise UsageError("--plan file has a malformed item")
+    try:
+        with open(os.path.join(root, "signals", name), "rb") as fh:
+            sig = parse_signal(fh.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, KnowledgeError):
+        raise UsageError("cannot read a signal named in the plan")
+    # Evidence line: the claimed stage and the warrant exactly as written (not the entry stage).
+    line = {"signal": name, "filed_by": sig["filed_by"], "stage": sig["stage"],
+            "warrant": sig["warrant"]}
+
+    # Maps are rebuilt per item: an earlier item of the same plan may have just created the
+    # entry this one confirms.
+    by_hash, by_id = open_entry_maps(root)
+    match = by_hash.get(claim_hash(sig["claim"])) or by_id.get(sig.get("confirms"))
+    if match is None:
+        if item["disposition"] == "confirmed":
+            raise UsageError("--plan file confirms an entry that does not exist")
+        if entry_addr != entry_id(sig["claim"]):
+            raise UsageError("--plan file names an entry that does not match the signal")
+        fields = {"id": entry_addr, "claim": sig["claim"], "claim_hash": claim_hash(sig["claim"]),
+                  "stage": stage, "created": today, "updated": today}
+        # Only a new entry made from a signal with no real warrant carries the flag.
+        if item["disposition"] == "wip":
+            fields["unwarranted"] = "yes"
+        rel = "knowledge/%s/%s-%s.md" % (_STAGE_DIRS[stage], entry_addr,
+                                         slug(sig["claim"]) or "entry")
+        _write_text(root, rel, render_entry(fields, [line]))
+        return
+
+    # An entry already stands (a plan lists every signal against the tree as it was, so two
+    # signals for one claim both read `written`): decide again against the entry as it is now.
+    # A duplicate adds nothing, and the stage never drops.
+    disposition, _, new_stage = entry_disposition(sig, match)
+    if disposition == "duplicate":
+        return
+    fields = dict((k, v) for k, v in match.items() if k not in ("claim_text", "evidence"))
+    fields["stage"] = new_stage
+    fields["updated"] = today
+    text = render_entry(fields, match["evidence"] + [line])
+    rel = _entry_rel(root, match)
+    if rel is None:
+        raise UsageError("cannot find the entry file to update")
+    if _STAGE_DIRS[new_stage] != rel.split("/")[1]:
+        new_rel = "knowledge/%s/%s" % (_STAGE_DIRS[new_stage], rel.rsplit("/", 1)[-1])
+        os.makedirs(os.path.join(root, "knowledge", _STAGE_DIRS[new_stage]), exist_ok=True)
+        # git mv so the move is staged as a rename and history follows the entry; a fixed argv,
+        # never a shell, and both paths are built here from fixed words and a validated name.
+        try:
+            subprocess.run(["git", "-C", root, "mv", rel, new_rel], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, check=True)
+        except (OSError, subprocess.CalledProcessError):
+            raise UsageError("git mv failed")
+        rel = new_rel
+    _write_text(root, rel, text)
+
+
+def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=None):
+    """The writing run: guards first, then entries for `wip`, `written` and `confirmed` items.
+
+    Order: lock (exit 3), clean tree (exit 4), then the plan (exit 2). Entries are written in
+    the working tree only. The helper never commits: the role's commit step is the only writer to
+    history. Signals are not moved and no ledger is written yet. --verdicts and --escalations
     are accepted but not read yet. --proposal-for is parsed only; a later change implements it.
     """
     if proposal_for is not None:
@@ -1508,6 +1604,12 @@ def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=No
         for item in data["signals"]:
             if item["disposition"] != "escalated" and item.get("stage") in HUMAN_ONLY_STAGES:
                 raise UsageError("--plan file has an item that would write to a human-only stage")
+        # Dates are read once so every entry of one run carries the same day. Every other
+        # disposition (duplicate, invalid, secret, repeat-rejected, escalated) writes no entry.
+        today = _today()
+        for item in data["signals"]:
+            if item["disposition"] in ("wip", "written", "confirmed"):
+                _apply_item(root, item, today)
         return 0
     finally:
         lock.close()
