@@ -94,3 +94,4 @@ s4 test_factory_chain_doc.bats
 s4 test_front_door.bats
 s4 test_demo_tape.bats
 s4 test_readme_translations.bats
+s4 test_knowledge_core.bats
