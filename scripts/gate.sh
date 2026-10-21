@@ -36,6 +36,8 @@
 #                notice if python3 or scripts/rules.py is absent)
 #   map          MAP.md is current              (map.py --check: drift only, never signal counts;
 #                skipped with a notice if python3 or scripts/map.py is absent)
+#   counts       generated counts in README/index.html are current (stamp-counts.py --check; compares
+#                committed files only; skipped with a notice if python3 or scripts/stamp-counts.py is absent)
 #   bats         the test suite
 #
 # Modes:
@@ -521,6 +523,16 @@ run_map_check() {
   python3 scripts/map.py --check --root "$GRID_DIR"
 }
 check map        run_map_check
+# Counts stamped into README/index.html come from the committed SKILLS.md headline and the team
+# yamls, so a stale one fails here. Absent tool = skipped loudly and recorded, like the checks above.
+run_counts_check() {
+  if ! command -v python3 >/dev/null || [ ! -f scripts/stamp-counts.py ]; then
+    echo "    python3 or stamp-counts.py absent - skipped"; SKIPPED+=(counts); return 0
+  fi
+  # GRID_DIR pinned so a stray exported GRID_DIR cannot point the check at another tree.
+  GRID_DIR="$GRID_DIR" python3 scripts/stamp-counts.py --check
+}
+check counts     run_counts_check
 if [ "$NO_BATS" = 1 ]; then
   echo "==> bats"; echo "    not run here (--no-bats): CI runs it in the shard jobs"
 else

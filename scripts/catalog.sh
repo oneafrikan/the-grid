@@ -396,3 +396,11 @@ if [ "$CHECK" = 1 ]; then
 fi
 
 echo "Wrote $OUT ($total skills)."
+
+# Restamp the generated counts in README/index.html from the SKILLS.md just written. Only for the
+# real catalogue: wire.sh passes the default path explicitly, so compare paths rather than test
+# for "no argument"; a scratch output path (tests) must never touch the docs. Guarded so wiring
+# never depends on python3 (the README needs it only for the agent teams) or on a stamp failure.
+if [ "$OUT" = "$GRID_DIR/SKILLS.md" ]; then
+  if command -v python3 >/dev/null 2>&1; then GRID_DIR="$GRID_DIR" python3 "$(dirname "${BASH_SOURCE[0]}")/stamp-counts.py" || echo "catalog: WARN: stamp-counts failed (gate will report)" >&2; fi
+fi

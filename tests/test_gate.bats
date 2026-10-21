@@ -281,6 +281,15 @@ stub_shellcheck_logging() {
   [[ "$last" == "gate: PASS (skipped:"*"budget"* ]] || false
 }
 
+@test "with no python3 and no scripts/stamp-counts.py the counts check is skipped LOUDLY, not failed" {
+  # The copied gate has no scripts/stamp-counts.py and the stub PATH has no python3.
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python3 or stamp-counts.py absent"* ]] || false
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"counts"* ]] || false
+}
+
 @test "with no scripts/build-personas.sh the personas check is skipped LOUDLY, not failed" {
   # The copied gate has no scripts/build-personas.sh (and no venv) in the fake grid.
   run run_gate
