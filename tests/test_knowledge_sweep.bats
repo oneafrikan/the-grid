@@ -600,7 +600,10 @@ empty_plan() {
 
 @test "apply: an escalated item with no stage is not a canon write and exits 0" {
   fixture
-  printf '%s\n' '{"signals": [{"file": "x.md", "disposition": "escalated", "stage": null, "entry": null}]}' \
+  # A real signal, since apply now moves every listed signal.
+  name=$(fsig 1)
+  commit_all
+  printf '{"signals": [{"file": "%s", "disposition": "escalated", "stage": null, "entry": null}]}\n' "$name" \
     >"$BATS_TEST_TMPDIR/esc.json"
   run --separate-stderr python3 -I "$KN" apply --root "$PROJ" --plan "$BATS_TEST_TMPDIR/esc.json"
   [ "$status" -eq 0 ]
@@ -692,7 +695,104 @@ plan_apply() {
   commit_all
   plan_apply
   commit_all
-  # The signal is still pending (apply does not move it yet) and now matches its own entry.
+  # The signal was moved to done/, so this second run has nothing pending and writes nothing.
   plan_apply
   [ -z "$(git -C "$PROJ" status --porcelain)" ]
+}
+
+# --- apply: bookkeeping -------------------------------------------------------------------
+
+# ledger_py <expression over L> — evaluate an expression over the list of ledger records.
+ledger_py() {
+  python3 -I -c "import json,sys; L=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; print($1)" \
+    "$PROJ/signals/done/ledger.jsonl"
+}
+
+@test "apply: processed signals move to done/ byte-identical with one disposition line each" {
+  fixture
+  a=$(fsig 1)
+  b=$(fsig 2)
+  mkdir -p "$BATS_TEST_TMPDIR/orig"
+  cp "$PROJ/signals/$a" "$PROJ/signals/$b" "$BATS_TEST_TMPDIR/orig/"
+  commit_all
+  plan_apply
+  for n in "$a" "$b"; do
+    cmp "$BATS_TEST_TMPDIR/orig/$n" "$PROJ/signals/done/$n"
+    [ ! -e "$PROJ/signals/$n" ]
+  done
+  [ "$(ledger_py "len(L)")" = "2" ]
+  [ "$(ledger_py "[r['signal'] for r in L]")" = "['$a', '$b']" ]
+  # Disposition, a K- entry id built from the claim hash, null issue and pr, ISO run time.
+  [ "$(ledger_py "[(r['event'], r['disposition'], r['issue'], r['pr'], r['run'], len(r['claim_hash']), r['entry'] == 'K-' + r['claim_hash'][:8]) for r in L][0]")" \
+    = "('disposition', 'written', None, None, '2026-10-19T12:00:00Z', 16, True)" ]
+  [ "$(ledger_py "L[1]['disposition']")" = "written" ]
+}
+
+@test "apply: a pre-existing ledger keeps its old bytes as a prefix" {
+  fixture
+  fsig 1 >/dev/null
+  esc_line aaaaaaaaaaaaaaaa 20260101T000000Z-agent-a-aaaaa1.md 5
+  commit_all
+  cp "$PROJ/signals/done/ledger.jsonl" "$BATS_TEST_TMPDIR/ledger.before"
+  size=$(stat -c %s "$BATS_TEST_TMPDIR/ledger.before")
+  plan_apply
+  cmp -n "$size" "$BATS_TEST_TMPDIR/ledger.before" "$PROJ/signals/done/ledger.jsonl"
+  [ "$(ledger_py "len(L)")" = "2" ]
+}
+
+@test "apply: invalid and secret signals are also moved and recorded, with a null claim hash and entry" {
+  fixture
+  mkdir -p "$PROJ/signals"
+  printf -- '---\nfiled_by: agent-a\nclaim: use the\xe2\x80\x8b gate\nstage: wip\nwarrant: seen\nstatus: pending\n---\n' \
+    >"$PROJ/signals/20261018T100001Z-agent-a-abc124.md"
+  tok=$(secret_tok)
+  write_sig "seen in $tok" "use the gate"
+  commit_all
+  # Not plan_apply: `check` rightly reports the unchanged invalid signal now sitting in done/.
+  python3 -I "$KN" plan --root "$PROJ" >"$BATS_TEST_TMPDIR/plan.json"
+  KNOWLEDGE_NOW=20261019T120000Z run --separate-stderr python3 -I "$KN" apply --root "$PROJ" \
+    --plan "$BATS_TEST_TMPDIR/plan.json"
+  [ "$status" -eq 0 ]
+  [ -e "$PROJ/signals/done/20261018T100001Z-agent-a-abc124.md" ]
+  [ -e "$PROJ/signals/done/20261018T100000Z-agent-a-abc123.md" ]
+  [ -z "$(ls "$PROJ"/signals/*.md 2>/dev/null)" ]
+  [ "$(ledger_py "sorted((r['disposition'], r['claim_hash'], r['entry']) for r in L)")" \
+    = "[('invalid', None, None), ('secret', None, None)]" ]
+  # The ledger line names the signal and the pattern class never; the token is not copied.
+  ! grep -qF -- "$tok" "$PROJ/signals/done/ledger.jsonl" || false
+}
+
+@test "apply: plan then apply again on the unchanged tree is a no-op and plan lists nothing pending" {
+  fixture
+  fsig 1 >/dev/null
+  fsig 2 >/dev/null
+  commit_all
+  plan_apply
+  commit_all
+  cp "$PROJ/signals/done/ledger.jsonl" "$BATS_TEST_TMPDIR/ledger.after1"
+  before=$(commits)
+  plan_json
+  [ "$(jq_py "d['signals']")" = "[]" ]
+  [ "$(jq_py "d['pending']")" = "0" ]
+  plan_apply
+  [ -z "$(git -C "$PROJ" status --porcelain)" ]
+  cmp "$BATS_TEST_TMPDIR/ledger.after1" "$PROJ/signals/done/ledger.jsonl"
+  [ "$(commits)" = "$before" ]
+}
+
+@test "apply: a plan naming a signal that is not in signals/ exits 2 and changes nothing" {
+  fixture
+  fsig 1 >/dev/null
+  commit_all
+  python3 -I "$KN" plan --root "$PROJ" >"$BATS_TEST_TMPDIR/plan.json"
+  # Add a second item for a well-formed name that does not exist.
+  python3 -I -c "
+import json,sys
+p=json.load(open(sys.argv[1]))
+p['signals'].append({'file':'20261018T100099Z-agent-a-ffffff.md','disposition':'escalated','entry':None,'stage':None})
+json.dump(p,open(sys.argv[1],'w'))" "$BATS_TEST_TMPDIR/plan.json"
+  run --separate-stderr python3 -I "$KN" apply --root "$PROJ" --plan "$BATS_TEST_TMPDIR/plan.json"
+  [ "$status" -eq 2 ]
+  [ -z "$(git -C "$PROJ" status --porcelain)" ]
+  [ ! -e "$PROJ/signals/done" ]
 }
