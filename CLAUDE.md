@@ -310,6 +310,12 @@ tests/lib/bats-core/bin/bats tests/
 
 All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint (`compose.py --lint-roles`), `compose.py --check` per composed project (local only: composed output is gitignored, so CI runs the lint and lists the uncomposed projects as `compose-<name>` skips), `check-personal.sh`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`. Venv-gated tests (`agent-factory/.venv` with PyYAML) skip on a plain `bats` run, but FAIL when `GRID_REQUIRE_VENV=1` or `CI=true` (the gate sets the former). In a `@test`, write `! cmd || false` and one `[ ]` per line: a bare mid-test `! cmd` or `[ A ] && [ B ]` can never fail (`test_repo_health.bats` lints this).
 
+## Canon is never merged on green
+
+**A PR that changes any path under `knowledge/canon/` is never merged under the standing approval to merge on green CI plus independent QA; a human merges it** (`GUARDRAILS#G7`).
+Before merging, the QA agent or session runs `git diff --name-only origin/main...HEAD -- knowledge/canon` (the same command as the PR template checkbox).
+Non-empty output means a human merges: stop and leave the PR open.
+
 ## Worktree hygiene
 
 Agents and sessions must not leave stale worktrees or local branches behind.
