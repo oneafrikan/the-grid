@@ -102,3 +102,121 @@ lint() {
   [ "$before" = "$after" ]
   [ -z "$after" ]
 }
+
+# mk_entry <dir> <stage> — write a knowledge entry into knowledge/<dir>/ whose `stage:` line
+# says <stage>, whatever the directory, and commit it. The entry is built with
+# knowledge.render_entry (so it is otherwise valid), always at stage wip because the renderer
+# rejects an unknown stage; the stage line is then rewritten, which is how a draft or a
+# misfiled entry gets made. `-I` keeps the caller's PYTHONPATH and cwd out of the import, so
+# the path is put on sys.path by hand. Sets ENTRY to the relative path.
+mk_entry() {
+  ENTRY=$(python3 -I -c '
+import os, sys
+sys.path.insert(0, os.path.join(sys.argv[1], "scripts"))
+import knowledge
+claim = "ship the thing"
+ident = knowledge.entry_id(claim)
+fields = {"id": ident, "claim": claim, "claim_hash": knowledge.claim_hash(claim),
+          "stage": "wip", "created": "2026-10-18", "updated": "2026-10-18"}
+evidence = [{"signal": "20261018T101500Z-agent-a-abc123.md", "filed_by": "agent-a",
+             "stage": "wip", "warrant": "seen in CI"}]
+text = knowledge.render_entry(fields, evidence)
+text = text.replace("\nstage: wip\n", "\nstage: " + sys.argv[3] + "\n", 1)
+rel = "knowledge/%s/%s-%s.md" % (sys.argv[2], ident, knowledge.slug(claim))
+path = os.path.join(sys.argv[1], *rel.split("/"))
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w", encoding="utf-8") as fh:
+    fh.write(text)
+print(rel)
+' "$P" "$1" "$2")
+  git -C "$P" add -A
+  git -C "$P" commit -q -m entry
+}
+
+# mk_signal <name> <frontmatter line>… — write a signal with exactly the given frontmatter
+# lines and commit it, so nothing in the fixture is an uncommitted edit.
+mk_signal() {
+  local name=$1
+  shift
+  mkdir -p "$P/signals"
+  { printf -- '---\n'; printf '%s\n' "$@"; printf -- '---\n'; } > "$P/signals/$name"
+  git -C "$P" add -A
+  git -C "$P" commit -q -m signal
+}
+
+@test "stage: an entry with an unknown stage gives E_STAGE with its path" {
+  mk_proj with-signals
+  mk_entry wip draft
+  lint
+  [ "$status" -eq 1 ]
+  grep -q "^E_STAGE $ENTRY: " <<<"$output"
+}
+
+@test "stage: canonical in knowledge/established/ gives E_STAGE naming stage and directory" {
+  mk_proj with-signals
+  mk_entry established canonical
+  lint
+  [ "$status" -eq 1 ]
+  line=$(grep "^E_STAGE $ENTRY: " <<<"$output")
+  [[ "$line" == *"stage"* ]]
+  [[ "$line" == *"knowledge/canon/"* ]]
+}
+
+@test "stage: established in knowledge/canon/ gives E_STAGE" {
+  mk_proj with-signals
+  mk_entry canon established
+  lint
+  [ "$status" -eq 1 ]
+  grep -q "^E_STAGE $ENTRY: " <<<"$output"
+}
+
+@test "signal: proposing canonical gives no E_STAGE line" {
+  mk_proj with-signals
+  mk_signal 20261018T101700Z-agent-c-abc125.md 'filed_by: agent-c' 'claim: a human-set stage' \
+    'stage: canonical' 'warrant: seen in CI' 'status: pending'
+  lint
+  ! grep -q '^E_STAGE' <<<"$output" || false
+}
+
+@test "signal: stage retired gives E_SIGNAL (not claimable) and no E_STAGE" {
+  mk_proj with-signals
+  mk_signal 20261018T101700Z-agent-c-abc125.md 'filed_by: agent-c' 'claim: a retired claim' \
+    'stage: retired' 'warrant: seen in CI' 'status: pending'
+  lint
+  [ "$status" -eq 1 ]
+  line=$(grep '^E_SIGNAL signals/20261018T101700Z-agent-c-abc125.md: ' <<<"$output")
+  [[ "$line" == *"not claimable"* ]]
+  ! grep -q '^E_STAGE' <<<"$output" || false
+}
+
+@test "signal: a missing filed_by gives E_SIGNAL naming the file and the key" {
+  mk_proj with-signals
+  mk_signal 20261018T101700Z-agent-c-abc125.md 'claim: no filer' 'stage: wip' \
+    'warrant: seen in CI' 'status: pending'
+  lint
+  [ "$status" -eq 1 ]
+  grep -q '^E_SIGNAL signals/20261018T101700Z-agent-c-abc125.md: filed_by' <<<"$output"
+}
+
+@test "signal: a hand-filed hash6 that is not a content hash gives no E_ line" {
+  mk_proj with-signals
+  # The hash6 in the name is never recomputed from the content: only history proves immutability.
+  mk_signal 20261018T101700Z-agent-c-a1b2c3.md 'filed_by: agent-c' 'claim: filed by hand' \
+    'stage: wip' 'warrant: seen in CI' 'status: pending'
+  lint
+  [ "$status" -eq 0 ]
+  ! grep -q '^E_' <<<"$output" || false
+}
+
+@test "signal: hand-off files and the README are not reported" {
+  mk_proj with-signals
+  # Neither is a signal, so neither has frontmatter the lint should read.
+  printf 'notes for the tech lead\n' > "$P/signals/→tech-lead.md"
+  printf '# Signals\n' > "$P/signals/README.md"
+  git -C "$P" add -A
+  git -C "$P" commit -q -m handoff
+  lint
+  [ "$status" -eq 0 ]
+  ! grep -q 'tech-lead\|README' <<<"$output" || false
+  ! grep -q '^E_' <<<"$output" || false
+}
