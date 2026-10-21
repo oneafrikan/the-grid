@@ -41,11 +41,41 @@ if [ "$active" = "true" ]; then
   exit 0
 fi
 
-# The message comes straight from the payload, so no transcript is read here (a transcript
-# fallback for a missing field is a separate piece of work). No model is called either: this
-# is a plain pattern test, so the hook costs nothing unless it fires. String only: a missing
-# field, null, number or object leaves msg empty, and an empty message exits 0 (fail open).
-msg="$(printf '%s' "$payload" | jq -r 'if (.last_assistant_message | type) == "string" then .last_assistant_message else empty end' 2>/dev/null)"
+# The message comes from the payload: the 2026-10-21 probe showed the Stop payload carries it
+# as last_assistant_message, so that is the primary path and the transcript is not touched
+# when the key is present. No model is called either: this is a plain pattern test, so the
+# hook costs nothing unless it fires. String only: a key that is present but null, a number
+# or an object leaves msg empty, and an empty message exits 0 (fail open).
+#
+# Fallback, only when the key is ABSENT (not merely empty): read the last assistant text from
+# the tail of transcript_path. It exists for payloads without the key. The transcript line
+# shape (.type == "assistant", .message.content[] blocks of type "text") comes from
+# tests/fixtures/hooks/shapes/assistant-text.json, captured for another hook; it has NOT
+# been observed at Stop time, and whether the transcript already holds the final message
+# when Stop fires is unknown. That is why the payload field is primary.
+#
+# Only the last 64 KiB is ever read (never the whole file, never skipped for being large):
+# the final message is at the end, and a huge transcript must not slow a Stop hook down. The
+# tail usually starts mid-line, so lines are parsed one by one and any that fail to parse
+# are dropped (fromjson?). An unusable path, an unreadable file or no assistant text all
+# leave msg empty and exit 0. No network, no write to disk, jq stderr to /dev/null.
+if printf '%s' "$payload" | jq -e 'has("last_assistant_message")' >/dev/null 2>/dev/null; then
+  msg="$(printf '%s' "$payload" | jq -r 'if (.last_assistant_message | type) == "string" then .last_assistant_message else empty end' 2>/dev/null)"
+else
+  msg=""
+  tpath="$(printf '%s' "$payload" | jq -r 'if (.transcript_path | type) == "string" then .transcript_path else empty end' 2>/dev/null)"
+  if [ -n "$tpath" ] && [ -f "$tpath" ] && [ -r "$tpath" ]; then
+    # tail -c N is portable (no negative-offset forms). Keep the last non-empty assistant
+    # text; blocks of one message are joined with newlines.
+    msg="$(tail -c 65536 "$tpath" 2>/dev/null | jq -R -r -n '
+      [ inputs | fromjson?
+        | objects | select(.type == "assistant")
+        | [ .message | objects | .content | arrays | .[] | objects
+            | select(.type == "text") | .text | strings ]
+        | join("\n") | select(length > 0) ]
+      | last // empty' 2>/dev/null)"
+  fi
+fi
 if [ -z "$msg" ]; then
   exit 0
 fi
