@@ -156,3 +156,41 @@ stop_payload() {
   [ "$status" -eq 0 ] || { echo "GRID_HOOKS=off" >&2; false; }
   [ -z "$output" ] || { echo "GRID_HOOKS=off" >&2; false; }
 }
+
+# shellcheck disable=SC2154  # status/output are set by bats' `run`
+@test "epistemic-stop: with no last_assistant_message it reads the last assistant text from the transcript tail" {
+  local t="$BATS_TEST_TMPDIR/tx.jsonl" pad payload
+
+  # (a) The last assistant text claims completion with no warrant: block with the reason.
+  { tx human-string "ok"; tx assistant-text "Fixed the bug and all tests pass."; } > "$t"
+  payload="$(stop_payload "unused" | jq --arg t "$t" 'del(.last_assistant_message) | .transcript_path = $t')"
+  run --separate-stderr bash -c 'printf "%s" "$1" | bash "$2/hooks/run.sh" epistemic-stop' _ "$payload" "$REPO_ROOT"
+  [ "$status" -eq 2 ]
+  [ "$stderr" = "State RAN, READ or UNTESTED for each completion claim (see AGENTS_base)" ]
+
+  # (b) A warranted claim exits 0 and prints nothing.
+  { tx human-string "ok"; tx assistant-text "Fixed. RAN: bash scripts/gate.sh, exit 0."; } > "$t"
+  run_hook epistemic-stop "$payload"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # (c) Over 64 KiB: an unwarranted claim on the FIRST line lies outside the tail, so only the
+  # last assistant line (no claim) counts. The padding line is cut mid-JSON by the tail and
+  # must be ignored, not crash the parse.
+  pad="$(head -c 70000 /dev/zero | tr '\0' x)"
+  { tx assistant-text "Done, the work is complete."; tx human-string "$pad"; tx assistant-text "Which branch do you want?"; } > "$t"
+  [ "$(wc -c < "$t")" -gt 70000 ]
+  run_hook epistemic-stop "$payload"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # (d) Key present: the payload message wins and the transcript is not read.
+  { tx human-string "ok"; tx assistant-text "RAN it"; } > "$t"
+  run_hook epistemic-stop "$(stop_payload "Done." | jq --arg t "$t" '.transcript_path = $t')"
+  [ "$status" -eq 2 ]
+
+  # (e) Key absent and the transcript file is missing: fail open.
+  run_hook epistemic-stop "$(echo "$payload" | jq --arg t "$BATS_TEST_TMPDIR/missing.jsonl" '.transcript_path = $t')"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
