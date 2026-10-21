@@ -1,0 +1,3 @@
+# Canonical knowledge changes need the owner's review (see knowledge/README.md).
+# Keep this file to this one rule: tests/test_canon_protection.bats fails otherwise.
+knowledge/canon/ @oneafrikan
