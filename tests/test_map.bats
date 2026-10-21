@@ -290,18 +290,28 @@ EOF
   grep -q 'python3 scripts/map.py status' "$R/MAP.md"
 }
 
+# drift_check — `--check` for MAP.md drift only. These fixtures hold placeholder signals and
+# entries that are not valid knowledge files, so the check runs from a lone copy of map.py with
+# no knowledge.py beside it: the knowledge lint (tests/test_map_lint.bats) is skipped and only
+# the drift result decides.
+drift_check() {
+  mkdir -p "$BATS_TEST_TMPDIR/solo"
+  cp "$MAP" "$BATS_TEST_TMPDIR/solo/map.py"
+  run python3 "$BATS_TEST_TMPDIR/solo/map.py" --check --root "$R"
+}
+
 @test "--check stays 0 when a signal is added, moved to signals/done, or a wip entry is added" {
   mkdir -p "$R/signals" "$R/knowledge/canon"
   put signals/README.md; put knowledge/README.md; put knowledge/canon/.gitkeep
   gen
-  run python3 "$MAP" --check --root "$R"; [ "$status" -eq 0 ]
+  drift_check; [ "$status" -eq 0 ]
   put signals/20260101T000000Z-x-abc123.md
-  run python3 "$MAP" --check --root "$R"; [ "$status" -eq 0 ]
+  drift_check; [ "$status" -eq 0 ]
   mkdir -p "$R/signals/done"
   mv "$R/signals/20260101T000000Z-x-abc123.md" "$R/signals/done/"
-  run python3 "$MAP" --check --root "$R"; [ "$status" -eq 0 ]
+  drift_check; [ "$status" -eq 0 ]
   entry wip newone
-  run python3 "$MAP" --check --root "$R"; [ "$status" -eq 0 ]
+  drift_check; [ "$status" -eq 0 ]
 }
 
 @test "--check goes 1 when a canon file is added, until MAP.md is regenerated" {
@@ -309,10 +319,10 @@ EOF
   put knowledge/README.md
   gen
   canon_entry 1 "A fact"
-  run python3 "$MAP" --check --root "$R"
+  drift_check
   [ "$status" -eq 1 ]
   gen
-  run python3 "$MAP" --check --root "$R"
+  drift_check
   [ "$status" -eq 0 ]
 }
 
