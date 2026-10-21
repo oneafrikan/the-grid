@@ -20,7 +20,7 @@
 
 ### Roles
 
-- core: gh-triage, librarian, platform-engineer, researcher, tron
+- core: context-engineer, gh-triage, librarian, platform-engineer, researcher, tron
 - finance-desk: finance-analyst, finance-manager, finance-risk-officer, finance-scribe, finance-sentinel, finance-strategist
 - grid: ad-copy, ai-engineer, backend-dev, ceo-orchestrator, copywriter, data-analyst, data-engineer, data-scientist, designer, devops, frontend-dev, fullstack-engineer, growth-hacker, paid-search, paid-social, product-manager, project-manager, prompt-engineer, qa-engineer, sdet, security-reviewer, seo, tech-lead, technical-writer
 - learning-desk: morpheus, oracle, tank

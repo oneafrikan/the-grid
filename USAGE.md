@@ -40,7 +40,7 @@ CLAUDE.md). Two different invocation shapes:
 | Form | Roles | How to invoke |
 |------|-------|----------------|
 | **Skill** (orchestrator) | `grid-ceo-orchestrator`, `grid-tech-lead`, `grid-growth-hacker`, `finance-desk-finance-manager`, `tron`, `morpheus`, `oracle` | Slash command, e.g. `/grid-tech-lead`. Transforms the session into that role for the rest of the conversation. |
-| **Subagent** (specialist) | the other 31 roles | Not a slash command. Either delegate explicitly — *"use the grid-backend-dev subagent to implement this"* — or let an orchestrator hand off automatically once you've invoked it. |
+| **Subagent** (specialist) | the other 32 roles | Not a slash command. Either delegate explicitly — *"use the grid-backend-dev subagent to implement this"* — or let an orchestrator hand off automatically once you've invoked it. |
 
 Typical flow: `/grid-ceo-orchestrator` to scope a business goal → it delegates
 to `grid-tech-lead` / `grid-product-manager` / `grid-growth-hacker` → those
@@ -56,7 +56,8 @@ Four composed projects, each independently wired and gated
   (`finance-desk-finance-manager` → sentinel/analyst/strategist/risk-officer/
   scribe). Standalone, not part of the CEO's chain — invoke directly.
 - **`core`** — cross-desk shared infra (`core-gh-triage`, `core-librarian`,
-  `core-researcher`, `core-platform-engineer`, and `/tron`, the front door that
+  `core-researcher`, `core-platform-engineer`, `core-context-engineer`, and
+  `/tron`, the front door that
   recommends which skill or agent to use), meant to stay wired regardless
   of which desk-specific project a machine runs.
 - **`learning-desk`** — the learning agents, all operator-triggered: `/morpheus`

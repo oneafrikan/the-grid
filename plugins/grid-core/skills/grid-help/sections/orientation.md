@@ -21,7 +21,7 @@
     orchestrator hand off once invoked.
   - Four public projects, independently gated (`project:<name>`): `grid`
     (dev team), `finance-desk` (standalone finance pipeline), `core`
-    (`gh-triage`, `librarian`, `researcher`, `platform-engineer`, `tron` — cross-desk
+    (`gh-triage`, `librarian`, `researcher`, `platform-engineer`, `context-engineer`, `tron` — cross-desk
     infra, meant to stay wired everywhere), and `learning-desk` (`morpheus`,
     `oracle`, `tank`). A private desk can exist too, composed the same way.
 - **Want a recurring, unattended automation** (e.g. clearing a GitHub issue

@@ -54,7 +54,7 @@ Stop there. If it felt useful, read [USAGE.md](USAGE.md).
 ## What you get
 
 - <!--count:wired-->132<!--/count--> curated skills as slash commands (/standup, /review, /ship, /skill-scout). <!--count:library-->100<!--/count--> more sit on a searchable shelf, switched off.
-- <!--count:roles-->38<!--/count--> ready-made agent roles: a dev team, a finance desk, a Socratic tutor (/morpheus), and /tron, which tells you which one to use.
+- <!--count:roles-->39<!--/count--> ready-made agent roles: a dev team, a finance desk, a Socratic tutor (/morpheus), and /tron, which tells you which one to use.
 - One git pull plus wire.sh makes every machine identical; a per-machine overlay handles the differences.
 - Project templates with specs and agents already wired in.
 

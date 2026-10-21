@@ -55,7 +55,7 @@ below; where no live spawn exists, hand off via the Signal Protocol (base).
 | fullstack-engineer | thin end-to-end feature slices and the client/server contract between them |
 | designer | UI/UX design: user flows, layout, design systems, component specs, accessibility-by-design. |
 | prompt-engineer | prompts, rubrics, few-shot examples, output schemas and prompt versioning |
-| ai-engineer | Context and token budgets, prompt caching, model/effort selection, retries and failure codes, agent loops, tool/MCP integration, async model calls, retrieval plumbing, observability and cost tracking. |
+| ai-engineer | API prompt-caching mechanics, model/effort selection, retries and failure codes, agent loops, tool/MCP integration, async model calls, retrieval plumbing (clients, indexes, calls), observability and per-call cost tracking. |
 | qa-engineer | Test plans, acceptance verification, the release gate |
 | sdet | Test infrastructure, fixtures and isolation, contract tests, eval harness |
 | technical-writer | README, CLAUDE.md-style guidance, API/env/command references, onboarding and architecture notes, changelogs, agent briefs and skills as documentation. |
@@ -78,18 +78,18 @@ below; where no live spawn exists, hand off via the Signal Protocol (base).
 - Hand off independent work in parallel (frontend + backend) when tasks don't depend on each other.
 - A specialist blocked on a product or priority call → escalate to the human; don't guess the call.
 - QA is the release gate. DevOps proposes deploys; the human approves production.
-- **External / desk research is off-team.** The generalist `researcher` is
-  cross-desk infra (core project): not on the roster above, so it cannot be
-  handed a signal as a report. Route research to `core-researcher` directly,
-  with the question *and* the decision it informs, or its scoping gate stalls.
-- **One-off prompt / system-prompt tuning is self-serve, not a specialist
-  handoff.** The `prompt-engineer` skill (jeffallan) is wired baseline-wide —
-  writing or refactoring a prompt, building a structured-output schema, or
-  drafting an eval rubric doesn't need a signal to backend-dev, and it isn't a
-  gap that needs a new role. Use the skill directly.
-- **ADR authoring is a wired skill, not from-scratch work.** Use the
-  `architecture-designer` skill (jeffallan, wired baseline-wide) for the ADR
-  template, trade-off framework and diagrams rather than freehanding the format.
+- **External / desk research is off-team.** `researcher` is core infra, not on
+  the roster, so no signal handoff. Route to `core-researcher` directly, with
+  the question *and* the decision it informs, or its scoping gate stalls.
+- **Context design is off-team.** What loads into a session, `CLAUDE.md` /
+  memory / skill layout and context budget go to `core-context-engineer`,
+  with the question *and* the decision it informs.
+- **One-off prompt tuning is self-serve.** Use the wired `prompt-engineer`
+  skill (jeffallan) for a prompt, output schema or eval rubric; no signal.
+- **Architecture is a wired skill, not a role.** Use `architecture-designer`
+  (ADRs, trade-offs, diagrams); `cloud-architect`, `microservices-architect`,
+  `rag-architect`, `legacy-modernizer` for narrower cases; the built-in `Plan`
+  agent for read-only option-weighing. The decision stays with the tech lead.
 - **A refactor broken into safe incremental commits follows a template.**
   For a refactor RFC (not a fresh-build PRD), use the `request-refactor-plan`
   skill (mattpocock, wired baseline-wide); it interviews for the plan and files
