@@ -664,6 +664,28 @@ commit_map() {
   [ -z "$output" ]
 }
 
+@test "map lint: a cut project's map.py --check runs the lint and exits 0" {
+  # Precondition: the seeded knowledge.py is the mirror of the repo's, so a cut project has the
+  # lint with only its own scripts/ (the cmp case lives in test_knowledge_core.bats).
+  [ -f "$REPO_ROOT/project-factory/templates/_common/scripts/knowledge.py" ]
+  run bash "$REPO_ROOT/project-factory/scripts/cut-project.sh" python-agents-base "$P"
+  [ "$status" -eq 0 ]
+  # The project's own copy only: nothing from the-grid is on the path of the check.
+  lint
+  [ "$status" -eq 0 ]
+  # The lint ran. The cut dir may print other notices (for example no git history yet), so
+  # only the "skipped" notice for the lint itself is ruled out.
+  ! grep -q 'knowledge lint skipped' <<<"$output" || false
+  # One bad signal (valid name, unknown stage) must now fail with E_STAGE, proving the lint
+  # is live and not merely silent. The file is left untracked: the cut repo has no commits.
+  mkdir -p "$P/signals"
+  printf -- '---\nfiled_by: agent-b\nclaim: a draft\nstage: draft\nwarrant: seen in CI\nstatus: pending\n---\n' \
+    > "$P/signals/20261018T101600Z-agent-b-abc124.md"
+  lint
+  [ "$status" -eq 1 ]
+  grep -q '^E_STAGE signals/20261018T101600Z-agent-b-abc124.md: ' <<<"$output"
+}
+
 @test "real repository: map.py --check exits 0" {
   # Guards the-grid's own gate: no tracked signal or entry may fail the lint.
   run python3 "$REPO_ROOT/scripts/map.py" --check --root "$REPO_ROOT"
