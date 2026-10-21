@@ -290,18 +290,80 @@ add_agent() {
   [ ! -f "$STATE/backoff" ]
 }
 
-@test "backoff: a worker cut off by a usage limit keeps the label and backs off; a plain missing outcome is still blocked" {
-  export STUB_NO_OUTCOME=1
-  export STUB_CLAUDE_JSON='{"type":"result","subtype":"success","is_error":false,"result":"Claude AI usage limit reached","total_cost_usd":0}'
-  run_runner
-  [ "$status" -eq 1 ]
-  refute has_gh "gh issue edit"
-  [ -f "$STATE/backoff" ]
-  rm -f "$STATE/backoff"
-  export STUB_CLAUDE_JSON='{"type":"result","subtype":"success","is_error":false,"result":"all done","total_cost_usd":0}'
+@test "backoff: a worker cut off by the claude service (login, key, limit) keeps the label, backs off and never counts toward poison; a plain missing outcome is still blocked" {
+  # Each row: is_error | exit | result text. The first three are the REAL claude 2.1.305 output
+  # (empty CLAUDE_CONFIG_DIR; a dummy ANTHROPIC_API_KEY; a dummy key with ANTHROPIC_BASE_URL on a
+  # closed port; all exit 1 with subtype "success"). The rest are UNCAPTURED best guesses (a real usage limit cannot be provoked
+  # safely); a no-outcome worker that said any of them is the service's fault, not the issue's.
+  local row err rc txt
+  set_conf MAX_ISSUES_PER_DAY 0   # one run per row: the default cap of 5 would stop the loop
+  for row in \
+    'true|1|Not logged in · Please run /login' \
+    'true|1|Invalid API key · Fix external API key' \
+    'true|1|API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)' \
+    'true|1|Claude AI usage limit reached' \
+    'true|1|API Error: Rate limit exceeded' \
+    'true|1|getaddrinfo: could not resolve host api.anthropic.com'; do
+    err="${row%%|*}"; rc="${row#*|}"; rc="${rc%%|*}"; txt="${row#*|*|}"
+    export STUB_NO_OUTCOME=1 STUB_CLAUDE_EXIT="$rc"
+    STUB_CLAUDE_JSON="$(jq -cn --argjson e "$err" --arg r "$txt" '{type:"result",subtype:"success",is_error:$e,result:$r,total_cost_usd:0}')" run_runner
+    [ "$status" -eq 1 ]
+    refute has_gh "gh issue edit"
+    [ -f "$STATE/backoff" ]
+    contains "$(cat "$STATE/backoff")" "issue_fails=0"
+    rm -f "$STATE/backoff"
+  done
+  unset STUB_CLAUDE_EXIT
+  # the worker's own (non-error) answer is never probed: an issue ABOUT rate limiting is not an outage
+  export STUB_CLAUDE_JSON='{"type":"result","subtype":"success","is_error":false,"result":"I added rate limit handling as the issue asked","total_cost_usd":0}'
   run_runner
   [ "$status" -eq 0 ]
   has_gh "--add-label blocked"
+}
+
+@test "poison: the third consecutive worker failure on one issue blocks it with one comment and clears the backoff; an outage in between does not count" {
+  export STUB_CLAUDE_JSON='{"type":"result","subtype":"error_during_execution","is_error":true}'
+  run_runner 4
+  [ "$status" -eq 1 ]
+  run_runner 4
+  [ "$status" -eq 1 ]
+  contains "$(cat "$STATE/backoff")" "issue=4 issue_fails=2"
+  # a login outage touches no counter
+  STUB_CLAUDE_LOGGED_IN=0 run_runner 4
+  [ "$status" -eq 1 ]
+  contains "$(cat "$STATE/backoff")" "issue=4 issue_fails=2"
+  refute has_gh "--add-label blocked"
+  run_runner 4
+  [ "$status" -eq 0 ]
+  has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label blocked"
+  contains "$(cat "$STUB_COMMENTS")" "3 consecutive runs"
+  [ ! -f "$STATE/backoff" ]
+}
+
+@test "direct: a gh failure between the push and the label swap is finished by the next run without working the issue again" {
+  happy_env
+  set_conf MODE direct
+  mkdir -p "$T/ghbin"
+  cat > "$T/ghbin/gh" <<EOF
+#!/bin/bash
+if [ -f "$T/gh-down" ]; then case "\${1:-} \${2:-}" in "issue edit") echo "gh: HTTP 500" >&2; exit 1 ;; esac; fi
+exec "$STUB_DIR/gh" "\$@"
+EOF
+  chmod +x "$T/ghbin/gh"
+  : > "$T/gh-down"
+  PATH="$T/ghbin:$PATH" run_runner
+  [ "$status" -eq 1 ]
+  [ "$(git -C "$ORIGIN" show next:stub-work-4.txt)" = "work for issue 4" ]
+  refute has_gh "gh issue close"
+  # gh is back: the same issue is picked again, finished from the marker, and the worker is not run
+  rm -f "$T/gh-down" "$STATE/backoff"
+  PATH="$T/ghbin:$PATH" run_runner
+  [ "$status" -eq 0 ]
+  [ "$(claude_calls)" -eq 1 ]
+  [ "$(git -C "$ORIGIN" rev-list --count next)" -eq 2 ]
+  has_gh "gh issue edit 4 --repo owner/name --remove-label ready-for-agent --add-label ready-for-human"
+  has_gh "gh issue close 4 --repo owner/name"
+  [ ! -f "$STATE/landed.4" ]
 }
 
 @test "preflight: a missing timeout binary exits 2" {
@@ -352,6 +414,63 @@ add_agent() {
   kill "$other" 2>/dev/null || true
   [ "$status" -eq 0 ]
   contains "$output" "took over a stale lock"
+}
+
+@test "lock: taking over a stale lock stops the dead runner's orphaned claude worker, and only a claude" {
+  happy_env
+  true &
+  dead=$!
+  wait "$dead"
+  # a stand-in worker whose command line contains "claude", and an unrelated process
+  bash -c 'sleep 60; :' claude-orphan &
+  orphan=$!
+  sleep 61 &
+  bystander=$!
+  mkdir -p "$STATE/lock"
+  echo "$dead" > "$STATE/lock/pid"
+  echo "$orphan" > "$STATE/lock/worker"
+  run_runner
+  [ "$status" -eq 0 ]
+  contains "$output" "stopped the orphaned worker"
+  ! kill -0 "$orphan" 2>/dev/null || false
+  # the same takeover with a worker pid that is not a claude (pid reuse) must not kill it
+  mkdir -p "$STATE/lock"
+  echo "$dead" > "$STATE/lock/pid"
+  echo "$bystander" > "$STATE/lock/worker"
+  run_runner
+  kill -0 "$bystander"
+  kill "$bystander" 2>/dev/null || true
+}
+
+@test "lock: a runner that re-took the lock between our read and the rename gets it back and we exit busy" {
+  true &
+  dead=$!
+  wait "$dead"
+  mkdir -p "$STATE/lock" "$T/mvbin"
+  echo "$dead" > "$STATE/lock/pid"
+  # a mv that, right after the rename, makes the moved lock look like a live new owner's
+  printf '#!/bin/bash\nPATH=/usr/bin:/bin mv "$@" || exit $?\ncase "$2" in *lock.stale.*) echo 99999999 > "$2/pid" ;; esac\n' > "$T/mvbin/mv"
+  chmod +x "$T/mvbin/mv"
+  PATH="$T/mvbin:$PATH" run_runner
+  [ "$status" -eq 0 ]
+  contains "$output" "busy"
+  [ "$(cat "$STATE/lock/pid")" = "99999999" ]
+  [ -z "$(ls -d "$STATE"/lock.stale.* 2>/dev/null || true)" ]
+  [ "$(claude_calls)" -eq 0 ]
+}
+
+@test "lock: a lock with no pid file is busy while fresh and taken over once it is older than 5 minutes" {
+  happy_env
+  mkdir -p "$STATE/lock"
+  run_runner
+  [ "$status" -eq 0 ]
+  contains "$output" "busy"
+  [ "$(claude_calls)" -eq 0 ]
+  touch -t 200001010000 "$STATE/lock"
+  run_runner
+  [ "$status" -eq 0 ]
+  contains "$output" "took over a stale lock"
+  has_gh "gh pr create"
 }
 
 @test "lock: SIGTERM mid-worker leaves no worktree and no lock" {
@@ -1004,6 +1123,19 @@ EOF
   [ "$(git -C "$ORIGIN" show next:stub-work-4.txt)" = "work for issue 4" ]
   # the worker's commit now sits on top of the other one
   contains "$(git -C "$ORIGIN" log -2 --format=%s next)" "stub work #4"
+}
+
+@test "direct: tracked files rewritten by VERIFY_CMD do not stop the rebase onto a moved base" {
+  happy_env
+  set_conf MODE direct
+  set_conf VERIFY_CMD 'echo regenerated >> seed.txt && ls stub-work-*.txt >/dev/null'
+  wrapper_claude "git clone -q '$ORIGIN' '$T/other' && echo other > '$T/other/other.txt' && git -C '$T/other' add -A && git -C '$T/other' commit -q -m other && git -C '$T/other' push -q origin next"
+  run_runner
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$ORIGIN" show next:other.txt)" = "other" ]
+  [ "$(git -C "$ORIGIN" show next:stub-work-4.txt)" = "work for issue 4" ]
+  # the verify command's edit was not landed
+  [ "$(git -C "$ORIGIN" show next:seed.txt)" = "seed" ]
 }
 
 @test "direct: a rebase conflict blocks the issue, pushes nothing, and keeps the work on local issue-N" {
