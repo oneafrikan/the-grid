@@ -789,7 +789,7 @@ scan_new_and_quarantine() {
     fi
   done < <(comm -13 "$SNAP_DIR/fs.before" "$SNAP_DIR/fs.scan")
   [ "${#hits[@]}" -gt 0 ] || return 0
-  QNOTE="secret=$(join_csv "${hits[@]}")"
+  QNOTE="secret=$(safe_csv "${hits[@]}")"
   [ "$moved" -gt 0 ] && QNOTE="$QNOTE quarantine=$qdir"
   return 0
 }
@@ -978,7 +978,7 @@ while IFS=$'\t' read -r f _ty _mt _sz; do
 done < <(awk -F'\t' 'FILENAME == ARGV[1] { seen[$1] = 1; next } !($1 in seen)' "$SNAP_DIR/fs.after" "$SNAP_DIR/fs.before")
 if [ "${#DELETED[@]}" -gt 0 ]; then
   scan_new_and_quarantine
-  finish_error unexpected-file "deleted=$(join_csv "${DELETED[@]}")${QNOTE:+ $QNOTE}"
+  finish_error unexpected-file "deleted=$(safe_csv "${DELETED[@]}")${QNOTE:+ $QNOTE}"
 fi
 
 HANDOFFS=()   # indexes into NEW
@@ -1030,7 +1030,7 @@ if [ "${#HITS[@]}" -gt 0 ]; then
   # secret in. The operator reviews and deletes the files.
   QDIR="$QUARANTINE/$SID"
   mkdir -p "$QDIR" && mv -- "${PAIR[@]}" "$QDIR/"
-  finish_error secret "secret=$(join_csv "${HITS[@]}") quarantine=$QDIR"
+  finish_error secret "secret=$(safe_csv "${HITS[@]}") quarantine=$QDIR"
 fi
 
 # ---- 9: commit the pair, by explicit path, in the repo that holds the real files ----

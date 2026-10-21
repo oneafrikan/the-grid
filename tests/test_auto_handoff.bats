@@ -1009,6 +1009,27 @@ lock_dir() { printf '%s\n' "$GRID_HOOK_STATE_DIR/handoff/$SID.lock"; }
   [[ "$output" != *"$tok"* ]]
 }
 
+# Security review of the worker log (hardening, refs private issue #79): a name the child
+# chose can look like a credential, so deleted= and secret= are masked like paths=.
+@test "a deleted file named like a credential is masked in the deleted= log field" {
+  local tok; tok="$(fake_token)"
+  printf 'old\n' > "$P/$tok.txt"; touch -t 202001010000 "$P/$tok.txt"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs STUB_DELETE_FILE="$P/$tok.txt"
+  run_worker
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "deleted="
+  refute grep -qF -- "$tok" "$LOG"
+}
+
+@test "a new file named like a credential is masked in the secret= log field" {
+  local tok; tok="$(fake_token)"
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$P/$tok.txt" STUB_OUTSIDE_BODY="$tok"
+  run_worker
+  grep -F "reason=unexpected-file" "$LOG" | grep -qF "secret="
+  refute grep -qF -- "$tok" "$LOG"
+}
+
 @test "the session lock is released on every exit path" {
   mk_tx 6
   export STUB_CLAUDE_EXIT=3
