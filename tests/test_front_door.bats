@@ -234,13 +234,33 @@ SPLIT_DOCS="docs/roadmap.md docs/private-projects.md"
   [ -z "$missing" ] || { echo "not linked from README.md or docs/architecture.md:$missing" >&2; return 1; }
 }
 
-# Case d: write targets named in scripts/wire.sh must be disclosed in INSTALL.md. SECURITY.md
-# does not exist yet; a later change adds it and extends this case to require it there too.
-@test "front door: INSTALL.md discloses the write targets wire.sh uses" {
-  if grep -qF -- 'settings.json' "$GRID_ROOT/scripts/wire.sh"; then
-    phrase_in INSTALL.md 'settings.json'
-  fi
-  if grep -qF -- 'RULES_DIR' "$GRID_ROOT/scripts/wire.sh"; then
-    phrase_in INSTALL.md 'rules'
-  fi
+# Case d: write targets named in scripts/wire.sh must be disclosed in INSTALL.md and SECURITY.md.
+@test "front door: INSTALL.md and SECURITY.md disclose the write targets wire.sh uses" {
+  for f in INSTALL.md SECURITY.md; do
+    if grep -qF -- 'settings.json' "$GRID_ROOT/scripts/wire.sh"; then
+      phrase_in "$f" 'settings.json'
+    fi
+    if grep -qF -- 'RULES_DIR' "$GRID_ROOT/scripts/wire.sh"; then
+      phrase_in "$f" 'rules'
+    fi
+  done
+}
+
+# Trust files (openspec change front-door, group 3).
+@test "front door: SECURITY.md starts with '# Security'" {
+  [ "$(head -n 1 "$GRID_ROOT/SECURITY.md")" = "# Security" ]
+}
+
+@test "front door: SECURITY.md has the advisory URL and the word supported" {
+  phrase_in SECURITY.md 'https://github.com/oneafrikan/the-grid/security/advisories/new'
+  grep -qw 'supported' "$GRID_ROOT/SECURITY.md"
+}
+
+@test "front door: SECURITY.md holds no email address" {
+  # The report channel is private vulnerability reporting; an address would invite public mail.
+  ! grep -qE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+' "$GRID_ROOT/SECURITY.md" || false
+}
+
+@test "front door: CHANGELOG.md has an Unreleased section" {
+  phrase_in CHANGELOG.md '## [Unreleased]'
 }
