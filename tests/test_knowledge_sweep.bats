@@ -164,3 +164,62 @@ jq_py() {
   [ -z "$output" ]
   [[ "$stderr" == "knowledge.py: --cap must be a non-negative integer" ]]
 }
+
+# secret_tok — a token-shaped value assembled from two literals, so this file holds no whole
+# token (same trick as tests/test_hooks.bats).
+secret_tok() { printf '%s' "sk""-$(printf 'Ab3dE%.0s' 1 2 3 4 5 6 7 8)"; }
+
+# write_sig <warrant> <claim> — hand-write a grammar-valid signal (the `file` subcommand is not
+# what is under test).
+write_sig() {
+  mkdir -p "$PROJ/signals"
+  printf -- '---\nfiled_by: agent-a\nclaim: %s\nstage: wip\nwarrant: %s\nstatus: pending\n---\n' \
+    "$2" "$1" >"$PROJ/signals/20261018T100000Z-agent-a-abc123.md"
+}
+
+@test "plan: a signal holding a token-shaped value is secret and the value is printed nowhere" {
+  fixture
+  tok=$(secret_tok)
+  write_sig "seen in $tok" "use the gate"
+  commit_all
+  python3 -I "$KN" plan --root "$PROJ" >"$BATS_TEST_TMPDIR/out" 2>"$BATS_TEST_TMPDIR/err"
+  output=$(cat "$BATS_TEST_TMPDIR/out")
+  [ "$(jq_py "d['signals'][0]['disposition']")" = "secret" ]
+  [ "$(jq_py "d['signals'][0]['reasons']")" = "['generic-sk']" ]
+  [ "$(jq_py "d['signals'][0]['claim_hash']")" = "None" ]
+  [ "$(jq_py "d['signals'][0]['entry']")" = "None" ]
+  [ "$(jq_py "d['counts']")" = "{'secret': 1}" ]
+  ! grep -qF -- "$tok" "$BATS_TEST_TMPDIR/out" || false
+  ! grep -qF -- "$tok" "$BATS_TEST_TMPDIR/err" || false
+  ! grep -qF -- "${tok:0:12}" "$BATS_TEST_TMPDIR/out" || false
+}
+
+@test "plan: the allow pragma does not exempt a token from the scan" {
+  fixture
+  # Read the pragma from the library so it is not spelled in this file.
+  pragma=$(sed -n "s/^_SECRET_PRAGMA='\(.*\)'$/\1/p" "$REPO_ROOT/hooks/lib/secret-patterns.sh")
+  [ -n "$pragma" ]
+  write_sig "seen in $(secret_tok) $pragma" "use the gate"
+  commit_all
+  plan_json
+  [ "$(jq_py "d['signals'][0]['disposition']")" = "secret" ]
+}
+
+@test "plan: a claim with an https URL and backticks is not secret" {
+  fixture
+  write_sig "seen in CI" 'see `scripts/gate.sh` and https://example.com/docs/page'
+  commit_all
+  plan_json
+  [ "$(jq_py "d['signals'][0]['disposition']")" = "pending" ]
+  [ "$(jq_py "d['signals'][0]['reasons']")" = "[]" ]
+}
+
+@test "plan: KNOWLEDGE_SECRET_PATTERNS naming a missing file is a usage error (exit 2)" {
+  fixture
+  fsig 1 >/dev/null
+  commit_all
+  KNOWLEDGE_SECRET_PATTERNS="$BATS_TEST_TMPDIR/nope.sh" run --separate-stderr python3 -I "$KN" plan --root "$PROJ"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"secret-patterns.sh not found"* ]]
+}
