@@ -3,6 +3,17 @@
 # instead of leaving a reader with a command that does not exist.
 
 GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
+
+# Sandbox HOME and git config like every other test file (tests/test_repo_health.bats lints this).
+load helpers/setup
+
+setup() {
+  common_setup
+}
+
+teardown() {
+  common_teardown
+}
 DOC=automation-factory/docs/factory-chain.md
 
 @test "factory-chain runbook: every repo script path it names exists" {

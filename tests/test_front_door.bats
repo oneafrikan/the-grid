@@ -12,6 +12,17 @@ export LC_ALL=C
 
 GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
+# Sandbox HOME and git config like every other test file (tests/test_repo_health.bats lints this).
+load helpers/setup
+
+setup() {
+  common_setup
+}
+
+teardown() {
+  common_teardown
+}
+
 # The docs this slice of the change adds. Group 2's later issues extend this list.
 NEW_DOCS="INSTALL.md CONTRIBUTING.md docs/architecture.md"
 
