@@ -13,7 +13,7 @@ export LC_ALL=C
 GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
 # The docs this slice of the change adds. Group 2's later issues extend this list.
-NEW_DOCS="INSTALL.md CONTRIBUTING.md"
+NEW_DOCS="INSTALL.md CONTRIBUTING.md docs/architecture.md"
 
 # Helper: phrase_in <file> <fixed phrase>. One grep per phrase-map row.
 phrase_in() {
@@ -44,6 +44,10 @@ relative_links() {
   [ "$(head -n 1 "$GRID_ROOT/CONTRIBUTING.md")" = "# Contributing" ]
 }
 
+@test "front door: docs/architecture.md starts with '# Architecture'" {
+  [ "$(head -n 1 "$GRID_ROOT/docs/architecture.md")" = "# Architecture" ]
+}
+
 @test "front door: INSTALL.md is at most 90 lines" {
   [ "$(wc -l < "$GRID_ROOT/INSTALL.md")" -le 90 ]
 }
@@ -51,9 +55,11 @@ relative_links() {
 @test "front door: every relative markdown link resolves" {
   for f in $NEW_DOCS; do
     links="$(relative_links "$f")"
+    # A link resolves from the directory of the file that holds it (docs/ for docs/*.md).
+    base="$(dirname "$f")"
     while IFS= read -r target; do
       [ -n "$target" ] || continue
-      [ -e "$GRID_ROOT/$target" ] || { echo "$f: broken link: $target" >&2; return 1; }
+      [ -e "$GRID_ROOT/$base/$target" ] || { echo "$f: broken link: $target" >&2; return 1; }
     done <<< "$links"
   done
 }
@@ -114,6 +120,18 @@ relative_links() {
 @test "front door: CONTRIBUTING.md names main and the gate command" {
   grep -qw 'main' "$GRID_ROOT/CONTRIBUTING.md"
   phrase_in CONTRIBUTING.md 'bash scripts/gate.sh'
+}
+
+@test "front door: docs/architecture.md keeps 'How wire.sh works'" {
+  phrase_in docs/architecture.md 'How wire.sh works'
+}
+
+@test "front door: docs/architecture.md keeps the wire.sh env override example" {
+  phrase_in docs/architecture.md 'GRID_DIR='
+}
+
+@test "front door: docs/architecture.md keeps the factories table (automation-factory)" {
+  phrase_in docs/architecture.md 'automation-factory'
 }
 
 @test "front door: CONTRIBUTING.md does not name the retired next branch" {
