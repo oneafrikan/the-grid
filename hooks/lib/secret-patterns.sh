@@ -701,7 +701,8 @@ secret_redact_file() {
 secret_mask_stream() {
   local line
   while IFS= read -r line || [ -n "$line" ]; do
-    if secret_match_long "$line"; then printf '[masked: %s]\n' "$SECRET_MATCH_NAME"; else printf '%s\n' "$line"; fi
+    # 2>/dev/null: a reader that closes the pipe early must not leave a printf write-error line in a caller's stderr
+    if secret_match_long "$line"; then printf '[masked: %s]\n' "$SECRET_MATCH_NAME" 2>/dev/null; else printf '%s\n' "$line" 2>/dev/null; fi
   done
 }
 
