@@ -1,0 +1,17 @@
+# role.yaml — gsd
+# Stack-agnostic role metadata. compose.py reads this for defaults; the
+# SOUL.md / SKILL.md (+ identity layers) beside it carry the actual content.
+# Small-team counterpart to tech-lead: splits a request into independent fixes and
+# fans out. Standalone (not in ceo-orchestrator's delegates_to); composed bare as /gsd.
+name: gsd
+title: GSD               # human-readable role for IDENTITY.md nameplate
+default_model: sonnet
+cron_model: haiku         # cheaper model for scheduled/heartbeat runs
+summary: >-
+  Splits a request into independent small fixes, fans out one specialist per fix, merges, runs independent QA.
+description: "GSD. Light fan-out for small fixes: one specialist per independent fix, merge, then independent QA. Use for small fixes; PRD-and-gate features go to tech-lead."
+base_skills: []      # skills always included for this role (TBD)
+orchestrator: true
+model_rationale: >-
+  Orchestrator whose work is splitting, briefing, merging and reporting; the specialists
+  do the building, so the mid tier is enough and keeps small fixes fast and cheap.

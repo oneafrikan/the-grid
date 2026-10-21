@@ -12,11 +12,11 @@
   check [SKILLS.md](https://github.com/oneafrikan/the-grid/blob/main/SKILLS.md) if unsure.
 - **Want a role to do work for you?**
   - **Orchestrator** (`grid-ceo-orchestrator`, `grid-tech-lead`,
-    `grid-growth-hacker`, `finance-desk-finance-manager`, plus `tron`,
+    `grid-growth-hacker`, `gsd` (small fixes), `finance-desk-finance-manager`, plus `tron`,
     `morpheus`, `oracle`) → slash command,
     e.g. `/grid-tech-lead`. Transforms the session into that role; it
     delegates further down the team.
-  - **Specialist** (the other 25 roles) → not a slash command. Delegate
+  - **Specialist** (the other 32 roles) → not a slash command. Delegate
     explicitly ("use the grid-backend-dev subagent to…") or let an
     orchestrator hand off once invoked.
   - Four public projects, independently gated (`project:<name>`): `grid`

@@ -24,6 +24,7 @@ paid-social
 # Variants (docs/role-authoring.md): orchestrators and unattended roles, plus two evidence-strong specialists.
 ceo-orchestrator
 tech-lead
+gsd
 growth-hacker
 finance-manager
 gh-triage

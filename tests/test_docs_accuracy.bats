@@ -211,6 +211,16 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
   [[ "$flatc" == *"all $total composed public roles"* ]]
 }
 
+# gsd is a standalone bare orchestrator: composed in grid.yaml, never under the CEO, and named
+# in the docs that list the orchestrators (the counts above come from compose.py, not typed here).
+@test "F11: gsd is a bare standalone orchestrator listed in USAGE and the grid-help orientation" {
+  grep -q '^  - role: gsd$' agent-factory/examples/grid.yaml
+  awk '/^  - role: gsd$/,/^  # product/' agent-factory/examples/grid.yaml | grep -q 'bare: true'
+  ! grep -q 'delegates_to: \[tech-lead, product-manager, growth-hacker, gsd' agent-factory/examples/grid.yaml || false
+  grep -q '`gsd`' USAGE.md
+  grep -q '`gsd`' skills/grid-help/sections/orientation.md
+}
+
 # --- F12: four public projects, four factories ---
 
 @test "F12: no 'three' project wording while four example configs exist" {
