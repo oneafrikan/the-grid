@@ -112,6 +112,9 @@ Spec: `loop-runner` (scripted scenarios), `loop-hooks`.
 - [x] 8.5 Same file, D5: run 8.1 and 8.4 under `WORKER_PERMISSIONS=allowlist` with, in turn, `--allowedTools` alone, plus `--permission-mode acceptEdits`, plus `--permission-mode dontAsk`. Record which combination completes with no prompt and no hang, set that as the runner default, and write it in the PR. Only if none completes does the report recommend `WORKER_PERMISSIONS=bypass`; the operator decides, and the decision is written in the PR (proposal assumption 1).
 - [x] 8.6 Record the real `claude -p --output-format json` field names (`is_error`, `subtype`, `total_cost_usd`) and the subtype when `--max-budget-usd 0.01` is exhausted; fix `run-issue.sh` and the UNVERIFIED list.
 - [ ] 8.7 HUMAN: create the throwaway private repo (`loop-sandbox`, `next` branch, trivial `README.md`, four issues labelled `ready-for-agent`: a trivial edit; one whose `VERIFY_CMD` will fail; one also labelled `severity:high`; one labelled `agent:grid-backend-dev`). Run `instantiate.sh ... --profile work --base-branch next --verify-cmd "test -s README.md" --agent-labels grid-backend-dev`, `bash loop/setup.sh`, then `bash loop/run-issue.sh` by hand four times. Paste: PR to `next` from `issue-N` opened by the runner, issue `ready-for-human` and open; `blocked` with the verify tail and no push; `severity:high` refused with no session; `--agent grid-backend-dev` in the log and the role in the run record. The stranger-author gate is covered by stubbed association in group 3 and stays UNTESTED live.
+  - Evidence 2026-10-21 (stated by the operator, not re-run here): a real-`claude` run landed commit `f218ddb` on the private sandbox repo `grid-loop-sandbox`, with no PR (direct mode).
+  - Shows: the runner drives a real `claude` session to a landed commit in direct mode.
+  - Does not show: the four runs this task asks for (a PR to the base, a failing verify, `severity:high`, an `agent:` label). No box is ticked.
 - [ ] 8.8 HUMAN: `claude -p --agent grid-backend-dev --model haiku --max-budget-usd 0.1 --output-format json "Reply with the model you are"`; record whether `--model` or the agent's `model:` wins.
 - [ ] 8.9 HUMAN: delete the throwaway repo; confirm no `issue-loop` lock or `<repo>-loop` worktree dir remains.
 - Acceptance: 8.1-8.6 pass twice with `GRID_E2E=1` (output pasted) or each failure is explained; 8.7-8.9 have pasted output.
@@ -132,10 +135,14 @@ Spec: `loop-waker`.
 
 ## 10. B2, HUMAN: Prove the waker on the throwaway repo
 
-- [ ] 10.1 Recreate the throwaway repo (as 8.1) with one labelled issue. As the operator, from a stripped environment that mimics cron: `env -i HOME="$HOME" PATH=/usr/bin:/bin bash loop/wake.sh`. Paste the result.
+- [ ] 10.1 Recreate the throwaway repo (as 8.1) with one labelled issue. As the operator, from a stripped environment that mimics cron: `env -i HOME="$HOME" PATH=/usr/bin:/bin bash loop/cron-run.sh`. Paste the result.
+  - Evidence 2026-10-21 (stated by the operator, not re-run here): a bare-environment cron-style run (`env -i`) reached the real tracker and exited 0 with "nothing to do".
+  - Shows: the stripped-environment entry point starts, reaches the tracker and exits cleanly on an empty queue.
+  - Does not show: a run with one labelled issue, which is what this task asks for. No box is ticked.
 - [ ] 10.2 Specifically record whether `gh` and `claude` authenticate with no desktop session (the keyring question, proposal assumption 10). If `gh` cannot read its token: record the options (`gh auth login --insecure-storage`, or run the waker from a session that has the keyring) and stop for the operator's decision; do not invent a token file.
-- [ ] 10.3 Idle poll: with no labelled issue, `wake.sh` prints nothing and writes no run-record line. Busy poll: start a run, start `wake.sh` again, observe "busy" behaviour (no second runner).
-- [ ] 10.4 Simulate cron ticks by hand, installing nothing: run the stripped-environment `wake.sh` twice in a row while a run is in progress; the second leaves it alone. No `crontab -e` in this group (D11).
+  - See the 10.1 evidence: it reached the real tracker, but whether `claude` and `gh` authenticate with no desktop session is not separately recorded. No box is ticked.
+- [ ] 10.3 Idle poll: with no labelled issue, `cron-run.sh` prints nothing and writes no run-record line. Busy poll: start a run, start `cron-run.sh` again, observe "busy" behaviour (no second runner).
+- [ ] 10.4 Simulate cron ticks by hand, installing nothing: run the stripped-environment `cron-run.sh` twice in a row while a run is in progress; the second leaves it alone. No `crontab -e` in this group (D11).
 - [ ] 10.5 Delete the throwaway repo.
 - Acceptance: pasted output for 10.1-10.4. Installing a waker for a real repo is a separate operator decision after group 12.
 
@@ -153,7 +160,7 @@ Spec: `loop-runner` ("Backoff on infra failure and rate limits", "Stale lock tak
 
 ## 12. B3, HUMAN: Prove B3 on the throwaway repo
 
-- [ ] 12.1 Kill -9 a running `run-issue.sh` (worker mid-flight); start `wake.sh`; observe "reclaimed stale lock" and a completed run. Confirm no orphan `claude` process (`ps`) or, if one remains, record it as the documented R10.qa.F10 gap.
+- [ ] 12.1 Kill -9 a running `run-issue.sh` (worker mid-flight); start `cron-run.sh`; observe "reclaimed stale lock" and a completed run. Confirm no orphan `claude` process (`ps`) or, if one remains, record it as the documented R10.qa.F10 gap.
 - [ ] 12.2 Backoff with a fake `claude`: set `GRID_CLAUDE` to a script that exits 1; run twice; observe the second run exit 0 "backing off until", no `gh` write; a third failure on the same issue (using `GRID_LOOP_NOW` or a hand-edited `until`) marks it `blocked`.
 - [ ] 12.3 Capture one real rate-limit sample if one occurs naturally (do not provoke one); paste the text/JSON, and set the pattern list from it. Until a sample exists the signal list is UNVERIFIED and unknown errors fall back to the generic infra backoff.
 - [ ] 12.4 (The sentence removal is done: the "do not install until B3 passes / 60-minute floor" wording is gone from the README and `instantiate.sh` output, without the group 12 proof. Still open:) Delete the throwaway repo after the proof; keep the 15-minute default. Delete the throwaway repo. Operator then decides whether to install a waker for a real repo (and the-grid cut is a separate step, see `loop-migration`).
