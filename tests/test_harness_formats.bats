@@ -520,10 +520,10 @@ gemini_roles() {
   codex=(); while IFS= read -r _l; do codex+=("$_l"); done < <(find "$TMP/core/_codex/agents" -name '*.toml' -type f | LC_ALL=C sort)
   opencode=(); while IFS= read -r _l; do opencode+=("$_l"); done < <(find "$TMP/core/_opencode/agents" -name '*.md' -type f | LC_ALL=C sort)
   gemini=(); while IFS= read -r _l; do gemini+=("$_l"); done < <(find "$TMP/core/_gemini-cli/agents" -name '*.md' -type f | LC_ALL=C sort)
-  # Guard against a vacuous pass: core has four specialists on every target.
-  [ "${#codex[@]}" -eq 4 ]
-  [ "${#opencode[@]}" -eq 4 ]
-  [ "${#gemini[@]}" -eq 4 ]
+  # Guard against a vacuous pass: core has five specialists on every target.
+  [ "${#codex[@]}" -eq 5 ]
+  [ "${#opencode[@]}" -eq 5 ]
+  [ "${#gemini[@]}" -eq 5 ]
   run python3 -I "$VALIDATE" codex-agent "${codex[@]}"
   echo "$output"
   [ "$status" -eq 0 ]
