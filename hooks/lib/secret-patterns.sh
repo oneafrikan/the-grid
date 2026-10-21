@@ -639,7 +639,8 @@ secret_scan_file() {
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
     if secret_match_long "$line"; then
-      printf '%s:%s: %s (%s...)\n' "$path" "$n" "$SECRET_MATCH_NAME" "${SECRET_MATCH_TEXT:0:4}"
+      # 2>/dev/null: a reader that closes the pipe early (| head -1) must not leave a printf write-error line in a caller's stderr
+      printf '%s:%s: %s (%s...)\n' "$path" "$n" "$SECRET_MATCH_NAME" "${SECRET_MATCH_TEXT:0:4}" 2>/dev/null
       found=$((found + 1))
       [ "$found" -ge 10 ] && break
     fi
