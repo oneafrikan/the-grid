@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Page background (#0d0d0f) with a 3x3 grid glyph in the page accent (#5b8af0). -->
+  <rect width="64" height="64" rx="12" fill="#0d0d0f"/>
+  <g fill="#5b8af0">
+    <rect x="10" y="10" width="12" height="12" rx="2"/>
+    <rect x="26" y="10" width="12" height="12" rx="2"/>
+    <rect x="42" y="10" width="12" height="12" rx="2"/>
+    <rect x="10" y="26" width="12" height="12" rx="2"/>
+    <rect x="26" y="26" width="12" height="12" rx="2"/>
+    <rect x="42" y="26" width="12" height="12" rx="2"/>
+    <rect x="10" y="42" width="12" height="12" rx="2"/>
+    <rect x="26" y="42" width="12" height="12" rx="2"/>
+    <rect x="42" y="42" width="12" height="12" rx="2"/>
+  </g>
+</svg>
