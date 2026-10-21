@@ -10,6 +10,17 @@
 export LC_ALL=C
 
 GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
+
+# Sandbox HOME and git config like every other test file (tests/test_repo_health.bats lints this).
+load helpers/setup
+
+setup() {
+  common_setup
+}
+
+teardown() {
+  common_teardown
+}
 TAPE="$GRID_ROOT/docs/demo/demo.tape"
 GIF="$GRID_ROOT/docs/demo/bootstrap-to-tron.gif"
 
