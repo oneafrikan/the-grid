@@ -7,17 +7,19 @@ Sections (added as the change lands, in this order):
     3. Warrant      is_warranted, ceiling
     4. Signal       KnowledgeError, parse_frontmatter, parse_signal, SIGNAL_NAME_RE, filer_slug
     5. Entry        parse_entry, render_entry, ENTRY_NAME_RE
+    6. Address      heading_slugs, resolve_address
 
 Design rules:
   * Python 3 standard library only, valid on 3.8 (no `X | Y` annotations, no
     `str.removeprefix`).
-  * Pure functions: no file access, no git, no clock. Same input, same output on every
-    machine.
+  * Pure functions: no git, no clock, and no file access except resolve_address, which only
+    reads under the root it is given. Same input, same output on every machine.
   * Error text never echoes claim or warrant text (those may carry hostile content).
   * Sorting, where it appears, is plain code-point order.
 """
 import datetime
 import hashlib
+import os
 import re
 import unicodedata
 
@@ -365,3 +367,101 @@ def render_entry(fields, evidence):
     text = "\n".join(lines) + "\n"
     parse_entry(text)
     return text
+
+
+# --- 6. address resolution ---------------------------------------------------------
+# E_ADDRESS is any address that does not resolve (zero or several files, bad form, no heading).
+E_ADDRESS = "E_ADDRESS"
+
+_ADDR_ID_RE = re.compile(r"K-[0-9a-f]{8}\Z")
+_HEADING_RE = re.compile(r"#{1,6}[ \t]+(.*?)[ \t#]*\Z")
+_FENCE_RE = re.compile(r"(`{3,}|~{3,})")
+
+
+def heading_slugs(text):
+    """Slugs of the Markdown headings in `text`, in document order.
+
+    Slug rule: lower-case, punctuation dropped, whitespace runs to one `-`. Lines inside a
+    fenced code block are skipped so a `# comment` in a code sample is not an address target.
+    """
+    slugs = []
+    fence = None
+    for line in text.split("\n"):
+        stripped = line.strip()
+        marker = _FENCE_RE.match(stripped)
+        if marker:
+            if fence is None:
+                fence = marker.group(1)[0]
+            elif marker.group(1)[0] == fence:
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        found = _HEADING_RE.match(line)
+        if found:
+            # \w keeps letters and digits of any script plus `_`; `-` is kept too.
+            kept = re.sub(r"[^\w\s-]", "", found.group(1).lower())
+            slugs.append("-".join(kept.split()))
+    return slugs
+
+
+def _address_error(message):
+    return KnowledgeError(E_ADDRESS, message)
+
+
+def resolve_address(root, addr):
+    """Resolve a knowledge address under `root`: returns (relative_path, slug_or_None).
+
+    Forms:
+      K-<hash8>[#slug]                     matches knowledge/*/K-<hash8>-*.md, so an entry that
+                                           moves between stage directories still resolves
+      knowledge/<dir>/K-<hash8>-<slug>.md[#slug]   valid only while the file is at that path
+    Raises KnowledgeError(E_ADDRESS) for zero matches, several matches (every match is
+    listed), a missing path, a slug that is not a heading of the file, or any other form.
+    Reads files under `root` only; nothing is written.
+    """
+    ref, sep, want = addr.partition("#")
+    if _ADDR_ID_RE.match(ref):
+        rel = _find_by_id(root, ref)
+    elif ref.startswith("knowledge/"):
+        parts = ref.split("/")
+        # Exactly knowledge/<dir>/<entry file>: a fixed shape means `..`, `.`, empty parts
+        # and absolute paths cannot reach outside the knowledge tree.
+        if (len(parts) != 3 or parts[1] in ("", ".", "..") or not ENTRY_NAME_RE.match(parts[2])):
+            raise _address_error("path form must be knowledge/<dir>/K-<hash8>-<slug>.md")
+        rel = ref
+        if not os.path.isfile(os.path.join(root, *parts)):
+            raise _address_error("no such file: " + rel)
+    else:
+        raise _address_error("address must be K-<hash8> or a knowledge/ path")
+    if not sep:
+        return rel, None
+    try:
+        with open(os.path.join(root, *rel.split("/")), encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError):
+        raise _address_error("cannot read " + rel)
+    if want not in heading_slugs(text):
+        raise _address_error("no heading " + want)
+    return rel, want
+
+
+def _find_by_id(root, entry_addr):
+    """Relative path of the one entry file for `K-<hash8>`, or raise E_ADDRESS."""
+    base = os.path.join(root, "knowledge")
+    matches = []
+    try:
+        dirs = sorted(os.listdir(base))
+    except OSError:
+        dirs = []
+    for d in dirs:
+        if not os.path.isdir(os.path.join(base, d)):
+            continue
+        for name in sorted(os.listdir(os.path.join(base, d))):
+            if name.startswith(entry_addr + "-") and ENTRY_NAME_RE.match(name):
+                matches.append("knowledge/%s/%s" % (d, name))
+    if not matches:
+        raise _address_error("no entry matches " + entry_addr)
+    if len(matches) > 1:
+        raise _address_error("ambiguous %s: %s" % (entry_addr, ", ".join(matches)))
+    return matches[0]
