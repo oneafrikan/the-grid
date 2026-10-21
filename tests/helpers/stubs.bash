@@ -76,6 +76,7 @@
 #     STUB_PR_EXISTS_FOR       issue numbers that already have an open PR (`gh pr list --head issue-N`)
 #     STUB_NEW_PR              number in the URL `gh pr create` prints (default 101); STUB_PR_CREATE_FAIL=1 fails it;
 #                              its --body-file is kept as $STUB_DIR/pr-create.body
+#     STUB_NEW_ISSUE           number in the URL `gh issue create` prints (default 201); STUB_REPO sets the owner/name
 #     STUB_DIFF_LINES          lines `gh pr diff` prints (default 5)
 #     STUB_COMMENTS            file collecting "<cmd> <number>: <body-file text>" for issue/pr comments
 #                              (default $STUB_DIR/comments.log)
@@ -377,6 +378,10 @@ case "${1:-} ${2:-}" in
     if [ -n "$bodyfile" ] && [ -f "$bodyfile" ]; then
       printf '%s %s: %s\n' "$1 $2" "$3" "$(tr '\n' ' ' < "$bodyfile")" >> "${STUB_COMMENTS:-/dev/null}"
     fi
+    exit 0 ;;
+  "issue create")
+    # like the real one: print the new issue's URL (the knowledge sweep reads the number from it)
+    echo "https://github.com/$repo/issues/${STUB_NEW_ISSUE:-201}"
     exit 0 ;;
   "issue edit") exit 0 ;;
   "repo view")

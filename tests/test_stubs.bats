@@ -30,6 +30,15 @@ teardown() {
   [[ "$output" == *'"loggedIn": false'* ]]
 }
 
+@test "gh stub: issue create prints the new issue URL (STUB_NEW_ISSUE, default 201) and is logged" {
+  run gh issue create --repo owner/name --title t --body b
+  [ "$status" -eq 0 ]
+  [ "$output" = "https://github.com/owner/name/issues/201" ]
+  STUB_NEW_ISSUE=7 run gh issue create --repo owner/name --title t --body b
+  [ "$output" = "https://github.com/owner/name/issues/7" ]
+  [ "$(grep -c '^gh issue create' "$STUB_LOG")" -eq 2 ]
+}
+
 @test "timeout stub: drops -k/--kill-after, -s/--signal, --foreground and --preserve-status" {
   local opts
   for opts in "-k 5" "--kill-after 5" "--kill-after=5" "-k5" "-s KILL" "--signal KILL" "--signal=KILL" \
