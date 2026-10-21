@@ -6,8 +6,12 @@ Usage:
                                       write (or verify) <root>/MAP.md
     map.py status [--root DIR]        print stage counts and pending signals (writes nothing)
 
-Exit codes: 0 ok / current, 1 stale or missing (--check only), 2 error
-(bad argument, unreadable input, over the token budget).
+Exit codes: 0 ok / current, 1 stale or missing or a knowledge lint finding (--check only),
+2 error (bad argument, unreadable input, over the token budget).
+
+--check also lints signals/ and knowledge/ with scripts/knowledge.py (change
+`epistemic-enforcement`, spec `map-lint`); it is skipped with one notice line when
+knowledge.py or both directories are absent.
 
 Design rules (change `charter-files`, spec `repo-map`):
   * Python 3 standard library only, valid on 3.8.
@@ -26,6 +30,7 @@ Design rules (change `charter-files`, spec `repo-map`):
     project-factory/templates/_common/scripts/map.py must stay byte-identical.
 """
 import difflib
+import importlib
 import os
 import re
 import subprocess
@@ -367,6 +372,78 @@ def status(root):
     print("pending signals: %d" % len(pending))
 
 
+# --- check -----------------------------------------------------------------------------
+def check_drift(target, text):
+    """Print why MAP.md differs from `text` and return 1; return 0 when it is current."""
+    if not os.path.isfile(target):
+        print("MAP.md is missing")
+        print(REGEN)
+        return 1
+    current = read_text(target)
+    if current == text:
+        return 0
+    print("MAP.md is stale")
+    diff = list(difflib.unified_diff(current.split("\n"), text.split("\n"),
+                                     "MAP.md", "generated", lineterm="", n=0))
+    for ln in diff[:12]:
+        print(ln)
+    print(REGEN)
+    return 1
+
+
+def load_knowledge():
+    """The scripts/knowledge.py module that sits next to this file, or None when absent.
+
+    Loaded with importlib inside this function, not an `import` statement: map.py stays
+    standard-library only (tests/test_map.bats checks its imports) and works in a project
+    that has no knowledge.py. The grammar, the warrant rules and the hash routine live in
+    knowledge.py alone; the lint imports them instead of carrying a second copy that could
+    drift. Bytecode writing is off for the import so --check never leaves a __pycache__
+    behind (it writes nothing).
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.isfile(os.path.join(here, "knowledge.py")):
+        return None
+    old_flag = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, here)
+    try:
+        return importlib.import_module("knowledge")
+    finally:
+        sys.path.remove(here)
+        sys.dont_write_bytecode = old_flag
+
+
+def knowledge_lint(root):
+    """Lint signals/ and knowledge/ through knowledge.check_tree. Returns 1 on any finding.
+
+    Findings print one per line as `E_<CODE> <path>: <message>` (knowledge.format_finding),
+    already sorted by path then code. An unreadable linted file is a MapError (exit 2):
+    the lint could not run, which is different from a finding. When there is nothing to
+    lint (no knowledge.py, or neither directory) it prints one notice and returns 0, so a
+    project that has not adopted the knowledge layer still passes on the drift result.
+    """
+    knowledge = load_knowledge()
+    if knowledge is None:
+        print("map.py: knowledge lint skipped (knowledge.py not found next to map.py)")
+        return 0
+    if not (os.path.isdir(os.path.join(root, "signals"))
+            or os.path.isdir(os.path.join(root, "knowledge"))):
+        print("map.py: knowledge lint skipped (no signals/ or knowledge/ directory)")
+        return 0
+    history_skipped = []
+    try:
+        findings = knowledge.check_tree(root, history_skipped)
+    except knowledge.KnowledgeError as exc:      # E_READ: str(exc) is "cannot read <file>"
+        raise MapError(str(exc))
+    # Without git the edited-after-add check cannot run; say so once, not per signal.
+    if history_skipped:
+        print("map.py: signal history check skipped (git cannot answer here)")
+    for finding in findings:
+        print(knowledge.format_finding(finding))
+    return 1 if findings else 0
+
+
 # --- main ------------------------------------------------------------------------------
 def parse_args(argv):
     """Return (mode, root, include_untracked). mode is 'write', 'check' or 'status'."""
@@ -407,20 +484,11 @@ def main(argv):
         text = generate(root, None if include_untracked else tracked_paths(root))
         target = os.path.join(root, "MAP.md")
         if mode == "check":
-            if not os.path.isfile(target):
-                print("MAP.md is missing")
-                print(REGEN)
-                return 1
-            current = read_text(target)
-            if current == text:
-                return 0
-            print("MAP.md is stale")
-            diff = list(difflib.unified_diff(current.split("\n"), text.split("\n"),
-                                             "MAP.md", "generated", lineterm="", n=0))
-            for ln in diff[:12]:
-                print(ln)
-            print(REGEN)
-            return 1
+            # Drift first, then the lint: both always run so one --check shows everything
+            # that is wrong, and the exit code is 1 if either found something.
+            drift = check_drift(target, text)
+            lint = knowledge_lint(root)
+            return 1 if drift or lint else 0
         try:
             with open(target, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(text)

@@ -78,6 +78,7 @@ s4 test_instincts_desk.bats
 s4 test_instincts_eval.bats
 s4 test_issue_loop_hooks.bats
 s4 test_map.bats
+s4 test_map_lint.bats
 s4 test_pages_site.bats
 s4 test_rules.bats
 s4 test_rules_content_php_laravel_wordpress.bats
