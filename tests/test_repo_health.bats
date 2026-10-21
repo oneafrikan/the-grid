@@ -19,6 +19,7 @@ setup_file() {
 # neither fails the lint below, so the convention no longer depends on remembering it.
 # Entry format: "<file>|<why it is safe without common_setup>".
 SANDBOX_EXCEPTIONS=(
+  "test_bootstrap_identity.bats|HOME is a temp dir and GRID_DIR an empty temp repo; global git config is redirected there, nothing real is read or written"
   "test_check_personal.bats|scans a throwaway git repo under BATS_TEST_TMPDIR with HOME and the denylist redirected there"
   "test_depersonalise.bats|read-only git ls-files/grep of the repo; writes nothing"
   "test_docs_factories.bats|read-only grep of tracked docs; writes nothing"
