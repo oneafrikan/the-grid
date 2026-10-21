@@ -152,6 +152,7 @@ are summarised; every other top-level directory, and every file under `scripts/`
     prune-report.sh     ← read-only report of what to drop from the baseline
     instincts.sh        ← habit learning from your own sessions (docs/instincts.md)
     auto-handoff-preflight.sh ← live checks that gate the auto-handoff hook
+    epistemic-stop-probe.sh ← capped one-call probe of the real Stop hook (payload fields, exit 2 continues, stop_hook_active); run with --yes
     repo-metadata.sh    ← compares (and optionally sets) the GitHub description, homepage and topics
     instincts/          ← analyse.py, capture.py, evalcases.py, inject.py, lib.py, prompts/analyse-v1.md
     usage/              ← weekly usage job: extract.py, aggregate.py, prune_report.py, usage_schema.py, weekly.sh, install-schedule.sh, adapters/claude_code.py, adapters/__init__.py

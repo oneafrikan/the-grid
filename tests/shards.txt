@@ -101,3 +101,4 @@ s4 test_knowledge_seed.bats
 s4 test_gh_triage_knowledge.bats
 s4 test_knowledge_secrets.bats
 s4 test_canon_protection.bats
+s4 test_epistemic_stop_probe.bats
