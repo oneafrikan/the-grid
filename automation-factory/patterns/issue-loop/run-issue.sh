@@ -233,11 +233,36 @@ if ! mkdir "$LOCK" 2>/dev/null; then
       else case "$(ps -p "$holder" -o command= 2>/dev/null || true)" in *run-issue.sh*) ;; *) stale=1 ;; esac
       fi ;;
     esac
+  elif [ -n "$(find "$LOCK" -maxdepth 0 -mmin +5 2>/dev/null)" ]; then
+    # No pid file: a crash between mkdir and the pid write. A live runner writes it within
+    # milliseconds, so a pid-less lock older than 5 minutes is dead, not "busy forever".
+    stale=1
   fi
+  took=0
   # mv is atomic: if two runs race for the same stale lock, only one wins the rename and the other sees "busy".
-  if [ "$stale" = 1 ] && mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null && mkdir "$LOCK" 2>/dev/null; then
-    rm -rf "$LOCK.stale.$$"
-    log "took over a stale lock (pid $holder is not a running run-issue.sh)"
+  if [ "$stale" = 1 ] && mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null; then
+    moved="$(cat "$LOCK.stale.$$/pid" 2>/dev/null || true)"
+    if [ "$moved" != "$holder" ]; then
+      # Another runner re-took the lock between our read and the rename: what we moved is LIVE. Put it back.
+      [ -e "$LOCK" ] || mv "$LOCK.stale.$$" "$LOCK" 2>/dev/null || true
+      rm -rf "$LOCK.stale.$$"
+    else
+      # A SIGKILLed runner leaves its claude worker running (until ISSUE_TIMEOUT). Stop that worker's
+      # process group before a second one starts on the same issue; the command-line check keeps a
+      # reused pid from hitting an unrelated process.
+      oldw="$(cat "$LOCK.stale.$$/worker" 2>/dev/null || true)"
+      case "$oldw" in ''|*[!0-9]*) ;; *)
+        case "$(ps -p "$oldw" -o command= 2>/dev/null || true)" in
+          *claude*) kill -TERM -- "-$oldw" 2>/dev/null || kill -TERM "$oldw" 2>/dev/null || true
+                    log "stopped the orphaned worker (pid $oldw) of the stale lock" ;;
+        esac ;;
+      esac
+      if mkdir "$LOCK" 2>/dev/null; then took=1; fi
+      rm -rf "$LOCK.stale.$$"
+    fi
+  fi
+  if [ "$took" = 1 ]; then
+    log "took over a stale lock (pid ${holder:-none} is not a running run-issue.sh)"
   else
     log "busy: another run holds the lock (${holder:+pid $holder, }$LOCK); exiting"
     exit 0
@@ -275,21 +300,63 @@ record_run() {
   return 0
 }
 
-# infra_fail <message> — stop the run with exit 1. The issue KEEPS its opt-in label (so a later
-# run retries it) and gets no comment; one run-record line says error.
+# bo_get <key> — one field of the backoff file (`until=<epoch> fails=<n> issue=<n> issue_fails=<n>`).
+# Split on spaces and match the whole key, so `fails` never reads `issue_fails`.
+bo_get() { tr ' ' '\n' < "$BACKOFF" 2>/dev/null | sed -n "s/^$1=//p" | sed -n '1p' || true; }
+
+# SERVICE_RE — text in a worker's result or stderr that means the claude SERVICE refused or dropped the
+# run (login, limit, network), not that the issue is bad. Case-insensitive ERE.
+#   Captured from claude 2.1.305 (the tests pin these strings):
+#     'not logged in'    result "Not logged in · Please run /login" (is_error true, exit 1)
+#     'invalid api key'  result "Invalid API key · Fix external API key" (is_error true, HTTP 401)
+#     'econnrefused'     result "API Error: Connection refused — a firewall or proxy may be blocking it
+#                        (ECONNREFUSED)" (is_error true, exit 1, after ~3 minutes of internal retries;
+#                        ANTHROPIC_BASE_URL pointed at a closed port)
+#   NOT captured (no safe way to trigger them without spending money or exhausting a real account);
+#   best guesses from the service's wording, kept so a real one is not blamed on the issue:
+#     'usage limit', 'rate limit', 'limit reached', 'overloaded_error', 'credit balance is too low',
+#     'oauth token', 'econnreset', 'etimedout', 'could not resolve host'.
+SERVICE_RE='not logged in|please run /login|invalid api key|usage limit|rate.?limit|limit reached|overloaded_error|credit balance is too low|oauth token|econnrefused|connection refused|econnreset|etimedout|could not resolve host'
+
+# infra_fail <message> [poison] — stop the run with exit 1. The issue KEEPS its opt-in label (so a
+# later run retries it) and gets no comment; one run-record line says error.
+#
+# Poison rule: a failure caused by THIS issue's run (the worker crashed or returned an error the
+# service patterns do not explain; the caller passes "poison") is counted in the backoff file's
+# `issue=` / `issue_fails=`. The third in a row on the same issue marks it `blocked` (one comment) and
+# exits 0, so one bad issue cannot hold the queue (the lowest number is always tried first). Outages
+# (logins, gh, origin, usage limits) never pass "poison": they are not the issue's fault, and counting
+# them would block innocent issues in bulk. The counter dies with the backoff file (any issue-level
+# outcome, via conclude, or an empty queue).
 infra_fail() {
   echo "run-issue: INFRASTRUCTURE FAILURE${N:+ on #$N}: $1" >&2
+  local fails=0 prev win=900 pissue pfails
+  prev="$(bo_get fails)"
+  case "$prev" in ''|*[!0-9]*) ;; *) fails="$prev" ;; esac
+  pissue="$(bo_get issue)"; pfails="$(bo_get issue_fails)"
+  case "$pfails" in ''|*[!0-9]*) pfails=0 ;; esac
+  if [ "${2:-}" = poison ] && [ -n "$N" ]; then
+    if [ "$pissue" = "$N" ]; then pfails=$((pfails + 1)); else pfails=1; fi
+    pissue="$N"
+    if [ "$pfails" -ge 3 ]; then
+      # A direct gh call, not conclude(): a failing relabel must fall through to the normal backoff.
+      if gh_t issue edit "$N" --repo "$ISSUE_REPO" --remove-label "$ISSUE_LABEL" --add-label blocked >/dev/null 2>&1; then
+        rm -f "$BACKOFF"
+        post_comment "issue-loop blocked this: the worker failed with an infrastructure error on 3 consecutive runs for this issue, so the issue itself probably breaks it. Last error: $(cut_bytes 300 "$1")"
+        record_run error "poison: 3 consecutive infra failures: $(cut_bytes 300 "$1")"
+        log "#$N -> blocked (error): 3 consecutive infra failures on this issue"
+        exit 0
+      fi
+    fi
+  fi
   if [ -n "$N" ]; then record_run error "infra: $(cut_bytes 300 "$1")"; fi
   # Back off: the window starts at 15 minutes and doubles with each consecutive failure, up to 6 hours.
   # Any issue-level outcome (conclude) or an empty queue clears it.
-  local fails=0 prev win=900
-  prev="$(sed -n 's/.*fails=\([0-9]*\).*/\1/p' "$BACKOFF" 2>/dev/null || true)"
-  case "$prev" in ''|*[!0-9]*) ;; *) fails="$prev" ;; esac
   fails=$((fails + 1))
   local i=1
   while [ "$i" -lt "$fails" ] && [ "$win" -lt 21600 ]; do win=$((win * 2)); i=$((i + 1)); done
   [ "$win" -le 21600 ] || win=21600
-  printf 'until=%s fails=%s\n' "$(( $(date +%s) + win ))" "$fails" > "$BACKOFF" 2>/dev/null || true
+  printf 'until=%s fails=%s issue=%s issue_fails=%s\n' "$(( $(date +%s) + win ))" "$fails" "$pissue" "$pfails" > "$BACKOFF" 2>/dev/null || true
   exit 1
 }
 
@@ -368,6 +435,7 @@ conclude() {
     infra_fail "could not relabel $ISSUE_REPO#$N: $(cut_bytes 200 "$(cat "$TMP/edit.err")")"
   fi
   rm -f "$BACKOFF"   # gh and the issue answered: the infrastructure is fine again
+  if [ -n "$N" ]; then rm -f "$STATE/landed.$N"; fi   # the issue now carries its outcome (see the direct-mode landing)
   post_comment "$text"
   if [ "$CLOSE_ISSUE" = 1 ]; then
     gh_t issue close "$N" --repo "$ISSUE_REPO" >/dev/null 2>&1 || warn "could not close $ISSUE_REPO#$N"
@@ -462,6 +530,25 @@ fi
 if [ "$(jq -r '.state // "open"' "$TMP/issue.json")" != "open" ]; then
   N=""
   die_pre "$ISSUE_REPO#$CUR_ISSUE is not open"
+fi
+
+# Already landed (MODE=direct): an earlier run pushed this issue's commit to the base but could not
+# update the issue (gh failed in between), so the marker it wrote before the push is still here. If the
+# commit is on origin/<base> now, finish the label swap, comment and close WITHOUT working it again.
+# If it is not (the push never happened or was rejected), the marker is stale: drop it and work the
+# issue as normal.
+if [ "$MODE" = "direct" ] && [ -f "$STATE/landed.$N" ]; then
+  landed_sha="$(cat "$STATE/landed.$N" 2>/dev/null || true)"
+  if ! git_t -C "$REPO_ROOT" fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" >/dev/null 2>"$TMP/e.err"; then
+    infra_fail "git fetch origin $BASE_BRANCH failed: $(cut_bytes 200 "$(cat "$TMP/e.err")")"
+  fi
+  if [ -n "$landed_sha" ] && git -C "$REPO_ROOT" cat-file -e "$landed_sha^{commit}" 2>/dev/null \
+     && git -C "$REPO_ROOT" merge-base --is-ancestor "$landed_sha" "origin/$BASE_BRANCH" 2>/dev/null; then
+    CLOSE_ISSUE=1
+    SHA="$(git -C "$REPO_ROOT" rev-parse --short "$landed_sha")"
+    conclude ready-for-human ok "issue-loop landed commit $SHA on $BASE_BRANCH ($GH_REPO). A run that pushed it could not update this issue, so a later run finished the label swap without working it again. The issue is closed; review the commit when convenient." "recovered: $SHA already on $BASE_BRANCH"
+  fi
+  rm -f "$STATE/landed.$N"
 fi
 
 TITLE="$(jq -r '.title // ""' "$TMP/issue.json")"
@@ -678,15 +765,26 @@ if [ "$WORKER_RC" -eq 124 ] || [ "$WORKER_RC" -eq 137 ]; then
   fi
   blocked "the worker exceeded ISSUE_TIMEOUT (${ISSUE_TIMEOUT}s) and was stopped. $wip_note"
 fi
+# What the service said: is this run's failure the SERVICE's (login, limit, network: SERVICE_RE) or
+# possibly the issue's? The first never counts toward the poison rule. The probe is stderr plus the
+# result text ONLY when the result is an error: a normal result is the worker's own final answer, and
+# an issue ABOUT rate limiting whose worker forgot the outcome line must end `blocked`, not be
+# retried as an outage.
+{ if [ "$RESULT_OK" = 1 ] && [ "$(jq -r '.is_error // false' "$TMP/result.json" 2>/dev/null)" = "true" ]; then
+    jq -r '.result // ""' "$TMP/result.json" 2>/dev/null || true
+  fi
+  head -c 2000 "$TMP/worker.err" 2>/dev/null || true; } | head -c 4000 > "$TMP/infra-probe.txt" || true
+POISON=poison
+if grep -qiE "$SERVICE_RE" "$TMP/infra-probe.txt"; then POISON=""; fi
 if [ "$RESULT_OK" = 1 ] && [ "$(jq -r '.is_error // false' "$TMP/result.json")" = "true" ]; then
   subtype="$(jq -r '.subtype // ""' "$TMP/result.json")"
   case "$subtype" in
     *budget*) blocked "the worker stopped at its spend cap (MAX_BUDGET_USD=$MAX_BUDGET_USD, $subtype)" ;;
-    *) infra_fail "the worker returned an error result ($subtype): $(cut_bytes 200 "$(jq -r '.result // ""' "$TMP/result.json")")" ;;
+    *) infra_fail "the worker returned an error result ($subtype): $(cut_bytes 200 "$(jq -r '.result // ""' "$TMP/result.json")")" "$POISON" ;;
   esac
 fi
 if [ "$WORKER_REAPED" != 1 ] && { [ "$WORKER_RC" -ne 0 ] || [ "$RESULT_OK" != 1 ]; }; then
-  infra_fail "the worker failed (exit $WORKER_RC): $(cut_bytes 300 "$(cat "$TMP/worker.err")")"
+  infra_fail "the worker failed (exit $WORKER_RC): $(cut_bytes 300 "$(cat "$TMP/worker.err")")" "$POISON"
 fi
 
 OUTCOME_LINE=""
@@ -704,8 +802,7 @@ case "$OUTCOME_LINE" in
   *)
     # No outcome line can also mean claude itself was cut off (usage or rate limit, login, network).
     # That is the infrastructure's fault, not the issue's: keep the label and back off.
-    { jq -r '.result // ""' "$TMP/result.json" 2>/dev/null || true; head -c 2000 "$TMP/worker.err" 2>/dev/null || true; } | head -c 4000 > "$TMP/infra-probe.txt" || true
-    if grep -qiE 'usage limit|rate.?limit|limit reached|overloaded_error|credit balance is too low|please run /login|invalid api key|oauth token|econnreset|etimedout|could not resolve host' "$TMP/infra-probe.txt"; then
+    if [ -z "$POISON" ]; then
       infra_fail "the worker was cut off by the claude service: $(cut_bytes 200 "$(head -n 3 "$TMP/infra-probe.txt")")"
     fi
     blocked "the worker wrote no recognised outcome line (expected done, needs-human or blocked)" ;;
@@ -754,14 +851,26 @@ if [ "$MODE" = "direct" ]; then
   # If the base moved while the worker ran, put the work on top of it. The rebased tree is not the
   # one that was verified, so verify again before anything is pushed.
   if ! git -C "$WT" merge-base --is-ancestor "origin/$BASE_BRANCH" HEAD; then
+    # VERIFY_CMD may have rewritten tracked files (a snapshot, a lockfile, a regenerated catalogue); git
+    # refuses to rebase a dirty tree. Only the commit is landed, so drop those edits first; a refusal
+    # below is then a real conflict.
+    git -C "$WT" reset -q --hard HEAD >/dev/null 2>&1 || true
     if ! git -C "$WT" rebase "origin/$BASE_BRANCH" >/dev/null 2>"$TMP/rebase.err"; then
       git -C "$WT" rebase --abort >/dev/null 2>&1 || true
       blocked "the rebase onto origin/$BASE_BRANCH conflicted, so nothing was pushed; the work is on the local branch issue-$N. $(cut_bytes 300 "$(cat "$TMP/rebase.err")")"
     fi
     run_verify
   fi
+  # Landing marker, written BEFORE the push: if gh fails between the push and the label swap, the issue
+  # keeps ISSUE_LABEL and the next tick would work it again and land a duplicate. A later run reads
+  # this file (see "already landed" after step 5) and finishes the label swap instead. The sha is the
+  # signal rather than a commit-message trailer or a search of the base's history because it is exact
+  # (the push keeps the sha), needs no change to the worker's commit, and cannot match an older commit
+  # when a human later re-labels the issue for new work: conclude() deletes the file on any outcome.
+  git -C "$WT" rev-parse HEAD > "$STATE/landed.$N"
   # Explicit refspec, never forced: a base that moved again since the fetch is a rejection, not a clobber.
   if ! git_t -C "$WT" push origin "HEAD:refs/heads/$BASE_BRANCH" >/dev/null 2>"$TMP/push.err"; then
+    rm -f "$STATE/landed.$N"   # nothing landed
     blocked "push to $BASE_BRANCH rejected, so nothing landed; the work is on the local branch issue-$N: $(cut_bytes 300 "$(cat "$TMP/push.err")")"
   fi
   SHA="$(git -C "$WT" rev-parse --short HEAD)"
