@@ -52,6 +52,8 @@ convention this led to.
   once, the headless runner, guard hook and worktree helper for the PR-only profiles, and the
   opt-in labels. It writes no scheduler file and no hook entry in `.claude/settings.json`.
   Planned: a waker (a cron line the operator installs) and backoff / stale-lock handling.
+  The step-by-step chain from an empty directory (seed, staff, cut the loop) is the runbook
+  [factory chain](docs/factory-chain.md).
 - **`AUTOMATIONS.md`** — a generated index of patterns, parallel to `SKILLS.md`.
 - **More patterns** — issue-loop is the first. Scheduled jobs, watch-and-react
   hooks, release automations, and agent-team orchestrations follow.
