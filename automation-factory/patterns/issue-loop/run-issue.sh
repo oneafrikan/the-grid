@@ -712,7 +712,20 @@ if [ -n "$WORKER_PERMISSION_MODE" ]; then args+=(--permission-mode "$WORKER_PERM
 if [ "$WORKER_PERMISSIONS" = "bypass" ]; then
   args+=(--dangerously-skip-permissions)
 else
-  args+=(--allowedTools "$WORKER_ALLOWED_TOOLS")
+  # The worker prompt tells it to run VERIFY_CMD itself first, so the allowlist must let it, or a fresh
+  # cut's first run ends `blocked` on a denied command. Add exactly that one entry (nothing else) unless
+  # the operator already listed it. A comma would split the entry and a ")" would end it early, so such a
+  # value is skipped with a warning (the operator names the commands in WORKER_ALLOWED_TOOLS instead).
+  ALLOWED_TOOLS="$WORKER_ALLOWED_TOOLS"
+  _verify_entry="Bash($VERIFY_CMD:*)"
+  case "$VERIFY_CMD" in
+    *,*|*\)*) warn "VERIFY_CMD contains ',' or ')', so it was not added to the worker allowlist; list the commands it runs in WORKER_ALLOWED_TOOLS" ;;
+    *) case ",$ALLOWED_TOOLS," in
+         *",$_verify_entry,"*) ;;
+         *) ALLOWED_TOOLS="$ALLOWED_TOOLS,$_verify_entry" ;;
+       esac ;;
+  esac
+  args+=(--allowedTools "$ALLOWED_TOOLS")
 fi
 
 log "#$N: starting the worker${AGENT:+ (agent $AGENT)} in $WT"
