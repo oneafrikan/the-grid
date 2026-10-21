@@ -10,6 +10,7 @@
 #   3. bats files the branch changed, plus every tests/*.bats that mentions a changed script
 #   4. changed Markdown: no leftover merge-conflict markers
 #   5. rules/ changed and scripts/rules.py exists: `python3 scripts/rules.py lint`
+#   6. any `run: <command>` lines in loop/verify-always.txt (e.g. a personal-data scan)
 # Run from the issue worktree. Exit 1 if any step fails, or if there are no changes at all.
 #
 # Bash 3.2 compatible (macOS): no mapfile, no associative arrays, empty arrays guarded for set -u.
@@ -77,13 +78,18 @@ $(printf '%s\n' "${bats_files[@]}" | sort -u)
 EOF
 fi
 
-# Repo-wide lints that a changed-files check cannot see (a new test file that skips the sandbox, a new
-# top-level dir the README layout must list). loop/verify-always.txt lists bats files, one per line, that
-# always run; the file is optional and a missing bats file is skipped.
+# Repo-wide checks that a changed-files check cannot see (a new test file that skips the sandbox, a new
+# top-level dir the README layout must list, a personal-data scan). The optional loop/verify-always.txt
+# holds one entry per line: a bats file that always runs (a missing one is skipped), or `run: <command>`,
+# a shell command run from the repo root (step 6). Blank lines and `#` comments are ignored.
 always="$(cd "$(dirname "$0")" && pwd)/verify-always.txt"
+run_cmds=()
 if [ -f "$always" ]; then
-  while IFS= read -r t; do
-    case "$t" in ''|'#'*) continue ;; esac
+  while IFS= read -r t || [ -n "$t" ]; do
+    case "$t" in
+      ''|'#'*) continue ;;
+      'run: '*) run_cmds+=("${t#run: }"); continue ;;
+    esac
     [ -f "$t" ] || continue
     dup=0
     for u in ${uniq_bats[@]+"${uniq_bats[@]}"}; do [ "$u" = "$t" ] && dup=1; done
@@ -146,6 +152,19 @@ if [ "$rules_changed" -eq 1 ] && [ -f scripts/rules.py ]; then
     echo "verify: skip rules lint (python3 not installed)"
   fi
 fi
+
+# 6. `run:` lines from verify-always.txt: each runs from the repo root; non-zero fails the verify.
+# Output is captured so a failure shows only its last 20 lines.
+for c in ${run_cmds[@]+"${run_cmds[@]}"}; do
+  echo "verify: run: $c"
+  if out="$(bash -c "$c" 2>&1)"; then
+    printf '%s\n' "$out" | tail -n 5
+  else
+    printf '%s\n' "$out" | tail -n 20
+    echo "verify: FAILED: $c" >&2
+    rc=1
+  fi
+done
 
 [ "$rc" -eq 0 ] && echo "verify: PASS (fast check; the full CI gate on the pull request is authoritative)"
 exit "$rc"
