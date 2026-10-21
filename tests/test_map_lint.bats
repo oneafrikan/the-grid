@@ -259,6 +259,63 @@ edit_sig() {
   [ -z "$(git -C "$P" status --porcelain)" ]
 }
 
+# ledger_line <signal name> — a disposition record carrying every key the ledger requires.
+ledger_line() {
+  printf '%s\n' '{"event":"disposition","signal":"'"$1"'","claim_hash":"h","disposition":"invalid","entry":null,"issue":null,"pr":null,"run":"r1"}'
+}
+
+@test "ledger: a done file with no ledger line gives E_LEDGER and exit 1" {
+  mk_proj with-signals
+  mkdir -p "$P/signals/done"
+  git -C "$P" mv "signals/$SIG" "signals/done/$SIG"
+  git -C "$P" add -A
+  git -C "$P" commit -q -m sweep
+  lint
+  [ "$status" -eq 1 ]
+  grep -q "^E_LEDGER signals/done/$SIG: no disposition line" <<<"$output"
+}
+
+@test "ledger: a ledger line naming a file still in signals/ gives E_LEDGER" {
+  mk_proj with-signals
+  mkdir -p "$P/signals/done"
+  ledger_line "$SIG" > "$P/signals/done/ledger.jsonl"
+  git -C "$P" add -A
+  git -C "$P" commit -q -m ledger
+  lint
+  [ "$status" -eq 1 ]
+  grep -q "^E_LEDGER signals/$SIG: processed but still pending" <<<"$output"
+}
+
+@test "ledger: a processed signal with its ledger line is clean" {
+  mk_proj with-signals
+  mkdir -p "$P/signals/done"
+  ledger_line "$SIG" > "$P/signals/done/ledger.jsonl"
+  git -C "$P" mv "signals/$SIG" "signals/done/$SIG"
+  git -C "$P" add -A
+  git -C "$P" commit -q -m sweep
+  lint
+  [ "$status" -eq 0 ]
+  ! grep -q '^E_LEDGER' <<<"$output" || false
+}
+
+@test "ledger: a malformed ledger line is reported with its line number" {
+  mk_proj with-signals
+  mkdir -p "$P/signals/done"
+  { ledger_line "$SIG"; printf 'not json\n'; } > "$P/signals/done/ledger.jsonl"
+  git -C "$P" add -A
+  git -C "$P" commit -q -m ledger
+  lint
+  [ "$status" -eq 1 ]
+  grep -q '^E_LEDGER signals/done/ledger.jsonl:2: ' <<<"$output"
+}
+
+@test "ledger: no ledger and no done files is clean" {
+  mk_proj with-signals
+  lint
+  [ "$status" -eq 0 ]
+  ! grep -q '^E_LEDGER' <<<"$output" || false
+}
+
 @test "no git: the history check is skipped with one notice and the other rules still apply" {
   mk_proj with-signals
   # A second signal with an unknown stage, so there are two signals and one rule violation.
