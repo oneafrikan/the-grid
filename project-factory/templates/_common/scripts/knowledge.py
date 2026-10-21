@@ -958,8 +958,10 @@ def scan_secret(lib, path):
 
 
 # Entry directories a signal can add evidence to. canon/, superseded/ and retired/ matches
-# are escalations (a later change), so they are deliberately not indexed here.
+# are escalations (see closed_entry_maps), so they are deliberately not indexed here.
 _OPEN_ENTRY_DIRS = ("wip", "provisional", "established")
+_CLOSED_ENTRY_DIRS = ("canon", "superseded", "retired")
+_ENTRY_HASH_LINE_RE = re.compile(r"^claim_hash: ([0-9a-f]{16})[ ]*$", re.MULTILINE)
 
 
 def open_entry_maps(root):
@@ -975,6 +977,62 @@ def open_entry_maps(root):
             by_hash[entry["claim_hash"]] = entry
             by_id[entry["id"]] = entry
     return by_hash, by_id
+
+
+def _file_claim_hash(root, rel):
+    """claim_hash of an entry file, or None when it holds none. parse_entry is tried first; a
+    forged entry whose id disagrees with its hash fails it, so the key is then read straight
+    from the text (the file is only ever compared with, never trusted)."""
+    entry = _load_entry(root, rel)
+    if entry is not None:
+        return entry["claim_hash"]
+    try:
+        with open(os.path.join(root, *rel.split("/")), "rb") as fh:
+            found = _ENTRY_HASH_LINE_RE.search(fh.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
+    return found.group(1) if found else None
+
+
+def closed_entry_maps(root):
+    """({claim_hash: entry}, {id: entry}, {id: [claim_hash or None]}) for the escalation rules.
+
+    The first two cover the parseable entries in canon/, superseded/ and retired/: a signal
+    that matches one needs a human. The third covers EVERY entry file in every stage directory,
+    keyed by the id in the file name (`K-<hash8>-*.md`) with the full hash the file claims
+    (None when unreadable): two different claims can share the 8-hex id, and a forged file
+    may not parse, so the name is what is trusted for the id.
+    """
+    by_hash = {}
+    by_id = {}
+    ids = {}
+    for dirname, rel in iter_entries(root):
+        ids.setdefault(rel.rsplit("/", 1)[-1][:10], []).append(_file_claim_hash(root, rel))
+        if dirname in _CLOSED_ENTRY_DIRS:
+            entry = _load_entry(root, rel)
+            if entry is not None:
+                by_hash[entry["claim_hash"]] = entry
+                by_id[entry["id"]] = entry
+    return by_hash, by_id, ids
+
+
+def escalation_reason(sig, chash, closed_by_hash, closed_by_id, ids):
+    """The reason a human must decide this signal, or None. First hit wins, in the order
+    canonical, supersedes, contradicts, canon-match, id-collision. Only fixed words come back,
+    never claim text."""
+    if sig["stage"] == "canonical":
+        return "canonical"
+    if "supersedes" in sig:
+        return "supersedes"
+    if "contradicts" in sig:
+        return "contradicts"
+    if chash in closed_by_hash or sig.get("confirms") in closed_by_id:
+        return "canon-match"
+    # Same K-<hash8> as an existing file but another full hash (or one we cannot read): the
+    # two claims would share an address, so neither may be merged by the sweep.
+    if any(h != chash for h in ids.get(entry_id(sig["claim"]), ())):
+        return "id-collision"
+    return None
 
 
 def _lower_stage(a, b):
@@ -1027,7 +1085,9 @@ def build_plan(root, cap=DEFAULT_CAP):
     rest are counted in `deferred`, untouched. A signal with any check_signal finding is
     `invalid` with the finding codes in `reasons`; a signal that survives every rule below gets
     `wip`, `written`, `confirmed` or `duplicate` from entry_disposition, with `entry` and the
-    post-apply `stage` filled in. Later changes add fields to each signal
+    post-apply `stage` filled in. A signal that needs a human (stage `canonical`, `supersedes`,
+    `contradicts`, a match in canon/superseded/retired, or an id collision) is `escalated` with
+    one fixed reason word and no entry or stage; it still takes a cap slot. Later changes add fields to each signal
     entry, never remove one. A grammatically valid signal that holds a token-shaped value is
     `secret` (reasons: the pattern name only, no claim_hash). A valid, non-secret signal whose
     claim has an open escalation is `duplicate` (reasons name the issue); one whose claim was
@@ -1053,6 +1113,7 @@ def build_plan(root, cap=DEFAULT_CAP):
     # Hash-to-entry and id-to-entry maps, built once per plan (no clock, so the plan stays
     # byte-identical on an unchanged tree).
     entries_by_hash, entries_by_id = open_entry_maps(root)
+    closed_by_hash, closed_by_id, ids_on_disk = closed_entry_maps(root)
     signals = []
     counts = {}
     for rel in pending[:slots]:
@@ -1088,11 +1149,19 @@ def build_plan(root, cap=DEFAULT_CAP):
                     entry["disposition"] = "repeat-rejected"
                     entry["reasons"] = ["rejected"]
                 else:
-                    # Same hash wins; otherwise the entry the signal says it confirms.
-                    match = entries_by_hash.get(entry["claim_hash"]) \
-                        or entries_by_id.get(sig.get("confirms"))
-                    entry["disposition"], entry["entry"], entry["stage"] = \
-                        entry_disposition(sig, match)
+                    # Escalation comes before any entry matching: a human decides these, so
+                    # no entry and no stage are planned for them.
+                    reason = escalation_reason(sig, entry["claim_hash"], closed_by_hash,
+                                               closed_by_id, ids_on_disk)
+                    if reason:
+                        entry["disposition"] = "escalated"
+                        entry["reasons"] = [reason]
+                    else:
+                        # Same hash wins; otherwise the entry the signal says it confirms.
+                        match = entries_by_hash.get(entry["claim_hash"]) \
+                            or entries_by_id.get(sig.get("confirms"))
+                        entry["disposition"], entry["entry"], entry["stage"] = \
+                            entry_disposition(sig, match)
         counts[entry["disposition"]] = counts.get(entry["disposition"], 0) + 1
         signals.append(entry)
     return {"cap": cap, "counts": counts,
