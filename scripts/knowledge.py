@@ -9,14 +9,16 @@ Sections (added as the change lands, in this order):
     5. Entry        parse_entry, render_entry, ENTRY_NAME_RE
     6. Address      heading_slugs, resolve_address
     7. Ledger       ledger_path, read_ledger, append_ledger, processed_signals, claim_state
-    8. Command line main, SUBCOMMANDS (the one place a subcommand is registered)
+    8. Command line main, SUBCOMMANDS (the one place a subcommand is registered); `file`
+                    writes a signal
 
 Design rules:
   * Python 3 standard library only, valid on 3.8 (no `X | Y` annotations, no
     `str.removeprefix`).
   * Pure functions: no git, no clock, and no file access except resolve_address, read_ledger
     and append_ledger, which only touch files under the root they are given. Same input, same
-    output on every machine.
+    output on every machine. (The command line is the exception: `file` reads the clock and
+    writes one file under the root.)
   * Error text never echoes claim or warrant text (those may carry hostile content).
   * Sorting, where it appears, is plain code-point order.
 """
@@ -613,22 +615,105 @@ def _cmd_hash(root, claim):
     return 0
 
 
-# Subcommand table: name -> (number of positional arguments, handler(root, *positionals)).
+_NOW_RE = re.compile(r"[0-9]{8}T[0-9]{6}Z\Z")
+# Value-taking options of `file`, in the order their keys follow the required ones.
+_FILE_OPTIONAL = ("supersedes", "contradicts", "confirms", "guardrail")
+
+
+def _signal_time():
+    """UTC timestamp for a signal name: KNOWLEDGE_NOW when set (so tests are deterministic),
+    else the clock."""
+    now = os.environ.get("KNOWLEDGE_NOW")
+    if now is None:
+        return datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if not _NOW_RE.match(now):
+        raise UsageError("KNOWLEDGE_NOW must look like YYYYMMDDTHHMMSSZ")
+    return now
+
+
+def _cmd_file(root, filer=None, claim=None, stage=None, warrant=None, body_file=None, **optional):
+    """Write one signal under root/signals/ and print its path; never commits, never needs git.
+
+    Everything is validated (through parse_signal, on the exact text that would be written)
+    before the first byte touches disk, so a bad argument leaves no file behind. Validation
+    failures are usage errors here (exit 2): the caller gave bad input.
+    """
+    values = {"filed_by": filer, "claim": claim, "stage": stage, "warrant": warrant}
+    for key, value in values.items():
+        if value is None:
+            raise UsageError("file needs --%s" % ("filer" if key == "filed_by" else key))
+    values.update((k, v) for k, v in optional.items() if v is not None)
+    values["status"] = "pending"
+
+    body = ""
+    if body_file is not None:
+        try:
+            # Bytes then strict decode: a body that is not UTF-8 is refused, not mangled.
+            with open(body_file, "rb") as fh:
+                body = fh.read().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            raise UsageError("cannot read --body-file as UTF-8 text")
+
+    # Fixed key order: required keys, then whichever optional keys were given.
+    lines = ["---"]
+    for key in _REQUIRED + _OPTIONAL:
+        if key in values:
+            lines.append("%s: %s" % (key, values[key]))
+    lines.append("---")
+    text = "\n".join(lines) + "\n"
+    if body:
+        text += "\n" + body
+
+    try:
+        parsed = parse_signal(text)
+    except KnowledgeError as err:
+        raise UsageError("%s %s" % (err.code, err))
+    # A value holding a newline (or padding the parser trims) would parse as something other
+    # than what was asked for, e.g. a claim that smuggles in a `guardrail:` line. Refuse it.
+    if any(parsed.get(key) != value for key, value in values.items()):
+        raise UsageError("E_SIGNAL a value is not a single trimmed line")
+
+    data = text.encode("utf-8")
+    name = "%s-%s-%s.md" % (_signal_time(), filer_slug(filer), hashlib.sha256(data).hexdigest()[:6])
+    if not SIGNAL_NAME_RE.match(name):
+        # e.g. a filer name with no letters or digits leaves an empty slug.
+        raise UsageError("E_SIGNAL filed_by gives no usable file-name slug")
+    directory = os.path.join(root, "signals")
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, name)
+    try:
+        # "x" so an existing file is never rewritten: the same content in the same second by
+        # the same filer lands on the same name and is left as it is.
+        with open(path, "xb") as fh:
+            fh.write(data)
+    except FileExistsError:
+        pass
+    print(path)
+    return 0
+
+
+# Subcommand table: name -> (number of positional arguments, value-taking options, handler).
+# Options map `--flag` to the handler's keyword name; handler(root, *positionals, **options).
 # A later subcommand is one new entry here plus its handler.
 SUBCOMMANDS = {
-    "hash": (1, _cmd_hash),
+    "hash": (1, {}, _cmd_hash),
+    "file": (0, dict([("--filer", "filer"), ("--claim", "claim"), ("--stage", "stage"),
+                      ("--warrant", "warrant"), ("--body-file", "body_file")]
+                     + [("--" + k, k) for k in _FILE_OPTIONAL]), _cmd_file),
 }
 
 
 def _parse(argv):
-    """Return (name, root_or_None, positionals) or raise UsageError."""
+    """Return (name, root_or_None, positionals, options) or raise UsageError."""
     if not argv:
         raise UsageError("usage: knowledge.py <%s> [--root DIR] [args]" % "|".join(SUBCOMMANDS))
     name = argv[0]
     if name not in SUBCOMMANDS:
         raise UsageError("unknown subcommand %r" % name)
+    known = SUBCOMMANDS[name][1]
     root = None
     positionals = []
+    options = {}
     i = 1
     while i < len(argv):
         arg = argv[i]
@@ -641,6 +726,14 @@ def _parse(argv):
                 raise UsageError("--root needs a directory")
             root = argv[i + 1]
             i += 1
+        elif arg in known:
+            if i + 1 >= len(argv):
+                raise UsageError("%s needs a value" % arg)
+            if known[arg] in options:
+                raise UsageError("%s given twice" % arg)
+            # The value is taken verbatim, even if it starts with a dash (a claim may).
+            options[known[arg]] = argv[i + 1]
+            i += 1
         elif arg.startswith("-") and arg != "-":
             raise UsageError("unknown option %r" % arg)
         else:
@@ -648,7 +741,7 @@ def _parse(argv):
         i += 1
     if len(positionals) != SUBCOMMANDS[name][0]:
         raise UsageError("%s takes %d argument(s)" % (name, SUBCOMMANDS[name][0]))
-    return name, root, positionals
+    return name, root, positionals, options
 
 
 def main(argv=None):
@@ -656,10 +749,10 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
     try:
-        name, root, positionals = _parse(argv)
+        name, root, positionals, options = _parse(argv)
         if root is None:
             root = default_root()
-        return SUBCOMMANDS[name][1](root, *positionals)
+        return SUBCOMMANDS[name][2](root, *positionals, **options)
     except UsageError as err:
         print("knowledge.py: %s" % err, file=sys.stderr)
         return 2
