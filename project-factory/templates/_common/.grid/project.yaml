@@ -19,6 +19,7 @@
 #     - Test suites live in <path>; fixtures in <path>.
 
 # hooks:                       # opt in to the-grid's guard hooks; `agent-factory/deploy_hooks.py <this-repo>` writes them
+#                              # where signals/ is used, set `profile: standard`: the commit-time secret scan only runs from standard
 #   profile: off               # off      - nothing (the default when this key is absent)
 #                              # minimal  - blocks git --no-verify, hook-disabling config and force-push
 #                              # standard - minimal + blocks commits that add a secret-looking line
