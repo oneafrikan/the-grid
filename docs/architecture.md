@@ -137,6 +137,8 @@ are summarised; every other top-level directory, and every file under `scripts/`
     build-site-assets.sh ← renders the landing-page images from one source PNG
     stage-site.sh       ← copies the files named in site-files.txt into the Pages artifact
     stamp-counts.py     ← restamps generated counts in the README and index.html
+    translate-readme.sh ← regenerates the machine translations of README.md (opt-in, costs tokens)
+    check-translations.sh ← reports README translations made from older README prose
     check-personal.sh   ← scans the tracked tree for personal data
     personal-patterns.txt ← public generic rules for check-personal.sh
     personal-allow-paths.txt ← paths check-personal.sh skips, each with a reason
@@ -167,6 +169,8 @@ are summarised; every other top-level directory, and every file under `scripts/`
       skill-excludes.txt  ← tracked skill paths wire.sh and catalog.sh skip
       render-schedule.sh  ← renders the launchd/systemd/cron schedule for the usage and instincts jobs
       private-git-guard.sh ← safety checks for the unattended jobs that commit to the private repo
+      readme-hash.sh      ← sourced by the translation scripts: the README source hash
+      readme-locales.txt  ← the README translation locales, in switcher order
   docs/
     architecture.md     ← this file
     PLUGINS.md          ← the generated Claude Code plugin bundles
@@ -179,6 +183,7 @@ are summarised; every other top-level directory, and every file under `scripts/`
     reference-repos.md  ← curated external repos
     reference-resources.md ← curated external references
     rules.md            ← the rule packs and how to opt in
+    translation-prompt.md ← the prompt scripts/translate-readme.sh sends for each README translation
     uplift-runbook.md   ← how uplift work is built and merged
     usage.md            ← the weekly usage job
     budget-target.json  ← the committed ratchet read by scripts/budget.py
@@ -229,6 +234,7 @@ Every `docs/*.md` file in the repo, so a reader can reach each from here:
 - [reference-repos.md](reference-repos.md) — curated external repos
 - [reference-resources.md](reference-resources.md) — curated external references
 - [rules.md](rules.md) — rule packs
+- [translation-prompt.md](translation-prompt.md) — the prompt for the README translations
 - [uplift-runbook.md](uplift-runbook.md) — uplift runbook
 - [usage.md](usage.md) — the weekly usage job
 

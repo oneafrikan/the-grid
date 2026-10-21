@@ -39,6 +39,9 @@
 #   counts       generated counts in README/index.html are current (stamp-counts.py --check; compares
 #                committed files only; skipped with a notice if python3 or scripts/stamp-counts.py is absent)
 #   bats         the test suite
+#   translations README translations are current (check-translations.sh, non-strict, run after bats;
+#                a stale one only prints a WARN, it never fails the gate; skipped with a notice if
+#                the script is absent)
 #
 # Modes:
 #   gate.sh               run all checks (the heavy, merge-time gate; CI runs it via --strict)
@@ -538,5 +541,27 @@ if [ "$NO_BATS" = 1 ]; then
 else
   check bats       run_bats
 fi
+# Stale README translations are a reminder, not a blocker: regenerating costs model tokens and an
+# unattended loop must not be stopped by every README edit. So this check always returns 0; it
+# prints the stale locales as a WARN. Absent script = skipped loudly and recorded (G3).
+run_translations_check() {
+  if [ ! -f scripts/check-translations.sh ]; then
+    echo "    check-translations.sh absent - skipped"; SKIPPED+=(translations); return 0
+  fi
+  local out line stale=""
+  out="$(bash scripts/check-translations.sh 2>&1)" && return 0
+  while IFS= read -r line; do
+    case "$line" in "STALE "*) stale="$stale${stale:+ }${line#STALE }" ;; esac
+  done <<EOF
+$out
+EOF
+  if [ -n "$stale" ]; then
+    echo "    WARN: stale translations: $stale (fix: bash scripts/translate-readme.sh --all)"
+  else
+    echo "    WARN: check-translations.sh failed: $out"
+  fi
+  return 0
+}
+check translations run_translations_check
 
 summarise

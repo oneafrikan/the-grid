@@ -309,6 +309,15 @@ stub_shellcheck_logging() {
   [[ "$last" == "gate: PASS (skipped:"*"personal"* ]] || false
 }
 
+@test "G3: with scripts/check-translations.sh absent the translations check is skipped LOUDLY, not failed" {
+  # The copied gate has no scripts/check-translations.sh in the fake grid.
+  run run_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"check-translations.sh absent - skipped"* ]] || false
+  last="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$last" == "gate: PASS (skipped:"*"translations"* ]] || false
+}
+
 # Uses the REAL scanner and patterns in the fake grid. HOME is $G, so no private
 # denylist exists: the scan runs generic-only and the gate records the skip.
 @test "personal check passes generic-only and lists personal-denylist as skipped; a home path makes it FAIL" {
