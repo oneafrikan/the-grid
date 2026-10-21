@@ -5,19 +5,21 @@
 > This file keeps only the **issue map** (below). Shipped-work history is kept
 > privately. Add new work as an issue, not here.
 
-**Current focus (2026-10-13):** the-grid is being shared with other people.
-The 13-change uplift (**#55**, one `ws:<change>` label per workstream) is built by
-worktree agents with PRs to `main` that a human merges, and review fixes land the
-same way. **#25** (public-facing README + quickstart) is the remaining gating work for
-the repo being usable by someone who isn't Gareth. `next` was merged to `main` on
-2026-10-19 (PR #286) and the branch is retired; `main` is the only long-lived branch.
+**Current focus (2026-10-21):** the issue loop is live in this repo (untracked
+`loop/`, `MODE=direct`, issues in the private tracker) and is draining a queue of
+uplift items; the operator turns cron on once the first queue is drained. Run,
+watch and feed it from `docs/issue-loop-runbook.md`. Deferred until `main` is
+stable: `karpathy-loop` and `cli-cron`. Held: the `index.html` rebuild (**#150**),
+blocked on the operator's render step (**#149**) and a `git rm`.
+
+**#25** (public-facing README + quickstart) is the remaining gating work for the repo
+being usable by someone who isn't the author. `main` is the only long-lived branch.
 
 Behind that: `agent-factory` is a multi-target compiler. The **Claude Code** target is
-live, and the `codex`, `opencode` and `gemini-cli` targets are built
+live, and the `codex`, `opencode`, `gemini-cli` and `portable` targets are built
 (skills, subagents and rules reach those harnesses via `harness:<name>`, see
-`docs/harnesses.md`); what is missing is a real-install smoke test of each (**#31**,
-**#33**, **#32** stay open until then). The `portable` target is built too
-(`dist/personas/`) and **#36** is closed. The OpenClaw/Paperclip emitter work
+`docs/harnesses.md`). **#31**, **#32**, **#33** and **#36** are closed; the real-install
+smoke test of each harness is tracked in **#143**. The OpenClaw/Paperclip emitter work
 (**#4**) remains the deeper lift.
 
 ---
