@@ -97,3 +97,4 @@ s4 test_readme_translations.bats
 s4 test_knowledge_core.bats
 s4 test_knowledge_sweep.bats
 s4 test_knowledge_seed.bats
+s4 test_gh_triage_knowledge.bats
