@@ -216,8 +216,8 @@ STUB
   [ -z "$output" ] || { echo "$output" >&2; false; }
   # the two guard entries carry the fields design.md requires (the four opt-in instincts
   # entries are checked in tests/test_instincts_register.bats, so they are excluded here)
-  run jq -e '.version == 1 and (.hooks | length) == 7
-    and all(.hooks[] | select(.scope == "project" and (has("opt_in") | not)); .event == "PreToolUse" and .matcher == "Bash"
+  run jq -e '.version == 1 and (.hooks | length) == 8
+    and all(.hooks[] | select(.scope == "project" and (has("opt_in") | not) and .event != "Stop"); .event == "PreToolUse" and .matcher == "Bash"
       and .fail == "closed" and .timeout == 5 and .model_cost == false and (.cost | length) > 0)' \
     "$REPO_ROOT/hooks/catalogue.json"
   [ "$status" -eq 0 ]
@@ -227,9 +227,17 @@ STUB
       and .fail == "open" and .timeout == 5 and .model_cost == true and (.cost | length) > 0' \
     "$REPO_ROOT/hooks/catalogue.json"
   [ "$status" -eq 0 ]
+  # the epistemic-stop entry: Stop, no matcher, strict, fail open, advisory (no on_failure)
+  run jq -e '.hooks[] | select(.id == "epistemic-stop")
+    | .event == "Stop" and (has("matcher") | not) and .min_profile == "strict"
+      and .fail == "open" and .timeout == 5 and .model_cost == false
+      and (has("on_failure") | not) and (.cost | length) > 0' \
+    "$REPO_ROOT/hooks/catalogue.json"
+  [ "$status" -eq 0 ]
   run jq -r '.hooks[] | "\(.id) \(.min_profile)"' "$REPO_ROOT/hooks/catalogue.json"
   [[ "$output" == *"pre-bash-no-bypass minimal"* ]] || false
   [[ "$output" == *"pre-bash-secret-scan standard"* ]] || false
+  [[ "$output" == *"epistemic-stop strict"* ]] || false
 }
 
 @test "the agreement check can fail (empty cost and a renamed script are both reported)" {
