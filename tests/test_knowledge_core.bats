@@ -681,3 +681,104 @@ kfile() {
   [ "$(git -C "$BATS_TEST_TMPDIR/proj" log --format=%H)" = "$before" ]
 }
 
+# kcheck <args...> — run `knowledge.py check` against the temp project root.
+kcheck() {
+  run python3 -I "$REPO_ROOT/scripts/knowledge.py" check --root "$BATS_TEST_TMPDIR/proj" "$@"
+}
+
+# wsig <name> <filed_by> <stage> [dir] — write a signal by hand into proj/<dir, default signals>.
+wsig() {
+  mkdir -p "$BATS_TEST_TMPDIR/proj/${4:-signals}"
+  printf -- '---\nfiled_by: %s\nclaim: use the gate\nstage: %s\nwarrant: seen in CI\nstatus: pending\n---\n' \
+    "$2" "$3" >"$BATS_TEST_TMPDIR/proj/${4:-signals}/$1"
+}
+
+@test "cli check: a tree with no signals/ exits 0 and prints nothing" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  kcheck
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "cli check: a signal made by file passes, and so does a hand-written name" {
+  kfile
+  [ "$status" -eq 0 ]
+  wsig 20261018T101500Z-human-alex-abc123.md human-alex provisional
+  kcheck
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "cli check: README, a hand-off file and non-signals in done/ are ignored" {
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a wip
+  printf 'hand-off\n' >"$BATS_TEST_TMPDIR/proj/signals/→tech-lead.md"
+  printf '# signals\n' >"$BATS_TEST_TMPDIR/proj/signals/README.md"
+  mkdir -p "$BATS_TEST_TMPDIR/proj/signals/done"
+  printf 'not a signal\n' >"$BATS_TEST_TMPDIR/proj/signals/done/notes.md"
+  printf '{}\n' >"$BATS_TEST_TMPDIR/proj/signals/done/ledger.jsonl"
+  kcheck
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # Named explicitly they are still skipped.
+  kcheck signals/README.md "signals/→tech-lead.md"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "cli check: a misnamed file with a claim key is E_SIGNAL; one without is ignored" {
+  wsig my-note.md agent-a wip
+  printf 'just notes\n' >"$BATS_TEST_TMPDIR/proj/signals/other.md"
+  kcheck
+  [ "$status" -eq 1 ]
+  [ "$output" = "E_SIGNAL signals/my-note.md: misnamed signal file" ]
+}
+
+@test "cli check: stage draft prints an E_STAGE line and exits 1, without claim text" {
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a draft
+  kcheck
+  [ "$status" -eq 1 ]
+  [[ "$output" == "E_STAGE signals/20261018T101500Z-agent-a-abc123.md: stage: must be one of"* ]]
+  [[ "$output" != *"use the gate"* ]]
+}
+
+@test "cli check: a file name filer that is not the slug of filed_by is E_SIGNAL" {
+  wsig 20261018T101500Z-agent-b-abc123.md agent-a wip
+  kcheck
+  [ "$status" -eq 1 ]
+  [ "$output" = "E_SIGNAL signals/20261018T101500Z-agent-b-abc123.md: file name filer does not match filed_by" ]
+}
+
+@test "cli check: findings are sorted by path and done/ signals are checked" {
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a draft
+  wsig 20261018T090000Z-agent-a-abc123.md agent-a draft signals/done
+  kcheck
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | cut -d: -f1)" = $'E_STAGE signals/20261018T101500Z-agent-a-abc123.md\nE_STAGE signals/done/20261018T090000Z-agent-a-abc123.md' ]
+}
+
+@test "cli check: PATH arguments check only those files" {
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a draft
+  wsig 20261018T101600Z-agent-a-abc123.md agent-a wip
+  kcheck signals/20261018T101600Z-agent-a-abc123.md
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  kcheck "$BATS_TEST_TMPDIR/proj/signals/20261018T101500Z-agent-a-abc123.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == "E_STAGE signals/20261018T101500Z-agent-a-abc123.md:"* ]]
+}
+
+@test "cli check: an unreadable or missing file exits 2, names the file and prints no finding" {
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a draft
+  wsig 20261018T101600Z-agent-a-abc123.md agent-a wip
+  chmod 000 "$BATS_TEST_TMPDIR/proj/signals/20261018T101600Z-agent-a-abc123.md"
+  # root reads through mode 000, so the unreadable case cannot be built there.
+  if [ ! -r "$BATS_TEST_TMPDIR/proj/signals/20261018T101600Z-agent-a-abc123.md" ]; then
+    kcheck
+    [ "$status" -eq 2 ]
+    [ "$output" = "knowledge.py: E_READ cannot read signals/20261018T101600Z-agent-a-abc123.md" ]
+  fi
+  kcheck signals/20261018T101700Z-agent-a-abc123.md
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"E_READ cannot read signals/20261018T101700Z-agent-a-abc123.md" ]]
+}
+

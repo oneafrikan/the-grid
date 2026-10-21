@@ -5,23 +5,26 @@ Sections (added as the change lands, in this order):
     1. Vocabulary   stage names and their rank
     2. Claim hash   claim_hash, entry_id, slug
     3. Warrant      is_warranted, ceiling
-    4. Signal       KnowledgeError, parse_frontmatter, parse_signal, SIGNAL_NAME_RE, filer_slug
+    4. Signal       KnowledgeError, parse_frontmatter, parse_signal, SIGNAL_NAME_RE, filer_slug,
+                    Finding, format_finding, iter_signals, iter_done, check_signal
     5. Entry        parse_entry, render_entry, ENTRY_NAME_RE
     6. Address      heading_slugs, resolve_address
     7. Ledger       ledger_path, read_ledger, append_ledger, processed_signals, claim_state
     8. Command line main, SUBCOMMANDS (the one place a subcommand is registered); `file`
-                    writes a signal
+                    writes a signal, `check` lints signals
 
 Design rules:
   * Python 3 standard library only, valid on 3.8 (no `X | Y` annotations, no
     `str.removeprefix`).
-  * Pure functions: no git, no clock, and no file access except resolve_address, read_ledger
-    and append_ledger, which only touch files under the root they are given. Same input, same
+  * Pure functions: no git, no clock, and no file access except resolve_address, read_ledger,
+    append_ledger, iter_signals, iter_done and check_signal, which only touch files under the
+    root they are given. Same input, same
     output on every machine. (The command line is the exception: `file` reads the clock and
     writes one file under the root.)
   * Error text never echoes claim or warrant text (those may carry hostile content).
   * Sorting, where it appears, is plain code-point order.
 """
+import collections
 import datetime
 import hashlib
 import json
@@ -98,6 +101,9 @@ def ceiling(evidence):
 # Error codes: E_SIGNAL is any malformed signal; E_STAGE is a stage name nobody knows.
 E_SIGNAL = "E_SIGNAL"
 E_STAGE = "E_STAGE"
+# E_READ is a file that cannot be opened. Library only: the command line turns it into a
+# usage-style failure (exit 2), never a finding.
+E_READ = "E_READ"
 
 
 class KnowledgeError(ValueError):
@@ -220,6 +226,113 @@ def parse_signal(text):
     result = dict(fields)
     result["body"] = body
     return result
+
+
+# One problem found by `check`. These codes and the printed line are the interface the later
+# lint (map.py --check) reads, so they do not change.
+Finding = collections.namedtuple("Finding", ("code", "path", "message"))
+
+
+def format_finding(finding):
+    """`E_<CODE> <relpath>: <message>`, the one line `check` prints per finding."""
+    return "%s %s: %s" % (finding.code, finding.path, finding.message)
+
+
+def _is_handoff_or_readme(name):
+    # `signals/README.md` and the `→<agent>.md` hand-off files are not signals and every
+    # command ignores them.
+    return name == "README.md" or name.startswith("→")
+
+
+def _has_claim_key(text):
+    """True when the first frontmatter block has a `claim:` line. Deliberately loose (no
+    parse): a misnamed file may well also be malformed, and it is still a misnamed signal."""
+    lines = text.split("\n")
+    if lines[0] != "---":
+        return False
+    for line in lines[1:]:
+        if line == "---":
+            break
+        if line.startswith("claim:"):
+            return True
+    return False
+
+
+def iter_signals(root):
+    """Pending signals under root/signals/: returns (relative paths, findings).
+
+    Paths are the regular files directly in signals/ (not subdirectories) whose names match
+    SIGNAL_NAME_RE, in sorted name order. Findings are E_SIGNAL "misnamed signal file" for a
+    `*.md` file that is not a hand-off or README, does not match the pattern, and has a
+    `claim:` key: the sweep would never see it, so the lint says so. A missing signals/ is an
+    empty result.
+    """
+    base = os.path.join(root, "signals")
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return [], []
+    paths = []
+    findings = []
+    for name in names:
+        if not os.path.isfile(os.path.join(base, name)):
+            continue
+        rel = "signals/" + name
+        if SIGNAL_NAME_RE.match(name):
+            paths.append(rel)
+        elif name.endswith(".md") and not _is_handoff_or_readme(name):
+            try:
+                with open(os.path.join(base, name), "rb") as fh:
+                    text = fh.read().decode("utf-8")
+            except (OSError, UnicodeDecodeError):
+                # Cannot tell whether it claims anything; not a signal, so not our concern.
+                continue
+            if _has_claim_key(text):
+                findings.append(Finding(E_SIGNAL, rel, "misnamed signal file"))
+    return paths, findings
+
+
+def iter_done(root):
+    """Relative paths of the processed signals in root/signals/done/ that match
+    SIGNAL_NAME_RE, sorted. The ledger and anything else in there is ignored."""
+    base = os.path.join(root, "signals", "done")
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return []
+    return ["signals/done/" + n for n in names
+            if SIGNAL_NAME_RE.match(n) and os.path.isfile(os.path.join(base, n))]
+
+
+def check_signal(root, relpath):
+    """Findings for one signal file (a list, empty when it is valid).
+
+    The parse findings carry the code of the error parse_signal raised. A file whose name
+    filer is not the slug of `filed_by` is an E_SIGNAL too: the name is what the sweep and
+    the humans see, so it must not name someone else. An unreadable file raises
+    KnowledgeError(E_READ) naming the path; a file that is not UTF-8 is a finding.
+    """
+    try:
+        with open(os.path.join(root, *relpath.split("/")), "rb") as fh:
+            data = fh.read()
+    except OSError:
+        raise KnowledgeError(E_READ, "cannot read " + relpath)
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return [Finding(E_SIGNAL, relpath, "file: not valid UTF-8")]
+    name = relpath.rsplit("/", 1)[-1]
+    if not SIGNAL_NAME_RE.match(name):
+        return [Finding(E_SIGNAL, relpath, "file name does not match the signal pattern")]
+    try:
+        fields = parse_signal(text)
+    except KnowledgeError as err:
+        return [Finding(err.code, relpath, str(err))]
+    # Name layout: 16-char timestamp, "-", filer, "-", six hex, ".md" (10 chars with its dash).
+    # The filer is not echoed: it is filer-chosen text.
+    if name[17:-10] != filer_slug(fields["filed_by"]):
+        return [Finding(E_SIGNAL, relpath, "file name filer does not match filed_by")]
+    return []
 
 
 # --- 5. entry format ---------------------------------------------------------------
@@ -588,8 +701,9 @@ def claim_state(ledger, claim_hash):
 
 
 # --- 8. command line ---------------------------------------------------------------
-# Exit status: 0 ok, 2 usage error. Every error is one `knowledge.py: ...` line on stderr
-# and nothing on stdout, so a caller can treat stdout as the result alone.
+# Exit status: 0 ok, 1 findings (`check`), 2 usage error or unreadable file. Every error is
+# one `knowledge.py: ...` line on stderr and nothing on stdout, so a caller can treat stdout
+# as the result alone.
 
 
 class UsageError(Exception):
@@ -692,11 +806,54 @@ def _cmd_file(root, filer=None, claim=None, stage=None, warrant=None, body_file=
     return 0
 
 
-# Subcommand table: name -> (number of positional arguments, value-taking options, handler).
+def _check_target(root, arg):
+    """Root-relative `/` path for a `check` PATH argument: relative ones are taken as relative
+    to root, absolute ones must sit under it."""
+    if os.path.isabs(arg):
+        arg = os.path.relpath(arg, root)
+    parts = os.path.normpath(arg).split(os.sep)
+    if parts[0] == "..":
+        raise UsageError("path is outside the root")
+    return "/".join(parts)
+
+
+def _cmd_check(root, *paths):
+    """Print one finding per line, sorted by path; exit 0 when there are none, 1 otherwise.
+
+    With PATH arguments only those files are checked; with none, every pending and done
+    signal is. Findings are collected before anything is printed, so an unreadable file
+    (exit 2) leaves stdout empty. Output never carries claim text.
+    """
+    findings = []
+    if paths:
+        targets = []
+        for arg in paths:
+            rel = _check_target(root, arg)
+            # Hand-off files and the README are ignored by every command, named or not.
+            if not _is_handoff_or_readme(rel.rsplit("/", 1)[-1]):
+                targets.append(rel)
+    else:
+        targets, findings = iter_signals(root)
+        targets = targets + iter_done(root)
+    try:
+        for rel in targets:
+            findings += check_signal(root, rel)
+    except KnowledgeError as err:
+        if err.code != E_READ:
+            raise
+        raise UsageError("%s %s" % (err.code, err))
+    for finding in sorted(findings, key=lambda f: (f.path, f.code, f.message)):
+        print(format_finding(finding))
+    return 1 if findings else 0
+
+
+# Subcommand table: name -> (number of positional arguments or None for any number,
+# value-taking options, handler).
 # Options map `--flag` to the handler's keyword name; handler(root, *positionals, **options).
 # A later subcommand is one new entry here plus its handler.
 SUBCOMMANDS = {
     "hash": (1, {}, _cmd_hash),
+    "check": (None, {}, _cmd_check),
     "file": (0, dict([("--filer", "filer"), ("--claim", "claim"), ("--stage", "stage"),
                       ("--warrant", "warrant"), ("--body-file", "body_file")]
                      + [("--" + k, k) for k in _FILE_OPTIONAL]), _cmd_file),
@@ -739,7 +896,7 @@ def _parse(argv):
         else:
             positionals.append(arg)
         i += 1
-    if len(positionals) != SUBCOMMANDS[name][0]:
+    if SUBCOMMANDS[name][0] is not None and len(positionals) != SUBCOMMANDS[name][0]:
         raise UsageError("%s takes %d argument(s)" % (name, SUBCOMMANDS[name][0]))
     return name, root, positionals, options
 
