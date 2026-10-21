@@ -423,3 +423,131 @@ except knowledge.KnowledgeError as e:
   run paddr 'R("knowledge/provisional/../../x/K-0123abcd-x.md")'
   [[ "$output" == "E_ADDRESS path form must be"* ]]
 }
+
+# pled <expr> — like paddr, for the ledger. Helpers: D/Res/Re build records, app(*recs)
+# appends them, led() reads the ledger back, state() is claim_state for hash h1, raw(text)
+# overwrites the file for malformed-line cases. Prints the result, or "<code> <message>"
+# on KnowledgeError.
+pled() {
+  python3 -I -c '
+import os, sys
+sys.path.insert(0, sys.argv[1] + "/scripts")
+import knowledge
+
+ROOT = sys.argv[3]
+
+def D(sig, h, disp, issue=None):
+    return {"event": "disposition", "signal": sig, "claim_hash": h, "disposition": disp,
+            "entry": None, "issue": issue, "pr": None, "run": "r1"}
+
+def Res(h, result):
+    return {"event": "resolution", "claim_hash": h, "pr": 7, "result": result, "run": "r2"}
+
+def Re(h):
+    return {"event": "reopen", "claim_hash": h, "by": "operator", "run": "r3"}
+
+def app(*recs):
+    knowledge.append_ledger(ROOT, list(recs))
+
+def led():
+    return knowledge.read_ledger(ROOT)
+
+def state(h="h1"):
+    return knowledge.claim_state(led(), h)
+
+def raw(text):
+    p = knowledge.ledger_path(ROOT)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w") as fh:
+        fh.write(text)
+
+def text():
+    with open(knowledge.ledger_path(ROOT)) as fh:
+        return fh.read()
+
+try:
+    r = eval(sys.argv[2])
+    print("ok" if r is None else r)
+except knowledge.KnowledgeError as e:
+    print(e.code, e)
+' "$REPO_ROOT" "$1" "$BATS_TEST_TMPDIR/lroot"
+}
+
+@test "read_ledger: an absent ledger is an empty list" {
+  run pled 'led()'
+  [ "$output" = "[]" ]
+}
+
+@test "append_ledger: creates signals/done and earlier lines stay a byte prefix" {
+  run pled '(app(D("a.md", "h1", "written"), D("b.md", "h2", "wip")), text())[1]'
+  first="$output"
+  [ "$(printf '%s\n' "$first" | wc -l)" -eq 2 ]
+  # Append a third record in a second process, then compare the first two lines byte for byte.
+  run pled '(app(Res("h1", "accepted")), text())[1]'
+  [ "${output:0:${#first}}" = "$first" ]
+  [ "$(printf '%s\n' "$output" | wc -l)" -eq 3 ]
+}
+
+@test "append_ledger: lines are compact with sorted keys" {
+  run pled '(app(Re("h1")), text())[1]'
+  [ "$output" = '{"by":"operator","claim_hash":"h1","event":"reopen","run":"r3"}' ]
+}
+
+@test "append_ledger only opens the ledger in append mode" {
+  grep -q 'open(path, "a"' "$REPO_ROOT/scripts/knowledge.py"
+  ! grep -nE 'open\(path, "(w|r\+|wb)"' "$REPO_ROOT/scripts/knowledge.py" || false
+}
+
+@test "read_ledger: a malformed JSON line fails with E_LEDGER and the line number" {
+  run pled '(raw("{\"event\":\"reopen\",\"claim_hash\":\"h\",\"by\":\"x\",\"run\":\"r\"}\n\nnot json\n"), led())[1]'
+  [ "$output" = "E_LEDGER line 3: not valid JSON" ]
+}
+
+@test "read_ledger: unknown event and missing keys fail with E_LEDGER" {
+  run pled '(raw("{\"event\":\"bogus\"}\n"), led())[1]'
+  [ "$output" = "E_LEDGER line 1: unknown event" ]
+  run pled '(raw("{\"event\":\"resolution\",\"claim_hash\":\"h\",\"pr\":1,\"run\":\"r\"}\n"), led())[1]'
+  [ "$output" = "E_LEDGER line 1: resolution needs key result" ]
+}
+
+@test "read_ledger: unknown disposition and result fail with E_LEDGER" {
+  run pled '(raw("{\"event\":\"disposition\",\"signal\":\"s\",\"claim_hash\":\"h\",\"disposition\":\"nope\",\"entry\":null,\"issue\":null,\"pr\":null,\"run\":\"r\"}\n"), led())[1]'
+  [ "$output" = "E_LEDGER line 1: unknown disposition" ]
+  run pled '(raw("{\"event\":\"resolution\",\"claim_hash\":\"h\",\"pr\":1,\"result\":\"maybe\",\"run\":\"r\"}\n"), led())[1]'
+  [ "$output" = "E_LEDGER line 1: unknown result" ]
+}
+
+@test "processed_signals: the signal names that have a disposition line" {
+  run pled '(app(D("a.md", "h1", "written"), D("b.md", "h2", "duplicate"), Res("h1", "accepted")), sorted(knowledge.processed_signals(led())))[1]'
+  [ "$output" = "['a.md', 'b.md']" ]
+}
+
+@test "claim_state: escalated with no resolution is open at that issue" {
+  run pled '(app(D("a.md", "h1", "escalated", 42)), state())[1]'
+  [ "$output" = "{'escalated_open': 42, 'rejected': False}" ]
+}
+
+@test "claim_state: escalated then accepted is no longer open and not rejected" {
+  run pled '(app(D("a.md", "h1", "escalated", 42), Res("h1", "accepted")), state())[1]'
+  [ "$output" = "{'escalated_open': None, 'rejected': False}" ]
+}
+
+@test "claim_state: escalated then rejected is closed and rejected" {
+  run pled '(app(D("a.md", "h1", "escalated", 42), Res("h1", "rejected")), state())[1]'
+  [ "$output" = "{'escalated_open': None, 'rejected': True}" ]
+}
+
+@test "claim_state: rejected then reopen is not rejected" {
+  run pled '(app(Res("h1", "rejected"), Re("h1")), state())[1]'
+  [ "$output" = "{'escalated_open': None, 'rejected': False}" ]
+}
+
+@test "claim_state: rejected, reopen, rejected again is rejected" {
+  run pled '(app(Res("h1", "rejected"), Re("h1"), Res("h1", "rejected")), state())[1]'
+  [ "$output" = "{'escalated_open': None, 'rejected': True}" ]
+}
+
+@test "claim_state: other hashes do not affect the answer" {
+  run pled '(app(D("a.md", "h2", "escalated", 9), Res("h2", "rejected")), state())[1]'
+  [ "$output" = "{'escalated_open': None, 'rejected': False}" ]
+}
