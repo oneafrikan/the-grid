@@ -620,3 +620,79 @@ empty_plan() {
   [ -z "$(git -C "$PROJ" status --porcelain)" ]
   [ "$(commits)" = "$before" ]
 }
+
+# --- apply: entries -----------------------------------------------------------------------
+
+# plan_apply — plan the committed fixture to a file outside the repo, apply it with a fixed
+# date, and require exit 0 and a tree `check` accepts. The run date is 2026-10-19.
+plan_apply() {
+  python3 -I "$KN" plan --root "$PROJ" >"$BATS_TEST_TMPDIR/plan.json"
+  KNOWLEDGE_NOW=20261019T120000Z run --separate-stderr python3 -I "$KN" apply --root "$PROJ" \
+    --plan "$BATS_TEST_TMPDIR/plan.json"
+  [ "$status" -eq 0 ]
+  run --separate-stderr python3 -I "$KN" check --root "$PROJ"
+  [ "$status" -eq 0 ]
+}
+
+@test "apply: an unwarranted established claim becomes a wip entry marked unwarranted" {
+  fixture
+  esig agent-a established none "claim one"
+  commit_all
+  plan_apply
+  f=$(ls "$PROJ"/knowledge/wip/K-*-claim-one.md)
+  grep -qx 'stage: wip' "$f"
+  grep -qx 'unwarranted: yes' "$f"
+  grep -qx 'created: 2026-10-19' "$f"
+}
+
+@test "apply: a warranted provisional claim becomes one provisional entry with one evidence line and no signal body" {
+  fixture
+  printf 'BODYONLYTEXT\n' >"$BATS_TEST_TMPDIR/body.txt"
+  esig agent-a provisional "seen in CI" "claim one" --body-file "$BATS_TEST_TMPDIR/body.txt"
+  commit_all
+  plan_apply
+  f=$(ls "$PROJ"/knowledge/provisional/K-*-claim-one.md)
+  [ "$(grep -c '^- ' "$f")" = "1" ]
+  grep -q '^- .*-agent-a-[0-9a-f]\{6\}\.md | agent-a | provisional | seen in CI$' "$f"
+  ! grep -q 'unwarranted' "$f" || false
+  ! grep -rq BODYONLYTEXT "$PROJ/knowledge" || false
+}
+
+@test "apply: a first established claim stays in provisional" {
+  fixture
+  esig agent-a established "seen in CI" "claim one"
+  commit_all
+  plan_apply
+  [ -n "$(ls "$PROJ"/knowledge/provisional/K-*.md)" ]
+  [ ! -e "$PROJ/knowledge/established" ]
+}
+
+@test "apply: a second filer with a new warrant moves the entry to established as a staged rename with two evidence lines" {
+  fixture
+  esig agent-a established "seen in CI" "claim one"
+  commit_all
+  plan_apply
+  commit_all
+  id=$(python3 -I "$KN" hash "claim one" | cut -c1-8)
+  old=$(ls "$PROJ"/knowledge/provisional/K-"$id"-*.md)
+  esig agent-b established "reproduced locally" "claim one reworded" --confirms "K-$id"
+  commit_all
+  plan_apply
+  [ ! -e "$old" ]
+  new=$(ls "$PROJ"/knowledge/established/K-"$id"-*.md)
+  [ "$(grep -c '^- ' "$new")" = "2" ]
+  grep -qx 'stage: established' "$new"
+  grep -qx 'updated: 2026-10-19' "$new"
+  git -C "$PROJ" status --porcelain | grep -q '^R'
+}
+
+@test "apply: a duplicate writes nothing" {
+  fixture
+  esig agent-a established "seen in CI" "claim one"
+  commit_all
+  plan_apply
+  commit_all
+  # The signal is still pending (apply does not move it yet) and now matches its own entry.
+  plan_apply
+  [ -z "$(git -C "$PROJ" status --porcelain)" ]
+}
