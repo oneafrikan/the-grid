@@ -12,16 +12,17 @@ Sections (added as the change lands, in this order):
     7. Ledger       ledger_path, read_ledger, append_ledger, processed_signals, claim_state
     8. Tree check   iter_entries, check_entry, check_tree (the one function a second tool
                     imports to lint the whole tree)
-    9. Command line main, SUBCOMMANDS (the one place a subcommand is registered); `file`
-                    writes a signal, `check` lints signals and entries
+    9. Plan         build_plan (read-only: which pending signals the sweep would look at)
+   10. Command line main, SUBCOMMANDS (the one place a subcommand is registered); `file`
+                    writes a signal, `check` lints signals and entries, `plan` prints build_plan
 
 Design rules:
   * Python 3 standard library only, valid on 3.8 (no `X | Y` annotations, no
     `str.removeprefix`).
   * Pure functions: no clock, no git except edited_after_add (and check_signal, which calls it),
     and no file access except resolve_address, read_ledger, append_ledger, iter_signals,
-    iter_done, check_signal, iter_entries, check_entry and check_tree, which only touch files
-    under the root they are given (check_tree writes nothing). Same
+    iter_done, check_signal, iter_entries, check_entry, check_tree and build_plan, which only
+    touch files under the root they are given (check_tree and build_plan write nothing). Same
     input, same output on every machine. (The command line is the exception: `file` reads the clock and
     writes one file under the root.)
   * Error text never echoes claim or warrant text (those may carry hostile content).
@@ -870,7 +871,51 @@ def check_tree(root, history_skipped=None):
     return sorted(findings, key=lambda f: (f.path, f.code, f.message))
 
 
-# --- 9. command line ---------------------------------------------------------------
+# --- 9. plan -----------------------------------------------------------------------
+# Signals one sweep run looks at when no cap is given.
+DEFAULT_CAP = 10
+
+
+def build_plan(root, cap=DEFAULT_CAP):
+    """Read-only plan of the pending signals: a dict that json.dumps(sort_keys=True) renders
+    byte-identically on an unchanged tree (no clock, no run id, no absolute paths).
+
+    Pending = a name matching SIGNAL_NAME_RE directly in signals/ that has no ledger
+    `disposition` line and is not already in signals/done/. Oldest name first (the timestamp
+    leads the name, so code-point order is age order); only the first `cap` are listed and the
+    rest are counted in `deferred`, untouched. A signal with any check_signal finding is
+    `invalid` with the finding codes in `reasons`; every other one is `pending` for now (later
+    changes replace that with the real dispositions). Later changes add fields to each signal
+    entry, never remove one. Raises KnowledgeError(E_READ) for a file that cannot be opened and
+    E_LEDGER for a bad ledger.
+    """
+    paths, _ = iter_signals(root)
+    seen = processed_signals(read_ledger(root))
+    seen.update(rel.rsplit("/", 1)[-1] for rel in iter_done(root))
+    pending = [rel for rel in paths if rel.rsplit("/", 1)[-1] not in seen]
+
+    signals = []
+    counts = {}
+    for rel in pending[:cap]:
+        findings = check_signal(root, rel)
+        entry = {"claim_hash": None, "disposition": "pending", "entry": None,
+                 "file": rel.rsplit("/", 1)[-1], "needs_judgement": [], "reasons": [],
+                 "stage": None}
+        if findings:
+            entry["disposition"] = "invalid"
+            # Codes only, never the message: it names the key but a code is all a reader needs.
+            entry["reasons"] = sorted(set(f.code for f in findings))
+        else:
+            # Valid, so it parses; the hash is the claim's identity for the later rules.
+            with open(os.path.join(root, *rel.split("/")), "rb") as fh:
+                entry["claim_hash"] = claim_hash(parse_signal(fh.read().decode("utf-8"))["claim"])
+        counts[entry["disposition"]] = counts.get(entry["disposition"], 0) + 1
+        signals.append(entry)
+    return {"cap": cap, "counts": counts, "deferred": len(pending) - len(signals),
+            "pending": len(pending), "reconcile": [], "signals": signals}
+
+
+# --- 10. command line --------------------------------------------------------------
 # Exit status: 0 ok, 1 findings (`check`), 2 usage error or unreadable file. Every error is
 # one `knowledge.py: ...` line on stderr and nothing on stdout, so a caller can treat stdout
 # as the result alone.
@@ -1028,6 +1073,31 @@ def _cmd_check(root, *paths, address=None):
     return 1 if findings else 0
 
 
+def _cmd_plan(root, cap=None):
+    """Print build_plan as JSON (sorted keys, 2-space indent) and write nothing. Exit 0.
+
+    --cap N limits how many pending signals are listed (default DEFAULT_CAP, N >= 0). An
+    unreadable signal is a usage-style failure (exit 2) like in `check`; the plan is built
+    before anything is printed so stdout stays empty then.
+    """
+    if cap is None:
+        limit = DEFAULT_CAP
+    else:
+        # ASCII digits only: no sign, space or other script's digits, so the cap is one plain
+        # non-negative number.
+        if not (cap.isascii() and cap.isdigit()):
+            raise UsageError("--cap must be a non-negative integer")
+        limit = int(cap)
+    try:
+        plan = build_plan(root, limit)
+    except KnowledgeError as err:
+        if err.code != E_READ:
+            raise
+        raise UsageError("%s %s" % (err.code, err))
+    print(json.dumps(plan, sort_keys=True, indent=2))
+    return 0
+
+
 # Subcommand table: name -> (number of positional arguments or None for any number,
 # value-taking options, handler).
 # Options map `--flag` to the handler's keyword name; handler(root, *positionals, **options).
@@ -1035,6 +1105,7 @@ def _cmd_check(root, *paths, address=None):
 SUBCOMMANDS = {
     "hash": (1, {}, _cmd_hash),
     "check": (None, {"--address": "address"}, _cmd_check),
+    "plan": (0, {"--cap": "cap"}, _cmd_plan),
     "file": (0, dict([("--filer", "filer"), ("--claim", "claim"), ("--stage", "stage"),
                       ("--warrant", "warrant"), ("--body-file", "body_file")]
                      + [("--" + k, k) for k in _FILE_OPTIONAL]), _cmd_file),
