@@ -16,10 +16,10 @@ Sections (added as the change lands, in this order):
 Design rules:
   * Python 3 standard library only, valid on 3.8 (no `X | Y` annotations, no
     `str.removeprefix`).
-  * Pure functions: no git, no clock, and no file access except resolve_address, read_ledger,
-    append_ledger, iter_signals, iter_done and check_signal, which only touch files under the
-    root they are given. Same input, same
-    output on every machine. (The command line is the exception: `file` reads the clock and
+  * Pure functions: no clock, no git except edited_after_add (and check_signal, which calls it),
+    and no file access except resolve_address, read_ledger, append_ledger, iter_signals,
+    iter_done and check_signal, which only touch files under the root they are given. Same
+    input, same output on every machine. (The command line is the exception: `file` reads the clock and
     writes one file under the root.)
   * Error text never echoes claim or warrant text (those may carry hostile content).
   * Sorting, where it appears, is plain code-point order.
@@ -101,6 +101,8 @@ def ceiling(evidence):
 # Error codes: E_SIGNAL is any malformed signal; E_STAGE is a stage name nobody knows.
 E_SIGNAL = "E_SIGNAL"
 E_STAGE = "E_STAGE"
+# E_EDITED is a signal changed after the commit that added it (signals are immutable).
+E_EDITED = "E_EDITED"
 # E_READ is a file that cannot be opened. Library only: the command line turns it into a
 # usage-style failure (exit 2), never a finding.
 E_READ = "E_READ"
@@ -304,8 +306,62 @@ def iter_done(root):
             if SIGNAL_NAME_RE.match(n) and os.path.isfile(os.path.join(base, n))]
 
 
-def check_signal(root, relpath):
+def _git(root, *args):
+    """stdout of `git <args>` run in root, or None when git is missing or exits non-zero
+    (not a repository, no commits yet). Fixed argv, never a shell; LC_ALL=C so the output
+    format cannot vary with the machine's locale."""
+    env = dict(os.environ, LC_ALL="C")
+    try:
+        done = subprocess.run(("git",) + args, cwd=root, env=env, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+    if done.returncode != 0:
+        return None
+    return done.stdout.decode("utf-8", "replace")
+
+
+def edited_after_add(root, relpath):
+    """True when the signal at relpath was changed after the commit that added it, False when
+    it was not, None when git cannot answer (no git binary, or root is not a repository).
+
+    A signal is immutable: that is checked from git history, never from the `<hash6>` in the
+    name. "Changed" means a commit that modified the path (--diff-filter=M), or an `M` in the
+    index or working tree against HEAD. A rename (the sweep moving a signal to signals/done/
+    unchanged), a delete and a file git has never seen are not modifications. A rename plus
+    an edit looks like a new file and is accepted (a recorded limit of the design).
+    """
+    history = _git(root, "log", "--diff-filter=M", "--format=%H", "--", relpath)
+    if history is None:
+        return None
+    if history.strip():
+        return True
+    status = _git(root, "diff", "--name-status", "HEAD", "--", relpath)
+    if status is None:
+        # A repository without a commit yet: nothing could have been added and then changed.
+        return False
+    return any(line.startswith("M") for line in status.splitlines())
+
+
+def check_signal(root, relpath, history_skipped=None):
     """Findings for one signal file (a list, empty when it is valid).
+
+    On top of the format findings, E_EDITED when the signal was changed after the commit that
+    added it (see edited_after_add). When git cannot answer the check is skipped and relpath
+    is appended to `history_skipped` (if given) so the caller can say so once.
+    """
+    findings = _check_signal_format(root, relpath)
+    edited = edited_after_add(root, relpath)
+    if edited is None:
+        if history_skipped is not None:
+            history_skipped.append(relpath)
+    elif edited:
+        findings.append(Finding(E_EDITED, relpath, "signal changed after it was added"))
+    return findings
+
+
+def _check_signal_format(root, relpath):
+    """Format findings for one signal file (a list, empty when it is valid).
 
     The parse findings carry the code of the error parse_signal raised. A file whose name
     filer is not the slug of `filed_by` is an E_SIGNAL too: the name is what the sweep and
@@ -835,13 +891,18 @@ def _cmd_check(root, *paths):
     else:
         targets, findings = iter_signals(root)
         targets = targets + iter_done(root)
+    skipped = []
     try:
         for rel in targets:
-            findings += check_signal(root, rel)
+            findings += check_signal(root, rel, skipped)
     except KnowledgeError as err:
         if err.code != E_READ:
             raise
         raise UsageError("%s %s" % (err.code, err))
+    if skipped:
+        # One line however many signals: every other rule was still applied, and this is not
+        # a failure.
+        print("notice: git history unavailable, edited-signal check skipped", file=sys.stderr)
     for finding in sorted(findings, key=lambda f: (f.path, f.code, f.message)):
         print(format_finding(finding))
     return 1 if findings else 0
