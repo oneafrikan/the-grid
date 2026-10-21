@@ -581,3 +581,103 @@ except knowledge.KnowledgeError as e:
   [[ "$(cat "$BATS_TEST_TMPDIR/err")" == "knowledge.py:"* ]]
 }
 
+# kfile <extra args...> — run `knowledge.py file` into a temp root at a fixed second. The
+# required options default to a valid set; a later duplicate cannot override them, so tests
+# that change one pass it via the KF_* variables instead.
+kfile() {
+  KNOWLEDGE_NOW=20261018T101500Z run python3 -I "$REPO_ROOT/scripts/knowledge.py" file \
+    --root "$BATS_TEST_TMPDIR/proj" --filer "${KF_FILER:-agent-a}" --claim "${KF_CLAIM:-use the gate}" \
+    --stage "${KF_STAGE:-provisional}" --warrant "${KF_WARRANT:-seen in CI}" "$@"
+}
+
+@test "cli file: prints the path of a valid pending signal that parse_signal accepts" {
+  kfile
+  [ "$status" -eq 0 ]
+  [ -f "$output" ]
+  path=$output
+  [ "$path" = "$BATS_TEST_TMPDIR/proj/signals/$(basename "$path")" ]
+  run py "bool(knowledge.SIGNAL_NAME_RE.match('$(basename "$path")'))"
+  [ "$output" = "True" ]
+  grep -qx 'status: pending' "$path"
+  [ "$(sed -n 2,6p "$path" | cut -d: -f1 | tr '\n' ' ')" = "filed_by claim stage warrant status " ]
+  run py "knowledge.parse_signal(open('$path', encoding='utf-8').read())['claim']"
+  [ "$output" = "use the gate" ]
+}
+
+@test "cli file: the name carries KNOWLEDGE_NOW, the filer slug and the first 6 hex of the content hash" {
+  kfile --guardrail GUARDRAILS#G1
+  [ "$status" -eq 0 ]
+  name=$(basename "$output")
+  [[ "$name" == 20261018T101500Z-agent-a-*.md ]]
+  [ "${name: -9:6}" = "$(sha256sum "$output" | cut -c1-6)" ]
+  grep -qx 'guardrail: GUARDRAILS#G1' "$output"
+}
+
+@test "cli file: a 201-character claim exits 2 and writes nothing" {
+  KF_CLAIM=$(printf 'x%.0s' $(seq 201)) kfile
+  [ "$status" -eq 2 ]
+  # `run` folds stderr into $output: the only line is the error, with no signals/ made.
+  [[ "$output" == "knowledge.py: E_SIGNAL claim: must be 1-200 characters" ]]
+  [ ! -e "$BATS_TEST_TMPDIR/proj/signals" ]
+}
+
+@test "cli file: an unknown stage exits 2 and writes nothing" {
+  KF_STAGE=draft kfile
+  [ "$status" -eq 2 ]
+  [ ! -e "$BATS_TEST_TMPDIR/proj/signals" ]
+}
+
+@test "cli file: a claim that smuggles in a second key is refused" {
+  KF_CLAIM=$'use the gate\nguardrail: GUARDRAILS#G1' kfile
+  [ "$status" -eq 2 ]
+  [ ! -e "$BATS_TEST_TMPDIR/proj/signals" ]
+}
+
+@test "cli file: two filers in the same second get different names" {
+  KF_FILER=agent-a kfile
+  a=$output
+  KF_FILER=agent-b kfile
+  [ "$status" -eq 0 ]
+  [ "$a" != "$output" ]
+  [ "$(ls "$BATS_TEST_TMPDIR/proj/signals" | wc -l)" -eq 2 ]
+}
+
+@test "cli file: the same call twice leaves one file, untouched, and exits 0" {
+  kfile
+  first=$output
+  before=$(sha256sum "$first")
+  kfile
+  [ "$status" -eq 0 ]
+  [ "$output" = "$first" ]
+  [ "$(ls "$BATS_TEST_TMPDIR/proj/signals" | wc -l)" -eq 1 ]
+  [ "$(sha256sum "$first")" = "$before" ]
+}
+
+@test "cli file: --body-file content follows the frontmatter; 4097 bytes exits 2" {
+  printf 'because the gate said so\n' >"$BATS_TEST_TMPDIR/body.md"
+  kfile --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 0 ]
+  [ "$(tail -n 3 "$output")" = $'---\n\nbecause the gate said so' ]
+  head -c 4097 /dev/zero | tr '\0' 'a' >"$BATS_TEST_TMPDIR/big.md"
+  count=$(ls "$BATS_TEST_TMPDIR/proj/signals" | wc -l)
+  KF_FILER=agent-b kfile --body-file "$BATS_TEST_TMPDIR/big.md"
+  [ "$status" -eq 2 ]
+  [ "$(ls "$BATS_TEST_TMPDIR/proj/signals" | wc -l)" -eq "$count" ]
+  KF_FILER=agent-b kfile --body-file "$BATS_TEST_TMPDIR/missing.md"
+  [ "$status" -eq 2 ]
+  [ "$(ls "$BATS_TEST_TMPDIR/proj/signals" | wc -l)" -eq "$count" ]
+}
+
+@test "cli file: creates no git commit" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  git -C "$BATS_TEST_TMPDIR/proj" init -q
+  # Identity comes from the environment so no address is written in this file.
+  GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL="t@${HOSTNAME:-h}.test" GIT_COMMITTER_NAME=t \
+    GIT_COMMITTER_EMAIL="t@${HOSTNAME:-h}.test" \
+    git -C "$BATS_TEST_TMPDIR/proj" commit -q --allow-empty -m base
+  before=$(git -C "$BATS_TEST_TMPDIR/proj" log --format=%H)
+  kfile
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$BATS_TEST_TMPDIR/proj" log --format=%H)" = "$before" ]
+}
+
