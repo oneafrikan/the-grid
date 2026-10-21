@@ -1812,6 +1812,48 @@ expect_plain() {
   expect_strict password-assigned '{"password":"s3cr3tVal"}'
 }
 
+# Security review of H-06 (hardening, refs private issue #79). Fixtures are split literals of
+# obviously fake material: 64 hex digits from a repeated word, base64 from "Zm9v" repeated.
+@test "strict: every base64-run on the line is judged, a leading sha256 does not hide a later run" {
+  local h b h65; h="$(printf 'e3b0c442%.0s' 1 2 3 4 5 6 7 8)"; b="$(printf 'Zm9v%.0s' $(seq 18))"; h65="${h}0"
+  expect_strict base64-run "sha256 $h blob $b"
+  expect_strict base64-run "$h $b"
+  expect_strict base64-run "$h $h65"
+  # control: two bare digests on one line stay clean, and the old order is still caught
+  expect_strict clean "sha256 $h and $h"
+  expect_strict base64-run "$b $h"
+}
+
+@test "strict: a bare hex run on a line that names a key, secret, private, token, password or credential is a hit" {
+  local h; h="$(printf 'e3b0c442%.0s' 1 2 3 4 5 6 7 8)"
+  expect_strict base64-run "key: $h"
+  expect_strict base64-run "signing_key = $h"
+  expect_strict base64-run "ENCRYPTION_KEY = $h"
+  expect_strict base64-run "the Secret is $h"
+  expect_strict base64-run "private $h"
+  expect_strict base64-run "bearer token $h"
+  expect_strict base64-run "passwd $h"
+  expect_strict base64-run "Credential $h$h"
+  # control: a checksum line without such a word is still clean
+  expect_strict clean "sha256 of the build artifact: $h"
+}
+
+@test "strict: the base64-run finding shows the first four characters of the run" {
+  local b; b="$(printf 'Zm9v%.0s' $(seq 18))"
+  printf 'blob %s\n' "$b" > "$BATS_TEST_TMPDIR/f.txt"
+  run bash -c '. "$1/hooks/lib/secret-patterns.sh"; SECRET_STRICT=1; secret_scan_file "$2"' _ "$REPO_ROOT" "$BATS_TEST_TMPDIR/f.txt"
+  [[ "$output" == *"base64-run (Zm9v...)"* ]] || { echo "$output" >&2; false; }
+}
+
+@test "strict: bidi marks, Mongolian vowel separator, variation selector and blank-looking fillers do not hide a key" {
+  local loc ins
+  for loc in C C.UTF-8; do
+    for ins in $'\xe2\x80\x8e' $'\xe2\x80\x8f' $'\xe1\xa0\x8e' $'\xef\xb8\x8f' $'\xe3\x85\xa4' $'\xef\xbe\xa0' $'\xe2\xa0\x80' $'\xd8\x9c'; do
+      expect_in "$loc" strict assigned-secret "token${ins}=Abcdefghijklmnop12"
+    done
+  done
+}
+
 @test "strict: the value boundaries hold (15 chars passes; a template marker first no longer exempts, H-01)" {
   expect_strict clean 'api_key = abcdefghijklmno'
   # H-01 (d): a model can put $ < { in front of any value, so strict mode reads those as
