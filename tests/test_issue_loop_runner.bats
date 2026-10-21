@@ -476,6 +476,39 @@ EOF
   [ "$(claude_calls)" -eq 0 ]
 }
 
+@test "lock: two starts racing for one stale lock - exactly one runs, the other exits busy (repeated)" {
+  happy_env
+  # no daily cap, or the default of 5 would end the loop part-way through the iterations
+  set_conf MAX_ISSUES_PER_DAY 0
+  # the winner must still hold the lock when the loser looks at it
+  export STUB_CLAUDE_SLEEP=1
+  true &
+  dead=$!
+  wait "$dead"
+  local i
+  for i in $(seq 1 20); do
+    # a fresh stale lock each round; a distinct issue number so "branch issue-N already exists" cannot interfere
+    export STUB_ISSUES=$((100 + i))
+    : > "$STUB_LOG"
+    mkdir -p "$STATE/lock"
+    echo "$dead" > "$STATE/lock/pid"
+    # start both together; which one wins the rename is not asserted, only that exactly one proceeds
+    ( cd "$REPO" && bash loop/run-issue.sh > "$T/race-a.out" 2>&1 ) &
+    pa=$!
+    ( cd "$REPO" && bash loop/run-issue.sh > "$T/race-b.out" 2>&1 ) &
+    pb=$!
+    ra=0; rb=0
+    wait "$pa" || ra=$?
+    wait "$pb" || rb=$?
+    [ "$ra" -eq 0 ]
+    [ "$rb" -eq 0 ]
+    [ "$(cat "$T/race-a.out" "$T/race-b.out" | grep -c 'busy')" -eq 1 ]
+    [ "$(claude_calls)" -eq 1 ]
+    [ -z "$(ls -d "$STATE"/lock.stale.* 2>/dev/null || true)" ]
+    [ ! -d "$STATE/lock" ]
+  done
+}
+
 @test "lock: a lock with no pid file is busy while fresh and taken over once it is older than 5 minutes" {
   happy_env
   mkdir -p "$STATE/lock"
