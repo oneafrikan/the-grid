@@ -225,3 +225,113 @@ except knowledge.KnowledgeError as e:
   [[ "$output" == "E_SIGNAL "* ]]
   [[ "$output" != *plugh* ]]
 }
+
+# pent <python expr> — the expression yields entry text. ent(**over) builds a valid entry
+# through the library's own claim_hash (an override of None drops the key); evl() is the
+# evidence list. Prints "ok" or "<code> <message>".
+pent() {
+  python3 -I -c '
+import sys
+sys.path.insert(0, sys.argv[1] + "/scripts")
+import knowledge
+
+SIGNAL = "20261018T101500Z-agent-1-abc123.md"
+
+def evl(warrant="ran bats"):
+    return [{"signal": SIGNAL, "filed_by": "agent-1", "stage": "provisional", "warrant": warrant}]
+
+def fields(**over):
+    claim = over.get("claim", "use the gate")
+    h = knowledge.claim_hash(claim)
+    f = {"id": "K-" + h[:8], "claim": claim, "claim_hash": h, "stage": "provisional",
+         "created": "2026-10-18", "updated": "2026-10-19"}
+    f.update(over)
+    return {k: v for k, v in f.items() if v is not None}
+
+def ent(**over):
+    # Built by hand rather than render_entry so invalid inputs can be made too.
+    f = fields(**over)
+    lines = ["%s: %s" % (k, v) for k, v in f.items()]
+    return ("---\n" + "\n".join(lines) + "\n---\n\n## Claim\n\n" + f.get("claim", "") +
+            "\n\n## Evidence\n\n- " + " | ".join(evl()[0].values()) + "\n")
+
+try:
+    r = eval(sys.argv[2])
+    print("ok" if r is None else r)
+except knowledge.KnowledgeError as e:
+    print(e.code, e)
+' "$REPO_ROOT" "$1"
+}
+
+@test "ENTRY_NAME_RE matches K-hash8-slug.md and rejects bad names" {
+  run py 'bool(knowledge.ENTRY_NAME_RE.match("K-0123abcd-use-the-gate.md"))'
+  [ "$output" = "True" ]
+  run py 'bool(knowledge.ENTRY_NAME_RE.match("K-0123abcd-entry.md"))'
+  [ "$output" = "True" ]
+  run py 'bool(knowledge.ENTRY_NAME_RE.match("K-0123ABCD-x.md"))'
+  [ "$output" = "False" ]
+  run py 'bool(knowledge.ENTRY_NAME_RE.match("K-0123abcd-" + "x" * 41 + ".md"))'
+  [ "$output" = "False" ]
+  run py 'bool(knowledge.ENTRY_NAME_RE.match("K-0123abcd-.md"))'
+  [ "$output" = "False" ]
+}
+
+@test "render_entry then parse_entry round-trips fields and evidence" {
+  run pent 'knowledge.parse_entry(knowledge.render_entry(fields(supersedes="K-0123abcd", guardrail="GUARDRAILS#G7", unwarranted="yes"), evl())) == dict(fields(supersedes="K-0123abcd", guardrail="GUARDRAILS#G7", unwarranted="yes"), claim_text="use the gate", evidence=evl())'
+  [ "$output" = "True" ]
+}
+
+@test "render_entry writes the keys in the fixed order" {
+  run pent 'knowledge.render_entry(dict(reversed(list(fields(contradicts="K-0123abcd").items()))), evl()).split("---")[1].split("\n")[1:-1] == [k + ": " + str(v) for k, v in fields(contradicts="K-0123abcd").items()]'
+  [ "$output" = "True" ]
+}
+
+@test "parse_entry keeps a warrant that contains ' | '" {
+  run pent 'knowledge.parse_entry(knowledge.render_entry(fields(), evl("a | b | c | d")))["evidence"][0]["warrant"]'
+  [ "$output" = "a | b | c | d" ]
+}
+
+@test "parse_entry rejects an unknown key" {
+  run pent 'knowledge.parse_entry(ent(colour="blue"))'
+  [[ "$output" == "E_ENTRY "* ]]
+}
+
+@test "parse_entry rejects a missing ## Evidence heading" {
+  run pent 'knowledge.parse_entry(ent().replace("## Evidence", "## Notes"))'
+  [ "$output" = "E_ENTRY body: missing '## Evidence' heading" ]
+}
+
+@test "parse_entry rejects an evidence line with three fields" {
+  run pent 'knowledge.parse_entry(ent().replace(" | provisional | ran bats", " | ran bats"))'
+  [[ "$output" == "E_ENTRY evidence:"* ]]
+}
+
+@test "parse_entry rejects an id that does not match claim_hash" {
+  run pent 'knowledge.parse_entry(ent(id="K-00000000"))'
+  [ "$output" = "E_ENTRY id: must be K- plus the first 8 of claim_hash" ]
+}
+
+@test "parse_entry rejects a claim_hash that does not match the claim" {
+  # A hand-edited claim with the old hash and id still in place.
+  run pent 'knowledge.parse_entry(ent().replace("use the gate", "skip the gate"))'
+  [ "$output" = "E_ENTRY claim_hash: does not match claim" ]
+}
+
+@test "parse_entry: stage draft is E_STAGE, retired is accepted" {
+  run pent 'knowledge.parse_entry(ent(stage="draft"))'
+  [[ "$output" == "E_STAGE stage:"* ]]
+  run pent 'knowledge.parse_entry(ent(stage="retired"))["stage"]'
+  [ "$output" = "retired" ]
+}
+
+@test "parse_entry rejects unwarranted: no" {
+  run pent 'knowledge.parse_entry(ent(unwarranted="no"))'
+  [[ "$output" == "E_ENTRY unwarranted:"* ]]
+}
+
+@test "parse_entry rejects a bad date and a missing required key" {
+  run pent 'knowledge.parse_entry(ent(created="2026-02-30"))'
+  [[ "$output" == "E_ENTRY created:"* ]]
+  run pent 'knowledge.parse_entry(ent(updated=None))'
+  [ "$output" = "E_ENTRY updated: required" ]
+}
