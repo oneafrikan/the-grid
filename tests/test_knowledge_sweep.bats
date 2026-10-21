@@ -1034,6 +1034,73 @@ wt_untouched() {
   git -C "$PROJ" worktree remove --force "$WT"
 }
 
+@test "apply --proposal-for: a supersession changes exactly the new entry and the old one, cross-linked" {
+  fixture
+  mk_entry provisional "old claim" "agent-a|provisional|seen in CI"
+  old=$(python3 -I "$KN" hash "old claim" | cut -c1-8)
+  mv "$PROJ/knowledge/provisional/K-$old.md" "$PROJ/knowledge/provisional/K-$old-old-claim.md"
+  esig agent-b provisional "ran it twice" "new claim" --supersedes "K-$old"
+  commit_all
+  wt_add
+  sig=$(basename "$(ls "$PROJ"/signals/*.md)")
+  KNOWLEDGE_NOW=20261019T120000Z run --separate-stderr python3 -I "$KN" apply \
+    --proposal-for "$sig" --root "$WT"
+  [ "$status" -eq 0 ]
+  [ "$(wt_status | wc -l)" -eq 2 ]
+  wt_status | grep -qE "^R[M ] knowledge/provisional/K-$old-old-claim\.md -> knowledge/superseded/K-$old-old-claim\.md$"
+  wt_status | grep -qE '^\?\? knowledge/provisional/K-[0-9a-f]{8}-new-claim\.md$'
+  new_f=$(ls "$WT"/knowledge/provisional/K-*-new-claim.md)
+  new=$(basename "$new_f" | cut -c1-10)
+  old_f="$WT/knowledge/superseded/K-$old-old-claim.md"
+  grep -qx 'stage: superseded' "$old_f"
+  grep -qx "superseded_by: $new" "$old_f"
+  grep -qx "supersedes: K-$old" "$new_f"
+  # The cross-link rule holds both ways.
+  run --separate-stderr python3 -I "$KN" check --root "$WT"
+  [ "$status" -eq 0 ]
+  [ -e "$PROJ/knowledge/provisional/K-$old-old-claim.md" ]
+  [ ! -e "$PROJ/knowledge/superseded" ]
+  wt_untouched
+  git -C "$PROJ" worktree remove --force "$WT"
+}
+
+@test "apply --proposal-for: a supersession of an entry that does not resolve exits 2 and writes nothing" {
+  fixture
+  esig agent-b provisional "ran it twice" "new claim" --supersedes K-0123abcd
+  commit_all
+  wt_add
+  sig=$(basename "$(ls "$PROJ"/signals/*.md)")
+  run --separate-stderr python3 -I "$KN" apply --proposal-for "$sig" --root "$WT"
+  [ "$status" -eq 2 ]
+  [ -z "$(wt_status)" ]
+  wt_untouched
+  git -C "$PROJ" worktree remove --force "$WT"
+}
+
+@test "apply --proposal-for: a declared contradiction adds one entry with contradicts and leaves the other entry's bytes alone" {
+  fixture
+  mk_entry established "other claim" "agent-a|established|seen in CI"
+  other=$(python3 -I "$KN" hash "other claim" | cut -c1-8)
+  mv "$PROJ/knowledge/established/K-$other.md" "$PROJ/knowledge/established/K-$other-other-claim.md"
+  esig agent-b provisional "ran it twice" "new claim" --contradicts "K-$other"
+  commit_all
+  wt_add
+  sig=$(basename "$(ls "$PROJ"/signals/*.md)")
+  KNOWLEDGE_NOW=20261019T120000Z run --separate-stderr python3 -I "$KN" apply \
+    --proposal-for "$sig" --root "$WT"
+  [ "$status" -eq 0 ]
+  [ "$(wt_status | wc -l)" -eq 1 ]
+  [[ "$(wt_status)" =~ ^\?\?\ knowledge/provisional/K-[0-9a-f]{8}-new-claim\.md$ ]]
+  grep -qx "contradicts: K-$other" "$WT"/knowledge/provisional/K-*-new-claim.md
+  cmp "$PROJ/knowledge/established/K-$other-other-claim.md" \
+    "$WT/knowledge/established/K-$other-other-claim.md"
+  [ ! -e "$WT/knowledge/superseded" ]
+  run --separate-stderr python3 -I "$KN" check --root "$WT"
+  [ "$status" -eq 0 ]
+  wt_untouched
+  git -C "$PROJ" worktree remove --force "$WT"
+}
+
 @test "apply --proposal-for: a missing signal, another kind of signal or a dirty tree writes nothing" {
   fixture
   esig agent-a provisional "seen in CI" "claim one"

@@ -1785,12 +1785,79 @@ def write_canon_entry(root, sig, name, today):
     _write_text(root, new_rel, text)
 
 
+def write_link_entry(root, sig, name, today):
+    """Write the proposal for a signal that declares `supersedes: K-old` and/or
+    `contradicts: K-x`. Only `_cmd_proposal` calls it.
+
+    The new entry is added at its mechanical stage (the same rule `apply --plan` uses, so it
+    never lands in canon/) and carries the declared links. For `supersedes` the old entry is
+    also `git mv`ed into knowledge/superseded/, set to `stage: superseded` and given
+    `superseded_by: K-new`: this is the ONLY place anything is written under
+    knowledge/superseded/, because a supersession must reach the repo through a human-approved
+    PR. Exactly those two files change. A `contradicts` target is never opened or edited.
+    UsageError (exit 2) when the claim already has an entry, or the old entry does not resolve,
+    is unreadable, is already superseded or retired, or is the new entry itself; every check
+    and both renderings come before the first write, so nothing is written then.
+    """
+    chash = claim_hash(sig["claim"])
+    addr = entry_id(sig["claim"])
+    _, _, ids = closed_entry_maps(root)
+    if ids.get(addr):
+        raise UsageError("the claim already has an entry")
+    old = old_rel = None
+    if "supersedes" in sig:
+        try:
+            old_rel, _ = resolve_address(root, sig["supersedes"])
+        except KnowledgeError:
+            raise UsageError("the superseded entry does not resolve")
+        old = _load_entry(root, old_rel)
+        if old is None or old["id"] == addr or "superseded_by" in old \
+                or old_rel.split("/")[1] in (_STAGE_DIRS["superseded"], _STAGE_DIRS["retired"]):
+            raise UsageError("the superseded entry cannot be superseded")
+    disposition, _, stage = entry_disposition(sig, None)
+    fields = {"id": addr, "claim": sig["claim"], "claim_hash": chash, "stage": stage,
+              "created": today, "updated": today}
+    if "supersedes" in sig:
+        fields["supersedes"] = old["id"]
+    if "contradicts" in sig:
+        fields["contradicts"] = sig["contradicts"]
+    # Same flag a plan-written entry gets when the signal has no real warrant.
+    if disposition == "wip":
+        fields["unwarranted"] = "yes"
+    line = {"signal": name, "filed_by": sig["filed_by"], "stage": sig["stage"],
+            "warrant": sig["warrant"]}
+    new_rel = "knowledge/%s/%s-%s.md" % (_STAGE_DIRS[stage], addr, slug(sig["claim"]) or "entry")
+    # Render both first: an entry the reader would reject must fail before anything moves.
+    new_text = render_entry(fields, [line])
+    if old is None:
+        _write_text(root, new_rel, new_text)
+        return
+    old_fields = dict((k, v) for k, v in old.items() if k not in ("claim_text", "evidence"))
+    old_fields["stage"] = "superseded"
+    old_fields["updated"] = today
+    old_fields["superseded_by"] = addr
+    old_text = render_entry(old_fields, old["evidence"])
+    moved_rel = "knowledge/%s/%s" % (_STAGE_DIRS["superseded"], old_rel.rsplit("/", 1)[-1])
+    os.makedirs(os.path.join(root, "knowledge", _STAGE_DIRS["superseded"]), exist_ok=True)
+    # git mv so the move is staged as a rename and history follows the old entry; a fixed argv,
+    # never a shell, both paths built here from fixed words and a name resolve_address accepted.
+    try:
+        subprocess.run(["git", "-C", root, "mv", old_rel, moved_rel], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        raise UsageError("git mv failed")
+    _write_text(root, moved_rel, old_text)
+    _write_text(root, new_rel, new_text)
+
+
 def _cmd_proposal(root, signal):
     """`apply --proposal-for SIGNAL`: write ONLY the proposed knowledge/ change for one
     escalated signal, so a PR can carry it. Runs in a fresh linked worktree cut from the sweep
     branch, where the signal is still pending in signals/.
 
-    Two cases (supersede and contradiction proposals are a later change):
+    Three cases:
+      * the signal has `supersedes` or `contradicts`: `write_link_entry` (checked first, so a
+        canonical claim that also declares a link keeps the link and is not written to canon/);
       * the signal claims `canonical`: `write_canon_entry`;
       * the signal cites a guardrail (and is not canonical, supersedes or contradicts): the
         entry is added at its mechanical stage through `_apply_item`, the same path `apply
@@ -1822,10 +1889,13 @@ def _cmd_proposal(root, signal):
     except (OSError, UnicodeDecodeError, KnowledgeError):
         raise UsageError("cannot read the signal")
     today = _today()
+    if "supersedes" in sig or "contradicts" in sig:
+        write_link_entry(root, sig, name, today)
+        return 0
     if sig["stage"] == "canonical":
         write_canon_entry(root, sig, name, today)
         return 0
-    if "guardrail" not in sig or "supersedes" in sig or "contradicts" in sig:
+    if "guardrail" not in sig:
         raise UsageError("the signal is not a canon or guardrail-conflict case")
     # A canon match or an id collision is a different escalation, not this one.
     closed_by_hash, closed_by_id, ids = closed_entry_maps(root)
