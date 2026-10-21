@@ -534,3 +534,89 @@ write_guardrails() {
   [ "$output" = "$first" ]
   [ -z "$(git -C "$PROJ" status --porcelain)" ]
 }
+
+# --- apply: guards only (no writes) -------------------------------------------------------
+
+# commits — number of commits in the fixture, to prove apply never commits.
+commits() {
+  git -C "$PROJ" rev-list --count HEAD
+}
+
+# empty_plan — plan from a committed fixture with no signals, saved outside the repo.
+empty_plan() {
+  python3 -I "$KN" plan --root "$PROJ" >"$BATS_TEST_TMPDIR/plan.json"
+}
+
+@test "apply: a valid plan with nothing to write exits 0, writes nothing and makes no commit" {
+  fixture
+  empty_plan
+  before=$(commits)
+  run --separate-stderr python3 -I "$KN" apply --root "$PROJ" --plan "$BATS_TEST_TMPDIR/plan.json"
+  [ "$status" -eq 0 ]
+  [ -z "$(git -C "$PROJ" status --porcelain)" ]
+  [ "$(commits)" = "$before" ]
+}
+
+@test "apply: while another process holds the lock it exits 3 with locked on stderr and writes nothing" {
+  fixture
+  empty_plan
+  before=$(commits)
+  # The holder prints one line once it owns the lock, then waits on stdin; reading that line
+  # means no sleep or polling is needed. Killing it releases the lock (the OS does that).
+  coproc HOLDER (python3 -I -c 'import fcntl,sys; f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX); print("held",flush=True); sys.stdin.readline()' "$PROJ/.git/knowledge-sweep.lock")
+  read -r line <&"${HOLDER[0]}"
+  [ "$line" = "held" ]
+  run --separate-stderr python3 -I "$KN" apply --root "$PROJ" --plan "$BATS_TEST_TMPDIR/plan.json"
+  kill "$HOLDER_PID" || true
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *locked* ]]
+  [ -z "$(git -C "$PROJ" status --porcelain)" ]
+  [ "$(commits)" = "$before" ]
+}
+
+@test "apply: an uncommitted new file exits 4 and nothing is written" {
+  fixture
+  empty_plan
+  before=$(commits)
+  printf 'stray\n' >"$PROJ/stray.txt"
+  run --separate-stderr python3 -I "$KN" apply --root "$PROJ" --plan "$BATS_TEST_TMPDIR/plan.json"
+  [ "$status" -eq 4 ]
+  # Only the stray file is there: apply added nothing of its own.
+  [ "$(git -C "$PROJ" status --porcelain)" = "?? stray.txt" ]
+  [ "$(commits)" = "$before" ]
+}
+
+@test "apply: a plan item that would write stage canonical exits 2 and knowledge/canon is unchanged" {
+  fixture
+  printf '%s\n' '{"signals": [{"file": "x.md", "disposition": "written", "stage": "canonical", "entry": "K-00000000"}]}' \
+    >"$BATS_TEST_TMPDIR/forged.json"
+  before=$(commits)
+  run --separate-stderr python3 -I "$KN" apply --root "$PROJ" --plan "$BATS_TEST_TMPDIR/forged.json"
+  [ "$status" -eq 2 ]
+  [ ! -e "$PROJ/knowledge/canon" ]
+  [ -z "$(git -C "$PROJ" status --porcelain)" ]
+  [ "$(commits)" = "$before" ]
+}
+
+@test "apply: an escalated item with no stage is not a canon write and exits 0" {
+  fixture
+  printf '%s\n' '{"signals": [{"file": "x.md", "disposition": "escalated", "stage": null, "entry": null}]}' \
+    >"$BATS_TEST_TMPDIR/esc.json"
+  run --separate-stderr python3 -I "$KN" apply --root "$PROJ" --plan "$BATS_TEST_TMPDIR/esc.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "apply: bad JSON, a missing plan file and an unknown disposition each exit 2" {
+  fixture
+  before=$(commits)
+  printf 'not json' >"$BATS_TEST_TMPDIR/bad.json"
+  run --separate-stderr python3 -I "$KN" apply --root "$PROJ" --plan "$BATS_TEST_TMPDIR/bad.json"
+  [ "$status" -eq 2 ]
+  run --separate-stderr python3 -I "$KN" apply --root "$PROJ" --plan "$BATS_TEST_TMPDIR/missing.json"
+  [ "$status" -eq 2 ]
+  printf '%s\n' '{"signals": [{"file": "x.md", "disposition": "bogus"}]}' >"$BATS_TEST_TMPDIR/unk.json"
+  run --separate-stderr python3 -I "$KN" apply --root "$PROJ" --plan "$BATS_TEST_TMPDIR/unk.json"
+  [ "$status" -eq 2 ]
+  [ -z "$(git -C "$PROJ" status --porcelain)" ]
+  [ "$(commits)" = "$before" ]
+}

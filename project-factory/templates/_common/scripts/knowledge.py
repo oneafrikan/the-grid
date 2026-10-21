@@ -14,7 +14,8 @@ Sections (added as the change lands, in this order):
                     imports to lint the whole tree)
     9. Plan         build_plan (read-only: which pending signals the sweep would look at)
    10. Command line main, SUBCOMMANDS (the one place a subcommand is registered); `file`
-                    writes a signal, `check` lints signals and entries, `plan` prints build_plan
+                    writes a signal, `check` lints signals and entries, `plan` prints build_plan,
+                    `apply` runs the safety guards (lock, clean tree, plan sanity), no writes yet
 
 Design rules:
   * Python 3 standard library only, valid on 3.8 (no `X | Y` annotations, no
@@ -30,6 +31,7 @@ Design rules:
 """
 import collections
 import datetime
+import fcntl
 import hashlib
 import json
 import os
@@ -1241,13 +1243,22 @@ def build_plan(root, cap=DEFAULT_CAP):
 
 
 # --- 10. command line --------------------------------------------------------------
-# Exit status: 0 ok, 1 findings (`check`), 2 usage error or unreadable file. Every error is
+# Exit status: 0 ok, 1 findings (`check`), 2 usage error or unreadable file, 3 another sweep
+# holds the lock (`apply`), 4 dirty tree (`apply`). Every error is
 # one `knowledge.py: ...` line on stderr and nothing on stdout, so a caller can treat stdout
 # as the result alone.
 
 
 class UsageError(Exception):
     """Bad command line; main() turns it into one stderr line and exit status 2."""
+
+
+class Refused(Exception):
+    """A guard stopped `apply` on purpose; main() prints the message and exits with `status`."""
+
+    def __init__(self, status, message):
+        Exception.__init__(self, message)
+        self.status = status
 
 
 def default_root():
@@ -1423,6 +1434,85 @@ def _cmd_plan(root, cap=None):
     return 0
 
 
+# Dispositions build_plan can leave on a signal (`pending` is only its starting value and is
+# always replaced), so anything else in a plan file is forged or from a different version.
+PLAN_DISPOSITIONS = ("invalid", "secret", "duplicate", "repeat-rejected", "escalated",
+                     "wip", "written", "confirmed")
+# Stages whose entries live under knowledge/canon|superseded|retired/: only a human-approved PR
+# may write there, never `apply`.
+HUMAN_ONLY_STAGES = ("canonical", "superseded", "retired")
+
+
+def _read_plan(path):
+    """Parse and sanity-check a plan file; UsageError (exit 2) on any problem. The error text
+    never echoes plan content."""
+    try:
+        with open(path, "rb") as fh:
+            plan = json.loads(fh.read().decode("utf-8"))
+    except OSError:
+        raise UsageError("cannot read --plan file")
+    except (ValueError, RecursionError):
+        # Bad JSON or not UTF-8 (UnicodeDecodeError is a ValueError).
+        raise UsageError("--plan file is not valid JSON")
+    if not isinstance(plan, dict) or not isinstance(plan.get("signals"), list):
+        raise UsageError("--plan file has no signals list")
+    for item in plan["signals"]:
+        if not isinstance(item, dict) or not isinstance(item.get("file"), str):
+            raise UsageError("--plan file has a malformed signal item")
+        if item.get("disposition") not in PLAN_DISPOSITIONS:
+            raise UsageError("--plan file has an unknown disposition")
+    return plan
+
+
+def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=None):
+    """Guards for the writing run; so far it checks everything and writes nothing.
+
+    Order: lock (exit 3), clean tree (exit 4), then the plan (exit 2). The helper never
+    commits: the role's commit step is the only writer to history. --verdicts and --escalations
+    are accepted but not read yet. --proposal-for is parsed only; a later change implements it.
+    """
+    if proposal_for is not None:
+        if plan is not None:
+            raise UsageError("--proposal-for cannot be combined with --plan")
+        raise UsageError("--proposal-for is not implemented yet")
+    if plan is None:
+        raise UsageError("apply needs --plan or --proposal-for")
+
+    # flock, not a pid file: the OS drops the lock when the process dies for any reason, so a
+    # crashed run can never leave a stale lock behind. The file object stays open (held in
+    # `lock`) until this function returns, i.e. for the whole run. The lock file sits in .git,
+    # so it never dirties the tree.
+    try:
+        lock = open(os.path.join(root, ".git", "knowledge-sweep.lock"), "a")
+    except OSError:
+        raise UsageError("cannot open the lock file under .git")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock.close()
+        raise Refused(3, "locked")
+    try:
+        # Fail closed: if git cannot say the tree is clean, treat it as not clean.
+        try:
+            status = subprocess.run(["git", "-C", root, "status", "--porcelain"],
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    check=True).stdout
+        except (OSError, subprocess.CalledProcessError):
+            raise Refused(4, "cannot read git status")
+        if status.strip():
+            raise Refused(4, "working tree is not clean")
+
+        data = _read_plan(plan)
+        # An escalated item writes nothing here; any other item whose stage is a human-only
+        # one would write under canon/superseded/retired, so the plan is forged or buggy.
+        for item in data["signals"]:
+            if item["disposition"] != "escalated" and item.get("stage") in HUMAN_ONLY_STAGES:
+                raise UsageError("--plan file has an item that would write to a human-only stage")
+        return 0
+    finally:
+        lock.close()
+
+
 # Subcommand table: name -> (number of positional arguments or None for any number,
 # value-taking options, handler).
 # Options map `--flag` to the handler's keyword name; handler(root, *positionals, **options).
@@ -1431,6 +1521,8 @@ SUBCOMMANDS = {
     "hash": (1, {}, _cmd_hash),
     "check": (None, {"--address": "address"}, _cmd_check),
     "plan": (0, {"--cap": "cap"}, _cmd_plan),
+    "apply": (0, {"--plan": "plan", "--verdicts": "verdicts", "--escalations": "escalations",
+                  "--proposal-for": "proposal_for"}, _cmd_apply),
     "file": (0, dict([("--filer", "filer"), ("--claim", "claim"), ("--stage", "stage"),
                       ("--warrant", "warrant"), ("--body-file", "body_file")]
                      + [("--" + k, k) for k in _FILE_OPTIONAL]), _cmd_file),
@@ -1490,6 +1582,9 @@ def main(argv=None):
     except UsageError as err:
         print("knowledge.py: %s" % err, file=sys.stderr)
         return 2
+    except Refused as err:
+        print("knowledge.py: %s" % err, file=sys.stderr)
+        return err.status
     except KnowledgeError as err:
         print("knowledge.py: %s %s" % (err.code, err), file=sys.stderr)
         return 1
