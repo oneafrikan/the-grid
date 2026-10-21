@@ -662,6 +662,27 @@ EOF
   refute argv_has --dangerously-skip-permissions
 }
 
+@test "permissions: the allowlist always carries the repo's own VERIFY_CMD (the worker is told to run it), unless the value would corrupt the list" {
+  happy_env
+  run_runner
+  [ "$status" -eq 0 ]
+  contains "$(argv_get --allowedTools)" ",Bash(ls stub-work-*.txt >/dev/null:*)"
+  # already listed by the operator: not added twice
+  git -C "$REPO" push -q origin :refs/heads/issue-4
+  set_conf WORKER_ALLOWED_TOOLS 'Read,Edit,Bash(ls stub-work-*.txt >/dev/null:*)'
+  run_runner
+  [ "$status" -eq 0 ]
+  [ "$(argv_get --allowedTools)" = 'Read,Edit,Bash(ls stub-work-*.txt >/dev/null:*)' ]
+  # a comma or ")" in the value would split or end the entry: skipped with one warning line
+  git -C "$REPO" push -q origin :refs/heads/issue-4
+  write_conf
+  set_conf VERIFY_CMD 'ls stub-work-*.txt >/dev/null && echo "a,b" >/dev/null'
+  run_runner
+  [ "$status" -eq 0 ]
+  contains "$output" "VERIFY_CMD contains"
+  lacks "$(argv_get --allowedTools)" "a,b"
+}
+
 @test "permissions: WORKER_PERMISSIONS=bypass passes --dangerously-skip-permissions and no allowlist" {
   happy_env
   set_conf WORKER_PERMISSIONS bypass
