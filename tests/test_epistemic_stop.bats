@@ -108,3 +108,51 @@ stop_payload() {
   [ "$status" -eq 0 ] || { echo "input: no message, missing transcript" >&2; false; }
   [ -z "$output" ] || { echo "input: no message, missing transcript" >&2; false; }
 }
+
+# shellcheck disable=SC2154  # status/output are set by bats' `run`
+@test "epistemic-stop: with jq hidden from PATH it exits 0 (fails open)" {
+  local noj payload
+  # Build the payload with jq BEFORE jq is hidden. path_without walks every executable on
+  # PATH (slow), so it is called once, here, as tests/test_hooks.bats does.
+  payload="$(stop_payload "Fixed the bug and all tests pass.")"
+  noj="$(path_without jq)"
+
+  # Control: the same payload with the normal PATH blocks, so the exit 0 below can only
+  # come from the missing jq, not from the message.
+  run_hook epistemic-stop "$payload"
+  [ "$status" -eq 2 ]
+
+  PATH="$noj" run bash -c 'printf "%s" "$1" | bash "$2/hooks/run.sh" epistemic-stop 2>&1' \
+    _ "$payload" "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+  # grid_require_jq open prints a note naming jq before it exits 0.
+  [[ "$output" == *"jq"* ]] || false
+}
+
+# shellcheck disable=SC2154  # status/output are set by bats' `run`
+@test "epistemic-stop: GRID_DISABLED_HOOKS and GRID_HOOKS=off switch it off" {
+  local payload
+  payload="$(stop_payload "Fixed the bug and all tests pass.")"
+
+  # Control: a kill switch naming a different hook leaves epistemic-stop active.
+  run env GRID_DISABLED_HOOKS=other-hook \
+    bash -c 'printf "%s" "$1" | bash "$2/hooks/run.sh" epistemic-stop 2>&1' _ "$payload" "$REPO_ROOT"
+  [ "$status" -eq 2 ]
+
+  # `env` scopes each variable to its own call, so nothing leaks between assertions.
+  run env GRID_DISABLED_HOOKS=epistemic-stop \
+    bash -c 'printf "%s" "$1" | bash "$2/hooks/run.sh" epistemic-stop 2>&1' _ "$payload" "$REPO_ROOT"
+  [ "$status" -eq 0 ] || { echo "GRID_DISABLED_HOOKS=epistemic-stop" >&2; false; }
+  [ -z "$output" ] || { echo "GRID_DISABLED_HOOKS=epistemic-stop" >&2; false; }
+
+  # A list with a space after the comma is tolerated.
+  run env GRID_DISABLED_HOOKS="other-hook, epistemic-stop" \
+    bash -c 'printf "%s" "$1" | bash "$2/hooks/run.sh" epistemic-stop 2>&1' _ "$payload" "$REPO_ROOT"
+  [ "$status" -eq 0 ] || { echo "GRID_DISABLED_HOOKS list with space" >&2; false; }
+  [ -z "$output" ] || { echo "GRID_DISABLED_HOOKS list with space" >&2; false; }
+
+  run env GRID_HOOKS=off \
+    bash -c 'printf "%s" "$1" | bash "$2/hooks/run.sh" epistemic-stop 2>&1' _ "$payload" "$REPO_ROOT"
+  [ "$status" -eq 0 ] || { echo "GRID_HOOKS=off" >&2; false; }
+  [ -z "$output" ] || { echo "GRID_HOOKS=off" >&2; false; }
+}
