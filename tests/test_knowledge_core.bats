@@ -883,3 +883,123 @@ wsig() {
   [[ "$output" == *"E_READ cannot read signals/20261018T101700Z-agent-a-abc123.md" ]]
 }
 
+# ptree <python expr> — entries in the temp project. put(dir, claim, name=None, **over) writes a
+# rendered entry into knowledge/<dir>/ (over overrides fields, e.g. stage=, supersedes=) and
+# returns its id; edit(dir, old, new) rewrites the text of every file in a dir (to make entries
+# render_entry would refuse); T() is the check_tree findings, one formatted line each.
+ptree() {
+  python3 -I -c '
+import os, sys
+sys.path.insert(0, sys.argv[1] + "/scripts")
+import knowledge
+
+ROOT = sys.argv[3]
+
+def put(d, claim="use the gate", name=None, **over):
+    h = knowledge.claim_hash(claim)
+    f = {"id": "K-" + h[:8], "claim": claim, "claim_hash": h, "stage": "provisional",
+         "created": "2026-10-18", "updated": "2026-10-19"}
+    f.update(over)
+    ev = [{"signal": "20261018T101500Z-agent-1-abc123.md", "filed_by": "agent-1",
+           "stage": "provisional", "warrant": "ran bats"}]
+    os.makedirs(os.path.join(ROOT, "knowledge", d), exist_ok=True)
+    name = name or "%s-%s.md" % (f["id"], knowledge.slug(claim))
+    with open(os.path.join(ROOT, "knowledge", d, name), "w") as fh:
+        fh.write(knowledge.render_entry(f, ev))
+    return f["id"]
+
+def edit(d, old, new):
+    for n in os.listdir(os.path.join(ROOT, "knowledge", d)):
+        p = os.path.join(ROOT, "knowledge", d, n)
+        with open(p) as fh:
+            text = fh.read()
+        with open(p, "w") as fh:
+            fh.write(text.replace(old, new))
+
+def T():
+    return "\n".join(knowledge.format_finding(f) for f in knowledge.check_tree(ROOT))
+
+try:
+    r = eval(sys.argv[2])
+    print("ok" if r is None else r)
+except knowledge.KnowledgeError as e:
+    print(e.code, e)
+' "$REPO_ROOT" "$1" "$BATS_TEST_TMPDIR/proj"
+}
+
+@test "check_tree: a tree with no signals/ or knowledge/ has no findings" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  run ptree 'T()'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "check_tree: a valid entry in provisional/ is clean" {
+  run ptree '(put("provisional"), T())[-1]'
+  [ -z "$output" ]
+}
+
+@test "check_tree: stage canonical in established/ is E_STAGE naming the file" {
+  run ptree '(put("established", stage="canonical"), T())[-1]'
+  [[ "$output" == "E_STAGE knowledge/established/K-"*"-use-the-gate.md: "* ]]
+  [ "$(echo "$output" | wc -l)" -eq 1 ]
+}
+
+@test "check_tree: stage canonical is clean in canon/, stage established there is E_STAGE" {
+  run ptree '(put("canon", stage="canonical"), T())[-1]'
+  [ -z "$output" ]
+  run ptree '(put("canon", "another claim", stage="established"), T())[-1]'
+  [[ "$output" == "E_STAGE knowledge/canon/K-"*"-another-claim.md: "* ]]
+}
+
+@test "check_tree: stage draft is E_STAGE" {
+  run ptree '(put("provisional"), edit("provisional", "stage: provisional", "stage: draft"), T())[-1]'
+  [[ "$output" == "E_STAGE knowledge/provisional/K-"*"-use-the-gate.md: "* ]]
+}
+
+@test "check_tree: superseded_by without the reverse supersedes is E_ENTRY on the old entry" {
+  run ptree '(put("superseded", "old claim", stage="superseded", superseded_by=knowledge.entry_id("new claim")), put("provisional", "new claim"), T())[-1]'
+  [[ "$output" == "E_ENTRY knowledge/superseded/K-"*"-old-claim.md: superseded_by: K-"* ]]
+  [ "$(echo "$output" | wc -l)" -eq 1 ]
+}
+
+@test "check_tree: a proper supersede pair is clean" {
+  run ptree '(put("superseded", "old claim", stage="superseded", superseded_by=knowledge.entry_id("new claim")), put("provisional", "new claim", supersedes=knowledge.entry_id("old claim")), T())[-1]'
+  [ -z "$output" ]
+}
+
+@test "check_tree: supersedes pointing at an entry outside superseded/ is E_ENTRY" {
+  run ptree '(put("established", "old claim", stage="established", superseded_by=knowledge.entry_id("new claim")), put("provisional", "new claim", supersedes=knowledge.entry_id("old claim")), T())[-1]'
+  [[ "$output" == "E_ENTRY knowledge/provisional/K-"*"-new-claim.md: supersedes: K-"*"not in knowledge/superseded/" ]]
+}
+
+@test "check_tree: supersedes pointing at a missing entry is E_ADDR" {
+  run ptree '(put("provisional", supersedes="K-00000000"), T())[-1]'
+  [[ "$output" == "E_ADDR knowledge/provisional/K-"*"-use-the-gate.md: supersedes: "* ]]
+}
+
+@test "check_tree: a file name whose hash does not match id is E_ENTRY" {
+  run ptree '(put("provisional", name="K-00000000-use-the-gate.md"), T())[-1]'
+  [[ "$output" == "E_ENTRY knowledge/provisional/K-00000000-use-the-gate.md: file name does not match"* ]]
+}
+
+@test "cli check: a bad entry and a bad signal are both printed, sorted by path" {
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a draft
+  run ptree 'put("established", stage="canonical")'
+  kcheck
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | cut -d: -f1 | cut -d/ -f1)" = $'E_STAGE knowledge\nE_STAGE signals' ]
+}
+
+@test "cli check: writes nothing, tracked or untracked" {
+  gproj
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a wip
+  run ptree 'put("provisional")'
+  gcommit add
+  run ptree 'put("established", "second claim", stage="canonical")'
+  before=$(git -C "$BATS_TEST_TMPDIR/proj" status --porcelain)
+  kcheck_raw
+  [ "$status" -eq 1 ]
+  [ "$(git -C "$BATS_TEST_TMPDIR/proj" status --porcelain)" = "$before" ]
+}
+

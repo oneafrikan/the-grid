@@ -10,15 +10,18 @@ Sections (added as the change lands, in this order):
     5. Entry        parse_entry, render_entry, ENTRY_NAME_RE
     6. Address      heading_slugs, resolve_address
     7. Ledger       ledger_path, read_ledger, append_ledger, processed_signals, claim_state
-    8. Command line main, SUBCOMMANDS (the one place a subcommand is registered); `file`
-                    writes a signal, `check` lints signals
+    8. Tree check   iter_entries, check_entry, check_tree (the one function a second tool
+                    imports to lint the whole tree)
+    9. Command line main, SUBCOMMANDS (the one place a subcommand is registered); `file`
+                    writes a signal, `check` lints signals and entries
 
 Design rules:
   * Python 3 standard library only, valid on 3.8 (no `X | Y` annotations, no
     `str.removeprefix`).
   * Pure functions: no clock, no git except edited_after_add (and check_signal, which calls it),
     and no file access except resolve_address, read_ledger, append_ledger, iter_signals,
-    iter_done and check_signal, which only touch files under the root they are given. Same
+    iter_done, check_signal, iter_entries, check_entry and check_tree, which only touch files
+    under the root they are given (check_tree writes nothing). Same
     input, same output on every machine. (The command line is the exception: `file` reads the clock and
     writes one file under the root.)
   * Error text never echoes claim or warrant text (those may carry hostile content).
@@ -756,7 +759,118 @@ def claim_state(ledger, claim_hash):
     return {"escalated_open": escalated_open, "rejected": rejected}
 
 
-# --- 8. command line ---------------------------------------------------------------
+# --- 8. tree check -----------------------------------------------------------------
+# E_ADDR is a finding for a cross-link whose address does not resolve. It is the finding code;
+# resolve_address itself raises E_ADDRESS, which check_entry turns into this.
+E_ADDR = "E_ADDR"
+
+# Directory each entry stage lives in: every stage in the directory of its own name except
+# `canonical`, which lives in `canon/`.
+_STAGE_DIRS = dict((stage, stage) for stage in STAGES_ENTRY)
+_STAGE_DIRS["canonical"] = "canon"
+ENTRY_DIRS = tuple(_STAGE_DIRS[stage] for stage in STAGES_ENTRY)
+
+
+def iter_entries(root):
+    """(directory name, relative path) of every `knowledge/<dir>/K-*.md` regular file in the six
+    stage directories, sorted by path. A missing directory is skipped; other directories under
+    knowledge/ are not entries and are ignored."""
+    found = []
+    for dirname in ENTRY_DIRS:
+        base = os.path.join(root, "knowledge", dirname)
+        try:
+            names = os.listdir(base)
+        except OSError:
+            continue
+        for name in names:
+            if name.startswith("K-") and name.endswith(".md") \
+                    and os.path.isfile(os.path.join(base, name)):
+                found.append((dirname, "knowledge/%s/%s" % (dirname, name)))
+    return sorted(found, key=lambda item: item[1])
+
+
+def _load_entry(root, relpath):
+    """parse_entry of the file at relpath, or None when it cannot be read or parsed (the entry
+    is then reported on its own; a link to it simply cannot be confirmed)."""
+    try:
+        with open(os.path.join(root, *relpath.split("/")), "rb") as fh:
+            return parse_entry(fh.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, KnowledgeError):
+        return None
+
+
+def _link_findings(root, relpath, fields):
+    """Findings for the supersede cross-links of one parsed entry.
+
+    A link must hold both ways: `superseded_by: K-new` needs K-new to carry `supersedes: K-old`,
+    and `supersedes: K-old` needs K-old to carry `superseded_by: K-new` and sit in superseded/.
+    The addresses are regex-checked K-<hex>, so echoing them is safe.
+    """
+    findings = []
+    own = fields["id"]
+    for key, back in (("superseded_by", "supersedes"), ("supersedes", "superseded_by")):
+        if key not in fields:
+            continue
+        try:
+            target, _ = resolve_address(root, fields[key])
+        except KnowledgeError as err:
+            findings.append(Finding(E_ADDR, relpath, "%s: %s" % (key, err)))
+            continue
+        other = _load_entry(root, target)
+        if other is None or other.get(back) != own:
+            findings.append(Finding(E_ENTRY, relpath,
+                                    "%s: %s does not carry %s back" % (key, fields[key], back)))
+        elif key == "supersedes" and target.split("/")[1] != "superseded":
+            findings.append(Finding(E_ENTRY, relpath,
+                                    "supersedes: %s is not in knowledge/superseded/" % fields[key]))
+    return findings
+
+
+def check_entry(root, dirname, relpath):
+    """Findings for one entry file (a list, empty when it is valid).
+
+    parse_entry findings carry its code and end the check (there are no fields to compare). On
+    a parsed entry: E_STAGE when `stage` disagrees with the directory, E_ENTRY when the file
+    name is not `<id>-<slug of the claim>.md`, and the cross-link findings. An unreadable file
+    raises KnowledgeError(E_READ) naming the path; a file that is not UTF-8 is a finding.
+    """
+    try:
+        with open(os.path.join(root, *relpath.split("/")), "rb") as fh:
+            data = fh.read()
+    except OSError:
+        raise KnowledgeError(E_READ, "cannot read " + relpath)
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return [Finding(E_ENTRY, relpath, "file: not valid UTF-8")]
+    try:
+        fields = parse_entry(text)
+    except KnowledgeError as err:
+        return [Finding(err.code, relpath, str(err))]
+    findings = []
+    want = _STAGE_DIRS[fields["stage"]]
+    if dirname != want:
+        findings.append(Finding(E_STAGE, relpath,
+                                "stage does not match the directory (expected knowledge/%s/)" % want))
+    # Same fallback as the writer: a claim that reduces to nothing is named `entry`.
+    if relpath.rsplit("/", 1)[-1] != "%s-%s.md" % (fields["id"], slug(fields["claim"]) or "entry"):
+        findings.append(Finding(E_ENTRY, relpath, "file name does not match id and claim"))
+    return findings + _link_findings(root, relpath, fields)
+
+
+def check_tree(root, history_skipped=None):
+    """All findings for pending signals, done signals and entries, sorted by path then code
+    (then message, so the order is total). Writes nothing. `history_skipped` is passed to
+    check_signal. Raises KnowledgeError(E_READ) for a file that cannot be opened."""
+    paths, findings = iter_signals(root)
+    for rel in paths + iter_done(root):
+        findings += check_signal(root, rel, history_skipped)
+    for dirname, rel in iter_entries(root):
+        findings += check_entry(root, dirname, rel)
+    return sorted(findings, key=lambda f: (f.path, f.code, f.message))
+
+
+# --- 9. command line ---------------------------------------------------------------
 # Exit status: 0 ok, 1 findings (`check`), 2 usage error or unreadable file. Every error is
 # one `knowledge.py: ...` line on stderr and nothing on stdout, so a caller can treat stdout
 # as the result alone.
@@ -876,25 +990,21 @@ def _check_target(root, arg):
 def _cmd_check(root, *paths):
     """Print one finding per line, sorted by path; exit 0 when there are none, 1 otherwise.
 
-    With PATH arguments only those files are checked; with none, every pending and done
-    signal is. Findings are collected before anything is printed, so an unreadable file
-    (exit 2) leaves stdout empty. Output never carries claim text.
+    With PATH arguments only those signal files are checked; with none, check_tree: every
+    pending and done signal and every entry. Findings are collected before anything is printed,
+    so an unreadable file (exit 2) leaves stdout empty. Output never carries claim text.
     """
     findings = []
-    if paths:
-        targets = []
-        for arg in paths:
-            rel = _check_target(root, arg)
-            # Hand-off files and the README are ignored by every command, named or not.
-            if not _is_handoff_or_readme(rel.rsplit("/", 1)[-1]):
-                targets.append(rel)
-    else:
-        targets, findings = iter_signals(root)
-        targets = targets + iter_done(root)
     skipped = []
     try:
-        for rel in targets:
-            findings += check_signal(root, rel, skipped)
+        if paths:
+            for arg in paths:
+                rel = _check_target(root, arg)
+                # Hand-off files and the README are ignored by every command, named or not.
+                if not _is_handoff_or_readme(rel.rsplit("/", 1)[-1]):
+                    findings += check_signal(root, rel, skipped)
+        else:
+            findings = check_tree(root, skipped)
     except KnowledgeError as err:
         if err.code != E_READ:
             raise
