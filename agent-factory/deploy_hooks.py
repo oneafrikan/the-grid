@@ -9,7 +9,7 @@ launcher, so nothing can drift. Which hooks a project gets is a profile:
     off       nothing (and any entry this tool wrote earlier is removed)
     minimal   pre-bash-no-bypass
     standard  minimal + pre-bash-secret-scan
-    strict    same as standard for now (the name is reserved for a stricter guard)
+    strict    standard + epistemic-stop (an advisory Stop hook, not a guard)
 
 Usage:
     deploy_hooks.py <project-dir> [--profile P] [--target local|shared]
@@ -93,7 +93,7 @@ import tempfile
 from pathlib import Path
 
 # Profiles in ascending order; a profile includes every hook whose min_profile ranks at or
-# below it. `strict` is accepted now and adds nothing beyond `standard` (catalogue-driven).
+# below it. `strict` adds `epistemic-stop` on top of `standard` (catalogue-driven).
 PROFILES = ("off", "minimal", "standard", "strict")
 TARGETS = ("local", "shared")
 # Where each target writes, relative to the project dir.
