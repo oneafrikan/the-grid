@@ -194,3 +194,69 @@ stop_payload() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+# Pins what the crude whole-word claim list does on 20 realistic messages (design.md Risk 2),
+# so a later regex change shows up in review as a failing test. No message carries RAN, READ
+# or UNTESTED, so exit 2 means the claim list matched and exit 0 means it did not.
+#
+# Observed when this test was added: claim list 10/10, non-claim 3/10 (30%) on this
+# adversarial list; the three are accepted false positives: one block costs one model turn and
+# the hook asks at most once per turn. The 7 quiet messages contain no claim word and stay at 0.
+#
+# Changing the claim regex (or the script's word list) must change these arrays in the same diff.
+# shellcheck disable=SC2154  # status/output are set by bats' `run`
+@test "epistemic-stop: fixture lists pin which of 10 claim and 10 non-claim messages fire" {
+  local msg claims_fired=0 quiet_fired=0 fp_fired=0
+
+  # 10 claims: every alternative of the claim list is used at least once; each must fire.
+  local -a CLAIMS=(
+    "Fixed the bug and all tests pass."
+    "Implemented the retry logic; it works now."
+    "The migration is complete."
+    "All done, ready for review."
+    "Finished. Tests are passing."
+    "I have completed the refactor."
+    "This is ready to merge."
+    "Fixed."
+    "all tests passed"
+    "Implemented and finished the parser."
+  )
+  # 7 non-claims with no claim word at all; none may fire.
+  local -a QUIET=(
+    "Which branch do you want me to use?"
+    "Here is the plan: first read the config, then edit the loader."
+    "The build is still running; I will check back in a minute."
+    "Two options for the schema: a join table or a JSON column."
+    "I could not find the config file in that directory."
+    "The suite crashed at line 12 with a KeyError."
+    "Should the cache expire after an hour or a day?"
+  )
+  # 3 non-claims that fire today, on purpose: the whole-word list cannot tell a claim from a
+  # question or a quote. Known cost, accepted (see the comment above the test).
+  local -a KNOWN_FALSE_POSITIVES=(
+    "I'm done thinking about X?"
+    'Review: the line `if complete: return` skips the cleanup, please look.'
+    "Should I mark the ticket as fixed?"
+  )
+
+  for msg in "${CLAIMS[@]}"; do
+    run_hook epistemic-stop "$(stop_payload "$msg")"
+    [ "$status" -eq 2 ] || { echo "fixture: $msg status: $status" >&2; false; }
+    claims_fired=$((claims_fired + 1))
+  done
+  for msg in "${QUIET[@]}"; do
+    run_hook epistemic-stop "$(stop_payload "$msg")"
+    [ "$status" -eq 0 ] || { echo "fixture: $msg status: $status" >&2; false; }
+  done
+  for msg in "${KNOWN_FALSE_POSITIVES[@]}"; do
+    run_hook epistemic-stop "$(stop_payload "$msg")"
+    [ "$status" -eq 2 ] || { echo "fixture: $msg status: $status" >&2; false; }
+    fp_fired=$((fp_fired + 1))
+  done
+
+  # Totals: the non-claim fire rate is (quiet_fired + fp_fired) of 10 = 3 of 10.
+  [ "$claims_fired" -eq 10 ]
+  [ "$quiet_fired" -eq 0 ]
+  [ "$fp_fired" -eq 3 ]
+  [ $((quiet_fired + fp_fired)) -eq 3 ]
+}
