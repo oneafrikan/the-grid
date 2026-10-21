@@ -439,9 +439,40 @@ def knowledge_lint(root):
     # Without git the edited-after-add check cannot run; say so once, not per signal.
     if history_skipped:
         print("map.py: signal history check skipped (git cannot answer here)")
+    findings = findings + ledger_findings(root, knowledge)
     for finding in findings:
         print(knowledge.format_finding(finding))
     return 1 if findings else 0
+
+
+def ledger_findings(root, knowledge):
+    """E_LEDGER findings: signals/done/ and the ledger must agree on what was processed.
+
+    A half-applied sweep leaves them out of step, and the next sweep would then process a
+    signal twice (a pending file with a disposition) or never account for one (a done file
+    with none). The ledger is read only through knowledge.read_ledger and
+    knowledge.processed_signals; this file carries no ledger parsing of its own. A bad ledger
+    line is reported with its line number and the two comparisons are skipped, since the set
+    of processed names cannot be trusted.
+    """
+    try:
+        processed = knowledge.processed_signals(knowledge.read_ledger(root))
+    except knowledge.KnowledgeError as exc:      # message is "line <n>: <what is wrong>"
+        lineno, _, message = str(exc)[len("line "):].partition(": ")
+        path = "signals/done/ledger.jsonl:" + lineno
+        return [knowledge.Finding(knowledge.E_LEDGER, path, message)]
+    except (OSError, UnicodeDecodeError) as exc:
+        raise MapError("cannot read signals/done/ledger.jsonl: %s" % exc.__class__.__name__)
+    findings = []
+    for rel in knowledge.iter_done(root):
+        if os.path.basename(rel) not in processed:
+            findings.append(knowledge.Finding(knowledge.E_LEDGER, rel, "no disposition line"))
+    pending, _ = knowledge.iter_signals(root)
+    for rel in pending:
+        if os.path.basename(rel) in processed:
+            findings.append(knowledge.Finding(knowledge.E_LEDGER, rel,
+                                              "processed but still pending"))
+    return findings
 
 
 # --- main ------------------------------------------------------------------------------
