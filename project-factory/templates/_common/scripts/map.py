@@ -439,7 +439,7 @@ def knowledge_lint(root):
     # Without git the edited-after-add check cannot run; say so once, not per signal.
     if history_skipped:
         print("map.py: signal history check skipped (git cannot answer here)")
-    findings = findings + ledger_findings(root, knowledge)
+    findings = findings + ledger_findings(root, knowledge) + warrant_findings(root, knowledge)
     for finding in findings:
         print(knowledge.format_finding(finding))
     return 1 if findings else 0
@@ -472,6 +472,43 @@ def ledger_findings(root, knowledge):
         if os.path.basename(rel) in processed:
             findings.append(knowledge.Finding(knowledge.E_LEDGER, rel,
                                               "processed but still pending"))
+    return findings
+
+
+E_WARRANT = "E_WARRANT"
+
+
+def warrant_findings(root, knowledge):
+    """E_WARRANT findings: no entry sits above the stage its evidence supports.
+
+    The sweep applies the different-filer rule when it promotes, but a hand edit in a PR (move
+    the file, change `stage:`) would bypass it. So the stage is re-derived here from each
+    entry's evidence with knowledge.ceiling and compared. Only `provisional` and `established`
+    are checked: `wip` needs no warrant, and `canonical`, `superseded` and `retired` are set by
+    a human. The warrant word list and the ceiling arithmetic live in knowledge.py alone. An
+    entry that does not parse is skipped; check_tree already reported it.
+    """
+    findings = []
+    for _, rel in knowledge.iter_entries(root):
+        try:
+            with open(os.path.join(root, *rel.split("/")), "rb") as fh:
+                entry = knowledge.parse_entry(fh.read().decode("utf-8"))
+        except (OSError, UnicodeDecodeError, knowledge.KnowledgeError):
+            continue
+        stage = entry["stage"]
+        if stage not in ("provisional", "established"):
+            continue
+        evidence = entry["evidence"]
+        if entry.get("unwarranted") == "yes":
+            message = "stage %s but marked unwarranted" % stage
+        elif not any(knowledge.is_warranted(e["warrant"]) for e in evidence):
+            message = "stage %s but no evidence line has a warrant" % stage
+        else:
+            top = knowledge.ceiling(evidence)
+            if knowledge.STAGE_RANK[stage] <= knowledge.STAGE_RANK[top]:
+                continue
+            message = "stage %s but the evidence supports at most %s" % (stage, top)
+        findings.append(knowledge.Finding(E_WARRANT, rel, message))
     return findings
 
 

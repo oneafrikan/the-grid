@@ -316,6 +316,91 @@ ledger_line() {
   ! grep -q '^E_LEDGER' <<<"$output" || false
 }
 
+# mk_warrant_entry <dir> <stage> <unwarranted: yes|no> <filer|warrant>… — write and commit an
+# entry in knowledge/<dir>/ with one evidence line per <filer|warrant> argument and the given
+# stage line (rewritten after rendering, as mk_entry does, so any stage can be set). Sets ENTRY.
+mk_warrant_entry() {
+  ENTRY=$(python3 -I -c '
+import os, sys
+sys.path.insert(0, os.path.join(sys.argv[1], "scripts"))
+import knowledge
+claim = "ship the thing"
+ident = knowledge.entry_id(claim)
+fields = {"id": ident, "claim": claim, "claim_hash": knowledge.claim_hash(claim),
+          "stage": "wip", "created": "2026-10-18", "updated": "2026-10-18"}
+if sys.argv[4] == "yes":
+    fields["unwarranted"] = "yes"
+evidence = []
+for n, spec in enumerate(sys.argv[5:]):
+    filer, warrant = spec.split("|", 1)
+    evidence.append({"signal": "20261018T1015%02dZ-%s-abc123.md" % (n, filer), "filed_by": filer,
+                     "stage": "wip", "warrant": warrant})
+text = knowledge.render_entry(fields, evidence)
+text = text.replace("\nstage: wip\n", "\nstage: " + sys.argv[3] + "\n", 1)
+rel = "knowledge/%s/%s-%s.md" % (sys.argv[2], ident, knowledge.slug(claim))
+path = os.path.join(sys.argv[1], *rel.split("/"))
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w", encoding="utf-8") as fh:
+    fh.write(text)
+print(rel)
+' "$P" "$@")
+  git -C "$P" add -A
+  git -C "$P" commit -q -m entry
+  # A new knowledge/ tree changes MAP.md; regenerate it so the clean cases fail only on the lint.
+  python3 "$P/scripts/map.py" --root "$P"
+  git -C "$P" add -A
+  git -C "$P" commit -q -m map
+}
+
+@test "warrant: provisional with unwarranted: yes gives E_WARRANT" {
+  mk_proj
+  mk_warrant_entry provisional provisional yes 'agent-a|seen in CI'
+  lint
+  [ "$status" -eq 1 ]
+  grep -q "^E_WARRANT $ENTRY: " <<<"$output"
+}
+
+@test "warrant: established with two evidence lines from one filer gives E_WARRANT" {
+  mk_proj
+  mk_warrant_entry established established no 'agent-a|seen in CI' 'agent-a|reproduced locally'
+  lint
+  [ "$status" -eq 1 ]
+  grep -q "^E_WARRANT $ENTRY: " <<<"$output"
+}
+
+@test "warrant: a wip entry moved to established with no new evidence gives E_WARRANT" {
+  mk_proj with-signals
+  # mk_entry's evidence is one line from one filer; only the stage and directory say established.
+  mk_entry established established
+  lint
+  [ "$status" -eq 1 ]
+  grep -q "^E_WARRANT $ENTRY: " <<<"$output"
+}
+
+@test "warrant: wip with unwarranted: yes is clean" {
+  mk_proj
+  mk_warrant_entry wip wip yes 'agent-a|untested'
+  lint
+  [ "$status" -eq 0 ]
+  ! grep -q '^E_WARRANT' <<<"$output" || false
+}
+
+@test "warrant: established with two filers and two warrants is clean" {
+  mk_proj
+  mk_warrant_entry established established no 'agent-a|seen in CI' 'agent-b|reproduced locally'
+  lint
+  [ "$status" -eq 0 ]
+  ! grep -q '^E_WARRANT' <<<"$output" || false
+}
+
+@test "warrant: canonical with one evidence line is clean" {
+  mk_proj
+  mk_warrant_entry canon canonical no 'agent-a|seen in CI'
+  lint
+  [ "$status" -eq 0 ]
+  ! grep -q '^E_WARRANT' <<<"$output" || false
+}
+
 @test "no git: the history check is skipped with one notice and the other rules still apply" {
   mk_proj with-signals
   # A second signal with an unknown stage, so there are two signals and one rule violation.
