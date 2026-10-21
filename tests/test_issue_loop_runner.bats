@@ -290,6 +290,23 @@ add_agent() {
   [ ! -f "$STATE/backoff" ]
 }
 
+@test "backoff: the window doubles 15, 30, 60, 120, 240 minutes and is capped at 6 hours (GRID_LOOP_NOW pins the clock)" {
+  happy_env
+  export GRID_LOOP_NOW=1000000
+  # prior fails -> expected window in seconds; k=5 would be 28800 unbounded, so the cap clamp is what holds it at 21600
+  local row k want got
+  mkdir -p "$STATE"   # the runner creates it on its first run; the first row seeds it before that
+  for row in "0:900" "1:1800" "2:3600" "3:7200" "4:14400" "5:21600" "6:21600" "50:21600"; do
+    k="${row%%:*}"; want="${row##*:}"
+    # until=1 is in the past of the pinned clock, so the run is not skipped as "inside the window"
+    printf 'until=1 fails=%s\n' "$k" > "$STATE/backoff"
+    STUB_CLAUDE_LOGGED_IN=0 run_runner
+    [ "$status" -eq 1 ]
+    got="$(sed -n 's/^until=\([0-9]*\).*/\1/p' "$STATE/backoff")"
+    [ "$got" -eq "$((1000000 + want))" ]
+  done
+}
+
 @test "backoff: a worker cut off by the claude service (login, key, limit) keeps the label, backs off and never counts toward poison; a plain missing outcome is still blocked" {
   # Each row: is_error | exit | result text. The first three are the REAL claude 2.1.305 output
   # (empty CLAUDE_CONFIG_DIR; a dummy ANTHROPIC_API_KEY; a dummy key with ANTHROPIC_BASE_URL on a
