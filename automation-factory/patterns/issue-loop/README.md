@@ -170,7 +170,7 @@ Both ship in the runner cuts (`pr`, and `direct` via `--land`) next to `run-issu
 
 It exits 1 when nothing has changed. It is a sanity pass, not a replacement for CI on the pull request, which stays the authoritative gate. Bash 3.2 compatible.
 
-Optional `loop/verify-always.txt` lists bats files (one per line, `#` comments allowed) that run on every verify even when the branch did not change them: use it for repo-wide lints a changed-files check cannot see (the-grid lists `tests/test_docs_accuracy.bats`; a test that needs initialised submodules does not belong there, since the worker worktrees have none). A missing file is skipped.
+Optional `loop/verify-always.txt` lists bats files (one per line, `#` comments allowed) that run on every verify even when the branch did not change them: use it for repo-wide lints a changed-files check cannot see (the-grid lists `tests/test_docs_accuracy.bats`; a test that needs initialised submodules does not belong there, since the worker worktrees have none). A missing file is skipped. A line starting `run: ` is instead a shell command run from the repo root on every verify (for example `run: GRID_REQUIRE_DENYLIST=1 bash scripts/check-personal.sh`); a non-zero exit fails the verify and the last 20 lines of its output are shown.
 
 ## Role routing
 

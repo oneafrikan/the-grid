@@ -130,3 +130,24 @@ fast_verify_repo() {
   [ "$status" -eq 0 ]
   contains "$output" "ALWAYS-RAN"
 }
+
+@test "verify.sh: a 'run:' line in verify-always.txt runs from the repo root; non-zero fails the verify with its output" {
+  mkdir -p "$REPO/loop"
+  cp "$PAT_DIR/verify.sh" "$REPO/loop/verify.sh"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -q -m base-files
+  git -C "$REPO" branch -M main
+  fast_verify_repo "fine text"
+  # a passing command (also proves the cwd is the repo root: it reads a file there)
+  printf '%s\n' '# a comment' '' 'run: test -f README.md && echo RUN-OK' > "$REPO/loop/verify-always.txt"
+  run bash -c 'cd "$1" && VERIFY_BASE=main bash loop/verify.sh' _ "$REPO"
+  [ "$status" -eq 0 ]
+  contains "$output" "RUN-OK"
+  contains "$output" "verify: PASS"
+  # a failing command fails the verify and its output is shown
+  printf '%s\n' 'run: echo RUN-BOOM; exit 3' > "$REPO/loop/verify-always.txt"
+  run bash -c 'cd "$1" && VERIFY_BASE=main bash loop/verify.sh' _ "$REPO"
+  [ "$status" -eq 1 ]
+  contains "$output" "RUN-BOOM"
+  ! contains "$output" "verify: PASS" || false
+}
