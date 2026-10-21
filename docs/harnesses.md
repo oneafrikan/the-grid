@@ -273,7 +273,7 @@ Single-file personas for chat-UI Projects: `dist/personas/<role>.md`
 - These are harness-oriented exports, not chat-native prompts. The text still carries
   harness references (Signal Protocol hand-offs, subagents, `~/.claude`), which mean
   nothing in a chat UI; they are not stripped.
-- Sizes are 6.7 to 18.8 KB. No size cap is claimed: the limit of a given chat UI is
+- Sizes are 6.7 to 19.8 KB. No size cap is claimed: the limit of a given chat UI is
   unverified, so check it before pasting a large persona.
 - The private learning store path is written as `<private-dir>/` in these files; the
   role sources keep the real path.
