@@ -957,6 +957,66 @@ def scan_secret(lib, path):
     raise KnowledgeError(E_READ, "the secret scan failed")
 
 
+# Entry directories a signal can add evidence to. canon/, superseded/ and retired/ matches
+# are escalations (a later change), so they are deliberately not indexed here.
+_OPEN_ENTRY_DIRS = ("wip", "provisional", "established")
+
+
+def open_entry_maps(root):
+    """({claim_hash: entry}, {id: entry}) over the parseable entries in wip/, provisional/ and
+    established/. An entry that does not parse is skipped (`check` reports it on its own)."""
+    by_hash = {}
+    by_id = {}
+    for dirname, rel in iter_entries(root):
+        if dirname not in _OPEN_ENTRY_DIRS:
+            continue
+        entry = _load_entry(root, rel)
+        if entry is not None:
+            by_hash[entry["claim_hash"]] = entry
+            by_id[entry["id"]] = entry
+    return by_hash, by_id
+
+
+def _lower_stage(a, b):
+    """The lower of two claimable stage names, by STAGE_RANK."""
+    return a if STAGE_RANK[a] <= STAGE_RANK[b] else b
+
+
+def entry_disposition(sig, match):
+    """(disposition, entry id or None, stage) for a signal that survived the earlier rules.
+
+    `sig` is parse_signal's dict. `match` is the existing entry (parse_entry's dict) or None.
+    The stage is the one the entry will have after `apply`: the lower of the highest stage
+    claimed and the ceiling of the evidence, and for an existing entry never below its
+    current stage (the sweep never lowers a stage).
+    """
+    warranted = is_warranted(sig["warrant"])
+    if match is None:
+        if not warranted:
+            # Recorded, but marked unwarranted on the entry and held at wip.
+            return "wip", entry_id(sig["claim"]), "wip"
+        # One warranted filer so far, so the ceiling is provisional whatever was claimed.
+        line = [{"filed_by": sig["filed_by"], "warrant": sig["warrant"]}]
+        return "written", entry_id(sig["claim"]), _lower_stage(sig["stage"], ceiling(line))
+
+    evidence = match["evidence"]
+    warranted_filers = {e["filed_by"] for e in evidence if is_warranted(e["warrant"])}
+    seen_warrants = {e["warrant"].strip().casefold() for e in evidence}
+    # A filer whose earlier signal had no warrant is not in warranted_filers, so a warranted
+    # re-file of the same claim confirms it. Same filer twice, a copied warrant or no warrant
+    # adds nothing (copy-paste cannot confirm).
+    if not warranted or sig["filed_by"] in warranted_filers \
+            or sig["warrant"].strip().casefold() in seen_warrants:
+        return "duplicate", match["id"], match["stage"]
+    combined = evidence + [{"filed_by": sig["filed_by"], "warrant": sig["warrant"],
+                            "stage": sig["stage"]}]
+    highest = max((e["stage"] for e in combined), key=STAGE_RANK.get)
+    stage = _lower_stage(highest, ceiling(combined))
+    if match["stage"] in STAGE_RANK:
+        stage = max(stage, match["stage"], key=STAGE_RANK.get)
+    return "confirmed", match["id"], stage
+
+
 def build_plan(root, cap=DEFAULT_CAP):
     """Read-only plan of the pending signals: a dict that json.dumps(sort_keys=True) renders
     byte-identically on an unchanged tree (no clock, no run id, no absolute paths).
@@ -965,8 +1025,9 @@ def build_plan(root, cap=DEFAULT_CAP):
     `disposition` line and is not already in signals/done/. Oldest name first (the timestamp
     leads the name, so code-point order is age order); only the first `cap` are listed and the
     rest are counted in `deferred`, untouched. A signal with any check_signal finding is
-    `invalid` with the finding codes in `reasons`; every other one is `pending` for now (later
-    changes replace that with the real dispositions). Later changes add fields to each signal
+    `invalid` with the finding codes in `reasons`; a signal that survives every rule below gets
+    `wip`, `written`, `confirmed` or `duplicate` from entry_disposition, with `entry` and the
+    post-apply `stage` filled in. Later changes add fields to each signal
     entry, never remove one. A grammatically valid signal that holds a token-shaped value is
     `secret` (reasons: the pattern name only, no claim_hash). A valid, non-secret signal whose
     claim has an open escalation is `duplicate` (reasons name the issue); one whose claim was
@@ -989,6 +1050,9 @@ def build_plan(root, cap=DEFAULT_CAP):
     reconcile = open_all[:cap]
     slots = cap - len(reconcile)
 
+    # Hash-to-entry and id-to-entry maps, built once per plan (no clock, so the plan stays
+    # byte-identical on an unchanged tree).
+    entries_by_hash, entries_by_id = open_entry_maps(root)
     signals = []
     counts = {}
     for rel in pending[:slots]:
@@ -1011,7 +1075,8 @@ def build_plan(root, cap=DEFAULT_CAP):
             else:
                 # Valid, so it parses; the hash is the claim's identity for the later rules.
                 with open(full, "rb") as fh:
-                    entry["claim_hash"] = claim_hash(parse_signal(fh.read().decode("utf-8"))["claim"])
+                    sig = parse_signal(fh.read().decode("utf-8"))
+                entry["claim_hash"] = claim_hash(sig["claim"])
                 # Ledger rules, by claim hash only. An open escalation wins over a stale
                 # rejection (claim_state clears `rejected` only on reopen, and a re-escalation
                 # needs a reopen first); a later `reopen` lets the claim through to later rules.
@@ -1022,6 +1087,12 @@ def build_plan(root, cap=DEFAULT_CAP):
                 elif state["rejected"]:
                     entry["disposition"] = "repeat-rejected"
                     entry["reasons"] = ["rejected"]
+                else:
+                    # Same hash wins; otherwise the entry the signal says it confirms.
+                    match = entries_by_hash.get(entry["claim_hash"]) \
+                        or entries_by_id.get(sig.get("confirms"))
+                    entry["disposition"], entry["entry"], entry["stage"] = \
+                        entry_disposition(sig, match)
         counts[entry["disposition"]] = counts.get(entry["disposition"], 0) + 1
         signals.append(entry)
     return {"cap": cap, "counts": counts,

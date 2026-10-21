@@ -59,7 +59,7 @@ jq_py() {
   [ "$(jq_py "d['deferred']")" = "15" ]
   [ "$(jq_py "d['pending']")" = "25" ]
   [ "$(jq_py "d['cap']")" = "10" ]
-  [ "$(jq_py "d['counts']")" = "{'pending': 10}" ]
+  [ "$(jq_py "d['counts']")" = "{'written': 10}" ]
   # The listed names are the ten oldest, in order.
   [ "$(jq_py "[s['file'] for s in d['signals']] == sorted(s['file'] for s in d['signals'])")" = "True" ]
   [ "$(jq_py "d['signals'][0]['file'][:16]")" = "20261018T100001Z" ]
@@ -109,8 +109,8 @@ jq_py() {
   [ "$(jq_py "d['signals'][0]['disposition']")" = "invalid" ]
   [ "$(jq_py "d['signals'][0]['reasons']")" = "['E_SIGNAL']" ]
   [ "$(jq_py "d['signals'][0]['claim_hash']")" = "None" ]
-  [ "$(jq_py "d['signals'][1]['disposition']")" = "pending" ]
-  [ "$(jq_py "d['counts']")" = "{'invalid': 1, 'pending': 1}" ]
+  [ "$(jq_py "d['signals'][1]['disposition']")" = "written" ]
+  [ "$(jq_py "d['counts']")" = "{'invalid': 1, 'written': 1}" ]
 }
 
 @test "plan: a signal edited after it was added is invalid with E_EDITED" {
@@ -210,7 +210,7 @@ write_sig() {
   write_sig "seen in CI" 'see `scripts/gate.sh` and https://example.com/docs/page'
   commit_all
   plan_json
-  [ "$(jq_py "d['signals'][0]['disposition']")" = "pending" ]
+  [ "$(jq_py "d['signals'][0]['disposition']")" = "written" ]
   [ "$(jq_py "d['signals'][0]['reasons']")" = "[]" ]
 }
 
@@ -270,7 +270,8 @@ claim_of_first() {
   [ "$(jq_py "d['counts']")" = "{'repeat-rejected': 1}" ]
   ledger_line "{\"by\":\"operator\",\"claim_hash\":\"$h\",\"event\":\"reopen\",\"run\":\"r3\"}"
   plan_json
-  [ "$(jq_py "d['signals'][0]['disposition']")" = "pending" ]
+  # Past the ledger rules the signal reaches the entry rules: no entry yet, so it is written.
+  [ "$(jq_py "d['signals'][0]['disposition']")" = "written" ]
 }
 
 @test "plan: open escalations are reconcile items, each takes a cap slot, and an accepted one is not listed" {
@@ -291,4 +292,112 @@ claim_of_first() {
   [ "$(jq_py "len(d['reconcile'])")" = "1" ]
   [ "$(jq_py "len(d['signals'])")" = "0" ]
   [ "$(jq_py "d['deferred']")" = "4" ]
+}
+
+# mk_entry <dir> <claim> [<filer>|<stage>|<warrant>]... — write an entry in knowledge/<dir>/ with
+# render_entry, one evidence line per argument, so the fixture is always a layout the reader accepts.
+mk_entry() {
+  python3 -I - "$REPO_ROOT/scripts" "$PROJ" "$@" <<'PY'
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import knowledge as k
+root, dirname, claim = sys.argv[2:5]
+evidence = []
+for n, spec in enumerate(sys.argv[5:], 1):
+    filer, stage, warrant = spec.split("|", 2)
+    evidence.append({"signal": "20260101T0000%02dZ-%s-aaaaa%d.md" % (n, filer, n),
+                     "filed_by": filer, "stage": stage, "warrant": warrant})
+fields = {"id": k.entry_id(claim), "claim": claim, "claim_hash": k.claim_hash(claim),
+          "stage": dirname, "created": "2026-01-01", "updated": "2026-01-01"}
+os.makedirs(os.path.join(root, "knowledge", dirname), exist_ok=True)
+path = os.path.join(root, "knowledge", dirname, fields["id"] + ".md")
+with open(path, "w", encoding="utf-8") as fh:
+    fh.write(k.render_entry(fields, evidence))
+PY
+}
+
+# esig <filer> <stage> <warrant> <claim> [extra file args] — file one signal (timestamp 10:00:30).
+esig() {
+  local filer=$1 stage=$2 warrant=$3 claim=$4
+  shift 4
+  KNOWLEDGE_NOW=20261018T100030Z python3 -I "$KN" file --root "$PROJ" --filer "$filer" \
+    --claim "$claim" --stage "$stage" --warrant "$warrant" "$@" >/dev/null
+}
+
+# Assert the first plan signal's disposition, stage and entry address (the entry is K- plus the
+# first 8 of the signal's own claim hash unless a third argument gives another one).
+expect_first() {
+  [ "$(jq_py "d['signals'][0]['disposition']")" = "$1" ]
+  [ "$(jq_py "d['signals'][0]['stage']")" = "$2" ]
+  [ "$(jq_py "d['signals'][0]['entry']")" = "${3:-K-$(jq_py "d['signals'][0]['claim_hash'][:8]")}" ]
+}
+
+@test "plan: an unwarranted established claim with no entry is wip at stage wip" {
+  fixture
+  esig agent-a established none "claim one"
+  commit_all
+  plan_json
+  expect_first wip wip
+}
+
+@test "plan: a warranted provisional claim with no entry is written at provisional" {
+  fixture
+  esig agent-a provisional "seen in CI" "claim one"
+  commit_all
+  plan_json
+  expect_first written provisional
+}
+
+@test "plan: a first established claim is written at provisional (one filer)" {
+  fixture
+  esig agent-a established "seen in CI" "claim one"
+  commit_all
+  plan_json
+  expect_first written provisional
+}
+
+@test "plan: a second filer naming the entry with a new warrant confirms it to established" {
+  fixture
+  mk_entry provisional "claim one" "agent-a|established|seen in CI"
+  id=$(python3 -I "$KN" hash "claim one" | cut -c1-8)
+  esig agent-b established "reproduced locally" "claim one reworded" --confirms "K-$id"
+  commit_all
+  plan_json
+  expect_first confirmed established "K-$id"
+}
+
+@test "plan: the same filer again is a duplicate and the entry keeps its stage" {
+  fixture
+  mk_entry provisional "claim one" "agent-a|established|seen in CI"
+  esig agent-a established "a different warrant" "claim one"
+  commit_all
+  plan_json
+  expect_first duplicate provisional
+}
+
+@test "plan: a second filer with an identical warrant (other case) is a duplicate" {
+  fixture
+  mk_entry provisional "claim one" "agent-a|established|seen in CI"
+  esig agent-b established "SEEN IN ci" "claim one"
+  commit_all
+  plan_json
+  expect_first duplicate provisional
+}
+
+@test "plan: a filer whose earlier signal had no warrant adds one and confirms wip to provisional" {
+  fixture
+  mk_entry wip "claim one" "agent-a|provisional|none"
+  esig agent-a provisional "seen in CI" "claim one"
+  commit_all
+  plan_json
+  expect_first confirmed provisional
+}
+
+@test "plan: an unwarranted signal on an existing entry is a duplicate" {
+  fixture
+  mk_entry provisional "claim one" "agent-a|provisional|seen in CI"
+  esig agent-b established none "claim one"
+  commit_all
+  plan_json
+  expect_first duplicate provisional
 }
