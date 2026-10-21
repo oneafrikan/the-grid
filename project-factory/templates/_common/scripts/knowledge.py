@@ -1722,6 +1722,125 @@ def _record_items(root, items, numbers=None, resolutions=None):
         raise KnowledgeError(E_APPLY, "signals were moved but the ledger append failed")
 
 
+def _require_clean_tree(root):
+    """Refuse (exit 4) unless git says the tree is clean. Fail closed: if git cannot say, the
+    tree counts as not clean."""
+    try:
+        status = subprocess.run(["git", "-C", root, "status", "--porcelain"],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        raise Refused(4, "cannot read git status")
+    if status.strip():
+        raise Refused(4, "working tree is not clean")
+
+
+def write_canon_entry(root, sig, name, today):
+    """Write the canonical form of the entry for signal `sig` (parse_signal's dict, file `name`).
+
+    The ONLY function that writes under knowledge/canon/, and only `_cmd_proposal` calls it: a
+    canon change must reach the repo through a human-approved PR, never through the sweep's own
+    commit. A new entry gets one evidence line (this signal). An entry that already stands in
+    wip/, provisional/ or established/ is `git mv`ed into canon/ (a staged rename, so history
+    follows it), set to `stage: canonical`, and gains this signal as one more evidence line.
+    Nothing is committed. UsageError (exit 2) when the claim is already canon, sits in
+    superseded/ or retired/, or its id is held by another claim; nothing is written then.
+    """
+    chash = claim_hash(sig["claim"])
+    addr = entry_id(sig["claim"])
+    canon_dir = _STAGE_DIRS["canonical"]
+    _, _, ids = closed_entry_maps(root)
+    if any(h != chash for h in ids.get(addr, ())):
+        raise UsageError("the entry id is held by another claim")
+    for dirname, rel in iter_entries(root):
+        if _file_claim_hash(root, rel) == chash and dirname not in _OPEN_ENTRY_DIRS:
+            raise UsageError("the claim already has an entry in canon, superseded or retired")
+    line = {"signal": name, "filed_by": sig["filed_by"], "stage": sig["stage"],
+            "warrant": sig["warrant"]}
+    by_hash, _ = open_entry_maps(root)
+    match = by_hash.get(chash)
+    if match is None:
+        fields = {"id": addr, "claim": sig["claim"], "claim_hash": chash,
+                  "stage": "canonical", "created": today, "updated": today}
+        rel = "knowledge/%s/%s-%s.md" % (canon_dir, addr, slug(sig["claim"]) or "entry")
+        _write_text(root, rel, render_entry(fields, [line]))
+        return
+    rel = _entry_rel(root, match)
+    if rel is None:
+        raise UsageError("cannot find the entry file to update")
+    fields = dict((k, v) for k, v in match.items() if k not in ("claim_text", "evidence"))
+    fields["stage"] = "canonical"
+    fields["updated"] = today
+    # Render first: an entry the reader would reject must fail before anything moves.
+    text = render_entry(fields, match["evidence"] + [line])
+    new_rel = "knowledge/%s/%s" % (canon_dir, rel.rsplit("/", 1)[-1])
+    os.makedirs(os.path.join(root, "knowledge", canon_dir), exist_ok=True)
+    # git mv so the move is staged as a rename; a fixed argv, never a shell, both paths built
+    # here from fixed words and a name iter_entries accepted.
+    try:
+        subprocess.run(["git", "-C", root, "mv", rel, new_rel], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        raise UsageError("git mv failed")
+    _write_text(root, new_rel, text)
+
+
+def _cmd_proposal(root, signal):
+    """`apply --proposal-for SIGNAL`: write ONLY the proposed knowledge/ change for one
+    escalated signal, so a PR can carry it. Runs in a fresh linked worktree cut from the sweep
+    branch, where the signal is still pending in signals/.
+
+    Two cases (supersede and contradiction proposals are a later change):
+      * the signal claims `canonical`: `write_canon_entry`;
+      * the signal cites a guardrail (and is not canonical, supersedes or contradicts): the
+        entry is added at its mechanical stage through `_apply_item`, the same path `apply
+        --plan` uses, so it can never land in canon/. GUARDRAILS.md, PURPOSE.md, BEHAVIOUR.md
+        and MAP.md are never touched.
+    The signal is not moved, the ledger is not touched, nothing is committed and no lock is
+    taken (the sweep holds it, and in a linked worktree `.git` is a file). The tree must still
+    be clean. Any other signal, or one that does not exist, is UsageError (exit 2) with
+    nothing written.
+    """
+    _require_clean_tree(root)
+    # Take the base name so a path to the signal works as well as its file name.
+    name = os.path.basename(signal)
+    if not SIGNAL_NAME_RE.match(name):
+        raise UsageError("--proposal-for does not name a signal file")
+    rel = "signals/" + name
+    if not os.path.isfile(os.path.join(root, "signals", name)) \
+            or os.path.lexists(os.path.join(root, "signals", "done", name)):
+        raise UsageError("the signal is missing or already processed")
+    try:
+        if check_signal(root, rel):
+            raise UsageError("the signal is not valid")
+        full = os.path.join(root, "signals", name)
+        # Same fail-closed scan as `plan`: a token-shaped signal never reaches an entry.
+        if scan_secret(find_secret_patterns(), full):
+            raise UsageError("the signal is not valid")
+        with open(full, "rb") as fh:
+            sig = parse_signal(fh.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, KnowledgeError):
+        raise UsageError("cannot read the signal")
+    today = _today()
+    if sig["stage"] == "canonical":
+        write_canon_entry(root, sig, name, today)
+        return 0
+    if "guardrail" not in sig or "supersedes" in sig or "contradicts" in sig:
+        raise UsageError("the signal is not a canon or guardrail-conflict case")
+    # A canon match or an id collision is a different escalation, not this one.
+    closed_by_hash, closed_by_id, ids = closed_entry_maps(root)
+    if escalation_reason(sig, claim_hash(sig["claim"]), closed_by_hash, closed_by_id, ids):
+        raise UsageError("the signal is not a canon or guardrail-conflict case")
+    by_hash, by_id = open_entry_maps(root)
+    match = by_hash.get(claim_hash(sig["claim"])) or by_id.get(sig.get("confirms"))
+    disposition, addr, stage = entry_disposition(sig, match)
+    if disposition == "duplicate":
+        raise UsageError("the signal adds nothing to propose")
+    _apply_item(root, {"file": name, "disposition": disposition, "entry": addr,
+                       "stage": stage}, today)
+    return 0
+
+
 def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=None):
     """The writing run: guards first, then entries for `wip`, `written` and `confirmed` items,
     then every listed signal moved to signals/done/ and recorded in the ledger.
@@ -1731,12 +1850,13 @@ def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=No
     commit step is the only writer to history. --verdicts turns an item whose model verdict is
     not the all-clear into `escalated` before anything is written; --escalations supplies the
     issue/pr numbers for `escalated` ledger lines and the PR-state `resolutions`.
-    --proposal-for is parsed only; a later change implements it.
+    --proposal-for is the separate, lock-free mode of `_cmd_proposal`.
     """
     if proposal_for is not None:
-        if plan is not None:
-            raise UsageError("--proposal-for cannot be combined with --plan")
-        raise UsageError("--proposal-for is not implemented yet")
+        if plan is not None or verdicts is not None or escalations is not None:
+            raise UsageError("--proposal-for cannot be combined with --plan, --verdicts or "
+                             "--escalations")
+        return _cmd_proposal(root, proposal_for)
     if plan is None:
         raise UsageError("apply needs --plan or --proposal-for")
 
@@ -1754,15 +1874,7 @@ def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=No
         lock.close()
         raise Refused(3, "locked")
     try:
-        # Fail closed: if git cannot say the tree is clean, treat it as not clean.
-        try:
-            status = subprocess.run(["git", "-C", root, "status", "--porcelain"],
-                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                    check=True).stdout
-        except (OSError, subprocess.CalledProcessError):
-            raise Refused(4, "cannot read git status")
-        if status.strip():
-            raise Refused(4, "working tree is not clean")
+        _require_clean_tree(root)
 
         data = _read_plan(plan)
         # Both option files are read before the first write, so a bad one changes nothing.
