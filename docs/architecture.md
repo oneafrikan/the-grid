@@ -145,6 +145,7 @@ are summarised; every other top-level directory, and every file under `scripts/`
     personal-denylist.example.txt ← starting point for the private denylist
     compose-goldens.sh  ← golden-output check for compose.py
     map.py              ← generates MAP.md; `status` prints stage and signal counts
+    knowledge.py        ← knowledge-signal helper: claim hashing, signal and entry parsing (more subcommands land as the sweep is built)
     rules.py            ← lints, lists and emits the rule packs (rules/)
     run-record.sh       ← appends one line per agent run to a local private log
     runtime-setup.sh    ← human-run setup for wired repos that need a runtime (e.g. gstack)
