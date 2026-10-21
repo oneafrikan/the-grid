@@ -7,8 +7,11 @@
 # general-purpose investigator any desk (or the human directly) can hand a
 # bounded question to; platform-engineer keeps the personal dev environment
 # (dotfiles, bootstrap scripts, per-machine overlays) portable across
-# macOS/Ubuntu/Arch. All four are meant to be wired on every machine
-# regardless of which desk-specific project
+# macOS/Ubuntu/Arch; context-engineer designs and measures what loads into a
+# session (instruction files, memory, skills, role files), which is a concern
+# of every machine's context budget, not of the dev team — so it is here and
+# not in grid.yaml, and is in no delegates_to. All six are meant to be wired on
+# every machine regardless of which desk-specific project
 # (grid, finance-desk, a private desk) that machine actually runs — hence
 # their own project rather than living inside one desk's roster.
 #
@@ -17,7 +20,7 @@
 # `-project:finance-desk` should still keep `project:core`.
 project: core
 slug: core
-description: Cross-desk shared infrastructure — gh-triage, librarian, researcher, platform-engineer, tron.
+description: Cross-desk shared infrastructure — gh-triage, librarian, researcher, platform-engineer, context-engineer, tron.
 paperclip: false
 
 agents:
@@ -34,6 +37,12 @@ agents:
   # tied to the machine rather than a team — so it belongs here, not in grid.yaml,
   # and survives a machine subtracting -project:grid. No delegation chain.
   - role: platform-engineer
+  # Context design and budget (what loads into a session, size and split,
+  # retrieval and handoff design). Machine-wide concern like platform-engineer,
+  # so it survives -project:grid and must not depend on ai-engineer or
+  # prompt-engineer being wired. No delegation chain: invoked directly, routed
+  # to by tech-lead as an off-team call, or handed work via the Signal Protocol.
+  - role: context-engineer
   # The grid's front door. Lives in core (not learning-desk) so it stays wired on every
   # machine even when a desk is subtracted. `bare: true` makes it /tron rather than
   # /core-tron; the rest of core keeps the core- prefix. No delegation chain: it

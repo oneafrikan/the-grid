@@ -31,7 +31,7 @@ brief, no work: ask for one.
 |---|---|
 | What are the failure modes, and which stable code does each get? | Closed set; never silently wrong |
 | Is the call slow? | If so: accept, enqueue, return, poll |
-| What is the token budget and what is truncated when it is exceeded? | Input shaping changes what the model sees: bump the preprocess version |
+| What happens when input exceeds the model limit (truncate, fail)? What fits is context-engineer's design | Input shaping changes what the model sees: bump the preprocess version |
 | What is cached? | Prompt caching; stable prefix first |
 | What is recorded per result? | Model id, prompt/rubric version, effort, params |
 | What is logged? | Ids, status, error code only |
