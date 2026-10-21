@@ -6,6 +6,15 @@ load helpers/setup
 
 SCRIPT="$REPO_ROOT/scripts/build-site-assets.sh"
 
+# Sandbox HOME and git config like every other test file (tests/test_repo_health.bats lints this).
+setup() {
+  common_setup
+}
+
+teardown() {
+  common_teardown
+}
+
 # Echo the ImageMagick binary that can write WebP, or nothing.
 find_im() {
   local im
