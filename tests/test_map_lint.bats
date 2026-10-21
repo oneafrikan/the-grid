@@ -446,3 +446,67 @@ print(rel)
   ! grep -q 'tech-lead\|README' <<<"$output" || false
   ! grep -q '^E_' <<<"$output" || false
 }
+
+# addr_signal <extra frontmatter line> — commit a valid signal carrying one address field.
+addr_signal() {
+  mk_signal 20261018T111500Z-agent-b-def456.md 'filed_by: agent-b' 'claim: cite something' \
+    'stage: wip' 'warrant: seen in CI' 'status: pending' "$1"
+}
+
+@test "addr: guardrail GUARDRAILS#G3 with G3 defined is clean" {
+  mk_proj
+  printf '# Guardrails\n\n- G3: Do the thing [check: human]\n' > "$P/GUARDRAILS.md"
+  addr_signal 'guardrail: GUARDRAILS#G3'
+  lint
+  ! grep -q '^E_ADDR' <<<"$output" || false
+}
+
+@test "addr: guardrail GUARDRAILS#G9 with no G9 gives E_ADDR naming the address" {
+  mk_proj
+  printf '# Guardrails\n\n- G3: Do the thing [check: human]\n' > "$P/GUARDRAILS.md"
+  addr_signal 'guardrail: GUARDRAILS#G9'
+  lint
+  [ "$status" -eq 1 ]
+  grep -q '^E_ADDR signals/.*GUARDRAILS#G9' <<<"$output"
+}
+
+@test "addr: a K- address still resolves after its entry moves to established/" {
+  mk_proj
+  mk_entry provisional provisional
+  ID=$(basename "$ENTRY" | cut -c1-10)
+  mkdir -p "$P/knowledge/established"
+  mv "$P/$ENTRY" "$P/knowledge/established/$(basename "$ENTRY")"
+  addr_signal "confirms: $ID"
+  lint
+  ! grep -q '^E_ADDR' <<<"$output" || false
+  # The #slug form cannot sit in a parsed signal (knowledge.py accepts K- plus 8 hex only), so
+  # the resolver step is driven directly with a heading the entry body has.
+  run python3 -I -c '
+import os, sys
+sys.path.insert(0, os.path.join(sys.argv[1], "scripts"))
+import knowledge, map as m
+print(m.address_errors(sys.argv[1], knowledge, {"confirms": sys.argv[2] + "#evidence"}, {}))
+' "$P" "$ID"
+  [ "$output" = "[]" ]
+}
+
+@test "addr: supersedes K-deadbeef matching no file gives E_ADDR" {
+  mk_proj
+  addr_signal 'supersedes: K-deadbeef'
+  lint
+  [ "$status" -eq 1 ]
+  grep -q '^E_ADDR signals/.*K-deadbeef' <<<"$output"
+}
+
+@test "addr: two files for one K-<hash8> give E_ADDR listing both" {
+  mk_proj
+  mk_entry wip wip
+  ID=$(basename "$ENTRY" | cut -c1-10)
+  mkdir -p "$P/knowledge/provisional"
+  cp "$P/$ENTRY" "$P/knowledge/provisional/$ID-copy.md"
+  addr_signal "contradicts: $ID"
+  lint
+  [ "$status" -eq 1 ]
+  grep -q "^E_ADDR signals/.*ambiguous $ID: .*knowledge/provisional/$ID-copy.md" <<<"$output"
+  grep -q "^E_ADDR signals/.*$ENTRY" <<<"$output"
+}
