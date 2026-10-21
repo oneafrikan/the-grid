@@ -68,6 +68,8 @@
 #   gh   (each call logs `gh <args> ::GH_TOKEN=<value|<unset>>`)
 #     STUB_PR_NUMBER           number printed by `gh pr view --json number -q .number`
 #                              (default empty: exit 1 "no pull requests found")
+#     STUB_PR_STATE_JSON       answer of `gh pr view N --json state,mergedAt` (knowledge sweep reconcile;
+#                              default {"state":"OPEN","mergedAt":null})
 #     STUB_LABELS              JSON printed by `gh label list ... --json name` (default [])
 #     STUB_GH_STORED_LOGIN     1 makes `gh auth status` succeed (default: it fails)
 #     STUB_ISSUES              issue numbers printed by `gh issue list` (space or newline separated)
@@ -343,6 +345,11 @@ for a in "$@"; do
 done
 case "${1:-} ${2:-}" in
   "pr view")
+    # knowledge sweep reconcile: `gh pr view N --json state,mergedAt` (default: still open)
+    case "$*" in *state,mergedAt*)
+      open_pr='{"state":"OPEN","mergedAt":null}'
+      printf '%s\n' "${STUB_PR_STATE_JSON:-$open_pr}"; exit 0 ;;
+    esac
     if [ -n "${STUB_PR_NUMBER:-}" ]; then echo "$STUB_PR_NUMBER"; exit 0; fi
     echo "no pull requests found" >&2; exit 1 ;;
   "label list") printf '%s\n' "${STUB_LABELS:-[]}"; exit 0 ;;
