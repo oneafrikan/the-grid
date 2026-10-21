@@ -1588,16 +1588,109 @@ def _check_bookkeeping(root, items):
             raise UsageError("--plan file has a malformed entry address")
 
 
-def _record_items(root, items):
-    """Move each plan item's signal to signals/done/ unchanged, then append one `disposition`
-    ledger line per item.
+def _read_json_option(path, flag):
+    """Parse the JSON file named by `flag`; UsageError (exit 2) if it cannot be read or parsed.
+    The error text never echoes file content. Exit 2 changes nothing, so it is fail-safe."""
+    try:
+        with open(path, "rb") as fh:
+            return json.loads(fh.read().decode("utf-8"))
+    except OSError:
+        raise UsageError("cannot read %s file" % flag)
+    except (ValueError, RecursionError):
+        raise UsageError("%s file is not valid JSON" % flag)
+
+
+def _apply_verdicts(items, verdicts):
+    """Turn every item whose needed model verdict is not exactly the all-clear into `escalated`.
+
+    Only a plan item that would write an entry (`wip`, `written`, `confirmed`) can list
+    `needs_judgement`. For each word listed, the verdict file must hold exactly `no`
+    (guardrail) or `none` (canon) under that signal's name. Anything else lets no write
+    through: `conflict`, `unsure`, an entry id, a missing signal, a missing key, a wrong type,
+    or no verdict file at all. A model that did not answer must never unlock a write, so
+    absence counts as `unsure`. Nothing else is read from the verdict file.
+
+    Returns the item list with those items replaced by escalated copies (no entry, no stage;
+    the claim hash stays so the ledger can reconcile the claim). Other items pass unchanged.
+    """
+    # The only value that lets each judgement through; every other value escalates.
+    clear = {"guardrail": "no", "canon": "none"}
+    if not isinstance(verdicts, dict):
+        verdicts = {}
+    out = []
+    for item in items:
+        needed = item.get("needs_judgement", [])
+        if item["disposition"] not in ("wip", "written", "confirmed"):
+            out.append(item)
+            continue
+        # The plan is a file: a needs_judgement that is not a list of known words cannot be
+        # trusted to mean "nothing to decide".
+        if not isinstance(needed, list) or any(w not in clear for w in needed):
+            raise UsageError("--plan file has a malformed needs_judgement")
+        verdict = verdicts.get(item["file"])
+        if not isinstance(verdict, dict):
+            verdict = {}
+        if all(verdict.get(word) == clear[word] for word in needed):
+            out.append(item)
+            continue
+        escalated = dict(item)
+        escalated.update({"disposition": "escalated", "entry": None, "stage": None,
+                          "reasons": ["verdict"]})
+        out.append(escalated)
+    return out
+
+
+def _issue_number(value):
+    """A positive int (not a bool) from the escalations file, else None: a malformed number is
+    recorded as absent rather than trusted."""
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
+
+
+def _read_escalations(path):
+    """Parse --escalations: ({signal file: {"issue", "pr"}}, [resolution fields]).
+
+    Shape: {"<signal file>": {"issue": N, "pr": N-or-null}, ...} plus an optional
+    "resolutions": [{"claim_hash", "pr", "result"}]. A malformed issue/pr is recorded as null;
+    a malformed resolution is a UsageError (nothing is written yet), since a wrong
+    resolution would change what later sweeps do with that claim.
+    """
+    data = _read_json_option(path, "--escalations")
+    if not isinstance(data, dict):
+        raise UsageError("--escalations file is not a JSON object")
+    numbers = {}
+    for name, value in data.items():
+        if name == "resolutions" or not isinstance(value, dict):
+            continue
+        numbers[name] = (_issue_number(value.get("issue")), _issue_number(value.get("pr")))
+    resolutions = data.get("resolutions", [])
+    if not isinstance(resolutions, list):
+        raise UsageError("--escalations resolutions is not a list")
+    checked = []
+    for res in resolutions:
+        if not isinstance(res, dict) or not isinstance(res.get("claim_hash"), str) \
+                or not _CLAIM_HASH_RE.match(res["claim_hash"]) \
+                or res.get("result") not in _RESULTS or _issue_number(res.get("pr")) is None:
+            raise UsageError("--escalations file has a malformed resolution")
+        checked.append((res["claim_hash"], res["pr"], res["result"]))
+    return numbers, checked
+
+
+def _record_items(root, items, numbers=None, resolutions=None):
+    """Move each plan item's signal to signals/done/ unchanged, then append the ledger lines:
+    one `resolution` per entry of `resolutions`, then one `disposition` per item.
 
     Moves come first and the ledger last, both from this one place: if the append fails the
     signals are already out of signals/, so the failure is reported (exit 1) with that state
     named, and the next `plan` cannot list them again. `git mv` keeps the bytes (so `status:
-    pending` stays) and stages a rename. issue and pr stay null until --escalations is read.
+    pending` stays) and stages a rename. issue and pr stay null unless `numbers` (from
+    --escalations) names the signal of an `escalated` item. Resolutions go first so a claim
+    escalated in this same run stays open afterwards.
     """
-    if not items:
+    numbers = numbers or {}
+    resolutions = resolutions or []
+    if not items and not resolutions:
         return
     # ISO form of the run time (KNOWLEDGE_NOW when set) for the ledger's `run` field.
     stamp = _signal_time()
@@ -1614,10 +1707,15 @@ def _record_items(root, items):
         except (OSError, subprocess.CalledProcessError):
             raise KnowledgeError(E_APPLY, "git mv of a signal failed; some signals may have moved "
                                           "and no ledger line was written")
-    records = [{"event": "disposition", "signal": item["file"],
-                "claim_hash": item.get("claim_hash"), "disposition": item["disposition"],
-                "entry": item.get("entry"), "issue": None, "pr": None, "run": run}
-               for item in items]
+    records = [{"event": "resolution", "claim_hash": chash, "pr": pr, "result": result,
+                "run": run} for chash, pr, result in resolutions]
+    for item in items:
+        # Numbers only ever attach to an escalation; any other disposition keeps null.
+        issue, pr = numbers.get(item["file"], (None, None)) \
+            if item["disposition"] == "escalated" else (None, None)
+        records.append({"event": "disposition", "signal": item["file"],
+                        "claim_hash": item.get("claim_hash"), "disposition": item["disposition"],
+                        "entry": item.get("entry"), "issue": issue, "pr": pr, "run": run})
     try:
         append_ledger(root, records)
     except (OSError, KnowledgeError):
@@ -1630,8 +1728,10 @@ def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=No
 
     Order: lock (exit 3), clean tree (exit 4), then the plan (exit 2). Entries, moves and
     ledger lines are written in the working tree only. The helper never commits: the role's
-    commit step is the only writer to history. --verdicts and --escalations are accepted but
-    not read yet. --proposal-for is parsed only; a later change implements it.
+    commit step is the only writer to history. --verdicts turns an item whose model verdict is
+    not the all-clear into `escalated` before anything is written; --escalations supplies the
+    issue/pr numbers for `escalated` ledger lines and the PR-state `resolutions`.
+    --proposal-for is parsed only; a later change implements it.
     """
     if proposal_for is not None:
         if plan is not None:
@@ -1665,20 +1765,28 @@ def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=No
             raise Refused(4, "working tree is not clean")
 
         data = _read_plan(plan)
+        # Both option files are read before the first write, so a bad one changes nothing.
+        # Without --verdicts every item that needs judgement escalates (absence is `unsure`).
+        verdicts = _read_json_option(verdicts, "--verdicts") if verdicts is not None else {}
+        numbers, resolutions = _read_escalations(escalations) if escalations is not None \
+            else ({}, [])
+        # From here on only `items` is used: an item the model did not clear is already
+        # `escalated`, so no later step can write an entry for it.
+        items = _apply_verdicts(data["signals"], verdicts)
         # An escalated item writes nothing here; any other item whose stage is a human-only
         # one would write under canon/superseded/retired, so the plan is forged or buggy.
-        for item in data["signals"]:
+        for item in items:
             if item["disposition"] != "escalated" and item.get("stage") in HUMAN_ONLY_STAGES:
                 raise UsageError("--plan file has an item that would write to a human-only stage")
         # Dates are read once so every entry of one run carries the same day. Every other
         # disposition (duplicate, invalid, secret, repeat-rejected, escalated) writes no entry.
         today = _today()
         # Checked before the first write so a bad plan changes nothing.
-        _check_bookkeeping(root, data["signals"])
-        for item in data["signals"]:
+        _check_bookkeeping(root, items)
+        for item in items:
             if item["disposition"] in ("wip", "written", "confirmed"):
                 _apply_item(root, item, today)
-        _record_items(root, data["signals"])
+        _record_items(root, items, numbers, resolutions)
         return 0
     finally:
         lock.close()

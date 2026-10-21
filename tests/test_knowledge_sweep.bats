@@ -796,3 +796,150 @@ json.dump(p,open(sys.argv[1],'w'))" "$BATS_TEST_TMPDIR/plan.json"
   [ -z "$(git -C "$PROJ" status --porcelain)" ]
   [ ! -e "$PROJ/signals/done" ]
 }
+
+# --- apply: model verdicts and escalation records -----------------------------------------
+
+# vapply <verdicts json> [<escalations json>] — plan the committed fixture (one signal), write
+# the verdict file (SIG stands for the signal's file name), apply and require exit 0 and a tree
+# `check` accepts. An empty first argument passes no --verdicts at all.
+vapply() {
+  local sig args=()
+  sig=$(basename "$(ls "$PROJ"/signals/*.md)")
+  python3 -I "$KN" plan --root "$PROJ" >"$BATS_TEST_TMPDIR/plan.json"
+  if [ -n "$1" ]; then
+    printf '%s' "${1//SIG/$sig}" >"$BATS_TEST_TMPDIR/verdicts.json"
+    args+=(--verdicts "$BATS_TEST_TMPDIR/verdicts.json")
+  fi
+  if [ -n "${2:-}" ]; then
+    printf '%s' "${2//SIG/$sig}" >"$BATS_TEST_TMPDIR/esc.json"
+    args+=(--escalations "$BATS_TEST_TMPDIR/esc.json")
+  fi
+  KNOWLEDGE_NOW=20261019T120000Z run --separate-stderr python3 -I "$KN" apply --root "$PROJ" \
+    --plan "$BATS_TEST_TMPDIR/plan.json" "${args[@]}"
+  [ "$status" -eq 0 ]
+  run --separate-stderr python3 -I "$KN" check --root "$PROJ"
+  [ "$status" -eq 0 ]
+}
+
+# mk_canon — a canon entry that `check` accepts: mk_entry names the file K-<id>.md, but check
+# wants the slugged name a real entry has.
+mk_canon() {
+  mk_entry canon "canon claim" "agent-a|canonical|seen in CI"
+  local id
+  id=$(python3 -I "$KN" hash "canon claim" | cut -c1-8)
+  mv "$PROJ/knowledge/canon/K-$id.md" "$PROJ/knowledge/canon/K-$id-canon-claim.md"
+}
+
+# escalated_cleanly — the one signal was moved, ledgered `escalated` with no entry, and no
+# entry file was written.
+escalated_cleanly() {
+  [ "$(ledger_py "[(r['disposition'], r['entry']) for r in L]")" = "[('escalated', None)]" ]
+  [ -z "$(ls "$PROJ"/signals/*.md 2>/dev/null)" ]
+  [ ! -e "$PROJ/knowledge/provisional" ]
+}
+
+@test "apply: a guardrail verdict of unsure escalates, writes no entry and still moves the signal" {
+  fixture
+  write_guardrails
+  esig agent-a provisional "seen in CI" "claim one" --guardrail GUARDRAILS#G3
+  commit_all
+  vapply '{"SIG":{"guardrail":"unsure"}}'
+  escalated_cleanly
+  # No --escalations file: the numbers are null.
+  [ "$(ledger_py "(L[0]['issue'], L[0]['pr'])")" = "(None, None)" ]
+}
+
+@test "apply: a guardrail verdict of conflict escalates" {
+  fixture
+  write_guardrails
+  esig agent-a provisional "seen in CI" "claim one" --guardrail GUARDRAILS#G3
+  commit_all
+  vapply '{"SIG":{"guardrail":"conflict"}}'
+  escalated_cleanly
+}
+
+@test "apply: a guardrail verdict of no writes the entry" {
+  fixture
+  write_guardrails
+  esig agent-a provisional "seen in CI" "claim one" --guardrail GUARDRAILS#G3
+  commit_all
+  vapply '{"SIG":{"guardrail":"no"}}'
+  [ -n "$(ls "$PROJ"/knowledge/provisional/K-*-claim-one.md)" ]
+  [ "$(ledger_py "[r['disposition'] for r in L]")" = "['written']" ]
+}
+
+@test "apply: a canon verdict naming an entry id escalates even when the guardrail verdict is no" {
+  fixture
+  write_guardrails
+  mk_canon
+  esig agent-b provisional "seen in CI" "claim one" --guardrail GUARDRAILS#G3
+  commit_all
+  id=$(python3 -I "$KN" hash "canon claim" | cut -c1-8)
+  vapply "{\"SIG\":{\"guardrail\":\"no\",\"canon\":\"K-$id\"}}"
+  escalated_cleanly
+}
+
+@test "apply: a canon verdict of none writes the entry" {
+  fixture
+  mk_canon
+  esig agent-b provisional "seen in CI" "claim one"
+  commit_all
+  vapply '{"SIG":{"canon":"none"}}'
+  [ -n "$(ls "$PROJ"/knowledge/provisional/K-*-claim-one.md)" ]
+}
+
+@test "apply: with no --verdicts file a signal that needs judgement escalates" {
+  fixture
+  mk_canon
+  esig agent-b provisional "seen in CI" "claim one"
+  commit_all
+  # No --verdicts at all: a model that did not answer must not unlock a write.
+  vapply ""
+  escalated_cleanly
+}
+
+@test "apply: a verdict that omits the judgement a signal needs escalates" {
+  fixture
+  mk_canon
+  esig agent-b provisional "seen in CI" "claim one"
+  commit_all
+  vapply '{"SIG":{"guardrail":"no"}}'
+  escalated_cleanly
+}
+
+@test "apply: --escalations numbers land in the escalated ledger line, null where absent" {
+  fixture
+  write_guardrails
+  esig agent-a provisional "seen in CI" "claim one" --guardrail GUARDRAILS#G3
+  commit_all
+  vapply '{"SIG":{"guardrail":"unsure"}}' '{"SIG":{"issue":42,"pr":null}}'
+  escalated_cleanly
+  [ "$(ledger_py "(L[0]['issue'], L[0]['pr'])")" = "(42, None)" ]
+}
+
+@test "apply: a resolutions record appends a resolution line and a later plan sees the claim as repeat-rejected" {
+  fixture
+  write_guardrails
+  esig agent-a provisional "seen in CI" "claim one" --guardrail GUARDRAILS#G3
+  commit_all
+  vapply '{"SIG":{"guardrail":"unsure"}}' '{"SIG":{"issue":42,"pr":9}}'
+  [ "$(ledger_py "(L[0]['issue'], L[0]['pr'])")" = "(42, 9)" ]
+  h=$(ledger_py "L[0]['claim_hash']")
+  commit_all
+  # A run with nothing pending still records the resolutions.
+  python3 -I "$KN" plan --root "$PROJ" >"$BATS_TEST_TMPDIR/plan.json"
+  printf '{"resolutions":[{"claim_hash":"%s","pr":9,"result":"rejected"}]}' "$h" \
+    >"$BATS_TEST_TMPDIR/esc.json"
+  KNOWLEDGE_NOW=20261019T130000Z run --separate-stderr python3 -I "$KN" apply --root "$PROJ" \
+    --plan "$BATS_TEST_TMPDIR/plan.json" --escalations "$BATS_TEST_TMPDIR/esc.json"
+  [ "$status" -eq 0 ]
+  [ "$(ledger_py "(L[-1]['event'], L[-1]['pr'], L[-1]['result'], L[-1]['claim_hash'] == '$h')")" \
+    = "('resolution', 9, 'rejected', True)" ]
+  commit_all
+  esig agent-b provisional "seen in CI" "claim one"
+  commit_all
+  plan_json
+  [ "$(jq_py "d['signals'][0]['disposition']")" = "repeat-rejected" ]
+  run --separate-stderr python3 -I "$KN" check --root "$PROJ"
+  [ "$status" -eq 0 ]
+}
