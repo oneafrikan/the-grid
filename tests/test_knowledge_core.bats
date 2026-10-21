@@ -1063,3 +1063,9 @@ kaddr() {
   [ "$(git -C "$BATS_TEST_TMPDIR/proj" status --porcelain)" = "$before" ]
 }
 
+# The template copy lets a cut project file and check signals without the-grid installed, so
+# it must never drift from the canonical script.
+@test "the project-template knowledge.py is byte-identical to scripts/knowledge.py" {
+  cmp "$REPO_ROOT/scripts/knowledge.py" "$REPO_ROOT/project-factory/templates/_common/scripts/knowledge.py"
+}
+
