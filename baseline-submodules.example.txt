@@ -42,7 +42,7 @@
 
 # --- composed agent-factory projects ---
 # project:core is cross-desk shared infra (gh-triage, librarian, researcher,
-# platform-engineer) — a machine trimming to a single desk via -project:grid
+# platform-engineer, context-engineer) — a machine trimming to a single desk via -project:grid
 # or -project:finance-desk should still keep project:core.
 project:core
 project:grid

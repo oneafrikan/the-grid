@@ -1066,13 +1066,13 @@ bash scripts/wire.sh
         <h2 id="agents-heading">Agents</h2>
 
         <p>
-          agent-factory produces 38 roles across four independently composed
+          agent-factory produces 39 roles across four independently composed
           and gated public projects (plus any private desk composed the same
           way, sourcing roles from outside this repo — see CLAUDE.md). Seven
           roles are <strong>orchestrators</strong> — they become Claude Code
           skills invoked as slash commands; four coordinate a team, and three
           (<code>tron</code>, <code>morpheus</code>, <code>oracle</code>) talk to you directly.
-          The other 31 are <strong>specialists</strong> —
+          The other 32 are <strong>specialists</strong> —
           subagents delegated to by an orchestrator or called directly.
         </p>
 
@@ -1100,6 +1100,15 @@ bash scripts/wire.sh
             </div>
             <div class="agent-card-title">Librarian</div>
             <p class="agent-card-summary">Maintains persistent, cross-linked markdown wikis compiled from other agents' research — one wiki per domain. Runs the ingest / query / lint cycle, preserving every page's evidence tier and provenance. Never asserts a claim itself.</p>
+          </article>
+
+          <article class="agent-card">
+            <div class="agent-card-name">
+              <code>core-context-engineer</code>
+              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
+            </div>
+            <div class="agent-card-title">Context Engineer</div>
+            <p class="agent-card-summary">Designs and measures what loads into a session and when: size and split, cache-friendly ordering, retrieval design, compaction and handoff. Measures before and after; shows the diff before touching a human's CLAUDE.md or memory.</p>
           </article>
 
           <article class="agent-card">

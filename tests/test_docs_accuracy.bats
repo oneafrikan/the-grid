@@ -225,6 +225,9 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
   grep -q '^    - role: tron\|role: tron' agent-factory/examples/core.yaml
   ! grep -n 'project:core` (gh-triage, librarian, researcher, platform-engineer)' CLAUDE.md || false
   awk '/`examples\/core.yaml`/,/regardless of which/' CLAUDE.md | grep -q 'tron'
+  # context-engineer is a core role, so the same roster paragraph names it
+  grep -q '^    - role: context-engineer\|role: context-engineer' agent-factory/examples/core.yaml
+  awk '/`examples\/core.yaml`/,/regardless of which/' CLAUDE.md | grep -q 'context-engineer'
 }
 
 @test "F12: the golden-output note does not give a stale target count" {

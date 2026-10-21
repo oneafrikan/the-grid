@@ -48,7 +48,8 @@ Wired skills: `prompt-engineer` (jeffallan) for prompt-writing technique;
 
 | Need | Route to |
 |------|----------|
-| Context, token budget, caching, retries, model choice, tool plumbing | ai-engineer |
+| Context, token-budget design, cache-friendly layout | context-engineer (if not wired, tell the user which role should take it) |
+| Retries, model choice, caching mechanics, tool plumbing | ai-engineer (if not wired, tell the user which role should take it) |
 | Running evals, measurement harness | sdet |
 | Documentation | technical-writer |
 | Scope / architecture | tech-lead (escalate) |
