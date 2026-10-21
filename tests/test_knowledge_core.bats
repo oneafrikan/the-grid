@@ -4,6 +4,8 @@
 
 load helpers/setup
 
+bats_require_minimum_version 1.5.0   # `run --separate-stderr`
+
 setup() {
   common_setup
 }
@@ -989,6 +991,64 @@ except knowledge.KnowledgeError as e:
   kcheck
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | cut -d: -f1 | cut -d/ -f1)" = $'E_STAGE knowledge\nE_STAGE signals' ]
+}
+
+# kaddr <args...> — `check --address ...` against the temp project, stdout and stderr apart.
+kaddr() {
+  run --separate-stderr python3 -I "$REPO_ROOT/scripts/knowledge.py" check --root "$BATS_TEST_TMPDIR/proj" "$@"
+}
+
+@test "cli check --address: K-hash8 prints the path on stdout, exit 0" {
+  run ptree 'put("provisional")'
+  kaddr --address "$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1] + "/scripts"); import knowledge; print(knowledge.entry_id("use the gate"))' "$REPO_ROOT")"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "knowledge/provisional/K-"*"-use-the-gate.md" ]]
+  [ -z "$stderr" ]
+}
+
+@test "cli check --address: K-hash8#evidence still resolves after the entry moves to established" {
+  run ptree 'put("provisional")'
+  id=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1] + "/scripts"); import knowledge; print(knowledge.entry_id("use the gate"))' "$REPO_ROOT")
+  kaddr --address "$id#evidence"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "knowledge/provisional/K-"*"-use-the-gate.md#evidence" ]]
+  mkdir -p "$BATS_TEST_TMPDIR/proj/knowledge/established"
+  mv "$BATS_TEST_TMPDIR"/proj/knowledge/provisional/K-*.md "$BATS_TEST_TMPDIR/proj/knowledge/established/"
+  kaddr --address "$id#evidence"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "knowledge/established/K-"*"-use-the-gate.md#evidence" ]]
+}
+
+@test "cli check --address: a slug that is not a heading exits 1, reason on stderr" {
+  run ptree 'put("provisional")'
+  kaddr --address "$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1] + "/scripts"); import knowledge; print(knowledge.entry_id("use the gate"))' "$REPO_ROOT")#notes"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"no heading notes"* ]]
+}
+
+@test "cli check --address: two files with one id exit 1 and stderr names both" {
+  run ptree '(put("provisional"), put("established", name=knowledge.entry_id("use the gate") + "-copy.md"))'
+  kaddr --address "$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1] + "/scripts"); import knowledge; print(knowledge.entry_id("use the gate"))' "$REPO_ROOT")"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"knowledge/established/K-"*"-copy.md"* ]]
+  [[ "$stderr" == *"knowledge/provisional/K-"*"-use-the-gate.md"* ]]
+}
+
+@test "cli check --address: an unknown id exits 1" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  kaddr --address K-00000000
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"no entry matches K-00000000"* ]]
+}
+
+@test "cli check --address: combined with a PATH argument exits 2" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  kaddr --address K-00000000 somefile
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
 }
 
 @test "cli check: writes nothing, tracked or untracked" {
