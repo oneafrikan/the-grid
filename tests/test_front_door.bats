@@ -137,3 +137,62 @@ relative_links() {
 @test "front door: CONTRIBUTING.md does not name the retired next branch" {
   ! grep -qw 'next' "$GRID_ROOT/CONTRIBUTING.md" || false
 }
+
+# Roadmap and private-projects split (openspec change front-door, task 2.4).
+SPLIT_DOCS="docs/roadmap.md docs/private-projects.md"
+
+@test "front door: roadmap and private-projects docs exist" {
+  for f in $SPLIT_DOCS; do
+    [ -f "$GRID_ROOT/$f" ] || { echo "missing: $f" >&2; return 1; }
+  done
+}
+
+@test "front door: docs/roadmap.md starts with '# Roadmap'" {
+  [ "$(head -n 1 "$GRID_ROOT/docs/roadmap.md")" = "# Roadmap" ]
+}
+
+@test "front door: docs/private-projects.md starts with '# Private projects'" {
+  [ "$(head -n 1 "$GRID_ROOT/docs/private-projects.md")" = "# Private projects" ]
+}
+
+@test "front door: roadmap and private-projects relative links resolve" {
+  for f in $SPLIT_DOCS; do
+    links="$(relative_links "$f")"
+    base="$(dirname "$f")"
+    while IFS= read -r target; do
+      [ -n "$target" ] || continue
+      [ -e "$GRID_ROOT/$base/$target" ] || { echo "$f: broken link: $target" >&2; return 1; }
+    done <<< "$links"
+  done
+}
+
+@test "front door: roadmap and private-projects hold no placeholder user, home path or author name" {
+  possessive="Gar""eth's"
+  for f in $SPLIT_DOCS; do
+    ! grep -qF -- '<your-username>' "$GRID_ROOT/$f" || { echo "$f: <your-username>" >&2; return 1; }
+    ! grep -qF -- '/Users/' "$GRID_ROOT/$f" || { echo "$f: /Users/" >&2; return 1; }
+    ! grep -qF -- "$possessive" "$GRID_ROOT/$f" || { echo "$f: possessive author name" >&2; return 1; }
+  done
+}
+
+@test "front door: roadmap and private-projects hold no typed counts" {
+  for f in $SPLIT_DOCS; do
+    ! grep -qE '[0-9]{2,4} (skills|agents|roles)' "$GRID_ROOT/$f" || { echo "$f: typed count" >&2; return 1; }
+  done
+}
+
+@test "front door: docs/roadmap.md keeps 'model-selection.md'" {
+  phrase_in docs/roadmap.md 'model-selection.md'
+}
+
+@test "front door: docs/roadmap.md keeps 'Roadmap'" {
+  phrase_in docs/roadmap.md 'Roadmap'
+}
+
+@test "front door: docs/private-projects.md keeps 'GRID_PRIVATE_ROLES_DIR'" {
+  phrase_in docs/private-projects.md 'GRID_PRIVATE_ROLES_DIR'
+}
+
+@test "front door: docs/private-projects.md keeps the overwrite warning" {
+  phrase_in docs/private-projects.md 'overwrites'
+}
