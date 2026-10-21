@@ -1421,6 +1421,34 @@ EOF
   contains "$output" "not found"
 }
 
+@test "cron-run.sh: two ticks started together - one runs the issue, the other exits 0 busy" {
+  cp "$PAT_DIR/cron-run.sh" "$REPO/loop/cron-run.sh"
+  write_cron_env
+  # cron.env is sourced by the script, so later exports win: one labelled issue, a worker that commits
+  # and then sleeps, so the first tick still holds the lock while the second looks at it
+  {
+    echo "export STUB_ISSUES='4'"
+    echo "export STUB_WORKER_COMMIT='1'"
+    echo "export STUB_CLAUDE_SLEEP='2'"
+  } >> "$REPO/loop/cron.env"
+  # both ticks in the background at once; either may win, so only the outcome is asserted
+  env -i HOME="$HOME" PATH=/usr/bin:/bin bash "$REPO/loop/cron-run.sh" > "$T/tick1.out" 2>&1 &
+  pid1=$!
+  env -i HOME="$HOME" PATH=/usr/bin:/bin bash "$REPO/loop/cron-run.sh" > "$T/tick2.out" 2>&1 &
+  pid2=$!
+  rc1=0; rc2=0
+  wait "$pid1" || rc1=$?
+  wait "$pid2" || rc2=$?
+  [ "$rc1" -eq 0 ]
+  [ "$rc2" -eq 0 ]
+  # exactly one tick reported busy
+  [ "$(grep -l 'busy' "$T/tick1.out" "$T/tick2.out" | wc -l)" -eq 1 ]
+  # and only one worker ran and one PR was opened
+  [ "$(claude_calls)" -eq 1 ]
+  [ "$(grep -c '^gh pr create' "$STUB_LOG")" -eq 1 ]
+  [ ! -d "$STATE/lock" ]
+}
+
 @test "env: a GH_TOKEN canary appears in no output and no posted comment" {
   happy_env
   export GH_TOKEN="canary-token-7f3a91" GITHUB_TOKEN="canary-gh-token-22" CLAUDE_CODE_OAUTH_TOKEN="canary-oauth-55"
