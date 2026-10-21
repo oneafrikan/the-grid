@@ -27,3 +27,15 @@ teardown() {
   run grep -F -- '- [ ] No path under `knowledge/canon/` changed, or a human is merging this: `git diff --name-only origin/main...HEAD -- knowledge/canon`' "$REPO_ROOT/.github/pull_request_template.md"
   [ "$status" -eq 0 ]
 }
+
+@test "CLAUDE.md block says canon is never merged without a human" {
+  # Take the block that starts at the line naming the path and the rule, up to
+  # the next blank line, so the three words must sit together and not be
+  # satisfied by unrelated mentions elsewhere in the file.
+  block="$(awk '/knowledge\/canon\// && /never merged/ {p=1} p && /^$/ {exit} p' "$REPO_ROOT/CLAUDE.md")"
+  [ -n "$block" ]
+  [[ "$block" == *'knowledge/canon/'* ]]
+  [[ "$block" == *'never merged'* ]]
+  [[ "$block" == *'human'* ]]
+  [[ "$block" == *'origin/main...HEAD'* ]]
+}
