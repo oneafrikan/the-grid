@@ -9,6 +9,7 @@ Sections (added as the change lands, in this order):
     5. Entry        parse_entry, render_entry, ENTRY_NAME_RE
     6. Address      heading_slugs, resolve_address
     7. Ledger       ledger_path, read_ledger, append_ledger, processed_signals, claim_state
+    8. Command line main, SUBCOMMANDS (the one place a subcommand is registered)
 
 Design rules:
   * Python 3 standard library only, valid on 3.8 (no `X | Y` annotations, no
@@ -24,6 +25,8 @@ import hashlib
 import json
 import os
 import re
+import subprocess
+import sys
 import unicodedata
 
 # --- 1. vocabulary -----------------------------------------------------------------
@@ -580,3 +583,95 @@ def claim_state(ledger, claim_hash):
         elif event == "reopen":
             rejected = False
     return {"escalated_open": escalated_open, "rejected": rejected}
+
+
+# --- 8. command line ---------------------------------------------------------------
+# Exit status: 0 ok, 2 usage error. Every error is one `knowledge.py: ...` line on stderr
+# and nothing on stdout, so a caller can treat stdout as the result alone.
+
+
+class UsageError(Exception):
+    """Bad command line; main() turns it into one stderr line and exit status 2."""
+
+
+def default_root():
+    """Git root of the current directory, else the current directory (git absent or failing)."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, check=True).stdout
+        top = out.decode("utf-8", "surrogateescape").strip()
+        if top:
+            return top
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    return os.getcwd()
+
+
+def _cmd_hash(root, claim):
+    # root is unused here; it is accepted so every subcommand shares one call shape.
+    print(claim_hash(claim))
+    return 0
+
+
+# Subcommand table: name -> (number of positional arguments, handler(root, *positionals)).
+# A later subcommand is one new entry here plus its handler.
+SUBCOMMANDS = {
+    "hash": (1, _cmd_hash),
+}
+
+
+def _parse(argv):
+    """Return (name, root_or_None, positionals) or raise UsageError."""
+    if not argv:
+        raise UsageError("usage: knowledge.py <%s> [--root DIR] [args]" % "|".join(SUBCOMMANDS))
+    name = argv[0]
+    if name not in SUBCOMMANDS:
+        raise UsageError("unknown subcommand %r" % name)
+    root = None
+    positionals = []
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--":
+            # Everything after `--` is positional, so a claim may start with a dash.
+            positionals += argv[i + 1:]
+            break
+        if arg == "--root":
+            if i + 1 >= len(argv):
+                raise UsageError("--root needs a directory")
+            root = argv[i + 1]
+            i += 1
+        elif arg.startswith("-") and arg != "-":
+            raise UsageError("unknown option %r" % arg)
+        else:
+            positionals.append(arg)
+        i += 1
+    if len(positionals) != SUBCOMMANDS[name][0]:
+        raise UsageError("%s takes %d argument(s)" % (name, SUBCOMMANDS[name][0]))
+    return name, root, positionals
+
+
+def main(argv=None):
+    """Run one subcommand and return its exit status."""
+    if argv is None:
+        argv = sys.argv[1:]
+    try:
+        name, root, positionals = _parse(argv)
+        if root is None:
+            root = default_root()
+        return SUBCOMMANDS[name][1](root, *positionals)
+    except UsageError as err:
+        print("knowledge.py: %s" % err, file=sys.stderr)
+        return 2
+    except KnowledgeError as err:
+        print("knowledge.py: %s %s" % (err.code, err), file=sys.stderr)
+        return 1
+    except UnicodeError:
+        # An argument that is not valid UTF-8 (surrogate escapes) cannot be hashed; the text
+        # itself is not echoed.
+        print("knowledge.py: argument is not valid UTF-8", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
