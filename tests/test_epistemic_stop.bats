@@ -68,3 +68,43 @@ stop_payload() {
     [ -z "$output" ]
   done
 }
+
+# shellcheck disable=SC2154  # status/output are set by bats' `run`
+@test "epistemic-stop: stop_hook_active true exits 0 without inspecting the message" {
+  local msg="Fixed the bug and all tests pass."
+
+  # Control: the same unwarranted claim on the first Stop of a turn blocks, so the exit 0
+  # below can only come from the loop guard. Without the guard the hook would block forever.
+  run_hook epistemic-stop "$(stop_payload "$msg" false)"
+  [ "$status" -eq 2 ]
+
+  # Second Stop in the turn (our own exit 2 already continued it): never block again.
+  run_hook epistemic-stop "$(stop_payload "$msg" true)"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# shellcheck disable=SC2154  # status/output are set by bats' `run`
+@test "epistemic-stop: input that is not a usable Stop payload exits 0 and prints nothing" {
+  # Fails open: input the hook cannot use must neither error nor print. run_hook merges
+  # stderr into $output, so an empty $output covers both streams.
+  run_hook epistemic-stop "not json at all"
+  [ "$status" -eq 0 ] || { echo "input: not json at all" >&2; false; }
+  [ -z "$output" ] || { echo "input: not json at all" >&2; false; }
+
+  run_hook epistemic-stop ""
+  [ "$status" -eq 0 ] || { echo "input: empty stdin" >&2; false; }
+  [ -z "$output" ] || { echo "input: empty stdin" >&2; false; }
+
+  run_hook epistemic-stop "$(jq -n -c '[1,2]')"
+  [ "$status" -eq 0 ] || { echo "input: JSON array" >&2; false; }
+  [ -z "$output" ] || { echo "input: JSON array" >&2; false; }
+
+  run_hook epistemic-stop "$(jq -n -c '{last_assistant_message: 7, stop_hook_active: false}')"
+  [ "$status" -eq 0 ] || { echo "input: numeric last_assistant_message" >&2; false; }
+  [ -z "$output" ] || { echo "input: numeric last_assistant_message" >&2; false; }
+
+  run_hook epistemic-stop "$(jq -n -c '{transcript_path: "/nonexistent/transcript.jsonl", stop_hook_active: false}')"
+  [ "$status" -eq 0 ] || { echo "input: no message, missing transcript" >&2; false; }
+  [ -z "$output" ] || { echo "input: no message, missing transcript" >&2; false; }
+}
