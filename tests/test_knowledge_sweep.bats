@@ -93,7 +93,8 @@ jq_py() {
   python3 -I "$KN" plan --root "$PROJ" >"$BATS_TEST_TMPDIR/two"
   cmp "$BATS_TEST_TMPDIR/one" "$BATS_TEST_TMPDIR/two"
   # Sorted keys, 2-space indent.
-  [ "$(sed -n 2p "$BATS_TEST_TMPDIR/one")" = '  "cap": 10,' ]
+  [ "$(sed -n 2p "$BATS_TEST_TMPDIR/one")" = '  "canon_claims": [],' ]
+  [ "$(sed -n 3p "$BATS_TEST_TMPDIR/one")" = '  "cap": 10,' ]
 }
 
 @test "plan: a signal with a hidden character is listed invalid with its code and no claim_hash" {
@@ -154,7 +155,7 @@ jq_py() {
 @test "plan: a tree with no signals/ gives an empty plan" {
   fixture
   plan_json
-  [ "$(jq_py "d")" = "{'cap': 10, 'counts': {}, 'deferred': 0, 'pending': 0, 'reconcile': [], 'signals': []}" ]
+  [ "$(jq_py "d")" = "{'canon_claims': [], 'cap': 10, 'counts': {}, 'deferred': 0, 'pending': 0, 'reconcile': [], 'signals': []}" ]
 }
 
 @test "plan: a bad --cap is a usage error (exit 2) with nothing on stdout" {
@@ -455,4 +456,81 @@ expect_escalated() {
   commit_all
   plan_json
   expect_escalated id-collision
+}
+
+# write_guardrails — a GUARDRAILS.md at the fixture root holding a G3 line (and a G30 one, so a
+# lookup of G3 cannot match by prefix).
+write_guardrails() {
+  printf '# Guardrails\n\n- G3: Add sponsored content [check: human]\n- G30: Other rule [check: none]\n' \
+    >"$PROJ/GUARDRAILS.md"
+}
+
+@test "plan: a signal citing a guardrail needs guardrail judgement and carries the exact line" {
+  fixture
+  write_guardrails
+  esig agent-a provisional "seen in CI" "claim one" --guardrail GUARDRAILS#G3
+  commit_all
+  plan_json
+  expect_first written provisional
+  [ "$(jq_py "d['signals'][0]['needs_judgement']")" = "['guardrail']" ]
+  [ "$(jq_py "d['signals'][0]['guardrail_text']")" = "- G3: Add sponsored content [check: human]" ]
+}
+
+@test "plan: a signal citing a guardrail that is not in GUARDRAILS.md is escalated (guardrail-not-found)" {
+  fixture
+  write_guardrails
+  esig agent-a provisional "seen in CI" "claim one" --guardrail GUARDRAILS#G9
+  commit_all
+  plan_json
+  expect_escalated guardrail-not-found
+  [ "$(jq_py "d['signals'][0]['needs_judgement']")" = "[]" ]
+}
+
+@test "plan: with canon entries the plan lists canon_claims and ordinary signals need canon judgement" {
+  fixture
+  mk_entry canon "canon claim" "agent-a|canonical|seen in CI"
+  esig agent-b provisional "seen in CI" "claim one"
+  commit_all
+  plan_json
+  id=$(python3 -I "$KN" hash "canon claim" | cut -c1-8)
+  [ "$(jq_py "d['canon_claims']")" = "[{'claim': 'canon claim', 'id': 'K-$id'}]" ]
+  [ "$(jq_py "d['signals'][0]['needs_judgement']")" = "['canon']" ]
+}
+
+@test "plan: with no canon, canon_claims is empty and a plain signal needs no judgement" {
+  fixture
+  esig agent-a provisional "seen in CI" "claim one"
+  commit_all
+  plan_json
+  [ "$(jq_py "d['canon_claims']")" = "[]" ]
+  [ "$(jq_py "d['signals'][0]['needs_judgement']")" = "[]" ]
+}
+
+@test "plan: at most 3 escalated signals are listed, the rest stay pending and count as deferred" {
+  fixture
+  for i in 1 2 3 4 5; do
+    KNOWLEDGE_NOW=$(printf '20261018T1000%02dZ' "$i") python3 -I "$KN" file --root "$PROJ" \
+      --filer agent-a --claim "claim number $i" --stage provisional --warrant "seen in CI" \
+      --supersedes K-aaaaaaaa >/dev/null
+  done
+  commit_all
+  plan_json
+  [ "$(jq_py "len(d['signals'])")" = "3" ]
+  [ "$(jq_py "d['counts']")" = "{'escalated': 3}" ]
+  [ "$(jq_py "d['deferred']")" = "2" ]
+  [ "$(jq_py "d['pending']")" = "5" ]
+  [ "$(ls "$PROJ/signals" | grep -c '\.md$')" = "5" ]
+}
+
+@test "plan: with guardrail and canon judgement, two runs print identical bytes and nothing is written" {
+  fixture
+  write_guardrails
+  mk_entry canon "canon claim" "agent-a|canonical|seen in CI"
+  esig agent-b provisional "seen in CI" "claim one" --guardrail GUARDRAILS#G3
+  commit_all
+  plan_json
+  first=$output
+  plan_json
+  [ "$output" = "$first" ]
+  [ -z "$(git -C "$PROJ" status --porcelain)" ]
 }
