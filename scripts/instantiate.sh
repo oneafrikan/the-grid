@@ -5,14 +5,16 @@
 #   instantiate.sh <pattern> <target-repo-dir> --profile <profile> [options]
 #
 # Patterns:
-#   issue-loop    Work labelled GitHub issues with a headless runner (one issue per run), a
-#                 runner-side verify gate and PRs for a human to merge; plus an interactive
-#                 /loop prompt and a post-commit review hook.
+#   issue-loop    Work labelled GitHub issues with a headless runner (one issue per run) and a
+#                 runner-side verify gate; the runner either opens a PR for a human to merge or
+#                 (--land direct) lands the verified commit on the base branch. Plus an
+#                 interactive /loop prompt and a post-commit review hook.
 #
 # Profiles (they only choose the default MODE; --mode overrides):
 #   personal      MODE=direct: interactive /loop pushing the base branch. No runner, no guard.
 #   work          MODE=pr: runner + guard + worktree helper; PRs only.
-#   mac-mini      MODE=pr: same as work (it used to write a launchd plist; the waker replaces that)
+#   mac-mini      MODE=pr: same as work (kept for old command lines; it writes no scheduler file,
+#                 use --cron-every for a per-repo cron line)
 #
 # Options:
 #   --repo <owner/name>         code repo (detected from the git remote if omitted)
@@ -23,13 +25,20 @@
 #   --label <label>             opt-in issue label (default: ready-for-agent)
 #   --review-focus <text>       what the post-commit reviewer should focus on
 #   --base-branch <branch>      PR target / worktree base (default: origin/HEAD's branch, else main)
-#   --mode <pr|direct>          override the profile's default mode
+#   --mode <pr|direct>          override the profile's default mode (direct = the interactive
+#                               /loop, no runner; see --land for headless direct landing)
+#   --land <pr|direct>          headless runner landing mode, default pr. Ships the runner, worker
+#                               prompt, guard, worktree helper and cron-run.sh in either case and
+#                               renders MODE=<value> into loop.conf. direct = no PR: the runner
+#                               verifies, rebases and pushes the base branch, then closes the issue
+#                               (protect the branch accordingly). Works with any profile.
 #   --setup-cmd <cmd>           run in each issue worktree before the worker (e.g. npm ci)
 #   --worker-model <model>      model for the headless worker (default: sonnet)
 #   --agent-labels <a,b>        also create an agent:<name> label for each name
 #   --fast-verify               VERIFY_CMD='bash loop/verify.sh' (changed-files check, seconds) unless
 #                               --verify-cmd or an existing loop.conf already sets one
-#   --cron-every <N>            (pr mode) render this repo's own cron line: poll every N minutes
+#   --cron-every <N>            (needs the runner: pr mode or --land) render this repo's own cron
+#                               line: poll every N minutes
 #                               (1-59), plus loop/cron.env with PATH and HOME for cron's bare
 #                               environment. Printed, never installed: crontab is a human step.
 #   --cron-log <file>           log for that line (default: ~/.grid/logs/issue-loop-<repo>.log)
@@ -55,7 +64,7 @@ usage() {
   echo "Patterns:  issue-loop"
   echo "Profiles:  personal | work | mac-mini"
   echo "Options:   --repo --issue-repo --project-context --verify-cmd --label --review-focus"
-  echo "           --base-branch --mode --setup-cmd --worker-model --agent-labels"
+  echo "           --base-branch --mode --land --setup-cmd --worker-model --agent-labels"
   echo "           --fast-verify --cron-every --cron-log"
   echo ""
   echo "Example:"
@@ -82,6 +91,7 @@ ISSUE_LABEL=""
 REVIEW_FOCUS=""
 BASE_BRANCH=""
 MODE=""
+LAND=""   # --land: headless runner landing mode (pr|direct); set means "ship the runner"
 SETUP_CMD=""
 WORKER_MODEL=""
 AGENT_LABELS=""
@@ -107,6 +117,7 @@ while [[ $# -gt 0 ]]; do
     --review-focus)     REVIEW_FOCUS="$2";     shift 2 ;;
     --base-branch)      BASE_BRANCH="$2";      shift 2 ;;
     --mode)             MODE="$2";             shift 2 ;;
+    --land)             LAND="$2";             shift 2 ;;
     --setup-cmd)        SETUP_CMD="$2";        shift 2 ;;
     --worker-model)     WORKER_MODEL="$2";     shift 2 ;;
     --agent-labels)     AGENT_LABELS="$2";     shift 2 ;;
@@ -120,6 +131,8 @@ done
 [[ "$PROFILE" =~ ^(personal|work|mac-mini)$ ]] || { echo "Error: profile must be personal, work or mac-mini"; exit 1; }
 [[ "$PATTERN" == "issue-loop" ]] || { echo "Error: unknown pattern '$PATTERN' (available: issue-loop)"; exit 1; }
 [[ -z "$MODE" || "$MODE" =~ ^(pr|direct)$ ]] || { echo "Error: --mode must be pr or direct"; exit 1; }
+[[ -z "$LAND" || "$LAND" =~ ^(pr|direct)$ ]] || { echo "Error: --land must be pr or direct"; exit 1; }
+[[ -z "$LAND" || -z "$MODE" || "$LAND" == "$MODE" ]] || { echo "Error: --land $LAND conflicts with --mode $MODE (--land sets the runner's MODE)"; exit 1; }
 [[ -z "$AGENT_LABELS" || "$AGENT_LABELS" =~ ^[A-Za-z0-9._,-]+$ ]] || { echo "Error: --agent-labels is a comma-separated list of agent names ([A-Za-z0-9._-])"; exit 1; }
 [[ -z "$CRON_EVERY" || "$CRON_EVERY" =~ ^([1-9]|[1-5][0-9])$ ]] || { echo "Error: --cron-every is a number of minutes (1-59)"; exit 1; }
 # one-line values only: they are written into single-line assignments
@@ -346,6 +359,15 @@ instantiate_issue_loop() {
   echo "  issues:  $ISSUE_REPO"
   echo "  profile: $PROFILE"
 
+  # --land is an explicit request for the headless runner in that landing mode, so it beats the
+  # profile default and a conf value. (--land vs --mode was checked at parse time.)
+  if [[ -n "$LAND" ]]; then
+    MODE="$LAND"
+    # loop.conf is rendered once and never rewritten: say so when it disagrees with --land
+    if [[ -f "$loop_dir/loop.conf" && "$(conf_value "$loop_dir/loop.conf" MODE)" != "$LAND" ]]; then
+      echo "  Warning: existing loop/loop.conf has MODE='$(conf_value "$loop_dir/loop.conf" MODE)'; it is left alone, set MODE='$LAND' there by hand"
+    fi
+  fi
   # profile -> default mode (an existing conf's MODE and --mode both win)
   if [[ -z "$MODE" ]]; then
     case "$PROFILE" in
@@ -354,8 +376,13 @@ instantiate_issue_loop() {
     esac
   fi
   [[ "$MODE" =~ ^(pr|direct)$ ]] || { echo "Error: MODE must be pr or direct (got '$MODE')"; exit 1; }
-  [[ -z "$CRON_EVERY" || "$MODE" == "pr" ]] || { echo "Error: --cron-every needs pr mode (it schedules the headless runner)"; exit 1; }
-  echo "  mode:    $MODE"
+  # Does this cut ship the headless runner? MODE=direct alone means the interactive /loop (no
+  # runner), so direct needs --land, or a runner already cut here (a re-run must not drop to the
+  # interactive text). pr always ships it.
+  RUNNER=0
+  if [[ "$MODE" == "pr" || -n "$LAND" || -f "$loop_dir/run-issue.sh" ]]; then RUNNER=1; fi
+  [[ -z "$CRON_EVERY" || "$RUNNER" -eq 1 ]] || { echo "Error: --cron-every needs the headless runner (pr mode, or --land direct); the interactive direct mode has none"; exit 1; }
+  echo "  mode:    $MODE$( [[ "$RUNNER" -eq 1 ]] && echo ' (headless runner)' || echo ' (interactive /loop, no runner)' )"
 
   # defaults for keys with no option and no conf/seed value
   : "${ISSUE_LABEL:=ready-for-agent}"
@@ -417,9 +444,10 @@ instantiate_issue_loop() {
     echo "  left alone: $loop_dir/loop.conf (rendered once; edit it by hand)"
   fi
 
-  # pr mode only: the headless runner, its prompt, the guard and the worktree helper
-  if [[ "$MODE" == "pr" ]]; then
-    section "PR mode: runner, worker prompt, guard hook, worktree helper"
+  # runner cuts only (pr, or direct via --land): the headless runner, its prompt, the guard and
+  # the worktree helper. The guard still stops the WORKER pushing; the runner does the landing.
+  if [[ "$RUNNER" -eq 1 ]]; then
+    section "Runner: runner, worker prompt, guard hook, worktree helper"
     copy_if_changed "$pattern_dir/run-issue.sh" "$loop_dir/run-issue.sh"
     copy_if_changed "$pattern_dir/cron-run.sh" "$loop_dir/cron-run.sh"
     copy_if_changed "$pattern_dir/verify.sh" "$loop_dir/verify.sh"
@@ -483,8 +511,15 @@ instantiate_issue_loop() {
   if [[ -f "$TARGET_DIR/CLAUDE.md" ]]; then
     echo "  CLAUDE.md already exists — skipping (review $TARGET_DIR/CLAUDE.md manually)"
   else
-    local profile_rules runner_note repo_name="${GH_REPO##*/}" md_tmp
-    if [[ "$MODE" == "pr" ]]; then
+    local profile_rules runner_note merge_rule repo_name="${GH_REPO##*/}" md_tmp
+    if [[ "$RUNNER" -eq 1 && "$MODE" == "direct" ]]; then
+      profile_rules="- The headless worker MUST NOT push at all: the guard hook blocks it. Only the RUNNER pushes \`${BASE_BRANCH}\`, after its own \`VERIFY_CMD\` passes. There is no PR and no review step, so branch protection and \`VERIFY_CMD\` are the only checks.
+- Flow: implement on an \`issue-<N>\` worktree branch, the RUNNER verifies, rebases onto \`origin/${BASE_BRANCH}\` if it moved (and verifies again), pushes \`${BASE_BRANCH}\` without force and closes the issue. A rebase conflict or rejected push labels the issue \`blocked\` and pushes nothing.
+- Start a branch by hand with: \`bash loop/hooks/new-agent-worktree.sh issue-<N>\`"
+      runner_note="- **Headless runner** (\`loop/run-issue.sh\`): works ONE \`${ISSUE_LABEL}\` issue per invocation in its own
+  worktree, runs \`VERIFY_CMD\` itself, then lands the commit on \`${BASE_BRANCH}\` (MODE=direct) and closes the issue.
+  Started by hand (\`bash loop/run-issue.sh\`) or by a cron line (\`--cron-every\`). Config: \`loop/loop.conf\`."
+    elif [[ "$MODE" == "pr" ]]; then
       profile_rules="- Agent MUST NOT push to \`${BASE_BRANCH}\` directly: the guard hook blocks it for the headless worker; branch protection is the real boundary.
 - Flow: implement on an \`issue-<N>\` worktree branch, the RUNNER verifies and opens a PR to \`${BASE_BRANCH}\`, a human merges.
 - Start a branch by hand with: \`bash loop/hooks/new-agent-worktree.sh issue-<N>\`"
@@ -494,6 +529,12 @@ instantiate_issue_loop() {
     else
       profile_rules="- Agent may push directly to \`${BASE_BRANCH}\` (direct mode, interactive \`/loop\` only)."
       runner_note="- (direct mode: interactive \`/loop\` only; there is no headless runner in this repo.)"
+    fi
+    # the issue-hygiene line that differs by landing mode
+    if [[ "$RUNNER" -eq 1 && "$MODE" == "direct" ]]; then
+      merge_rule="The loop lands verified commits on \`${BASE_BRANCH}\` itself and opens no PRs."
+    else
+      merge_rule="The loop opens PRs and never merges."
     fi
     md_tmp=$(mktemp)
     cat > "$md_tmp" <<CLAUDEMD
@@ -520,7 +561,8 @@ ${profile_rules}
 
 - Label an issue \`${ISSUE_LABEL}\` to make it eligible. Everything else is the operator's call.
 - \`blocked\`, \`needs-human\` and \`ready-for-human\` are set by the loop; remove \`blocked\` and re-add \`${ISSUE_LABEL}\` to retry.
-- The loop opens PRs and never merges. \`VERIFY_CMD\` in \`loop/loop.conf\` is the gate; empty means the runner refuses to start.
+- ${merge_rule}
+- \`VERIFY_CMD\` in \`loop/loop.conf\` is the gate; empty means the runner refuses to start.
 ${VERIFY_CMD:+- Verify command: \`${VERIFY_CMD}\`}
 
 ## Forbidden
@@ -546,7 +588,7 @@ CLAUDEMD
   echo "  Label:      $ISSUE_LABEL"
   if [[ -n "$VERIFY_CMD" ]]; then echo "  Verify:     $VERIFY_CMD"; else echo "  Verify:     (empty: set VERIFY_CMD in loop/loop.conf, the runner refuses to run without it)"; fi
   echo ""
-  if [[ "$MODE" == "pr" ]]; then
+  if [[ "$RUNNER" -eq 1 ]]; then
     echo "  First run, by hand, from $TARGET_DIR:"
     echo ""
     echo "    bash loop/run-issue.sh"
