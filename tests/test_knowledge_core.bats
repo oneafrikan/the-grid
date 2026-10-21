@@ -551,3 +551,33 @@ except knowledge.KnowledgeError as e:
   run pled '(app(D("a.md", "h2", "escalated", 9), Res("h2", "rejected")), state())[1]'
   [ "$output" = "{'escalated_open': None, 'rejected': False}" ]
 }
+
+@test "cli hash: case and spacing do not change the output, which is 16 hex plus newline" {
+  a=$(python3 -I "$REPO_ROOT/scripts/knowledge.py" hash "Use  the   Gate")
+  b=$(python3 -I "$REPO_ROOT/scripts/knowledge.py" hash "  use the gate ")
+  [ "$a" = "$b" ]
+  run python3 -I "$REPO_ROOT/scripts/knowledge.py" hash "use the gate"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^[0-9a-f]{16}$ ]]
+  # Command substitution strips the newline, so count the raw bytes: 16 hex plus one newline.
+  [ "$(python3 -I "$REPO_ROOT/scripts/knowledge.py" hash "use the gate" | wc -c)" -eq 17 ]
+}
+
+@test "cli hash: accepts --root DIR" {
+  run python3 -I "$REPO_ROOT/scripts/knowledge.py" hash --root "$BATS_TEST_TMPDIR" "use the gate"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(py 'knowledge.claim_hash("use the gate")')" ]
+}
+
+@test "cli: no argument, an unknown subcommand and an unknown option exit 2 with one stderr line" {
+  for args in "" "bogus" "hash" "hash --bogus x" "hash --root"; do
+    # shellcheck disable=SC2086
+    run python3 -I "$REPO_ROOT/scripts/knowledge.py" $args
+    [ "$status" -eq 2 ]
+  done
+  python3 -I "$REPO_ROOT/scripts/knowledge.py" bogus 2>"$BATS_TEST_TMPDIR/err" >"$BATS_TEST_TMPDIR/out" || true
+  [ ! -s "$BATS_TEST_TMPDIR/out" ]
+  [ "$(wc -l <"$BATS_TEST_TMPDIR/err")" -eq 1 ]
+  [[ "$(cat "$BATS_TEST_TMPDIR/err")" == "knowledge.py:"* ]]
+}
+
