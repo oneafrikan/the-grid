@@ -439,7 +439,11 @@ def knowledge_lint(root):
     # Without git the edited-after-add check cannot run; say so once, not per signal.
     if history_skipped:
         print("map.py: signal history check skipped (git cannot answer here)")
-    findings = findings + ledger_findings(root, knowledge) + warrant_findings(root, knowledge)
+    findings = (findings + ledger_findings(root, knowledge) + warrant_findings(root, knowledge)
+                + address_findings(root, knowledge))
+    # knowledge.check_entry already reports a dangling supersedes/superseded_by with the same
+    # text address_findings builds; keep one line of each, not two.
+    findings = list(dict.fromkeys(findings))
     for finding in findings:
         print(knowledge.format_finding(finding))
     return 1 if findings else 0
@@ -509,6 +513,61 @@ def warrant_findings(root, knowledge):
                 continue
             message = "stage %s but the evidence supports at most %s" % (stage, top)
         findings.append(knowledge.Finding(E_WARRANT, rel, message))
+    return findings
+
+
+E_ADDR = "E_ADDR"
+ADDRESS_KEYS = ("supersedes", "superseded_by", "contradicts", "confirms", "guardrail")
+
+
+def address_errors(root, knowledge, fields, guardrails):
+    """(key, message) for each frontmatter address in `fields` that does not resolve.
+
+    Only the K-<hash8>[#slug] and GUARDRAILS#G<n> forms are checked; any other form gives no
+    error here (path addresses are checked separately). `K-` goes through
+    knowledge.resolve_address, so an entry that moved between stage directories still
+    resolves and an ambiguous id lists every file. `guardrails` is the {"G<n>": line} map
+    from knowledge.guardrail_lines. Only the listed frontmatter keys are read, never prose.
+    """
+    errors = []
+    for key in ADDRESS_KEYS:
+        addr = fields.get(key)
+        if addr is None:
+            continue
+        if addr.startswith("GUARDRAILS#"):
+            if addr[len("GUARDRAILS#"):] not in guardrails:
+                errors.append((key, "%s is not defined in GUARDRAILS.md" % addr))
+        elif addr.startswith("K-"):
+            try:
+                knowledge.resolve_address(root, addr)
+            except knowledge.KnowledgeError as exc:
+                errors.append((key, str(exc)))
+    return errors
+
+
+def address_findings(root, knowledge):
+    """E_ADDR findings for the address fields of pending signals and of entries.
+
+    Fields come from knowledge.parse_signal / parse_entry, never a regex over the raw text.
+    A file that does not parse is skipped: check_tree already reported it. The message form
+    `<key>: <reason>` matches knowledge._link_findings, so the two never disagree on text.
+    """
+    try:
+        guardrails = knowledge.guardrail_lines(root)
+    except knowledge.KnowledgeError as exc:      # E_READ: GUARDRAILS.md exists but is unreadable
+        raise MapError(str(exc))
+    pending, _ = knowledge.iter_signals(root)
+    targets = [(rel, knowledge.parse_signal) for rel in pending]
+    targets += [(rel, knowledge.parse_entry) for _, rel in knowledge.iter_entries(root)]
+    findings = []
+    for rel, parse in targets:
+        try:
+            with open(os.path.join(root, *rel.split("/")), "rb") as fh:
+                fields = parse(fh.read().decode("utf-8"))
+        except (OSError, UnicodeDecodeError, knowledge.KnowledgeError):
+            continue
+        for key, message in address_errors(root, knowledge, fields, guardrails):
+            findings.append(knowledge.Finding(E_ADDR, rel, "%s: %s" % (key, message)))
     return findings
 
 
