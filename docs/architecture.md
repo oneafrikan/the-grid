@@ -232,8 +232,8 @@ Every `docs/*.md` file in the repo, so a reader can reach each from here:
 - [uplift-runbook.md](uplift-runbook.md) — uplift runbook
 - [usage.md](usage.md) — the weekly usage job
 
-Planned in this change, plain text until the files exist: `docs/roadmap.md` (the roadmap
-and model-routing note) and `docs/private-projects.md` (composing a private desk).
+Planned in this change, plain text until the files exist: [docs/roadmap.md](roadmap.md) (the roadmap
+and model-routing note) and [docs/private-projects.md](private-projects.md) (composing a private desk).
 
 ## Hand-synced copies
 
