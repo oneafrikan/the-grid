@@ -520,14 +520,75 @@ E_ADDR = "E_ADDR"
 ADDRESS_KEYS = ("supersedes", "superseded_by", "contradicts", "confirms", "guardrail")
 
 
+def github_slugs(knowledge, text):
+    """Every heading anchor GitHub would render for `text`, repeats included.
+
+    knowledge.heading_slugs gives the base slug of each heading but not the repeat rule, so
+    only that step lives here: the second heading with a slug gets `-1`, the third `-2`, and
+    a suffixed slug that is already taken is bumped again.
+    """
+    seen = set()
+    counts = {}
+    for base in knowledge.heading_slugs(text):
+        slug = base
+        while slug in seen:
+            counts[base] = counts.get(base, 0) + 1
+            slug = "%s-%d" % (base, counts[base])
+        seen.add(slug)
+    return seen
+
+
+def path_address_error(root, knowledge, addr):
+    """Message for a `<path>[#slug]` address that is refused or does not resolve, else None.
+
+    The text is judged before the filesystem is touched: a leading `/`, any `..` and anything
+    under signals/ (the sweep moves signal files, so such an address dangles by design) are
+    refused outright. The file must exist as written or with `.md` appended, and its real
+    path (symlinks followed) must stay under `root`, so no check reads outside the repo.
+    """
+    ref, sep, want = addr.partition("#")
+    if ref.startswith("/"):
+        return "%s is absolute; use a path relative to the repo root" % addr
+    if ".." in ref:
+        return "%s contains .. and may not leave the repo root" % addr
+    parts = [p for p in ref.split("/") if p not in ("", ".")]
+    if not parts:
+        return "%s has no path" % addr
+    if parts[0] == "signals":
+        return "%s points into signals/, whose files are moved by the sweep" % addr
+    real_root = os.path.realpath(root)
+    target = None
+    for candidate in ("/".join(parts), "/".join(parts) + ".md"):
+        full = os.path.join(root, *candidate.split("/"))
+        if not os.path.isfile(full):
+            continue
+        real = os.path.realpath(full)
+        if real != real_root and not real.startswith(real_root + os.sep):
+            return "%s resolves outside the repo root" % addr
+        target = real
+        break
+    if target is None:
+        return "no such file: %s" % ref
+    if not sep:
+        return None
+    try:
+        with open(target, encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError):
+        return "cannot read %s" % ref
+    if want not in github_slugs(knowledge, text):
+        return "no heading %s in %s" % (want, ref)
+    return None
+
+
 def address_errors(root, knowledge, fields, guardrails):
     """(key, message) for each frontmatter address in `fields` that does not resolve.
 
-    Only the K-<hash8>[#slug] and GUARDRAILS#G<n> forms are checked; any other form gives no
-    error here (path addresses are checked separately). `K-` goes through
-    knowledge.resolve_address, so an entry that moved between stage directories still
-    resolves and an ambiguous id lists every file. `guardrails` is the {"G<n>": line} map
-    from knowledge.guardrail_lines. Only the listed frontmatter keys are read, never prose.
+    Three forms: GUARDRAILS#G<n>, K-<hash8>[#slug] and the generic <path>[#slug]. `K-` goes
+    through knowledge.resolve_address, so an entry that moved between stage directories still
+    resolves and an ambiguous id lists every file; a path goes through path_address_error.
+    `guardrails` is the {"G<n>": line} map from knowledge.guardrail_lines. Only the listed
+    frontmatter keys are read, never prose.
     """
     errors = []
     for key in ADDRESS_KEYS:
@@ -542,6 +603,10 @@ def address_errors(root, knowledge, fields, guardrails):
                 knowledge.resolve_address(root, addr)
             except knowledge.KnowledgeError as exc:
                 errors.append((key, str(exc)))
+        else:
+            message = path_address_error(root, knowledge, addr)
+            if message is not None:
+                errors.append((key, message))
     return errors
 
 
