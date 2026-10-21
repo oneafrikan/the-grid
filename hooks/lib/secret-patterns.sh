@@ -115,7 +115,8 @@ secret_prefilter_re() {
 # below. They are worker-only on purpose: as a commit guard on human diffs they would be
 # too noisy (any long hash or `password=...` in code). No entropy scoring: fixed patterns,
 # nothing to tune. Known cost: a long base64-looking run in a handoff is quarantined (a bare
-# sha256/sha512 hex digest is the one exemption); the operator reviews the quarantine directory.
+# sha256/sha512 hex digest is the one exemption, withheld on a line that names a key, secret,
+# private, token, passw or credential); the operator reviews the quarantine directory.
 _STRICT_Q="'\""   # a single and a double quote
 STRICT_NAMES=(base64-run bearer-value url-password password-assigned)
 STRICT_RES=(
@@ -232,12 +233,17 @@ _MB_BLANKS=(
 )
 _UB=""
 # H-26 (VS6/VF10): characters that are invisible or zero-width: soft hyphen, U+200B to U+200D,
-# U+2060, U+FEFF and the combining marks U+0300 to U+036F. `token<U+200B>=value` hides the
+# U+2060, U+FEFF, the directional marks U+200E/F/U+061C, U+180E, U+FE0F, the fillers U+3164,
+# U+FFA0, U+2800 and the combining marks U+0300 to U+036F. `token<U+200B>=value` hides the
 # key from the key regex, and a value cut by a multibyte blank (`Abcdefgh<U+3000>ijklmnop12`)
 # is two short words once the blanks become spaces, yet one value in a shell. The third strict
 # reading (_unblank ... strip) deletes these and the blanks above. It is scanned in addition
 # to the other two, never instead of them.
-_MB_INVIS=($'\xc2\xad' $'\xe2\x80\x8b' $'\xe2\x80\x8c' $'\xe2\x80\x8d' $'\xe2\x81\xa0' $'\xef\xbb\xbf')
+_MB_INVIS=($'\xc2\xad' $'\xe2\x80\x8b' $'\xe2\x80\x8c' $'\xe2\x80\x8d' $'\xe2\x81\xa0' $'\xef\xbb\xbf'
+  # directional marks U+200E/F and U+061C, Mongolian vowel separator U+180E, variation
+  # selector U+FE0F, and the blank-looking fillers U+3164, U+FFA0 and braille blank U+2800
+  $'\xe2\x80\x8e' $'\xe2\x80\x8f' $'\xd8\x9c' $'\xe1\xa0\x8e' $'\xef\xb8\x8f'
+  $'\xe3\x85\xa4' $'\xef\xbe\xa0' $'\xe2\xa0\x80')
 for _b in $(seq 768 879); do
   printf -v _b '\\x%02x\\x%02x' $((0xC0 | _b >> 6)) $((0x80 | _b & 0x3F))
   printf -v _b "$_b"
@@ -356,7 +362,7 @@ _secret_exempt() {
 #       (about 20 s on a 240 KB line of keys). A line with more keys than the bound is
 #       reported as key-dense-line: a scan that cannot finish must block, not pass.
 _secret_match() {
-  local line="$1" i name re hit="" text="" was=0 tail key after tok full
+  local line="$1" i name re hit="" text="" was=0 tail key after tok full kw
   [ "$_SM_KEYS_SHARED" = 1 ] || _SM_KEYS_LEFT=$SECRET_MAX_KEYS   # H-05: see _SM_KEYS_SHARED
   shopt -q nocasematch && was=1
   shopt -u nocasematch
@@ -412,13 +418,35 @@ _secret_match() {
     shopt -s nocasematch   # only password-assigned needs it; the others spell their classes out
     for ((i = 0; i < ${#STRICT_NAMES[@]}; i++)); do
       re="${STRICT_RES[$i]}"
-      if [[ "$line" =~ $re ]]; then
+      if [ "${STRICT_NAMES[$i]}" = base64-run ]; then
         # A bare sha256 / sha512 (all hex, exactly 64 or 128 characters) is a checksum a
-        # handoff legitimately quotes, and quarantining it loses the handoff. A hex value
-        # with a key name in front of it is still caught by the assigned-secret row above.
-        if [ "${STRICT_NAMES[$i]}" = base64-run ] && [[ "${BASH_REMATCH[0]}" =~ ^([0-9a-fA-F]{64}|[0-9a-fA-F]{128})$ ]]; then
-          continue
-        fi
+        # handoff legitimately quotes, and quarantining it loses the handoff. EVERY run on
+        # the line is judged (the loop below reads the rest of the line after an exempt
+        # run, as the assigned-secret loop does), so a digest in front of a real run does
+        # not hide it. Bare hex is also what `openssl rand -hex 32` and many secret keys
+        # look like, so the exemption is withheld when the line holds one of the words
+        # key, secret, private, token, passw or credential (substring, case-insensitive,
+        # so "keyboard" counts too: a false hit only quarantines a handoff for review). A
+        # hex value that is itself assigned (`key = <hex>`) is also caught by the
+        # assigned-secret row above; this covers the lines that row does not read.
+        kw=0; [[ "$line" =~ key|secret|private|token|passw|credential ]] && kw=1
+        tail="$line"
+        while [[ "$tail" =~ $re ]]; do
+          full="${BASH_REMATCH[0]}"   # taken before the inner =~ below clears BASH_REMATCH
+          if [ "$kw" = 1 ] || ! [[ "$full" =~ ^([0-9a-fA-F]{64}|[0-9a-fA-F]{128})$ ]]; then
+            hit="base64-run"; text="$full"; break
+          fi
+          # an exempt run costs a unit, as in the loops above: each pass re-reads the rest
+          # of the line, so a line of thousands of digests must end in a block, not a stall
+          if [ "$_SM_KEYS_LEFT" -le 0 ]; then hit="key-dense-line"; text=""; break; fi
+          if (( --_SM_CLOCK_LEFT <= 0 )) && _secret_tick; then hit="scan-budget"; text=""; break; fi
+          _SM_KEYS_LEFT=$((_SM_KEYS_LEFT - 1))
+          tail="${tail#*"$full"}"
+        done
+        [ -z "$hit" ] || break
+        continue
+      fi
+      if [[ "$line" =~ $re ]]; then
         hit="${STRICT_NAMES[$i]}"
         text="${BASH_REMATCH[0]}"
         if [ "${STRICT_BOUND[$i]}" = 1 ]; then text="${text#"${BASH_REMATCH[1]}"}"; fi
