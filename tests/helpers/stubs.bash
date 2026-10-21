@@ -208,7 +208,7 @@ case "${STUB_CLAUDE_MODE:-}" in
       # WP-016: the write-only boundary failing in ways the original scan could not see.
       handoff-outside)  # the pair, plus a file at $STUB_OUTSIDE_FILE (outside the target dir)
         write_pair "$PWD/LOGS"
-        printf 'x\n' > "$STUB_OUTSIDE_FILE" ;;
+        printf '%s\n' "${STUB_OUTSIDE_BODY:-x}" > "$STUB_OUTSIDE_FILE" ;;
       handoff-home-dotfile)  # the pair, plus a line appended to the shell rc file
         write_pair "$PWD/LOGS"
         echo 'echo planted' >> "$HOME/.bashrc" ;;

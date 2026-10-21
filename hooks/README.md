@@ -385,8 +385,12 @@ proven live (operator check B1), so the rules are not the only barrier:
    a finding; a third reading deletes those blanks and the zero-width and combining
    characters, so `token<U+200B>=value` does not hide the key).
    A templated value such as `token=${A_LONG_VARIABLE_NAME}` is therefore quarantined too.
-   A bare sha256 or sha512 hex digest (64 or 128 hex characters) is not a hit; any other
-   run of 64 or more base64 characters is, and so are key names such as `tokenizer = ...`,
+   A bare sha256 or sha512 hex digest (64 or 128 hex characters) is not a hit, unless the
+   same line also contains `key`, `secret`, `private`, `token`, `passw` or `credential`
+   (any case, as a substring): bare hex is also what `openssl rand -hex 32` keys look
+   like, so `signing_key = <hex>` and `the secret is <hex>` are hits. Every run on the
+   line is judged, so a digest in front of another long run does not hide it. Any other
+   run of 64 or more base64 characters is a hit, and so are key names such as `tokenizer = ...`,
    `max_tokens = <long number>`, `token_url: ...`, `secret_name: ...` and
    `password_file: ...` (a name suffix cannot be exempted without giving the model the same
    escape; the quarantine is reviewed, not lost). The same
