@@ -259,7 +259,7 @@ The worker SHALL be started with `--session-id <uuid>` (when a uuid source exist
 
 
 ### Requirement: Backoff on infra failure and rate limits
-An infrastructure failure is: `claude` or `gh` logged out, `gh` or `origin` unreachable (including a failing `gh pr list` or `ls-remote`, an unreadable issue, a failed fetch), or a worker with no recognised outcome line whose output shows a usage limit, rate limit or similar service cut-off (a fixed pattern list in `run-issue.sh`). After one the runner SHALL exit 1, keep `ISSUE_LABEL`, record outcome `error` with an `infra:` note, and write `<state>/backoff` as `until=<epoch> fails=<n>` with `fails` incremented and the window `min(15 min * 2^(fails-1), 6 h)`. While `now < until`, a start with no issue number SHALL exit 0 with "backing off" and touch nothing; `run-issue.sh <N>` ignores the window. Any run reaching an issue-level outcome, or finding the queue empty, SHALL delete `backoff`. A worker with no outcome line and no such pattern is an issue-level `blocked`. Not built: the poison-issue rule (three consecutive infra failures on the same issue block that issue); `backoff` carries no per-issue counter, so a persistently failing issue is retried once per window, at most every 6 hours.
+An infrastructure failure is: `claude` or `gh` logged out, `gh` or `origin` unreachable (including a failing `gh pr list` or `ls-remote`, an unreadable issue, a failed fetch), or a worker with no recognised outcome line whose output shows a usage limit, rate limit or similar service cut-off (a fixed pattern list in `run-issue.sh`). After one the runner SHALL exit 1, keep `ISSUE_LABEL`, record outcome `error` with an `infra:` note, and write `<state>/backoff` as `until=<epoch> fails=<n>` with `fails` incremented and the window `min(15 min * 2^(fails-1), 6 h)`. While `now < until`, a start with no issue number SHALL exit 0 with "backing off" and touch nothing; `run-issue.sh <N>` ignores the window. Any run reaching an issue-level outcome, or finding the queue empty, SHALL delete `backoff`. A worker with no outcome line and no such pattern is an issue-level `blocked`. Poison-issue rule: a failure caused by the issue's own run (a worker crash or an error result the service patterns do not explain) is also counted per issue in `backoff` as `issue=<n> issue_fails=<n>`; the third consecutive one on the same issue SHALL relabel it `blocked`, post one comment, record outcome `error` with a `poison:` note, delete `backoff` and exit 0. Outages and limits never count, and a failed relabel falls through to the normal backoff.
 
 #### Scenario: Doubling and cap
 - **WHEN** consecutive infra failures occur
@@ -277,12 +277,12 @@ An infrastructure failure is: `claude` or `gh` logged out, `gh` or `origin` unre
 - **WHEN** the (stub) worker result reads "usage limit reached" and no outcome line was written
 - **THEN** exit 1, the label stays, `backoff` is set; a plain missing outcome line stays `blocked`
 
-#### Scenario: Poison issue (NOT BUILT)
+#### Scenario: Poison issue
 - **WHEN** issue 9 fails with an infra error three runs in a row (window waited out each time)
-- **THEN** issue 9 is `blocked` with a comment naming the repeated failure, and the next run selects another issue
+- **THEN** issue 9 is `blocked` with one comment naming the repeated failure, `backoff` is deleted, and the next run selects another issue
 
 ### Requirement: Stale lock takeover
-A held lock SHALL be taken over (atomically, via `mv` to `lock.stale.$$` then `mkdir`, logging "took over a stale lock") when `lock/pid` holds a number naming a process that does not exist, or a live process whose command line does not contain `run-issue.sh` (pid reuse after a crash or reboot). Otherwise the start exits 0 as busy. Not built: reclaiming a lock that has no readable `pid` once it is older than 10 minutes (such a lock is treated as busy), and removing a leftover worktree for any issue other than the one next selected (the next run for the same issue recreates its own).
+A held lock SHALL be taken over (atomically, via `mv` to `lock.stale.$$` then `mkdir`, logging "took over a stale lock") when `lock/pid` holds a number naming a process that does not exist, or a live process whose command line does not contain `run-issue.sh` (pid reuse after a crash or reboot). A lock with no readable `pid` is taken over once it is older than 5 minutes (a crash between `mkdir` and the pid write); a fresher one is busy. Otherwise the start exits 0 as busy. Not built: removing a leftover worktree for any issue other than the one next selected (the next run for the same issue recreates its own).
 
 #### Scenario: Killed runner
 - **WHEN** a runner is SIGKILLed mid-run (its pid is gone) and a new one starts

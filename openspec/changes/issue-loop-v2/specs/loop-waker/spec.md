@@ -68,8 +68,8 @@ The cron line SHALL NOT depend on a login shell, on `XDG_*` variables, or on a T
 - **THEN** no "Cron" section is printed and `loop/cron.env` is not written
 
 ### Requirement: Installation is gated (D11), now lifted
-The target poll is every 15 minutes. The first draft held the cron line uninstalled, and the interval at 60 minutes or more, until backoff and stale-lock handling existed. Both are built (see `loop-runner`), so the 60-minute floor and the "do not install until B3 passes" wording are gone from the pattern README and from `instantiate.sh` output. The documentation SHALL still state that, before installing, the printed line's command must have been observed under `env -i HOME=$HOME PATH=/usr/bin:/bin sh -c '...'` to authenticate `gh` and `claude` on that machine. The poison-issue rule (three infra failures on one issue block it) is NOT built; until it is, a repeatedly failing issue is retried once per backoff window, at most every 6 hours.
+The target poll is every 15 minutes. The first draft held the cron line uninstalled, and the interval at 60 minutes or more, until backoff and stale-lock handling existed. Both are built (see `loop-runner`), so the 60-minute floor and the "do not install until B3 passes" wording are gone from the pattern README and from `instantiate.sh` output. The documentation SHALL still state that, before installing, the printed line's command must have been observed under `env -i HOME=$HOME PATH=/usr/bin:/bin sh -c '...'` to authenticate `gh` and `claude` on that machine. The poison-issue rule (three consecutive failures on one issue block it) is built, and the pattern README documents it.
 
 #### Scenario: README states it
 - **WHEN** the pattern README's "Unattended" section is read
-- **THEN** it contains the stripped-environment check, says nothing is installed for the operator, and says the poison-issue rule is not built yet
+- **THEN** it contains the stripped-environment check, says nothing is installed for the operator, and documents the poison-issue rule
