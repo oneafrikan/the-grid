@@ -206,6 +206,7 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/run-issue.XXXXXX")"
 CHILD_PID=""
 CURRENT_WT=""
 HAVE_LOCK=0
+HAVE_TAKEOVER=0
 
 # cleanup — runs on EVERY exit path (normal, die, infra stop, signal): stop the worker, remove
 # the worktree (the BRANCH is kept), the temp dir (which holds the per-run settings file) and the lock.
@@ -222,6 +223,7 @@ cleanup() {
   fi
   rm -rf "$TMP"
   if [ "$HAVE_LOCK" = 1 ]; then rm -rf "$LOCK"; fi
+  if [ "$HAVE_TAKEOVER" = 1 ]; then rmdir "$LOCK.takeover" 2>/dev/null || true; fi
 }
 trap cleanup EXIT
 # bash defers a trap until the foreground child exits, so children run via run_child
@@ -231,7 +233,8 @@ trap 'exit 143' INT TERM HUP
 set -E
 trap 'echo "run-issue: unexpected failure near line $LINENO" >&2; exit 1' ERR
 
-if ! mkdir "$LOCK" 2>/dev/null; then
+# lock_stale — sets `holder` and `stale` from what is on disk right now.
+lock_stale() {
   holder=""
   if [ -f "$LOCK/pid" ]; then holder="$(cat "$LOCK/pid" 2>/dev/null || true)"; fi
   # Stale lock (a crash, SIGKILL or reboot left it): the recorded pid is gone, or was reused by a
@@ -248,8 +251,26 @@ if ! mkdir "$LOCK" 2>/dev/null; then
     # milliseconds, so a pid-less lock older than 5 minutes is dead, not "busy forever".
     stale=1
   fi
+}
+
+if ! mkdir "$LOCK" 2>/dev/null; then
+  lock_stale
   took=0
-  # mv is atomic: if two runs race for the same stale lock, only one wins the rename and the other sees "busy".
+  # Takeover is serialised by a second mkdir mutex. Without it a runner that read the lock as stale
+  # can rename a lock a faster runner has just re-created and is still filling in, and the put-back
+  # below leaves that runner without its lock for a moment (its write to $LOCK/pid fails, exit 1).
+  # The loser of the mutex is simply busy, like any runner that finds a live lock.
+  if [ "$stale" = 1 ]; then
+    # a mutex left by a runner SIGKILLed inside the few lines below would block takeovers for good
+    if [ -n "$(find "$LOCK.takeover" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then rmdir "$LOCK.takeover" 2>/dev/null || true; fi
+    if mkdir "$LOCK.takeover" 2>/dev/null; then
+      HAVE_TAKEOVER=1
+      lock_stale   # look again under the mutex: the lock may have been taken over since the read above
+    else
+      stale=0
+    fi
+  fi
+  # mv is atomic: only one run can move the stale lock away.
   if [ "$stale" = 1 ] && mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null; then
     moved="$(cat "$LOCK.stale.$$/pid" 2>/dev/null || true)"
     if [ "$moved" != "$holder" ]; then
@@ -271,6 +292,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
       rm -rf "$LOCK.stale.$$"
     fi
   fi
+  if [ "$HAVE_TAKEOVER" = 1 ]; then rmdir "$LOCK.takeover" 2>/dev/null || true; HAVE_TAKEOVER=0; fi
   if [ "$took" = 1 ]; then
     log "took over a stale lock (pid ${holder:-none} is not a running run-issue.sh)"
   else
