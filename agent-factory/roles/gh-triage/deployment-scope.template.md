@@ -42,3 +42,17 @@ enabled: false
 # messages-file: <absolute path to a .md file of the channel's messages>
 # last-run-file: <absolute path to a .md file holding the last-processed timestamp>
 # file-issues-in: <rule — e.g. "the repo whose live system the message concerns; default <repo>">
+
+## Knowledge sweep
+
+Set `enabled: false` to skip the knowledge sweep entirely (the default). When `enabled: true`,
+the table below lists the repos swept; a repo not listed is not swept. `Checkout path` is a
+dedicated clone that the sweep owns: nothing else writes there. `Sweep branch` is the branch the
+sweep commits to. `Cap` is the most pending signals handled per run for that repo (default 10);
+signals over the cap stay pending and are picked up next run, oldest first.
+
+enabled: false
+
+| Repo | Checkout path | Sweep branch | Cap |
+|---|---|---|---|
+| <repo> | <absolute path to the dedicated clone> | <branch the sweep commits to> | 10 |
