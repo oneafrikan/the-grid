@@ -681,9 +681,33 @@ kfile() {
   [ "$(git -C "$BATS_TEST_TMPDIR/proj" log --format=%H)" = "$before" ]
 }
 
-# kcheck <args...> — run `knowledge.py check` against the temp project root.
-kcheck() {
+# kcheck_raw <args...> — run `knowledge.py check` against the temp project root; stderr is
+# part of $output.
+kcheck_raw() {
   run python3 -I "$REPO_ROOT/scripts/knowledge.py" check --root "$BATS_TEST_TMPDIR/proj" "$@"
+}
+
+# kcheck <args...> — kcheck_raw minus the `notice:` line check prints when the temp project is
+# not a git repository, so the tests that predate the history check keep their exact output.
+kcheck() {
+  kcheck_raw "$@"
+  output=$(printf '%s\n' "$output" | grep -v '^notice:' || true)
+}
+
+# gproj — make the temp project a git repo with one empty base commit. Identity comes from the
+# environment (no address in this file) and no user or system git config is read.
+gproj() {
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL="t@${HOSTNAME:-h}.test" GIT_COMMITTER_NAME=t \
+    GIT_COMMITTER_EMAIL="t@${HOSTNAME:-h}.test" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  git -C "$BATS_TEST_TMPDIR/proj" init -q
+  git -C "$BATS_TEST_TMPDIR/proj" commit -q --allow-empty -m base
+}
+
+# gcommit <message> — stage everything in the temp project and commit it.
+gcommit() {
+  git -C "$BATS_TEST_TMPDIR/proj" add -A
+  git -C "$BATS_TEST_TMPDIR/proj" commit -q -m "$1"
 }
 
 # wsig <name> <filed_by> <stage> [dir] — write a signal by hand into proj/<dir, default signals>.
@@ -765,6 +789,83 @@ wsig() {
   kcheck "$BATS_TEST_TMPDIR/proj/signals/20261018T101500Z-agent-a-abc123.md"
   [ "$status" -eq 1 ]
   [[ "$output" == "E_STAGE signals/20261018T101500Z-agent-a-abc123.md:"* ]]
+}
+
+@test "cli check: a signal changed in a later commit is E_EDITED and exits 1" {
+  gproj
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a wip
+  gcommit add
+  printf 'changed\n' >>"$BATS_TEST_TMPDIR/proj/signals/20261018T101500Z-agent-a-abc123.md"
+  gcommit edit
+  kcheck_raw
+  [ "$status" -eq 1 ]
+  [[ "$output" == "E_EDITED signals/20261018T101500Z-agent-a-abc123.md: "* ]]
+}
+
+@test "cli check: an uncommitted working tree change to a signal is E_EDITED" {
+  gproj
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a wip
+  gcommit add
+  printf 'changed\n' >>"$BATS_TEST_TMPDIR/proj/signals/20261018T101500Z-agent-a-abc123.md"
+  kcheck_raw
+  [ "$status" -eq 1 ]
+  [[ "$output" == "E_EDITED signals/20261018T101500Z-agent-a-abc123.md: "* ]]
+}
+
+@test "cli check: a staged change to a signal is E_EDITED" {
+  gproj
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a wip
+  gcommit add
+  printf 'changed\n' >>"$BATS_TEST_TMPDIR/proj/signals/20261018T101500Z-agent-a-abc123.md"
+  git -C "$BATS_TEST_TMPDIR/proj" add -A
+  kcheck_raw
+  [ "$status" -eq 1 ]
+  [[ "$output" == "E_EDITED signals/20261018T101500Z-agent-a-abc123.md: "* ]]
+}
+
+@test "cli check: an unchanged committed signal is clean" {
+  gproj
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a wip
+  gcommit add
+  kcheck_raw
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "cli check: moving a signal to done/ unchanged is not an edit" {
+  gproj
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a wip
+  gcommit add
+  mkdir -p "$BATS_TEST_TMPDIR/proj/signals/done"
+  git -C "$BATS_TEST_TMPDIR/proj" mv signals/20261018T101500Z-agent-a-abc123.md signals/done/
+  gcommit sweep
+  kcheck_raw
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "cli check: a signal never committed is clean" {
+  gproj
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a wip
+  kcheck_raw
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "cli check: outside a git repository it prints one notice, still checks, and exits 0" {
+  # The ceiling stops git finding a repository above the temp dir.
+  export GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR"
+  wsig 20261018T101500Z-agent-a-abc123.md agent-a wip
+  wsig 20261018T101600Z-agent-a-abc123.md agent-a wip
+  kcheck_raw
+  [ "$status" -eq 0 ]
+  [[ "$output" == "notice:"* ]]
+  [ "$(echo "$output" | wc -l)" -eq 1 ]
+  # The other rules still apply.
+  wsig 20261018T101700Z-agent-a-abc123.md agent-a draft
+  kcheck_raw
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"E_STAGE signals/20261018T101700Z-agent-a-abc123.md:"* ]]
 }
 
 @test "cli check: an unreadable or missing file exits 2, names the file and prints no finding" {
