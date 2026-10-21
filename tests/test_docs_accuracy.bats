@@ -35,19 +35,22 @@ teardown() {
 
 # --- F3: wire.sh writes ~/.claude/settings.json (the auto-handoff SessionEnd hook) ---
 
-@test "F3: the README wire.sh section and its safety line mention settings.json" {
-  sec="$(awk '/^## How wire.sh works/{f=1;next} /^## /{f=0} f' README.md)"
+@test "F3: the architecture doc's wire.sh section and the README Status safety line mention settings.json" {
+  # the wire.sh walkthrough moved from README.md to docs/architecture.md (front-door change)
+  sec="$(awk '/^## How wire.sh works/{f=1;next} /^## /{f=0} f' docs/architecture.md)"
   [[ "$sec" == *settings.json* ]]
   [[ "$sec" == *-hook:auto-handoff* ]]
-  # the safety claim must not say symlinks are the only thing wire.sh touches
+  # the README safety bullet must name settings.json and the opt-out, and not claim "only symlinks"
+  status="$(awk '/^## Status/{f=1;next} /^## /{f=0} f' README.md)"
+  [[ "$status" == *settings.json* ]]
+  [[ "$status" == *-hook:auto-handoff* ]]
   ! grep -n 'wire.sh` only ever touches symlinks' README.md || false
   # the code does write it (guards the doc against a removed feature)
   grep -q 'deploy_hooks.py' scripts/wire.sh
 }
 
-@test "F3: the README intro does not promise 'no config files' for wire.sh without the hook" {
-  intro="$(sed -n '1,100p' README.md)"
-  [[ "$intro" == *settings.json* ]]
+@test "F3: the README does not promise 'no config files' for wire.sh without the hook" {
+  grep -q 'settings.json' README.md
 }
 
 # --- F7: no <your-username> placeholder in a runnable clone command ---
@@ -118,9 +121,10 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
   owned="$(printf '%s\n' "$head" | sed -E 's/.*\(([0-9]+) root-owned.*/\1/')"
   upstream="$(printf '%s\n' "$head" | sed -E 's/.*\+ ([0-9]+) from allowlisted.*/\1/')"
   lib="$(printf '%s\n' "$head" | sed -E 's/.*, ([0-9]+) in library.*/\1/')"
-  # the README paragraph wraps across lines: compare on one flattened line
-  flat="$(tr '\n' ' ' < README.md | tr -s ' ')"
-  [[ "$flat" == *"**$total skills indexed, $wired wired live** ($owned built by Gareth, $upstream from curated upstream repos) **+ $lib more in a searchable library**"* ]]
+  # README counts are generated markers (scripts/stamp-counts.py), never typed: the markers that
+  # the README uses (wired, library) must hold the SKILLS.md values.
+  grep -qF "<!--count:wired-->$wired<!--/count-->" README.md
+  grep -qF "<!--count:library-->$lib<!--/count-->" README.md
 }
 
 @test "F11: index.html wired-skill counts equal the SKILLS.md headline" {
@@ -198,9 +202,8 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
     fi
   done
   [ "$total" -eq $((orch + spec)) ]
-  flat="$(tr '\n' ' ' < README.md | tr -s ' ')"
-  [[ "$flat" == *"$total composed AI agents across 4 ready-to-run teams ($orch orchestrators, $spec specialists)"* ]]
-  [[ "$flat" == *"$total ready-made AI roles"* ]]
+  # the README role count is a generated marker; it must equal compose.py's total
+  grep -qF "<!--count:roles-->$total<!--/count-->" README.md
   grep -q "the other $spec roles" USAGE.md
   # CLAUDE.md's hand-typed counts: the grid project's split and the all-public-roles total
   flatc="$(tr '\n' ' ' < CLAUDE.md | tr -s ' ')"
@@ -236,13 +239,14 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
 
 # --- F14: layout lists and residual stale wording ---
 
-@test "F14: the README layout block lists every tracked top-level directory" {
-  block="$(awk '/^## Repo layout/{f=1;next} /^## /{f=0} f' README.md)"
+@test "F14: the architecture doc's layout block lists every tracked top-level directory" {
+  # the repo layout moved from README.md to docs/architecture.md (front-door change)
+  block="$(awk '/^## Repo layout/{f=1;next} /^## /{f=0} f' docs/architecture.md)"
   for d in $(git ls-files | awk -F/ 'NF>1 && $1 !~ /^\./ {print $1}' | sort -u); do
-    [[ "$block" == *"  $d/"* ]] || { echo "README layout lacks $d/"; false; }
+    [[ "$block" == *"  $d/"* ]] || { echo "architecture layout lacks $d/"; false; }
   done
   for f in policy.yaml grid.yaml grid.lock; do
-    [[ "$block" == *"$f"* ]] || { echo "README layout lacks $f"; false; }
+    [[ "$block" == *"$f"* ]] || { echo "architecture layout lacks $f"; false; }
   done
 }
 

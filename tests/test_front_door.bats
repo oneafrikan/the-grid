@@ -264,3 +264,102 @@ SPLIT_DOCS="docs/roadmap.md docs/private-projects.md"
 @test "front door: CHANGELOG.md has an Unreleased section" {
   phrase_in CHANGELOG.md '## [Unreleased]'
 }
+
+# README front door (openspec change front-door, task 4.5). README.md is a short landing page:
+# fixed hero sentence and quickstart, the skeleton's headings in order, generated counts only.
+
+# Fixed strings from design.md; the site and INSTALL.md hand-sync copies of the same text.
+HERO='Inspired by Tron. Dotfiles for your AI assistant: curated skills and agent teams, wired identically onto every machine and every AI tool you use.'
+CLONE_CMD='git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid && bash ~/.the-grid/scripts/bootstrap.sh --with-agents'
+
+@test "front door: README.md is between 140 and 185 lines" {
+  n="$(wc -l < "$GRID_ROOT/README.md")"
+  [ "$n" -ge 140 ]
+  [ "$n" -le 185 ]
+}
+
+@test "front door: README.md '##' headings follow the skeleton order" {
+  prev=0
+  for h in "Who it's for" "Quickstart" "What you get" "How it works" 'Why "the grid"' "Status" "Docs"; do
+    n="$(grep -nxF -- "## $h" "$GRID_ROOT/README.md" | head -n 1 | cut -d: -f1)"
+    [ -n "$n" ] || { echo "README.md: missing heading: $h" >&2; return 1; }
+    [ "$n" -gt "$prev" ] || { echo "README.md: heading out of order: $h" >&2; return 1; }
+    prev="$n"
+  done
+}
+
+@test "front door: README.md has the hero sentence once, as a bold paragraph, not a blockquote" {
+  [ "$(grep -cF -- "$HERO" "$GRID_ROOT/README.md")" -eq 1 ]
+  grep -qxF -- "**$HERO**" "$GRID_ROOT/README.md"
+  ! grep -F -- "$HERO" "$GRID_ROOT/README.md" | grep -q '^>' || false
+}
+
+@test "front door: the hero sentence names no product" {
+  for w in "Claude Code" ECC gstack; do
+    [[ "$HERO" != *"$w"* ]] || { echo "hero names $w" >&2; return 1; }
+  done
+}
+
+@test "front door: README.md has the status line and the empty langs marker" {
+  phrase_in README.md 'Works today with Claude Code. Other AI tools: see [docs/roadmap.md](docs/roadmap.md).'
+  grep -qxF -- '<!-- langs --><!-- /langs -->' "$GRID_ROOT/README.md"
+}
+
+@test "front door: README.md carries the clone URL and no your-username placeholder" {
+  phrase_in README.md 'https://github.com/oneafrikan/the-grid.git'
+  for f in README.md BOOTSTRAP.md; do
+    ! grep -qF -- 'your-username' "$GRID_ROOT/$f" || { echo "$f: your-username" >&2; return 1; }
+  done
+}
+
+@test "front door: the README quickstart command uses --with-agents and matches INSTALL.md" {
+  phrase_in README.md "$CLONE_CMD"
+  phrase_in README.md '--with-agents'
+  # INSTALL.md writes the clone and the bootstrap as two blocks (line-continued clone, then
+  # --with-agents), so the exact one-line string is not there yet: check both halves instead.
+  # Tighten to the full CLONE_CMD once INSTALL.md carries it.
+  phrase_in INSTALL.md 'git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid'
+  phrase_in INSTALL.md 'bash ~/.the-grid/scripts/bootstrap.sh --with-agents'
+}
+
+@test "front door: README.md has a mermaid diagram, the banner and the Flynn attribution" {
+  grep -qxF -- '```mermaid' "$GRID_ROOT/README.md"
+  phrase_in README.md '████████╗'
+  phrase_in README.md 'Kevin Flynn'
+}
+
+@test "front door: README.md has no heading naming ECC, gstack or 'Why not'" {
+  ! grep -E '^#+ .*(ECC|gstack|Why not)' "$GRID_ROOT/README.md" || false
+}
+
+@test "front door: README.md has no typed count outside the generated markers" {
+  stripped="$(sed -E 's/<!--count:[^>]*-->[^<]*<!--\/count-->//g' "$GRID_ROOT/README.md")"
+  ! grep -qE '[0-9]{2,4} (skills|agents|roles)' <<< "$stripped" || false
+}
+
+@test "front door: every count marker in README.md is one of the six known names" {
+  names="$(grep -oE '<!--count:[^>]*-->' "$GRID_ROOT/README.md" | sed -e 's/^<!--count://' -e 's/-->$//' | sort -u)"
+  [ -n "$names" ]
+  while IFS= read -r name; do
+    case "$name" in
+      indexed|wired|root_owned|upstream_wired|library|roles) ;;
+      *) echo "README.md: unknown count name: $name" >&2; return 1 ;;
+    esac
+  done <<< "$names"
+}
+
+@test "front door: every relative link in README.md resolves" {
+  links="$(relative_links README.md)"
+  while IFS= read -r target; do
+    [ -n "$target" ] || continue
+    [ -e "$GRID_ROOT/$target" ] || { echo "README.md: broken link: $target" >&2; return 1; }
+  done <<< "$links"
+}
+
+@test "front door: README.md Status line does not claim wire.sh touches only symlinks" {
+  # wire.sh also writes settings.json (hook) and, opt-in, rules and harness dirs; INSTALL.md has the list
+  ! grep -qF -- 'only ever touches symlinks' "$GRID_ROOT/README.md" || false
+  status="$(awk '/^## Status/{f=1;next} /^## /{f=0} f' "$GRID_ROOT/README.md")"
+  [[ "$status" == *settings.json* ]]
+  [[ "$status" == *"Versioned from v0.1.0"* ]]
+}
