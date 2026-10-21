@@ -1559,13 +1559,79 @@ def _apply_item(root, item, today):
     _write_text(root, rel, text)
 
 
-def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=None):
-    """The writing run: guards first, then entries for `wip`, `written` and `confirmed` items.
+# Failure of the bookkeeping step (signal moves or ledger append) after entries were written.
+E_APPLY = "E_APPLY"
+_CLAIM_HASH_RE = re.compile(r"[0-9a-f]{16}\Z")
 
-    Order: lock (exit 3), clean tree (exit 4), then the plan (exit 2). Entries are written in
-    the working tree only. The helper never commits: the role's commit step is the only writer to
-    history. Signals are not moved and no ledger is written yet. --verdicts and --escalations
-    are accepted but not read yet. --proposal-for is parsed only; a later change implements it.
+
+def _check_bookkeeping(root, items):
+    """Validate every plan item that will be moved and recorded, before anything is written.
+
+    The plan is a file, so it may be forged or stale: each item must name a signal that sits in
+    signals/ and is not yet in signals/done/, each name once, with a claim hash and entry that
+    have the shape of the real ones. UsageError (exit 2) on the first problem, so a bad plan
+    leaves the tree untouched rather than half moved.
+    """
+    seen = set()
+    for item in items:
+        name = item["file"]
+        if not SIGNAL_NAME_RE.match(name) or name in seen:
+            raise UsageError("--plan file has a malformed or repeated signal name")
+        seen.add(name)
+        if not os.path.isfile(os.path.join(root, "signals", name)) \
+                or os.path.lexists(os.path.join(root, "signals", "done", name)):
+            raise UsageError("a signal named in the plan is missing or already processed")
+        chash, entry = item.get("claim_hash"), item.get("entry")
+        if chash is not None and not (isinstance(chash, str) and _CLAIM_HASH_RE.match(chash)):
+            raise UsageError("--plan file has a malformed claim hash")
+        if entry is not None and not (isinstance(entry, str) and _ENTRY_ADDR_RE.match(entry)):
+            raise UsageError("--plan file has a malformed entry address")
+
+
+def _record_items(root, items):
+    """Move each plan item's signal to signals/done/ unchanged, then append one `disposition`
+    ledger line per item.
+
+    Moves come first and the ledger last, both from this one place: if the append fails the
+    signals are already out of signals/, so the failure is reported (exit 1) with that state
+    named, and the next `plan` cannot list them again. `git mv` keeps the bytes (so `status:
+    pending` stays) and stages a rename. issue and pr stay null until --escalations is read.
+    """
+    if not items:
+        return
+    # ISO form of the run time (KNOWLEDGE_NOW when set) for the ledger's `run` field.
+    stamp = _signal_time()
+    run = "%s-%s-%sT%s:%s:%sZ" % (stamp[:4], stamp[4:6], stamp[6:8], stamp[9:11], stamp[11:13],
+                                   stamp[13:15])
+    os.makedirs(os.path.join(root, "signals", "done"), exist_ok=True)
+    for item in items:
+        name = item["file"]
+        # A fixed argv, never a shell; both paths are built from fixed words and a name that
+        # SIGNAL_NAME_RE accepted.
+        try:
+            subprocess.run(["git", "-C", root, "mv", "signals/" + name, "signals/done/" + name],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        except (OSError, subprocess.CalledProcessError):
+            raise KnowledgeError(E_APPLY, "git mv of a signal failed; some signals may have moved "
+                                          "and no ledger line was written")
+    records = [{"event": "disposition", "signal": item["file"],
+                "claim_hash": item.get("claim_hash"), "disposition": item["disposition"],
+                "entry": item.get("entry"), "issue": None, "pr": None, "run": run}
+               for item in items]
+    try:
+        append_ledger(root, records)
+    except (OSError, KnowledgeError):
+        raise KnowledgeError(E_APPLY, "signals were moved but the ledger append failed")
+
+
+def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=None):
+    """The writing run: guards first, then entries for `wip`, `written` and `confirmed` items,
+    then every listed signal moved to signals/done/ and recorded in the ledger.
+
+    Order: lock (exit 3), clean tree (exit 4), then the plan (exit 2). Entries, moves and
+    ledger lines are written in the working tree only. The helper never commits: the role's
+    commit step is the only writer to history. --verdicts and --escalations are accepted but
+    not read yet. --proposal-for is parsed only; a later change implements it.
     """
     if proposal_for is not None:
         if plan is not None:
@@ -1607,9 +1673,12 @@ def _cmd_apply(root, plan=None, verdicts=None, escalations=None, proposal_for=No
         # Dates are read once so every entry of one run carries the same day. Every other
         # disposition (duplicate, invalid, secret, repeat-rejected, escalated) writes no entry.
         today = _today()
+        # Checked before the first write so a bad plan changes nothing.
+        _check_bookkeeping(root, data["signals"])
         for item in data["signals"]:
             if item["disposition"] in ("wip", "written", "confirmed"):
                 _apply_item(root, item, today)
+        _record_items(root, data["signals"])
         return 0
     finally:
         lock.close()
