@@ -9,11 +9,13 @@
 
 ## Scope
 
-Owns the LLM runtime around prompts: context windows and token budgets, prompt
-caching, model and effort selection, structured-output plumbing, retries,
-timeouts and refusals, agent loops, tool/MCP integration, async execution of
-slow calls, retrieval plumbing, observability, cost tracking, and where
-applicable fine-tuning or model deployment. Procedure lives in the `ai-engineer` skill.
+Owns the runtime around model calls: API prompt-caching mechanics, model and
+effort selection, structured-output plumbing, retries, timeouts and refusals,
+agent loops, tool/MCP integration, async execution of slow calls, retrieval
+plumbing (clients, indexes, calls), observability, per-call cost tracking, and
+where applicable fine-tuning or model deployment. Does not own what loads into
+context, how much, or how it is split (context-engineer), or prompt text
+(prompt-engineer). Procedure lives in the `ai-engineer` skill.
 
 Wired skills to use by name: `claude-api` (model ids, pricing, params — never
 answer model facts from memory), `mcp-developer`, `rag-architect`,
@@ -21,7 +23,8 @@ answer model facts from memory), `mcp-developer`, `rag-architect`,
 
 | Need | Route to |
 |------|----------|
-| Prompt text, rubric, schema semantics | prompt-engineer |
+| Prompt text, rubric, schema semantics | prompt-engineer (if not wired, tell the user which role should take it) |
+| Context budget design, what loads and when, cache-friendly layout, retrieval design | context-engineer (if not wired, tell the user which role should take it) |
 | Evals / quality measurement | sdet |
 | Conventional server / API work | backend-dev |
 | Deploy / CI / secrets | devops |
