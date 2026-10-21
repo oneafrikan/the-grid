@@ -94,3 +94,134 @@ print(eval(sys.argv[2]))
   run py 'knowledge.ceiling([{"filed_by": "a", "warrant": "saw it"}, {"filed_by": "a", "warrant": "ran it"}])'
   [ "$output" = "provisional" ]
 }
+
+# psig <python expr> — the expression yields signal text (sig() builds a valid one, with
+# keyword overrides; an override of None drops the key). Prints "ok" or "<code> <message>".
+psig() {
+  python3 -I -c '
+import sys
+sys.path.insert(0, sys.argv[1] + "/scripts")
+import knowledge
+
+def sig(body="", **over):
+    f = {"filed_by": "agent-1", "claim": "use the gate", "stage": "provisional",
+         "warrant": "ran bats", "status": "pending"}
+    f.update(over)
+    lines = ["%s: %s" % (k, v) for k, v in f.items() if v is not None]
+    return "---\n" + "\n".join(lines) + "\n---\n" + body
+
+try:
+    knowledge.parse_signal(eval(sys.argv[2]))
+    print("ok")
+except knowledge.KnowledgeError as e:
+    print(e.code, e)
+' "$REPO_ROOT" "$1"
+}
+
+@test "parse_signal accepts a valid minimal signal and returns fields plus body" {
+  run psig 'sig()'
+  [ "$output" = "ok" ]
+  run py 'knowledge.parse_signal("---\nfiled_by: a\nclaim: c\nstage: wip\nwarrant: none\nstatus: pending\n---\nhello\n")["body"]'
+  [ "$output" = "hello" ]
+}
+
+@test "parse_signal accepts the optional keys and a warrant of none" {
+  run psig 'sig(warrant="none", supersedes="K-0123abcd", contradicts="K-0123abcd", confirms="K-0123abcd", guardrail="GUARDRAILS#G12")'
+  [ "$output" = "ok" ]
+}
+
+@test "SIGNAL_NAME_RE matches a hand-written name and rejects a bad one" {
+  run py 'bool(knowledge.SIGNAL_NAME_RE.match("20261018T101500Z-human-alex-abc123.md"))'
+  [ "$output" = "True" ]
+  run py 'bool(knowledge.SIGNAL_NAME_RE.match("20261018T101500Z-human-ABC123.md"))'
+  [ "$output" = "False" ]
+  run py 'bool(knowledge.SIGNAL_NAME_RE.match("20261018T101500Z-a-abc12.md"))'
+  [ "$output" = "False" ]
+}
+
+@test "filer_slug lower-cases, folds, trims and caps at 32" {
+  run py 'knowledge.filer_slug(" Human.Alex_1 ")'
+  [ "$output" = "human-alex-1" ]
+  run py 'len(knowledge.filer_slug("x" * 60))'
+  [ "$output" = "32" ]
+}
+
+@test "parse_signal rejects a bidirectional override in the claim" {
+  run psig 'sig(claim="use the ‮gate")'
+  [[ "$output" == "E_SIGNAL claim:"* ]]
+}
+
+@test "parse_signal rejects a zero-width space in the claim" {
+  run psig 'sig(claim="use the​ gate")'
+  [[ "$output" == "E_SIGNAL claim:"* ]]
+}
+
+@test "parse_signal rejects a 201-character claim but accepts 200" {
+  run psig 'sig(claim="c" * 201)'
+  [[ "$output" == "E_SIGNAL claim:"* ]]
+  run psig 'sig(claim="c" * 200)'
+  [ "$output" = "ok" ]
+}
+
+@test "parse_signal rejects a 301-character warrant" {
+  run psig 'sig(warrant="w" * 301)'
+  [[ "$output" == "E_SIGNAL warrant:"* ]]
+}
+
+@test "parse_signal: stage retired and superseded are E_SIGNAL" {
+  run psig 'sig(stage="retired")'
+  [[ "$output" == "E_SIGNAL stage:"* ]]
+  run psig 'sig(stage="superseded")'
+  [[ "$output" == "E_SIGNAL stage:"* ]]
+}
+
+@test "parse_signal: an unknown stage is E_STAGE" {
+  run psig 'sig(stage="draft")'
+  [[ "$output" == "E_STAGE stage:"* ]]
+}
+
+@test "parse_signal rejects an unknown key" {
+  run psig 'sig(colour="blue")'
+  [[ "$output" == "E_SIGNAL "* ]]
+}
+
+@test "parse_signal rejects a duplicate key" {
+  run psig '"---\nfiled_by: a\nclaim: c\nclaim: d\nstage: wip\nwarrant: w\nstatus: pending\n---\n"'
+  [[ "$output" == "E_SIGNAL "* ]]
+}
+
+@test "parse_signal rejects a missing required key" {
+  run psig 'sig(warrant=None)'
+  [ "$output" = "E_SIGNAL warrant: required" ]
+}
+
+@test "parse_signal rejects a missing closing fence and a line without a colon" {
+  run psig '"---\nfiled_by: a\nclaim: c\n"'
+  [[ "$output" == "E_SIGNAL "* ]]
+  run psig '"---\nfiled_by a\n---\n"'
+  [[ "$output" == "E_SIGNAL "* ]]
+}
+
+@test "parse_signal limits the body to 4096 bytes in UTF-8" {
+  run psig 'sig(body="b" * 4096)'
+  [ "$output" = "ok" ]
+  run psig 'sig(body="b" * 4097)'
+  [[ "$output" == "E_SIGNAL body:"* ]]
+  # 2049 two-byte characters is 4098 bytes though only 2049 characters.
+  run psig 'sig(body="é" * 2049)'
+  [[ "$output" == "E_SIGNAL body:"* ]]
+}
+
+@test "parse_signal rejects status other than pending" {
+  run psig 'sig(status="done")'
+  [ "$output" = "E_SIGNAL status: must be pending" ]
+}
+
+@test "parse_signal error text never echoes claim or warrant text" {
+  run psig 'sig(claim="xyzzy-distinctive-claim ‮")'
+  [[ "$output" == "E_SIGNAL "* ]]
+  [[ "$output" != *xyzzy* ]]
+  run psig 'sig(warrant="plugh-distinctive-warrant" + "w" * 300)'
+  [[ "$output" == "E_SIGNAL "* ]]
+  [[ "$output" != *plugh* ]]
+}
