@@ -5,12 +5,12 @@
 > This file keeps only the **issue map** (below). Shipped-work history is kept
 > privately. Add new work as an issue, not here.
 
-**Current focus (2026-10-21):** the issue loop is live in this repo (untracked
-`loop/`, `MODE=direct`, issues in the private tracker) and is draining a queue of
-uplift items; the operator turns cron on once the first queue is drained. Run,
-watch and feed it from `docs/issue-loop-runbook.md`. Deferred until `main` is
-stable: `karpathy-loop` and `cli-cron`. Held: the `index.html` rebuild (**#150**),
-blocked on the operator's render step (**#149**) and a `git rm`.
+**Current focus (2026-10-22):** the issue loop is live in this repo (untracked
+`loop/`, `MODE=direct`, issues in the private tracker) and its first queue is drained
+(86 issues landed, `main` green). Next: the operator installs the cron line (exact
+line in `docs/issue-loop-runbook.md`, "Cron") and works the human issues. Deferred
+until `main` is stable: `karpathy-loop` and `cli-cron`. Held: the `index.html` rebuild
+(**#150**), blocked on the operator's render step (**#149**) and a `git rm`.
 
 **#25** (public-facing README + quickstart) is the remaining gating work for the repo
 being usable by someone who isn't the author. `main` is the only long-lived branch.
