@@ -12,7 +12,7 @@ How to run, watch and feed the live issue loop in this repo. For runner internal
   - `MAX_ISSUES_PER_DAY=0`: unlimited. Do not add caps.
   - `VERIFY_CMD`: the fast `loop/verify.sh` (changed-file checks only). The full gate takes about 35 minutes and is CI's job at merge.
   - `LOOP_WORKTREE_ROOT=$HOME/grid-loop`: worktrees are `~/grid-loop/issue-<N>`.
-- Cron is NOT installed. The operator turns it on once the first queue is drained.
+- Cron is NOT installed yet. The first queue is drained and the runner is cron-ready; the operator installs the line in "Cron" below.
 
 ## Sync the live instance after the pattern changes
 
@@ -51,14 +51,19 @@ Faster than waiting for cron ticks.
 
 ## Cron (operator only)
 
-- One line per repo, printed by the installer. An agent never installs it.
-- Shape (expand `~` to an absolute path; `<repo>` is the repo path):
+- An agent never installs it. The operator runs it once, by hand.
+- The line for this repo (`$HOME` is set by cron and expanded by its `sh`; `~` is not reliable there):
   ```
-  */15 * * * * mkdir -p ~/.grid/logs && cd <repo> && bash loop/cron-run.sh >> ~/.grid/logs/issue-loop-<repo>.log 2>&1
+  */15 * * * * mkdir -p $HOME/.grid/logs && cd $HOME/.the-grid && bash loop/cron-run.sh >> $HOME/.grid/logs/issue-loop-the-grid.log 2>&1
   ```
-- `loop/cron-run.sh` sources the gitignored `loop/cron.env` (`HOME`, `PATH`), then `exec`s the runner.
-- The installer prints the exact line: `bash scripts/instantiate.sh issue-loop <repo> --profile work --land direct --cron-every 15` (see the pattern README, "Unattended").
+- Add it: `crontab -e`, paste the line, save. Or in one go:
+  `(crontab -l 2>/dev/null; echo '<the line above>') | crontab -`
+- Confirm: `crontab -l | grep cron-run`; within 15 minutes `tail ~/.grid/logs/issue-loop-the-grid.log` shows a run ("nothing to do" when the queue is empty); `bash loop/status.sh` shows the lock and recent runs.
+- Stop: `crontab -e` and delete or comment the line. A run already in flight finishes.
+- `loop/cron-run.sh` sources the gitignored `loop/cron.env` (`HOME`, `PATH`), then `exec`s the runner. Re-run the installer if `gh`, `claude` or the repo moves.
+- For a different repo the installer prints its line: `bash scripts/instantiate.sh issue-loop <repo> --profile work --land direct --cron-every 15` (see the pattern README, "Unattended").
 - Do not run cron and `drain.sh` at once: the runner lock makes the second one exit "busy".
+- Cron runs one issue per fire (the lowest-numbered `ready-for-agent`), so 15 minutes is the floor between landings. For a backlog use `drain.sh` instead.
 
 ## Feed the queue
 
@@ -108,13 +113,13 @@ Never queue:
   - a separate promote step dev -> staging -> production (not the loop's job).
 - Until then `main` is the only long-lived branch and `MODE=direct` is the remediation mode. Do not use direct mode for staging or production.
 
-## State on 2026-10-21
+## State on 2026-10-22
 
-- A drain started about 10:44Z over private issues #104-#107 and #110-#120.
-  - Contents: mirrors of front-door items, the factory-chain runbook, and the context-engineer (#118, #119) and gsd (#120) roles.
-  - #118, #119 and #120 each include one unreviewed budget-ratchet raise; the operator reviews these afterwards.
-- Deferred, not queued: `karpathy-loop` and `cli-cron` (private #108, #109), until `main` is stable.
+- The first queue is fully drained: 86 private issues landed on `main` with no PRs (front-door, context-engineer, gsd, issue-loop-v2 gaps, knowledge-signals, epistemic-enforcement including the Stop hook). `main` CI is green.
+- Budget-ratchet raises the operator still reviews: `git show d5c2e5e -- docs/budget-target.json`, `git show 032fb41 -- docs/budget-target.json`, and commit `4c96930` (context-engineer part a).
+- Deferred, not queued: `karpathy-loop` and `cli-cron` (private #108, #109), until `main` is stable. The `base:<branch>` runner issue (private #183) is also unqueued.
 - Held: the `index.html` rebuild (public #150), blocked on the operator's render step (#149) and a `git rm`.
+- The loop reads only the PRIVATE tracker (`ISSUE_REPO`). A `ready-for-agent` label on a public issue does nothing; mirror it into the private tracker (see "Feed the queue").
 
 ## Never
 
