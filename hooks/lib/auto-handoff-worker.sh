@@ -286,8 +286,11 @@ lock_path_wait() {
 lock_path_wait "$CWD_REAL" cwd
 
 # ---- 5: digest, fallback dir, target dir -------------------------------------------
-DIGEST_DIR="$(mktemp -d)" || finish_error digest-failed
-SNAP_DIR="$(mktemp -d)" || finish_error digest-failed
+# Explicit template: BSD/macOS `mktemp -d` with no template ignores $TMPDIR (it uses the
+# per-user DARWIN_USER_TEMP_DIR), so the dirs would escape a caller-set TMPDIR. GNU honours
+# TMPDIR either way, so this is the same place there.
+DIGEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")" || finish_error digest-failed
+SNAP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")" || finish_error digest-failed
 DIGEST="$DIGEST_DIR/session-digest.md"
 bash "$HERE/transcript-digest.sh" "$TRANSCRIPT" "$DIGEST" "$MAX_BYTES" 2>/dev/null || finish_error digest-failed
 # The model reads this digest, so a secret in the transcript must not be in it: otherwise it

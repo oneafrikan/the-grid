@@ -1210,7 +1210,7 @@ cwd_lock() { printf '%s/handoff/cwd-%s.lock\n' "$GRID_HOOK_STATE_DIR" "$(printf 
 @test "a SIGKILLed worker leaves nothing in the gate's TMPDIR (NF-001: its temp dirs live in the test sandbox)" {
   mk_tx 6
   export STUB_CLAUDE_MODE=handoff-logs STUB_CLAUDE_SLEEP=20
-  local before after
+  local before after d leaked=""
   before="$(find "$GATE_TMPDIR" -maxdepth 1 -name 'tmp.*' | sort)"
   bash "$WORKER" "$SID" "$TXN" "$P" other > /dev/null 2>&1 &
   wpid=$!
@@ -1218,8 +1218,19 @@ cwd_lock() { printf '%s/handoff/cwd-%s.lock\n' "$GRID_HOOK_STATE_DIR" "$(printf 
   kill -KILL "$wpid"                                  # no EXIT trap runs: the worker's temp dirs stay behind
   wait "$wpid" 2>/dev/null || true
   kill "$(cat "$STUB_DIR/claude.pid")" 2>/dev/null || true
+  # Positive control: the worker's dirs (snapshot dir holds fs.before) must be in the sandbox,
+  # so a pass cannot mean "the worker never ran".
+  [ -n "$(find "$TMPDIR" -maxdepth 2 -name fs.before 2>/dev/null)" ]
+  # On macOS (and any box where the gate dir is the shared system temp dir) other processes,
+  # including concurrent bats runs, create and delete tmp.* entries there while this test runs,
+  # so a bare before/after diff is racy. Only a new entry that carries the worker's own files
+  # (fs.before / git0.state) counts as this worker's leak.
   after="$(find "$GATE_TMPDIR" -maxdepth 1 -name 'tmp.*' | sort)"
-  [ "$after" = "$before" ] || { echo "new in the gate TMPDIR:" >&2; comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2; false; }
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    if [ -e "$d/fs.before" ] || [ -e "$d/git0.state" ]; then leaked="$leaked$d"$'\n'; fi
+  done < <(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after"))
+  [ -z "$leaked" ] || { echo "worker temp dirs leaked into the gate TMPDIR:" >&2; printf '%s' "$leaked" >&2; false; }
 }
 
 @test "a terminated worker removes its temp dirs (no leak into TMPDIR)" {
