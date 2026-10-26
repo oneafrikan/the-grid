@@ -37,7 +37,7 @@ teardown_file() {
 
 setup() {
   common_setup
-  T="$(mktemp -d)"
+  T="$(mktemp_canon)"
   export HOME="$T/home"
   mkdir -p "$HOME"
   # Behind the stubs make_stubs prepends below: reached only once the stub dir is gone.

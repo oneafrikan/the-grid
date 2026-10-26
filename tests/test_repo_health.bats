@@ -99,6 +99,14 @@ sandbox_status() {
   while IFS= read -r repo_dir; do
     seen=$((seen + 1))
     if [ -z "$(ls -A "$repo_dir" 2>/dev/null)" ]; then
+      # A machine may deliberately leave a library-tier submodule uninitialised. Only an
+      # EMPTY dir whose name is not in the tracked baseline is excused; a baseline repo
+      # (wired everywhere, and what CI inits) must still be present.
+      if ! grep -vE '^[[:space:]]*(#|-|$)' "$GRID_ROOT/baseline-submodules.example.txt" \
+           | sed -e 's|^repos/||' -e 's|/.*||' -e 's|[[:space:]].*||' \
+           | grep -qxF "$(basename "$repo_dir")"; then
+        continue
+      fi
       echo "Uninitialized submodule: $repo_dir" >&3
       failed=1
     fi
