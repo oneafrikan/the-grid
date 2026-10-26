@@ -54,7 +54,8 @@ done
 CHECK_DONE=0
 if [ "$CHECK" = 1 ]; then
   [ -z "$OUT" ] || { echo "catalog.sh: --check writes nothing and takes no output path" >&2; usage >&2; exit 2; }
-  OUT="$(mktemp)" || { echo "catalog.sh: --check cannot create a temp file (is TMPDIR usable?)" >&2; exit 2; }
+  # Explicit template: BSD/macOS mktemp ignores $TMPDIR without -t, GNU honours it either way.
+  OUT="$(mktemp "${TMPDIR:-/tmp}/catalog.XXXXXX")" || { echo "catalog.sh: --check cannot create a temp file (is TMPDIR usable?)" >&2; exit 2; }
   # A non-zero exit before the comparison finished is an error (2), whatever set -e saw.
   check_exit() {
     local rc=$?
@@ -252,6 +253,10 @@ DENY_SKILLS=()
 wire_all_repos=1
 if [ -f "$WIRE_ALLOWLIST_FILE" ]; then
   wire_all_repos=0
+  # Open the file explicitly: bash 3.2 (macOS) exits 1 on a failed `done < file` redirect
+  # without running the EXIT trap, so --check would report 1 ("stale") for an unreadable
+  # baseline instead of 2. A failed `exec` falls through to the explicit exit, which runs it.
+  exec 4< "$WIRE_ALLOWLIST_FILE" || exit 1
   while IFS= read -r line; do
     line="${line%%#*}"; line="$(echo "$line" | tr -d '[:space:]')"
     [ -z "$line" ] && continue
@@ -263,7 +268,8 @@ if [ -f "$WIRE_ALLOWLIST_FILE" ]; then
       */*)  WIRED_SKILLS+=("$line") ;;
       *)    WIRED_REPOS+=("$line") ;;
     esac
-  done < "$WIRE_ALLOWLIST_FILE"
+  done <&4
+  exec 4<&-
 fi
 repo_is_denied()  { local n="$1" r; for r in "${DENY_REPOS[@]:-}";    do [ "$r" = "$n" ] && return 0; done; return 1; }
 skill_is_denied() { local e="$1/$2" s; for s in "${DENY_SKILLS[@]:-}"; do [ "$s" = "$e" ] && return 0; done; return 1; }
