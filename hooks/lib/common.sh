@@ -61,7 +61,7 @@ _grid_count_tokens() {
 
 # _grid_unquote <text>: sets _GUQ to <text> as the shell would read it for the purposes of
 #   the guards' fast paths: each backslash-newline deleted, then every " ' and \ deleted.
-#   Same result as   t="${1//$'\\\n'/}"; t="${t//[\"\'\\]/}"   but sliced, for the same bash 3.2
+#   Same result as   t="${1//\\$'\n'/}"; t="${t//[\"\'\\]/}"   but sliced, for the same bash 3.2
 #   reason as _grid_count_tokens: each deletion costs O(length) on 3.2, so text with
 #   thousands of quote characters (a 9.6 KB nest of "$( ... )") took about 2 s per pass
 #   and the hook ran the pass three times. Slices are 256 bytes; a slice end is moved
@@ -75,7 +75,10 @@ _grid_unquote() {
     if [ "${s:$((o + 255)):1}" = '\' ] && [ "${s:$((o + 256)):1}" = $'\n' ]; then e=257; fi
     chunk="${s:$o:$e}"
     o=$((o + e))
-    chunk="${chunk//$'\\\n'/}"
+    # Pattern is \\$'\n' (escaped backslash, then newline), NOT $'\\\n'. On bash 3.2.57
+    # (macOS /bin/bash) the $'\\\n' form does not match backslash-newline, so g\<NL>it
+    # survived, the fast path never saw "git" and the guard failed open.
+    chunk="${chunk//\\$'\n'/}"
     chunk="${chunk//[\"\'\\]/}"
     out+="$chunk"
   done
