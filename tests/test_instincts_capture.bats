@@ -13,6 +13,8 @@ REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 SH="$REPO_ROOT/scripts/instincts.sh"
 FIXTURE="$REPO_ROOT/tests/fixtures/hooks/pretooluse-bash.json"
 
+load helpers/portable
+
 setup() {
   # Env that would redirect git or change capture behaviour must not leak in from the caller.
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GRID_HOST GRID_INSTINCTS GRID_INSTINCTS_SKIP \
@@ -109,9 +111,9 @@ PY
 @test "file is mode 0600 and the directories are 0700" {
   capture "$(bash_payload 'ls')"
   f="$(only_file)"
-  [ "$(stat -c %a "$f")" = 600 ]
-  [ "$(stat -c %a "$OBSDIR")" = 700 ]
-  [ "$(stat -c %a "$GRID_STATE_DIR/instincts")" = 700 ]
+  [ "$(file_mode "$f")" = 600 ]
+  [ "$(file_mode "$OBSDIR")" = 700 ]
+  [ "$(file_mode "$GRID_STATE_DIR/instincts")" = 700 ]
   # File name is obs-<ISO year>-W<ww>.jsonl
   [[ "$(basename "$f")" =~ ^obs-[0-9]{4}-W[0-9]{2}\.jsonl$ ]]
 }
@@ -504,7 +506,7 @@ PY
 @test "observation files are created 0600 even under a permissive umask" {
   umask 000
   capture "$(bash_payload ls)"
-  [ "$(stat -c %a "$(only_file)")" = 600 ]
+  [ "$(file_mode "$(only_file)")" = 600 ]
 }
 
 # --- WP-028 round 2: whitespace other than a space must not glue a secret flag to its value ----
