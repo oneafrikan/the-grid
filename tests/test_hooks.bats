@@ -2541,8 +2541,9 @@ _lib() {
 
 @test "budget: the entry points report scan-budget as a finding (line, file, redaction, stream)" {
   printf 'clean text\nmore text\n' > "$BATS_TEST_TMPDIR/b.txt"
-  # a deadline in the past: every scan is over budget at its first check
-  _lib 'SECRET_DEADLINE_US=1
+  # a deadline in the past: every scan is over budget at its first check. 0, not 1: bash 3.2 has
+  # no EPOCHREALTIME, so the product falls back to SECONDS*1e6, which is 0 in a fresh shell.
+  _lib 'SECRET_DEADLINE_US=0
     echo "line: $(secret_match_line "text")"
     secret_scan_file "'"$BATS_TEST_TMPDIR"'/b.txt" | head -1
     printf "a\nb\n" | secret_mask_stream | head -1
