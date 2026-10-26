@@ -9,7 +9,67 @@ REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 # string comparisons against a non-canonical temp path fail. TMPDIR tweaks do not help.
 mktemp_canon() { (cd "$(mktemp -d "$@")" && pwd -P); }
 
+# ensure_timeout: make a literal `timeout` command resolve on PATH. macOS ships none and
+# Homebrew coreutils only installs `gtimeout`, while tests and the scripts under test call
+# `timeout` literally (some via `exec timeout` / `env -i timeout`, which bypass shell
+# functions, so an exported function is not enough: it has to be an executable on PATH).
+# Order: a real `timeout` already on PATH wins; else symlink `gtimeout`; else a perl shim
+# (alarm, TERM, optional KILL after -k N; exit 124 on timeout like GNU). Built once per bats
+# file under BATS_FILE_TMPDIR and prepended to PATH; a no-op where GNU timeout exists.
+# Same arg shape as GNU: timeout [-k N] SECS cmd...
+ensure_timeout() {
+  command -v timeout >/dev/null 2>&1 && return 0
+  local d="${BATS_FILE_TMPDIR:-${BATS_TEST_TMPDIR:-/tmp}}/timeout-shim" g
+  if [ ! -x "$d/timeout" ]; then
+    mkdir -p "$d"
+    if g="$(command -v gtimeout 2>/dev/null)"; then
+      ln -sf "$g" "$d/timeout"
+    else
+      cat > "$d/timeout" <<'PERL'
+#!/usr/bin/perl
+use strict; use warnings;
+my $kill = 0;
+# GNU option forms the scripts use: -k N, --kill-after=N, -s SIG / --signal=SIG (ignored:
+# TERM is always sent), --foreground, --preserve-status (accepted, ignored).
+while (@ARGV && $ARGV[0] =~ /^-/) {
+  my $o = shift;
+  if ($o eq "-k") { $kill = shift; }
+  elsif ($o =~ /^--kill-after=(.*)$/) { $kill = $1; }
+  elsif ($o eq "-s") { shift; }
+  elsif ($o =~ /^-k(.+)$/) { $kill = $1; }
+}
+$kill =~ s/s$//;
+my $secs = shift; my @cmd = @ARGV;
+$secs =~ s/s$//;   # GNU accepts a trailing unit; only seconds are used here
+my $pid = fork();
+die "fork: $!" unless defined $pid;
+if (!$pid) { exec @cmd or do { print STDERR "timeout: cannot run $cmd[0]: $!\n"; exit 127 } }
+my $timed_out = 0;
+$SIG{ALRM} = sub {
+  if (!$timed_out) {
+    $timed_out = 1; kill "TERM", $pid;
+    alarm $kill if $kill;   # -k N: escalate to KILL if TERM is ignored
+  } else { kill "KILL", $pid; }
+};
+# Like GNU timeout, forward a signal sent to us on to the child (else killing the caller
+# would orphan the probe).
+for my $s (qw(TERM INT HUP)) { $SIG{$s} = sub { kill $s, $pid; }; }
+alarm $secs;
+my $r;
+do { $r = waitpid($pid, 0) } while ($r == -1 && $!{EINTR});
+my $st = $?;
+exit 124 if $timed_out;
+exit(($st & 127) ? 128 + ($st & 127) : $st >> 8);
+PERL
+      chmod +x "$d/timeout"
+    fi
+  fi
+  PATH="$d:$PATH"
+  export PATH
+}
+
 common_setup() {
+  ensure_timeout
   # An empty/unset HOME makes `cd ""` succeed, turning the "real home" into the cwd and
   # disarming every comparison below; refuse before anything is derived from it.
   [ -n "${HOME:-}" ] || { echo "REFUSING: HOME is unset or empty" >&2; return 1; }

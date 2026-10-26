@@ -154,7 +154,11 @@ EOF
 # use_real_timeout — put the real GNU timeout ahead of the stub (the stub does not enforce).
 use_real_timeout() {
   local real
-  real="$(PATH=/usr/bin:/bin command -v timeout || PATH=/usr/bin:/bin command -v gtimeout)"
+  # Probe the real PATH (Homebrew's gtimeout is not in /usr/bin); common_setup's
+  # ensure_timeout puts a gtimeout link or perl shim on PATH where GNU timeout is absent.
+  # STUB_DIR is dropped from the probe PATH: it holds the non-enforcing timeout stub.
+  local probe="${PATH//"$STUB_DIR":/}"
+  real="$(PATH="$probe" type -P timeout || PATH="$probe" type -P gtimeout)"
   mkdir -p "$T/rt"
   ln -sf "$real" "$T/rt/timeout"
   PATH="$T/rt:$PATH"
