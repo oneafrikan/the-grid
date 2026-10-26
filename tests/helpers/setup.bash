@@ -4,6 +4,11 @@
 # shellcheck disable=SC2034  # read by the .bats files that load this helper
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
+# mktemp -d that returns the CANONICAL path. On macOS mktemp gives /var/folders/... but
+# /var is a symlink to /private/var, and wire.sh (pwd -P) records the canonical form, so
+# string comparisons against a non-canonical temp path fail. TMPDIR tweaks do not help.
+mktemp_canon() { (cd "$(mktemp -d "$@")" && pwd -P); }
+
 common_setup() {
   # An empty/unset HOME makes `cd ""` succeed, turning the "real home" into the cwd and
   # disarming every comparison below; refuse before anything is derived from it.
@@ -12,18 +17,18 @@ common_setup() {
   # sandbox check below must still know where the real ~/.claude, ~/.grid and
   # ~/.the-grid-private live.
   export REAL_HOME="${REAL_HOME:-$HOME}"
-  MOCK_GRID=$(mktemp -d)
-  MOCK_SKILLS=$(mktemp -d)
-  OTHER_DIR=$(mktemp -d)
+  MOCK_GRID=$(mktemp_canon)
+  MOCK_SKILLS=$(mktemp_canon)
+  OTHER_DIR=$(mktemp_canon)
   mkdir -p "$MOCK_GRID/repos"
   # Point wire.sh's agents dir at a temp dir too, so tests never touch the real
   # ~/.claude/agents. Exported so child `bash wire.sh` invocations inherit it
   # even though test lines only set GRID_DIR/SKILLS_DIR inline.
-  MOCK_AGENTS=$(mktemp -d)
+  MOCK_AGENTS=$(mktemp_canon)
   export AGENTS_DIR="$MOCK_AGENTS"
   # Rule packs (rule-packs): wire.sh's rules tier writes under $RULES_DIR/grid, so a
   # test that forgets an override must land in a temp dir, never the real ~/.claude/rules.
-  MOCK_RULES=$(mktemp -d)
+  MOCK_RULES=$(mktemp_canon)
   export RULES_DIR="$MOCK_RULES"
   # Isolation tripwire: default every target dir to a sandbox so a test that
   # forgets an inline override cannot reach the real ~/.claude, then refuse to
@@ -36,7 +41,7 @@ common_setup() {
   # auto-handoff worker or wire.sh could write to is a temp dir, so a test that
   # forgets an override fails the sandbox check instead of touching the real
   # ~/.claude, ~/.grid or ~/.the-grid-private.
-  MOCK_HOOK_ROOT=$(mktemp -d)
+  MOCK_HOOK_ROOT=$(mktemp_canon)
   mkdir -p "$MOCK_HOOK_ROOT/claude" "$MOCK_HOOK_ROOT/logs" "$MOCK_HOOK_ROOT/state" \
            "$MOCK_HOOK_ROOT/fallback" "$MOCK_HOOK_ROOT/private"
   export CLAUDE_CONFIG_DIR="$MOCK_HOOK_ROOT/claude"
@@ -64,7 +69,7 @@ common_setup() {
   # purpose: any unquoted expansion in the wiring code then fails a test. The inherited
   # GRID_HARNESS / XDG_CONFIG_HOME / GRID_DRY_HOME are dropped (GRID_DRY_HOME would
   # otherwise override this sandbox base, and XDG would relocate OpenCode's dir).
-  MOCK_HARNESS_ROOT=$(mktemp -d)
+  MOCK_HARNESS_ROOT=$(mktemp_canon)
   MOCK_HARNESS_HOME="$MOCK_HARNESS_ROOT/home dir"
   mkdir -p "$MOCK_HARNESS_HOME"
   export GRID_HARNESS_HOME="$MOCK_HARNESS_HOME"
