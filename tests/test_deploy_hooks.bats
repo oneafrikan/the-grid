@@ -17,6 +17,7 @@
 bats_require_minimum_version 1.5.0   # `run -127` below
 
 load helpers/setup
+load helpers/portable
 load helpers/hooks
 load helpers/venv
 
@@ -853,13 +854,13 @@ seed_user_file() {
 @test "a new settings file honours umask 077 (mode 600)" {
   run bash -c 'umask 077; exec "$0" "$1" --user --hooks user-job' "$PY" "$EMIT"
   [ "$status" -eq 0 ]
-  [ "$(stat -c %a "$(user_file)")" = "600" ]
+  [ "$(file_mode "$(user_file)")" = "600" ]
 }
 
 @test "a new settings file under umask 022 is mode 644" {
   run bash -c 'umask 022; exec "$0" "$1" --user --hooks user-job' "$PY" "$EMIT"
   [ "$status" -eq 0 ]
-  [ "$(stat -c %a "$(user_file)")" = "644" ]
+  [ "$(file_mode "$(user_file)")" = "644" ]
 }
 
 # _before_replace is the test seam between "read the file" and "rename over it": a change

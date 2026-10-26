@@ -17,6 +17,7 @@
 bats_require_minimum_version 1.5.0
 
 load helpers/setup
+load helpers/portable
 load helpers/venv
 
 # The four ids, sorted the way owned_ids() prints them.
@@ -404,8 +405,8 @@ EOF
   [ "$status" -eq 0 ]
   m="$(marker_file)"
   [ -f "$m" ]
-  [ "$(stat -c %a "$m")" = 600 ]
-  [ "$(stat -c %a "$(dirname "$m")")" = 700 ]
+  [ "$(file_mode "$m")" = 600 ]
+  [ "$(file_mode "$(dirname "$m")")" = 700 ]
   [ "$(cat "$m")" = "$(cd "$PROJ" && pwd -P)" ]
 }
 
