@@ -19,7 +19,7 @@ load helpers/grid_fixture
 
 setup() {
   common_setup
-  T=$(mktemp -d)
+  T=$(mktemp_canon)
   grid_env_isolate "$T/env"
   export GRID_HOST=testhost
   export GRID_TRACE_FETCH="$T/trace"
