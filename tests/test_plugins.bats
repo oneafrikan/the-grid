@@ -8,6 +8,7 @@
 
 load helpers/setup
 load helpers/venv
+load helpers/portable
 
 # shellcheck disable=SC2120  # "$@" is forwarded; callers pass flags only sometimes
 # The builder bundles only git-tracked files (NF-044), so the mock grid is a git repo and each
