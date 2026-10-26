@@ -19,6 +19,7 @@ Design rules (design.md: Injection):
     re-scrubbed here before it is printed. Invalid lines are skipped.
   * Nothing qualifies -> nothing printed, not even the header.
 """
+from __future__ import annotations  # `X | None` hints must not evaluate on py3.9 (stock macOS)
 import math
 import os
 import sys
