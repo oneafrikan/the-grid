@@ -247,6 +247,13 @@ EOF
   # The machine hostname must not appear. Match it as a whole token that is not part of a
   # hyphenated name (so a skill name that merely ends in the hostname is not a hit).
   host="$(hostname -s)"
+  # A hostname that is also an ordinary English word used in shipped prose (this repo's own
+  # skills say "daily summary" / "Not a daily manager") cannot be told from a leak by a token
+  # grep, so the check is skipped for exactly those words. Keep the list to words that really
+  # occur; any other host (my-laptop, gareths-mbp, forge, ...) is still checked.
+  case "$host" in
+    daily) skip "hostname '$host' is an English word present in shipped prose; leak check not meaningful" ;;
+  esac
   run grep -rlE "(^|[^[:alnum:]_-])${host}($|[^[:alnum:]_-])" "$REPO_ROOT/plugins/"
   [ -z "$output" ]
 }
