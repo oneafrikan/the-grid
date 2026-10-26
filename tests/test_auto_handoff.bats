@@ -506,8 +506,10 @@ fake_token() { printf 'gh%s_%s' p "$(printf 'a%.0s' $(seq 36))"; }
 
 @test "mapped location matches the directory case-insensitively: | proj | LOGS | finds Logs/ (R24.qa.F9)" {
   mk_tx 6
-  mkdir -p "$HOME/.the-grid-private" "$P/Logs"
-  rmdir "$P/LOGS"
+  mkdir -p "$HOME/.the-grid-private"
+  # Rename via a temp name: on case-insensitive APFS, mkdir Logs is a no-op and rmdir LOGS would
+  # delete the only dir. Two mv steps yield a real Logs/ on both filesystems.
+  mv "$P/LOGS" "$P/Logs.tmp" && mv "$P/Logs.tmp" "$P/Logs"
   printf '| proj | LOGS |\n' > "$HOME/.the-grid-private/handoff-locations.md"
   export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$P/Logs"
   run_worker

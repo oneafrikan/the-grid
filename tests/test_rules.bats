@@ -406,8 +406,10 @@ PYEOF
 
 @test "E_NAME: an uppercase rule file name" {
   make_pack bad
-  write_rule "$R/rules/bad/Style.md"
-  printf '| Style.md | https://example.com/style |\n' >> "$R/rules/bad/README.md"
+  # Rename style.md to Style.md (and its Sources row) instead of writing a second file: on
+  # case-insensitive APFS a write to Style.md would reuse style.md, so no uppercase name existed.
+  mv "$R/rules/bad/style.md" "$R/rules/bad/Style.tmp" && mv "$R/rules/bad/Style.tmp" "$R/rules/bad/Style.md"
+  sed_i 's/^| style.md |/| Style.md |/' "$R/rules/bad/README.md"
   expect_only E_NAME
 }
 
@@ -1494,6 +1496,11 @@ readme_with() {
   [[ "$output" == *"E_NAME"*"grid-a-b-c.mdc"* ]]
   rm -rf "$R/rules/a-b" "$R/rules/a"
   make_pack r
+  # readme.md beside README.md needs a case-sensitive file system; on APFS the write would
+  # overwrite README.md, so the rest of this test is skipped there (the first half has run).
+  if [ -e "$R/rules/r/readme.md" ]; then
+    skip "case-insensitive file system cannot hold readme.md beside README.md"
+  fi
   write_rule "$R/rules/r/readme.md"
   run lint
   [[ "$output" == *"E_NAME rules/r/readme.md"* ]]
