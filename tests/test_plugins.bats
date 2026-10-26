@@ -246,7 +246,7 @@ EOF
   # The machine hostname must not appear. Match it as a whole token that is not part of a
   # hyphenated name (so a skill name that merely ends in the hostname is not a hit).
   host="$(hostname -s)"
-  run grep -rlP "(?<![\\w-])\\Q${host}\\E(?![\\w-])" "$REPO_ROOT/plugins/"
+  run grep -rlE "(^|[^[:alnum:]_-])${host}($|[^[:alnum:]_-])" "$REPO_ROOT/plugins/"
   [ -z "$output" ]
 }
 
@@ -444,7 +444,7 @@ snapshot_bundle() {
   mkdir -p "$tmp/private/qa-engineer"
   cp "$REPO_ROOT"/tests/fixtures/compose/roles/fx-eng/* "$tmp/private/qa-engineer/"
   # The role name must match its dir or compose errors out (exit 2) instead of drifting.
-  sed -i 's/^name: fx-eng$/name: qa-engineer/' "$tmp/private/qa-engineer/role.yaml"
+  sed_i 's/^name: fx-eng$/name: qa-engineer/' "$tmp/private/qa-engineer/role.yaml"
   GRID_PRIVATE_ROLES_DIR="$tmp/private" run BUILD --check
   rm -rf "$tmp"
   echo "$output"

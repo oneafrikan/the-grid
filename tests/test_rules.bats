@@ -397,7 +397,7 @@ PYEOF
 @test "E_ATTRIBUTION: tier 2 pack not listed in THIRD_PARTY_NOTICES.txt" {
   make_pack bad 2
   # make_pack listed the pack in the notices; take it out again.
-  sed -i '/^bad$/d' "$R/rules/THIRD_PARTY_NOTICES.txt"
+  sed_i '/^bad$/d' "$R/rules/THIRD_PARTY_NOTICES.txt"
   expect_only E_ATTRIBUTION
   [[ "$output" == *"pack bad is not listed"* ]]
 }
@@ -787,7 +787,7 @@ PY
 @test "emit agents-md: --check exits 1 when the block was edited, and does not fix it" {
   make_pack sql
   emit --harness agents-md --packs sql --out "$R/AGENTS.md" >/dev/null
-  sed -i 's/Use `foo` for bar./Tampered./' "$R/AGENTS.md"
+  sed_i 's/Use `foo` for bar./Tampered./' "$R/AGENTS.md"
   before="$(cksum < "$R/AGENTS.md")"
   run emit --harness agents-md --packs sql --out "$R/AGENTS.md" --check
   [ "$status" -eq 1 ]
@@ -1075,7 +1075,7 @@ roundtrip() {
   # An LF file that an editor re-saves with CRLF endings is not drift either.
   printf 'one\ntwo\n' > "$R/AGENTS.md"
   emit --harness agents-md --packs sql --out "$R/AGENTS.md" >/dev/null
-  sed -i 's/$/\r/' "$R/AGENTS.md"
+  sed_i 's/$/\r/' "$R/AGENTS.md"
   run emit --harness agents-md --packs sql --out "$R/AGENTS.md" --check
   [ "$status" -eq 0 ]
 }

@@ -18,6 +18,7 @@
 bats_require_minimum_version 1.5.0
 
 load helpers/setup
+load helpers/portable
 load helpers/hooks
 load helpers/stubs
 
@@ -1566,7 +1567,7 @@ mkrepo() {
   # a worker copy with the two detections removed (the real files are untouched)
   W2="$BATS_TEST_TMPDIR/w2root"; mkdir -p "$W2/hooks" "$W2/scripts"
   cp -R "$REPO_ROOT/hooks/lib" "$W2/hooks/lib"; cp "$REPO_ROOT/scripts/run-record.sh" "$W2/scripts/"
-  sed -i 's/^  have_gitdir "\$RG" || /  true || /; s/^if \[ "\${#NEWGIT\[@\]}" -gt 0 \]; then/if false; then/' "$W2/hooks/lib/auto-handoff-worker.sh"
+  sed_i 's/^  have_gitdir "\$RG" || /  true || /; s/^if \[ "\${#NEWGIT\[@\]}" -gt 0 \]; then/if false; then/' "$W2/hooks/lib/auto-handoff-worker.sh"
   export STUB_CLAUDE_MODE=handoff-nested-git STUB_HANDOFF_DIR="$P/notes/handoffs" STUB_CANARY_CMD="touch $CANARY"
   run bash "$W2/hooks/lib/auto-handoff-worker.sh" "$SID" "$TXN" "$P" other
   [ ! -e "$CANARY" ]
