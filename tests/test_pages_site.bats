@@ -197,7 +197,8 @@ nested_fixture() {
   [ "$status" -eq 0 ]
   [ -f "$BATS_TEST_TMPDIR/elsewhere/site/index.html" ]
   # the rm ran on the canonical physical path, not the raw '//...' spelling
-  [ "$(cat "$RMLOG")" = "-rf -- $BATS_TEST_TMPDIR/elsewhere/site" ]
+  # canonical = /private/var/... on macOS, where BATS_TEST_TMPDIR is spelled via the /var symlink
+  [ "$(cat "$RMLOG")" = "-rf -- $(cd "$BATS_TEST_TMPDIR" && pwd -P)/elsewhere/site" ]
 }
 
 @test "GRID_DIR spelled with a leading '//' is judged on its canonical path: the repo and its subdir are still refused" {
@@ -231,7 +232,7 @@ nested_fixture() {
   echo "$output"
   [ "$status" -eq 0 ]
   [ -f "$BATS_TEST_TMPDIR/cwd/-rf/index.html" ]
-  [ "$(cat "$RMLOG")" = "-rf -- $BATS_TEST_TMPDIR/cwd/-rf" ]
+  [ "$(cat "$RMLOG")" = "-rf -- $(cd "$BATS_TEST_TMPDIR" && pwd -P)/cwd/-rf" ]
 }
 
 @test "an out dir under the repo is accepted only as a top-level _name that is not tracked" {
