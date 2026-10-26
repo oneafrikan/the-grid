@@ -247,7 +247,8 @@ path_without() {
   local dirs i n chunk=500
   local -a batch
   IFS=: read -r -a dirs <<< "$PATH"
-  local IFS=:
+  # No `local IFS=:` here: on bash 3.2 it makes "${batch[@]:$n:$chunk}" join into one word
+  # (ln then gets one huge name, "File name too long"). The read above scopes its own IFS.
   i=${#dirs[@]}
   while [ "$i" -gt 0 ]; do
     i=$((i - 1))
