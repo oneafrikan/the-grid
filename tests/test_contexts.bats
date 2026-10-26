@@ -170,7 +170,8 @@ run_cd() {
 
 @test "sourcing leaves no helper variables behind and writes no files" {
   cd "$OTHER_DIR"
-  run env -u GRID_DIR bash -c 'source "$1"; set | grep -c "^_grid_ctx_"; ls -A "$2" | wc -l' _ "$ALIASES" "$OTHER_DIR"
+  # BSD wc -l pads its count with spaces (macOS), so strip them before comparing to "0".
+  run env -u GRID_DIR bash -c 'source "$1"; set | grep -c "^_grid_ctx_"; ls -A "$2" | wc -l | tr -d " "' _ "$ALIASES" "$OTHER_DIR"
   [ "${lines[0]}" = "0" ]
   [ "${lines[1]}" = "0" ]
 }
