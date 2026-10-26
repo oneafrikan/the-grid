@@ -734,7 +734,7 @@ ledger_py() {
   esc_line aaaaaaaaaaaaaaaa 20260101T000000Z-agent-a-aaaaa1.md 5
   commit_all
   cp "$PROJ/signals/done/ledger.jsonl" "$BATS_TEST_TMPDIR/ledger.before"
-  size=$(stat -c %s "$BATS_TEST_TMPDIR/ledger.before")
+  size=$(wc -c < "$BATS_TEST_TMPDIR/ledger.before" | tr -d " ")
   plan_apply
   cmp -n "$size" "$BATS_TEST_TMPDIR/ledger.before" "$PROJ/signals/done/ledger.jsonl"
   [ "$(ledger_py "len(L)")" = "2" ]

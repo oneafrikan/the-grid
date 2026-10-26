@@ -7,6 +7,7 @@
 bats_require_minimum_version 1.5.0   # `run --separate-stderr`
 
 load helpers/setup
+load helpers/portable
 
 setup() {
   common_setup
@@ -900,7 +901,7 @@ PY
   [ "$output" = "wrote $R/GEMINI.md" ]
   [ -f "$R/GEMINI.md" ]
   [ ! -s "$R/GEMINI.md" ]
-  [ "$(stat -c %a "$R/GEMINI.md")" = 600 ]
+  [ "$(file_mode "$R/GEMINI.md")" = 600 ]
   # Removing again is a no-op on the kept empty file.
   run emit --harness gemini --packs "" --out "$R/GEMINI.md"
   [ "$status" -eq 0 ]
@@ -1017,7 +1018,7 @@ no_tmp_left() { [ -z "$(find "$1" -maxdepth 1 -name '*.tmp' -print -quit)" ]; }
   chmod 600 "$R/AGENTS.md"
   run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
   [ "$status" -eq 0 ]
-  [ "$(stat -c %a "$R/AGENTS.md")" = 600 ]
+  [ "$(file_mode "$R/AGENTS.md")" = 600 ]
   no_tmp_left "$R"
 }
 
@@ -1849,7 +1850,7 @@ print('ok')"
     run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
     [ "$status" -eq 0 ]
     grep -q '^### sql / style' "$R/AGENTS.md"
-    [ "$(stat -c %a "$R/AGENTS.md")" = "$m" ]
+    [ "$(file_mode "$R/AGENTS.md")" = "$m" ]
   done
 }
 
