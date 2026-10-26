@@ -249,7 +249,7 @@ STUB
   [ "$status" -eq 0 ]
   [[ "$output" != *"repos/ex/s"* ]]
   [[ "$output" == *"-> ok"* ]]
-  [ "${lines[-1]}" = "audit: wired set NOT scanned" ]
+  [ "${lines[$((${#lines[@]}-1))]}" = "audit: wired set NOT scanned" ]
 }
 
 @test "--gate: an uninitialised LIBRARY-only submodule does not matter" {
@@ -319,7 +319,7 @@ STUB
 
 # wire_links DIR -> sorted "path -> target" lines for every symlink in DIR: a
 # stable fingerprint (no mtimes) to prove links are unchanged or identical.
-wire_links() { find "$1" -type l -printf '%p -> %l\n' | LC_ALL=C sort; }
+wire_links() { find "$1" -type l -exec sh -c 'for p; do printf "%s -> %s\n" "$p" "$(readlink "$p")"; done' sh {} + | LC_ALL=C sort; }
 
 # run_wire [ARGS...] -> `run` the real wire.sh against the mock grid.
 run_wire() { run bash "$REPO_ROOT/scripts/wire.sh" "$@"; }

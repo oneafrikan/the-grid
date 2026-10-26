@@ -12,6 +12,8 @@
 bats_require_minimum_version 1.5.0   # `run --separate-stderr`
 
 load helpers/setup
+load helpers/portable
+TAB=$'\t'
 
 setup() {
   common_setup
@@ -64,7 +66,7 @@ assert_user_text() {
   [ "$status" -eq 0 ]
   [ ! -e "$CODEX_MD" ]
   [ ! -e "$GRID_HARNESS_HOME/.codex/AGENTS.md" ]
-  grep -qP '^rules@~/\.codex/AGENTS\.md\tcodex\t-\tskipped\trules-file-absent$' "$MANIFEST"
+  grep -qE '^rules@~/\.codex/AGENTS\.md'"$TAB"'codex'"$TAB"'-'"$TAB"'skipped'"$TAB"'rules-file-absent$' "$MANIFEST"
 }
 
 @test "no rules: entry and a missing file: no row, nothing created" {
@@ -193,7 +195,7 @@ assert_user_text() {
   [ "$status" -eq 0 ]
   cmp "$BATS_TEST_TMPDIR/real-agents.md" "$BATS_TEST_TMPDIR/real-agents.orig"
   [ -L "$CODEX_MD" ]
-  grep -qP '^rules@~/\.codex/AGENTS\.md\tcodex\t-\tskipped\trules-file-symlink$' "$MANIFEST"
+  grep -qE '^rules@~/\.codex/AGENTS\.md'"$TAB"'codex'"$TAB"'-'"$TAB"'skipped'"$TAB"'rules-file-symlink$' "$MANIFEST"
 }
 
 @test "a symlinked instruction file holding an old block is not edited on removal either" {
@@ -253,7 +255,7 @@ assert_user_text() {
   wire
   [ "$status" -eq 0 ]
   [ -d "$CODEX_MD" ]
-  grep -qP '^rules@~/\.codex/AGENTS\.md\tcodex\t-\tskipped\trules-file-not-regular$' "$MANIFEST"
+  grep -qE '^rules@~/\.codex/AGENTS\.md'"$TAB"'codex'"$TAB"'-'"$TAB"'skipped'"$TAB"'rules-file-not-regular$' "$MANIFEST"
 }
 
 # ---------------------------------------------------------------- --check
@@ -272,7 +274,7 @@ assert_user_text() {
   printf 'rules:fx\nharness:codex\n' > "$OVERLAY"
   make_user_file "$CODEX_MD"
   wire
-  sed -i 's/Quote every expansion\./Do whatever./' "$CODEX_MD"
+  sed_i 's/Quote every expansion\./Do whatever./' "$CODEX_MD"
   sum1="$(cksum < "$CODEX_MD")"
   wire --check
   [ "$status" -eq 1 ]
@@ -363,7 +365,7 @@ registry_copy() {
   [ "$status" -eq 0 ]
   cmp "$CODEX_MD" "$BATS_TEST_TMPDIR/codex.orig"
   [[ "$stderr" == *"markers"* ]]
-  grep -qP '^rules@~/\.codex/AGENTS\.md\tcodex\t-\tskipped\tmarkers-unbalanced$' "$MANIFEST"
+  grep -qE '^rules@~/\.codex/AGENTS\.md'"$TAB"'codex'"$TAB"'-'"$TAB"'skipped'"$TAB"'markers-unbalanced$' "$MANIFEST"
   # --check agrees: an inactive harness with a damaged file is not drift.
   wire --check
   [ "$status" -eq 0 ]
@@ -375,13 +377,13 @@ registry_copy() {
   printf 'notes\n%s\nno end line\n' "$BEGIN_LINE" > "$CODEX_MD"
   wire
   [ "$status" -eq 1 ]
-  grep -qP '^rules@~/\.codex/AGENTS\.md\tcodex\t-\tfailed\t' "$MANIFEST"
+  grep -qE '^rules@~/\.codex/AGENTS\.md'"$TAB"'codex'"$TAB"'-'"$TAB"'failed'"$TAB"'' "$MANIFEST"
 }
 
 @test "two harnesses sharing one rules_file make wire exit 2 and name both" {
   registry_copy
   # Point gemini's rules_file at codex's.
-  sed -i 's#~/.gemini/GEMINI.md#~/.codex/AGENTS.md#' "$HARNESS_REGISTRY"
+  sed_i 's#~/.gemini/GEMINI.md#~/.codex/AGENTS.md#' "$HARNESS_REGISTRY"
   printf 'rules:fx\nharness:codex\n' > "$OVERLAY"
   wire
   [ "$status" -eq 2 ]
@@ -390,7 +392,7 @@ registry_copy() {
 
 @test "a rules_file that is not an instruction file or not ~/-relative is skipped as rules-file-not-allowed" {
   registry_copy
-  sed -i 's#~/.codex/AGENTS.md#~/.bashrc#; s#~/.gemini/GEMINI.md#'"$BATS_TEST_TMPDIR"'/AGENTS.md#' "$HARNESS_REGISTRY"
+  sed_i 's#~/.codex/AGENTS.md#~/.bashrc#; s#~/.gemini/GEMINI.md#'"$BATS_TEST_TMPDIR"'/AGENTS.md#' "$HARNESS_REGISTRY"
   printf 'rules:fx\nharness:codex\nharness:gemini\n' > "$OVERLAY"
   printf 'export X=1\n' > "$GRID_HARNESS_HOME/.bashrc"
   printf 'notes\n' > "$BATS_TEST_TMPDIR/AGENTS.md"
@@ -400,8 +402,8 @@ registry_copy() {
   [ "$status" -eq 0 ]
   cmp "$GRID_HARNESS_HOME/.bashrc" "$BATS_TEST_TMPDIR/bashrc.orig"
   cmp "$BATS_TEST_TMPDIR/AGENTS.md" "$BATS_TEST_TMPDIR/agents.orig"
-  grep -qP '^rules@~/\.bashrc\tcodex\t-\tskipped\trules-file-not-allowed$' "$MANIFEST"
-  grep -qP "^rules@.*AGENTS\.md\tgemini\t-\tskipped\trules-file-not-allowed\$" "$MANIFEST"
+  grep -qE '^rules@~/\.bashrc'"$TAB"'codex'"$TAB"'-'"$TAB"'skipped'"$TAB"'rules-file-not-allowed$' "$MANIFEST"
+  grep -qE "^rules@.*AGENTS\.md${TAB}gemini${TAB}-${TAB}skipped${TAB}rules-file-not-allowed\$" "$MANIFEST"
 }
 
 # ---------------------------------------------------------------- visibility and cap (WP-054)
@@ -427,7 +429,7 @@ pad_packs() {
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"over the 12288-byte cap"* ]]
   cmp "$CODEX_MD" "$BATS_TEST_TMPDIR/codex.orig"
-  grep -qP '^rules@~/\.codex/AGENTS\.md\tcodex\t-\tskipped\tover-cap$' "$MANIFEST"
+  grep -qE '^rules@~/\.codex/AGENTS\.md'"$TAB"'codex'"$TAB"'-'"$TAB"'skipped'"$TAB"'over-cap$' "$MANIFEST"
   # --check agrees: an over-cap selection is not drift.
   wire --check
   [ "$status" -eq 0 ]
@@ -509,7 +511,7 @@ action() {
     registry_copy
     # gemini now points at the same file as codex by another spelling: the duplicate check
     # must not be defeatable by it.
-    sed -i "s#~/.gemini/GEMINI.md#$raw#" "$HARNESS_REGISTRY"
+    sed_i "s#~/.gemini/GEMINI.md#$raw#" "$HARNESS_REGISTRY"
     printf 'rules:fx\nharness:codex\n' > "$OVERLAY"
     wire
     [ "$status" -eq 2 ] || { echo "not refused: $raw"; return 1; }

@@ -9,6 +9,7 @@
 # independent verification belongs to qa-engineer.
 
 load helpers/setup
+load helpers/portable
 load helpers/venv
 
 setup() {
@@ -143,7 +144,7 @@ PYEOF
   cp -R "$REPO_ROOT/tests/fixtures/compose/roles" "$roles"
   for r in zz-edit zz-write zz-ro; do
     cp -R "$roles/fx-eng" "$roles/$r"
-    sed -i "s/^name: .*/name: $r/" "$roles/$r/role.yaml"
+    sed_i "s/^name: .*/name: $r/" "$roles/$r/role.yaml"
   done
   printf 'tools: [Read, Edit, Bash]\n' >> "$roles/zz-edit/role.yaml"
   printf 'tools: [Read, Write]\n'      >> "$roles/zz-write/role.yaml"
@@ -240,7 +241,7 @@ PYEOF
   cp -R "$REPO_ROOT/tests/fixtures/compose/roles" "$roles"
   mk() {   # mk <role> <tools yaml list, or empty for no allowlist>
     cp -R "$roles/fx-eng" "$roles/$1"
-    sed -i "s/^name: .*/name: $1/" "$roles/$1/role.yaml"
+    sed_i "s/^name: .*/name: $1/" "$roles/$1/role.yaml"
     [ -z "$2" ] || printf 'tools: %s\n' "$2" >> "$roles/$1/role.yaml"
   }
   mk zz-edit   '[Read, Edit]'                   # edit allowed; bash and web denied
@@ -379,7 +380,7 @@ gemini_roles() {
   for spec in "$@"; do
     r="${spec%%=*}"; t="${spec#*=}"
     cp -R "$roles/fx-eng" "$roles/$r"
-    sed -i "s/^name: .*/name: $r/" "$roles/$r/role.yaml"
+    sed_i "s/^name: .*/name: $r/" "$roles/$r/role.yaml"
     printf 'tools: [%s]\n' "${t//,/, }" >> "$roles/$r/role.yaml"
     cfg+="  - role: $r"$'\n'
   done
