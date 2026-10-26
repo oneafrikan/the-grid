@@ -26,7 +26,7 @@ stage_names() { printf '%s\n' wip provisional established canonical superseded r
   f="$REPO_ROOT/PURPOSE.md"
   [ -f "$f" ]
   [ "$(grep -c '^## ' "$f")" -eq 3 ]
-  [ "$(grep '^## ' "$f" | paste -sd'|')" = "## Problem|## Intended solution|## Outcome" ]
+  [ "$(grep '^## ' "$f" | paste -sd'|' -)" = "## Problem|## Intended solution|## Outcome" ]
   grep -qxF 'Must-nots: see [GUARDRAILS.md](GUARDRAILS.md).' "$f"
   ! grep -Eq '^- G[0-9]+:' "$f" || false
   [ "$(wc -l < "$f")" -le 40 ]
@@ -273,7 +273,7 @@ TEMPLATES="finance-agents-base lamp-agents-base python-agents-base python-astro-
 @test "template PURPOSE.md: three headings in order, a GUARDRAILS link, <fill markers, no guardrail entries, <= 40 lines" {
   f="$REPO_ROOT/$COMMON/PURPOSE.md"
   [ -f "$f" ]
-  [ "$(grep '^## ' "$f" | paste -sd'|')" = "## Problem|## Intended solution|## Outcome" ]
+  [ "$(grep '^## ' "$f" | paste -sd'|' -)" = "## Problem|## Intended solution|## Outcome" ]
   grep -qxF 'Must-nots: see [GUARDRAILS.md](GUARDRAILS.md).' "$f"
   grep -q '<fill' "$f"
   ! grep -Eq '^- G[0-9]+:' "$f" || false
