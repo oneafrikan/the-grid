@@ -233,6 +233,7 @@ Every `docs/*.md` file in the repo, so a reader can reach each from here:
 - [instincts.md](instincts.md) — habit learning from your own sessions
 - [issue-loop-runbook.md](issue-loop-runbook.md) — operating runbook for the issue-loop
 - [model-selection.md](model-selection.md) — which model for which job
+- [portability.md](portability.md) — rules for tests and scripts that run on Linux and macOS
 - [reference-repos.md](reference-repos.md) — curated external repos
 - [reference-resources.md](reference-resources.md) — curated external references
 - [rules.md](rules.md) — rule packs
