@@ -105,4 +105,4 @@ A newly added submodule is **library-only** by default (indexed in `SKILLS.md`, 
 tests/lib/bats-core/bin/bats tests/
 ```
 
-Tests cover: symlink creation, idempotency, stale cleanup, skill format validation (required frontmatter), submodule health, broken symlink detection, the role contract and its lint, per-project agent deploys, the run record, and the golden-case runner (against a stub, never a real model). All tests use temp dirs and never touch the real `~/.claude/skills/`. `bash scripts/gate.sh` runs the full commit gate.
+Tests cover: symlink creation, idempotency, stale cleanup, skill format validation (required frontmatter), submodule health, broken symlink detection, the role contract and its lint, per-project agent deploys, the run record, and the golden-case runner (against a stub, never a real model). All tests use temp dirs and never touch the real `~/.claude/skills/`. `bash scripts/gate.sh` runs the full commit gate. Tests and scripts must run on Linux and macOS: see [docs/portability.md](docs/portability.md).
