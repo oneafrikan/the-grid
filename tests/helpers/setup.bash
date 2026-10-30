@@ -7,6 +7,8 @@ REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 # mktemp -d that returns the CANONICAL path. On macOS mktemp gives /var/folders/... but
 # /var is a symlink to /private/var, and wire.sh (pwd -P) records the canonical form, so
 # string comparisons against a non-canonical temp path fail. TMPDIR tweaks do not help.
+# Extra args pass through to mktemp (a template, -t); no caller in this file passes any.
+# shellcheck disable=SC2120
 mktemp_canon() { (cd "$(mktemp -d "$@")" && pwd -P); }
 
 # ensure_timeout: make a literal `timeout` command resolve on PATH. macOS ships none and
