@@ -1,6 +1,6 @@
 # Handover: macOS port (PR #301) for a Linux session
 
-TEMPORARY. This file travels with branch `fix/macos-bats` and is deleted in the merge-follow-up commit once PR #301 merges (see section 10).
+KEPT as a record (operator decision, 2026-10-30). It was written for the Linux session that verified branch `fix/macos-bats` (PR #301) and stays after the merge as the account of what the macOS port changed and how it was checked. Sections 3 to 5 and 10 are the one-time verification and merge steps; they are done once the PR is merged.
 
 Audience: a Claude or human session on a Linux box that has just checked out `fix/macos-bats` and has its own in-flight branch that was never run on macOS.
 
@@ -256,12 +256,25 @@ jobs:
 - `readlink -f` was checked OK on macOS 26 but is not guaranteed on older macOS.
 - UNTESTED: Linux (any distro), bash 4/5, shellcheck on the changed files, python 3.10+ for `miniyaml`, the differential in 4.10.
 
-## 10. Cleanup (merge-follow-up commit)
+## Linux results (2026-10-30, branch head c3ecdc1)
+
+Linux box: bash 5.2.21, python 3.12.3, GNU userland.
+
+- CI: `checks`, `bats s1` to `s4` and `gate` all green. The only failure before the fix was shellcheck SC2120 on `mktemp_canon` (suppressed in c3ecdc1); shellcheck now passes on every changed shell file.
+- 4.10 differential (`_grid_unquote`, `_grid_count_tokens` against the unsliced oracle): all equal. The guard `g\<NL>it commit -n` is blocked (exit 2).
+- 4.2, 4.3, 4.5 (bad baseline exits 2) and 4.7 (4299 and 4300 digits parse, 4301 raises) ran and passed. The rest of section 4 was not run by hand; CI's bats shards cover it.
+- Security review of the guard-hook changes (read-only, adversarial inputs through the real hooks): no fail-open regression, verdict MERGE.
+  - 5505 of 5505 evasive variants blocked at padding offsets 0 to 1100, identical to the old tree.
+  - A 2000-string fuzz of the unquote and token-count helpers matched the oracle in C and C.UTF-8 locales.
+  - On bash 5.2 the old backslash-newline pattern also worked; the new one is a bash 3.2 fix only.
+  - Notes (low): a `TMPDIR` starting with `-` would be read as a `mktemp` option; `catalog.sh --check` exit 0 on a clean tree needs initialised submodules to confirm.
+  - Not tested: bash 3.2 timing and slice behaviour (macOS only), `hooks/run.sh` as the launcher, locales other than C and C.UTF-8.
+
+## 10. Cleanup (merge-follow-up)
+
+Keep this file. Only tidy branches and worktrees:
 
 ```bash
-git rm docs/handoffs/macos-port-linux-handover.md
-rmdir docs/handoffs 2>/dev/null || true        # only if empty
-git commit -m "docs: remove macOS port handover (PR #301 merged)"
 git worktree list && git worktree prune
 git branch --merged origin/main | grep -v '^\*\|main$'   # delete only branches confirmed merged or contained in origin/main
 git branch -d fix/macos-bats                   # after the PR shows MERGED
