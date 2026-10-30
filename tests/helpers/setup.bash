@@ -4,7 +4,74 @@
 # shellcheck disable=SC2034  # read by the .bats files that load this helper
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
+# mktemp -d that returns the CANONICAL path. On macOS mktemp gives /var/folders/... but
+# /var is a symlink to /private/var, and wire.sh (pwd -P) records the canonical form, so
+# string comparisons against a non-canonical temp path fail. TMPDIR tweaks do not help.
+# Extra args pass through to mktemp (a template, -t); no caller in this file passes any.
+# shellcheck disable=SC2120
+mktemp_canon() { (cd "$(mktemp -d "$@")" && pwd -P); }
+
+# ensure_timeout: make a literal `timeout` command resolve on PATH. macOS ships none and
+# Homebrew coreutils only installs `gtimeout`, while tests and the scripts under test call
+# `timeout` literally (some via `exec timeout` / `env -i timeout`, which bypass shell
+# functions, so an exported function is not enough: it has to be an executable on PATH).
+# Order: a real `timeout` already on PATH wins; else symlink `gtimeout`; else a perl shim
+# (alarm, TERM, optional KILL after -k N; exit 124 on timeout like GNU). Built once per bats
+# file under BATS_FILE_TMPDIR and prepended to PATH; a no-op where GNU timeout exists.
+# Same arg shape as GNU: timeout [-k N] SECS cmd...
+ensure_timeout() {
+  command -v timeout >/dev/null 2>&1 && return 0
+  local d="${BATS_FILE_TMPDIR:-${BATS_TEST_TMPDIR:-/tmp}}/timeout-shim" g
+  if [ ! -x "$d/timeout" ]; then
+    mkdir -p "$d"
+    if g="$(command -v gtimeout 2>/dev/null)"; then
+      ln -sf "$g" "$d/timeout"
+    else
+      cat > "$d/timeout" <<'PERL'
+#!/usr/bin/perl
+use strict; use warnings;
+my $kill = 0;
+# GNU option forms the scripts use: -k N, --kill-after=N, -s SIG / --signal=SIG (ignored:
+# TERM is always sent), --foreground, --preserve-status (accepted, ignored).
+while (@ARGV && $ARGV[0] =~ /^-/) {
+  my $o = shift;
+  if ($o eq "-k") { $kill = shift; }
+  elsif ($o =~ /^--kill-after=(.*)$/) { $kill = $1; }
+  elsif ($o eq "-s") { shift; }
+  elsif ($o =~ /^-k(.+)$/) { $kill = $1; }
+}
+$kill =~ s/s$//;
+my $secs = shift; my @cmd = @ARGV;
+$secs =~ s/s$//;   # GNU accepts a trailing unit; only seconds are used here
+my $pid = fork();
+die "fork: $!" unless defined $pid;
+if (!$pid) { exec @cmd or do { print STDERR "timeout: cannot run $cmd[0]: $!\n"; exit 127 } }
+my $timed_out = 0;
+$SIG{ALRM} = sub {
+  if (!$timed_out) {
+    $timed_out = 1; kill "TERM", $pid;
+    alarm $kill if $kill;   # -k N: escalate to KILL if TERM is ignored
+  } else { kill "KILL", $pid; }
+};
+# Like GNU timeout, forward a signal sent to us on to the child (else killing the caller
+# would orphan the probe).
+for my $s (qw(TERM INT HUP)) { $SIG{$s} = sub { kill $s, $pid; }; }
+alarm $secs;
+my $r;
+do { $r = waitpid($pid, 0) } while ($r == -1 && $!{EINTR});
+my $st = $?;
+exit 124 if $timed_out;
+exit(($st & 127) ? 128 + ($st & 127) : $st >> 8);
+PERL
+      chmod +x "$d/timeout"
+    fi
+  fi
+  PATH="$d:$PATH"
+  export PATH
+}
+
 common_setup() {
+  ensure_timeout
   # An empty/unset HOME makes `cd ""` succeed, turning the "real home" into the cwd and
   # disarming every comparison below; refuse before anything is derived from it.
   [ -n "${HOME:-}" ] || { echo "REFUSING: HOME is unset or empty" >&2; return 1; }
@@ -12,18 +79,18 @@ common_setup() {
   # sandbox check below must still know where the real ~/.claude, ~/.grid and
   # ~/.the-grid-private live.
   export REAL_HOME="${REAL_HOME:-$HOME}"
-  MOCK_GRID=$(mktemp -d)
-  MOCK_SKILLS=$(mktemp -d)
-  OTHER_DIR=$(mktemp -d)
+  MOCK_GRID=$(mktemp_canon)
+  MOCK_SKILLS=$(mktemp_canon)
+  OTHER_DIR=$(mktemp_canon)
   mkdir -p "$MOCK_GRID/repos"
   # Point wire.sh's agents dir at a temp dir too, so tests never touch the real
   # ~/.claude/agents. Exported so child `bash wire.sh` invocations inherit it
   # even though test lines only set GRID_DIR/SKILLS_DIR inline.
-  MOCK_AGENTS=$(mktemp -d)
+  MOCK_AGENTS=$(mktemp_canon)
   export AGENTS_DIR="$MOCK_AGENTS"
   # Rule packs (rule-packs): wire.sh's rules tier writes under $RULES_DIR/grid, so a
   # test that forgets an override must land in a temp dir, never the real ~/.claude/rules.
-  MOCK_RULES=$(mktemp -d)
+  MOCK_RULES=$(mktemp_canon)
   export RULES_DIR="$MOCK_RULES"
   # Isolation tripwire: default every target dir to a sandbox so a test that
   # forgets an inline override cannot reach the real ~/.claude, then refuse to
@@ -36,7 +103,7 @@ common_setup() {
   # auto-handoff worker or wire.sh could write to is a temp dir, so a test that
   # forgets an override fails the sandbox check instead of touching the real
   # ~/.claude, ~/.grid or ~/.the-grid-private.
-  MOCK_HOOK_ROOT=$(mktemp -d)
+  MOCK_HOOK_ROOT=$(mktemp_canon)
   mkdir -p "$MOCK_HOOK_ROOT/claude" "$MOCK_HOOK_ROOT/logs" "$MOCK_HOOK_ROOT/state" \
            "$MOCK_HOOK_ROOT/fallback" "$MOCK_HOOK_ROOT/private"
   export CLAUDE_CONFIG_DIR="$MOCK_HOOK_ROOT/claude"
@@ -64,7 +131,7 @@ common_setup() {
   # purpose: any unquoted expansion in the wiring code then fails a test. The inherited
   # GRID_HARNESS / XDG_CONFIG_HOME / GRID_DRY_HOME are dropped (GRID_DRY_HOME would
   # otherwise override this sandbox base, and XDG would relocate OpenCode's dir).
-  MOCK_HARNESS_ROOT=$(mktemp -d)
+  MOCK_HARNESS_ROOT=$(mktemp_canon)
   MOCK_HARNESS_HOME="$MOCK_HARNESS_ROOT/home dir"
   mkdir -p "$MOCK_HARNESS_HOME"
   export GRID_HARNESS_HOME="$MOCK_HARNESS_HOME"
@@ -247,7 +314,8 @@ path_without() {
   local dirs i n chunk=500
   local -a batch
   IFS=: read -r -a dirs <<< "$PATH"
-  local IFS=:
+  # No `local IFS=:` here: on bash 3.2 it makes "${batch[@]:$n:$chunk}" join into one word
+  # (ln then gets one huge name, "File name too long"). The read above scopes its own IFS.
   i=${#dirs[@]}
   while [ "$i" -gt 0 ]; do
     i=$((i - 1))

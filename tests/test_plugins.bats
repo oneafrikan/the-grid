@@ -8,6 +8,7 @@
 
 load helpers/setup
 load helpers/venv
+load helpers/portable
 
 # shellcheck disable=SC2120  # "$@" is forwarded; callers pass flags only sometimes
 # The builder bundles only git-tracked files (NF-044), so the mock grid is a git repo and each
@@ -246,7 +247,14 @@ EOF
   # The machine hostname must not appear. Match it as a whole token that is not part of a
   # hyphenated name (so a skill name that merely ends in the hostname is not a hit).
   host="$(hostname -s)"
-  run grep -rlP "(?<![\\w-])\\Q${host}\\E(?![\\w-])" "$REPO_ROOT/plugins/"
+  # A hostname that is also an ordinary English word used in shipped prose (this repo's own
+  # skills say "daily summary" / "Not a daily manager") cannot be told from a leak by a token
+  # grep, so the check is skipped for exactly those words. Keep the list to words that really
+  # occur; any other host (host-a, host-b, ...) is still checked.
+  case "$host" in
+    daily) skip "hostname '$host' is an English word present in shipped prose; leak check not meaningful" ;;
+  esac
+  run grep -rlE "(^|[^[:alnum:]_-])${host}($|[^[:alnum:]_-])" "$REPO_ROOT/plugins/"
   [ -z "$output" ]
 }
 
@@ -444,7 +452,7 @@ snapshot_bundle() {
   mkdir -p "$tmp/private/qa-engineer"
   cp "$REPO_ROOT"/tests/fixtures/compose/roles/fx-eng/* "$tmp/private/qa-engineer/"
   # The role name must match its dir or compose errors out (exit 2) instead of drifting.
-  sed -i 's/^name: fx-eng$/name: qa-engineer/' "$tmp/private/qa-engineer/role.yaml"
+  sed_i 's/^name: fx-eng$/name: qa-engineer/' "$tmp/private/qa-engineer/role.yaml"
   GRID_PRIVATE_ROLES_DIR="$tmp/private" run BUILD --check
   rm -rf "$tmp"
   echo "$output"

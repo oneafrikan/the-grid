@@ -29,6 +29,7 @@ a temp dir), so the system prompt is exactly what ships. The model is the role's
 model. Tools are switched OFF, so a case can only talk and can never act on anything.
 Results go to evals/results/*.jsonl (git-ignored) with pass rate and flip rate.
 """
+from __future__ import annotations  # `X | None` hints must not evaluate on py3.9 (stock macOS)
 import argparse
 import fnmatch
 import json

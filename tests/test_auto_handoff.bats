@@ -18,6 +18,7 @@
 bats_require_minimum_version 1.5.0
 
 load helpers/setup
+load helpers/portable
 load helpers/hooks
 load helpers/stubs
 
@@ -505,8 +506,10 @@ fake_token() { printf 'gh%s_%s' p "$(printf 'a%.0s' $(seq 36))"; }
 
 @test "mapped location matches the directory case-insensitively: | proj | LOGS | finds Logs/ (R24.qa.F9)" {
   mk_tx 6
-  mkdir -p "$HOME/.the-grid-private" "$P/Logs"
-  rmdir "$P/LOGS"
+  mkdir -p "$HOME/.the-grid-private"
+  # Rename via a temp name: on case-insensitive APFS, mkdir Logs is a no-op and rmdir LOGS would
+  # delete the only dir. Two mv steps yield a real Logs/ on both filesystems.
+  mv "$P/LOGS" "$P/Logs.tmp" && mv "$P/Logs.tmp" "$P/Logs"
   printf '| proj | LOGS |\n' > "$HOME/.the-grid-private/handoff-locations.md"
   export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$P/Logs"
   run_worker
@@ -1207,7 +1210,7 @@ cwd_lock() { printf '%s/handoff/cwd-%s.lock\n' "$GRID_HOOK_STATE_DIR" "$(printf 
 @test "a SIGKILLed worker leaves nothing in the gate's TMPDIR (NF-001: its temp dirs live in the test sandbox)" {
   mk_tx 6
   export STUB_CLAUDE_MODE=handoff-logs STUB_CLAUDE_SLEEP=20
-  local before after
+  local before after d leaked=""
   before="$(find "$GATE_TMPDIR" -maxdepth 1 -name 'tmp.*' | sort)"
   bash "$WORKER" "$SID" "$TXN" "$P" other > /dev/null 2>&1 &
   wpid=$!
@@ -1215,8 +1218,19 @@ cwd_lock() { printf '%s/handoff/cwd-%s.lock\n' "$GRID_HOOK_STATE_DIR" "$(printf 
   kill -KILL "$wpid"                                  # no EXIT trap runs: the worker's temp dirs stay behind
   wait "$wpid" 2>/dev/null || true
   kill "$(cat "$STUB_DIR/claude.pid")" 2>/dev/null || true
+  # Positive control: the worker's dirs (snapshot dir holds fs.before) must be in the sandbox,
+  # so a pass cannot mean "the worker never ran".
+  [ -n "$(find "$TMPDIR" -maxdepth 2 -name fs.before 2>/dev/null)" ]
+  # On macOS (and any box where the gate dir is the shared system temp dir) other processes,
+  # including concurrent bats runs, create and delete tmp.* entries there while this test runs,
+  # so a bare before/after diff is racy. Only a new entry that carries the worker's own files
+  # (fs.before / git0.state) counts as this worker's leak.
   after="$(find "$GATE_TMPDIR" -maxdepth 1 -name 'tmp.*' | sort)"
-  [ "$after" = "$before" ] || { echo "new in the gate TMPDIR:" >&2; comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2; false; }
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    if [ -e "$d/fs.before" ] || [ -e "$d/git0.state" ]; then leaked="$leaked$d"$'\n'; fi
+  done < <(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after"))
+  [ -z "$leaked" ] || { echo "worker temp dirs leaked into the gate TMPDIR:" >&2; printf '%s' "$leaked" >&2; false; }
 }
 
 @test "a terminated worker removes its temp dirs (no leak into TMPDIR)" {
@@ -1566,7 +1580,7 @@ mkrepo() {
   # a worker copy with the two detections removed (the real files are untouched)
   W2="$BATS_TEST_TMPDIR/w2root"; mkdir -p "$W2/hooks" "$W2/scripts"
   cp -R "$REPO_ROOT/hooks/lib" "$W2/hooks/lib"; cp "$REPO_ROOT/scripts/run-record.sh" "$W2/scripts/"
-  sed -i 's/^  have_gitdir "\$RG" || /  true || /; s/^if \[ "\${#NEWGIT\[@\]}" -gt 0 \]; then/if false; then/' "$W2/hooks/lib/auto-handoff-worker.sh"
+  sed_i 's/^  have_gitdir "\$RG" || /  true || /; s/^if \[ "\${#NEWGIT\[@\]}" -gt 0 \]; then/if false; then/' "$W2/hooks/lib/auto-handoff-worker.sh"
   export STUB_CLAUDE_MODE=handoff-nested-git STUB_HANDOFF_DIR="$P/notes/handoffs" STUB_CANARY_CMD="touch $CANARY"
   run bash "$W2/hooks/lib/auto-handoff-worker.sh" "$SID" "$TXN" "$P" other
   [ ! -e "$CANARY" ]

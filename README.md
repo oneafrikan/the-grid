@@ -136,6 +136,7 @@ This is one person's working system, shared because the mechanics are reusable, 
 - [docs/private-projects.md](docs/private-projects.md): keeping a private desk out of the public repo.
 - [docs/model-selection.md](docs/model-selection.md): which model for which job, with prices.
 - [docs/rules.md](docs/rules.md): opt-in coding-convention rule packs.
+- [docs/portability.md](docs/portability.md): writing tests and scripts that run on Linux and macOS.
 - [docs/harnesses.md](docs/harnesses.md): other AI tools (Codex CLI, OpenCode, Gemini CLI).
 - [hooks/README.md](hooks/README.md): guard hooks and the auto-handoff hook.
 - [CURATION.md](CURATION.md): why each wired repo is trusted.

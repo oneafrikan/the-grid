@@ -13,6 +13,8 @@ REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 SH="$REPO_ROOT/scripts/instincts.sh"
 LIBDIR="$REPO_ROOT/scripts/instincts"
 
+load helpers/portable
+
 setup() {
   # A git hook (the commit gate) exports these; they would redirect `git -C <tmp>`
   # back at the real repo and make the "no remote" cases lie.
@@ -621,8 +623,8 @@ EOF
   pylib 'lib.write_marker("0123456789ab", "/some/root")'
   m="$GRID_STATE_DIR/instincts/enabled/0123456789ab"
   [ "$(cat "$m")" = "/some/root" ]
-  [ "$(stat -c %a "$m")" = 600 ]
-  [ "$(stat -c %a "$GRID_STATE_DIR/instincts/enabled")" = 700 ]
+  [ "$(file_mode "$m")" = 600 ]
+  [ "$(file_mode "$GRID_STATE_DIR/instincts/enabled")" = 700 ]
   pylib 'lib.remove_marker("0123456789ab"); lib.remove_marker("0123456789ab")'
   [ ! -e "$m" ]
 }
@@ -763,8 +765,8 @@ dropped() { pylib 'print(repr(lib.drop_sensitive_lines(sys.argv[2])))' "$1"; }
   umask 000
   pylib 'lib._append_line("0123456789ab", "host-a", {"id": "x"})'
   f="$GRID_LEARNING_DIR/instincts/0123456789ab/host-a.jsonl"
-  [ "$(stat -c %a "$f")" = 600 ]
-  [ "$(stat -c %a "$GRID_LEARNING_DIR/instincts/0123456789ab")" = 700 ]
+  [ "$(file_mode "$f")" = 600 ]
+  [ "$(file_mode "$GRID_LEARNING_DIR/instincts/0123456789ab")" = 700 ]
 }
 
 # --- host name and paths ------------------------------------------------------

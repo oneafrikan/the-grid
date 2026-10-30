@@ -421,7 +421,9 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
   snap() { ( cd "$H" && find . | LC_ALL=C sort && find . -type f -exec cat {} + ); }
   before="$(snap)"
   # Even an inherited SKILLS_DIR/AGENTS_DIR pointing into the home must be ignored.
-  HOME="$H" SKILLS_DIR="$H/.claude/skills" AGENTS_DIR="$H/.claude/agents" budget --json
+  # PYTHONDONTWRITEBYTECODE: Apple system python writes stdlib .pyc into $HOME/Library/Caches;
+  # that is the interpreter, not budget.py, touching HOME.
+  HOME="$H" PYTHONDONTWRITEBYTECODE=1 SKILLS_DIR="$H/.claude/skills" AGENTS_DIR="$H/.claude/agents" budget --json
   [ "$status" -eq 0 ]
   [ "$(jget "$output" baseline.skills.count)" = "1" ]
   [ "$(snap)" = "$before" ]

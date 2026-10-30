@@ -7,6 +7,7 @@
 bats_require_minimum_version 1.5.0   # `run --separate-stderr`
 
 load helpers/setup
+load helpers/portable
 
 setup() {
   common_setup
@@ -396,7 +397,7 @@ PYEOF
 @test "E_ATTRIBUTION: tier 2 pack not listed in THIRD_PARTY_NOTICES.txt" {
   make_pack bad 2
   # make_pack listed the pack in the notices; take it out again.
-  sed -i '/^bad$/d' "$R/rules/THIRD_PARTY_NOTICES.txt"
+  sed_i '/^bad$/d' "$R/rules/THIRD_PARTY_NOTICES.txt"
   expect_only E_ATTRIBUTION
   [[ "$output" == *"pack bad is not listed"* ]]
 }
@@ -405,8 +406,10 @@ PYEOF
 
 @test "E_NAME: an uppercase rule file name" {
   make_pack bad
-  write_rule "$R/rules/bad/Style.md"
-  printf '| Style.md | https://example.com/style |\n' >> "$R/rules/bad/README.md"
+  # Rename style.md to Style.md (and its Sources row) instead of writing a second file: on
+  # case-insensitive APFS a write to Style.md would reuse style.md, so no uppercase name existed.
+  mv "$R/rules/bad/style.md" "$R/rules/bad/Style.tmp" && mv "$R/rules/bad/Style.tmp" "$R/rules/bad/Style.md"
+  sed_i 's/^| style.md |/| Style.md |/' "$R/rules/bad/README.md"
   expect_only E_NAME
 }
 
@@ -786,7 +789,7 @@ PY
 @test "emit agents-md: --check exits 1 when the block was edited, and does not fix it" {
   make_pack sql
   emit --harness agents-md --packs sql --out "$R/AGENTS.md" >/dev/null
-  sed -i 's/Use `foo` for bar./Tampered./' "$R/AGENTS.md"
+  sed_i 's/Use `foo` for bar./Tampered./' "$R/AGENTS.md"
   before="$(cksum < "$R/AGENTS.md")"
   run emit --harness agents-md --packs sql --out "$R/AGENTS.md" --check
   [ "$status" -eq 1 ]
@@ -900,7 +903,7 @@ PY
   [ "$output" = "wrote $R/GEMINI.md" ]
   [ -f "$R/GEMINI.md" ]
   [ ! -s "$R/GEMINI.md" ]
-  [ "$(stat -c %a "$R/GEMINI.md")" = 600 ]
+  [ "$(file_mode "$R/GEMINI.md")" = 600 ]
   # Removing again is a no-op on the kept empty file.
   run emit --harness gemini --packs "" --out "$R/GEMINI.md"
   [ "$status" -eq 0 ]
@@ -1017,7 +1020,7 @@ no_tmp_left() { [ -z "$(find "$1" -maxdepth 1 -name '*.tmp' -print -quit)" ]; }
   chmod 600 "$R/AGENTS.md"
   run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
   [ "$status" -eq 0 ]
-  [ "$(stat -c %a "$R/AGENTS.md")" = 600 ]
+  [ "$(file_mode "$R/AGENTS.md")" = 600 ]
   no_tmp_left "$R"
 }
 
@@ -1074,7 +1077,7 @@ roundtrip() {
   # An LF file that an editor re-saves with CRLF endings is not drift either.
   printf 'one\ntwo\n' > "$R/AGENTS.md"
   emit --harness agents-md --packs sql --out "$R/AGENTS.md" >/dev/null
-  sed -i 's/$/\r/' "$R/AGENTS.md"
+  sed_i 's/$/\r/' "$R/AGENTS.md"
   run emit --harness agents-md --packs sql --out "$R/AGENTS.md" --check
   [ "$status" -eq 0 ]
 }
@@ -1493,6 +1496,11 @@ readme_with() {
   [[ "$output" == *"E_NAME"*"grid-a-b-c.mdc"* ]]
   rm -rf "$R/rules/a-b" "$R/rules/a"
   make_pack r
+  # readme.md beside README.md needs a case-sensitive file system; on APFS the write would
+  # overwrite README.md, so the rest of this test is skipped there (the first half has run).
+  if [ -e "$R/rules/r/readme.md" ]; then
+    skip "case-insensitive file system cannot hold readme.md beside README.md"
+  fi
   write_rule "$R/rules/r/readme.md"
   run lint
   [[ "$output" == *"E_NAME rules/r/readme.md"* ]]
@@ -1849,7 +1857,7 @@ print('ok')"
     run emit --harness agents-md --packs sql --out "$R/AGENTS.md"
     [ "$status" -eq 0 ]
     grep -q '^### sql / style' "$R/AGENTS.md"
-    [ "$(stat -c %a "$R/AGENTS.md")" = "$m" ]
+    [ "$(file_mode "$R/AGENTS.md")" = "$m" ]
   done
 }
 
