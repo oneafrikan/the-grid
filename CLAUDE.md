@@ -119,7 +119,7 @@ submodules into two tiers:
 - `scripts/compose-goldens.sh` — golden-output check for `compose.py` over a fixture project, every compose target (the `TARGETS` list in the script; `--check` default, `--update` to regenerate `tests/fixtures/compose/golden/`; run `--update` in any PR that changes compose output). See `agent-factory/README.md`.
 - `agent-factory/user.public.yaml` — tracked neutral identity (`machine: "your-machine"`); use via `GRID_USER_CONFIG` for anything composed into a tracked or shipped file.
 - `contexts/` — opt-in working-mode prompts (`dev.md`, `research.md`, `review.md`, each <=1200 bytes) and `aliases.sh`, a snippet a human sources from `~/.zshrc`/`~/.bashrc` to get `claude-dev`/`claude-research`/`claude-review` (`claude --append-system-prompt-file`). Not wired by `wire.sh`; Claude Code only.
-- `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`.
+- `tests/` — bats test suite. Run with `tests/lib/bats-core/bin/bats tests/`. Tests and scripts must run on Linux (authoritative) and macOS (BSD userland, the 3.2 system bash): rules and helpers in `docs/portability.md`.
 - `repos/` — sibling skill repos as git submodules. Each submodule may contain multiple skill dirs.
 - `scripts/grid` — the submodule-free install CLI (`install`, `lock`, `drift`, `schedule`, `doctor`, `repair`, `uninstall`, `audit` passthrough). One stdlib Python 3.8+ file; `python3 scripts/grid --help`. The install path for users is `BOOTSTRAP.md` "Install without submodules".
 - `grid.yaml` — where wired skills come from: one `url` per source (key = dir under `repos/`) plus the tracked baseline file that selects the default set. Read with `scripts/lib/miniyaml.py`.
@@ -308,7 +308,7 @@ Idempotent: a fully-wired machine reports "Nothing to reconcile".
 tests/lib/bats-core/bin/bats tests/
 ```
 
-All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint (`compose.py --lint-roles`), `compose.py --check` per composed project (local only: composed output is gitignored, so CI runs the lint and lists the uncomposed projects as `compose-<name>` skips), `check-personal.sh`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`. Venv-gated tests (`agent-factory/.venv` with PyYAML) skip on a plain `bats` run, but FAIL when `GRID_REQUIRE_VENV=1` or `CI=true` (the gate sets the former). In a `@test`, write `! cmd || false` and one `[ ]` per line: a bare mid-test `! cmd` or `[ A ] && [ B ]` can never fail (`test_repo_health.bats` lints this).
+Write portable shell and tests: read `docs/portability.md` first (helpers `file_mode`, `sed_i`, `mktemp_canon`; avoid `coproc`, `grep -P`, `stat -c`, bare `mktemp`). All tests must stay green (run `bash scripts/gate.sh` for the full commit gate: shellcheck, `catalog.sh --check`, role lint (`compose.py --lint-roles`), `compose.py --check` per composed project (local only: composed output is gitignored, so CI runs the lint and lists the uncomposed projects as `compose-<name>` skips), `check-personal.sh`, bats). Tests use temp dirs — they never touch the real `~/.claude/skills/` or `~/.claude/agents/`. Venv-gated tests (`agent-factory/.venv` with PyYAML) skip on a plain `bats` run, but FAIL when `GRID_REQUIRE_VENV=1` or `CI=true` (the gate sets the former). In a `@test`, write `! cmd || false` and one `[ ]` per line: a bare mid-test `! cmd` or `[ A ] && [ B ]` can never fail (`test_repo_health.bats` lints this).
 
 ## Canon is never merged on green
 

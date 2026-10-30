@@ -37,6 +37,54 @@ grid_require_jq() {
   esac
 }
 
+# _grid_count_tokens <text>: sets _GCT to the number of blanks and separators
+#   ([[:space:];&|()`]) in <text>: the same count as ${#${text//[^[:space:];&|()`]/}}.
+#   Why not that one-liner: on bash 3.2 (stock macOS) deleting the NON-members of a class
+#   from a long string costs about O(length) PER MATCH, so a 14 KB command (about 12,600
+#   non-members) took 25 to 70 s here, far past the 5 s hook timeout, and a timed-out
+#   hook does not block. The text is cut into 256-byte slices instead, so every deletion
+#   works on a short string (cost O(256^2) per slice, about 55 slices for 14 KB)
+#   and the total is near-linear (a slice start costs O(offset), still only one copy per
+#   slice). The class is one character wide, so a slice boundary
+#   can never split a match: the count is identical.
+_grid_count_tokens() {
+  local s="$1" n o=0 c k=0 chunk
+  n=${#s}
+  while [ "$o" -lt "$n" ]; do
+    chunk="${s:$o:256}"
+    chunk="${chunk//[^[:space:];&|()\`]/}"
+    k=$((k + ${#chunk}))
+    o=$((o + 256))
+  done
+  _GCT=$k
+}
+
+# _grid_unquote <text>: sets _GUQ to <text> as the shell would read it for the purposes of
+#   the guards' fast paths: each backslash-newline deleted, then every " ' and \ deleted.
+#   Same result as   t="${1//\\$'\n'/}"; t="${t//[\"\'\\]/}"   but sliced, for the same bash 3.2
+#   reason as _grid_count_tokens: each deletion costs O(length) on 3.2, so text with
+#   thousands of quote characters (a 9.6 KB nest of "$( ... )") took about 2 s per pass
+#   and the hook ran the pass three times. Slices are 256 bytes; a slice end is moved
+#   forward by one when it would separate a backslash from the newline after it, so
+#   no two-character match is ever split and the output is byte-identical.
+_grid_unquote() {
+  local s="$1" n o=0 e chunk out=""
+  n=${#s}
+  while [ "$o" -lt "$n" ]; do
+    e=256
+    if [ "${s:$((o + 255)):1}" = '\' ] && [ "${s:$((o + 256)):1}" = $'\n' ]; then e=257; fi
+    chunk="${s:$o:$e}"
+    o=$((o + e))
+    # Pattern is \\$'\n' (escaped backslash, then newline), NOT $'\\\n'. On bash 3.2.57
+    # (macOS /bin/bash) the $'\\\n' form does not match backslash-newline, so g\<NL>it
+    # survived, the fast path never saw "git" and the guard failed open.
+    chunk="${chunk//\\$'\n'/}"
+    chunk="${chunk//[\"\'\\]/}"
+    out+="$chunk"
+  done
+  _GUQ="$out"
+}
+
 # grid_check_cmd_cap <hook-name> <command>
 #   Input cap for the guards (WP-019). A timed-out PreToolUse hook does not block, so
 #   a command too large to tokenize inside the hook timeout must be refused, not
@@ -56,7 +104,7 @@ grid_check_cmd_cap() {
   local max="${GRID_GUARD_MAX_CMD:-20000}" maxt="${GRID_GUARD_MAX_TOKENS:-2500}" st t
   [[ "$max" =~ ^[0-9]+$ ]] || max=20000
   [[ "$maxt" =~ ^[0-9]+$ ]] || maxt=2500
-  st="${2//$'\\\n'/}"; st="${st//[\"\'\\]/}"
+  _grid_unquote "$2"; st="$_GUQ"
   case "$st" in
     *[gG][iI][tT]*|*[hH][uU][sS][kK][yY]*|*[lL][eE][fF][tT][hH][oO][oO][kK]*|*[pP][rR][eE]_[cC][oO][mM][mM][iI][tT]*) ;;
     *)
@@ -65,9 +113,9 @@ grid_check_cmd_cap() {
       # LEFTHOOK or PRE_COMMIT (no-bypass reads those). Whatever the guards tokenize is capped.
       case "$2" in *'$'*|*'`'*) ;; *) return 0 ;; esac ;;
   esac
-  t="${st//[^[:space:];&|()\`]/}"
-  if [ "${#st}" -le "$max" ] && [ "${#t}" -le "$maxt" ]; then return 0; fi
-  echo "BLOCKED by the-grid hook $1: command too long to inspect (${#st} bytes, ${#t} tokens; limits $max and $maxt). Write the content to a file with the Write tool and refer to the file in the command." >&2
+  _grid_count_tokens "$st"
+  if [ "${#st}" -le "$max" ] && [ "$_GCT" -le "$maxt" ]; then return 0; fi
+  echo "BLOCKED by the-grid hook $1: command too long to inspect (${#st} bytes, $_GCT tokens; limits $max and $maxt). Write the content to a file with the Write tool and refer to the file in the command." >&2
   exit 2
 }
 
@@ -80,8 +128,8 @@ grid_check_cmd_cap() {
 #   command that never names git passes, as it does at the fast path.
 grid_check_balanced() {
   [ "${GIT_UNBALANCED:-0}" = 1 ] || [ -n "${GIT_FAIL:-}" ] || return 0
-  local st="${2//$'\\\n'/}"
-  st="${st//[\"\'\\]/}"
+  local st
+  _grid_unquote "$2"; st="$_GUQ"
   case "$st" in
     *[gG][iI][tT]*|*[hH][uU][sS][kK][yY]*) ;;
     *) return 0 ;;

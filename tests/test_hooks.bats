@@ -2145,7 +2145,8 @@ _identrun_line() {   # <pad before> <run length> <pad after> [<run char> [<key w
 # ===========================================================================
 
 # _fill <n> <char>: <n> copies of one character (fast for thousands, unlike rep).
-_fill() { head -c "$1" /dev/zero | tr '\0' "$2"; }
+# BSD head rejects `-c 0` ("illegal byte count"), so a zero count is skipped (same empty output).
+_fill() { [ "$1" -gt 0 ] || return 0; head -c "$1" /dev/zero | tr '\0' "$2"; }
 
 # _straddle <dots before> <key word> <run length> <run char> <text after the run> [<dots after>]
 # The key word starts at offset <dots before>; the cut of the first piece is at 4352 and
@@ -2415,7 +2416,11 @@ expect_in() {
   sp=$'\xc2\xa0'
   for pad in 0 4335 4340; do
     expect_in C.UTF-8 strict assigned-secret "$(_fill "$pad" .)token=Abcdefgh${sp}ijklmnop12$(_fill 3000 .)"
-    expect_in C.UTF-8 strict password-assigned "$(_fill "$pad" .)password=Ab3${sp}xY $(_fill 3000 .)"
+    # glibc's [[:space:]] excludes U+00A0 in UTF-8, macOS libc includes it: there "Ab3<NBSP>xY"
+    # is two short words to the matcher itself, so this expectation is GNU-only (probe, don't assume).
+    if ! printf 'a\xc2\xa0b\n' | LC_ALL=C.UTF-8 command grep -qE 'a[[:space:]]b'; then
+      expect_in C.UTF-8 strict password-assigned "$(_fill "$pad" .)password=Ab3${sp}xY $(_fill 3000 .)"
+    fi
   done
   # the one-line entry point as well
   run env LC_ALL=C bash -c '. "$1/hooks/lib/secret-patterns.sh"; SECRET_STRICT=1
@@ -2541,8 +2546,9 @@ _lib() {
 
 @test "budget: the entry points report scan-budget as a finding (line, file, redaction, stream)" {
   printf 'clean text\nmore text\n' > "$BATS_TEST_TMPDIR/b.txt"
-  # a deadline in the past: every scan is over budget at its first check
-  _lib 'SECRET_DEADLINE_US=1
+  # a deadline in the past: every scan is over budget at its first check. 0, not 1: bash 3.2 has
+  # no EPOCHREALTIME, so the product falls back to SECONDS*1e6, which is 0 in a fresh shell.
+  _lib 'SECRET_DEADLINE_US=0
     echo "line: $(secret_match_line "text")"
     secret_scan_file "'"$BATS_TEST_TMPDIR"'/b.txt" | head -1
     printf "a\nb\n" | secret_mask_stream | head -1

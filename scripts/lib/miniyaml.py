@@ -152,6 +152,10 @@ def _bare_scalar(raw, lineno):
         # collection (or fails) where this reader would keep a string.
         raise ParseError(lineno, "a '- ' or '? ' indicator is not allowed inside a value")
     if _INT_RE.match(s):
+        # Same limit as CPython 3.11+ (4300 digits), enforced here so older Pythons
+        # (3.9 parses any length) reject exactly the same inputs: one answer everywhere.
+        if len(s.lstrip("+-")) > 4300:
+            raise ParseError(lineno, "integer too long")
         try:
             return int(s)
         except ValueError:  # more digits than int() converts (4300 by default)

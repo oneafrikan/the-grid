@@ -561,13 +561,22 @@ empty_plan() {
   fixture
   empty_plan
   before=$(commits)
-  # The holder prints one line once it owns the lock, then waits on stdin; reading that line
-  # means no sleep or polling is needed. Killing it releases the lock (the OS does that).
-  coproc HOLDER (python3 -I -c 'import fcntl,sys; f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX); print("held",flush=True); sys.stdin.readline()' "$PROJ/.git/knowledge-sweep.lock")
-  read -r line <&"${HOLDER[0]}"
+  # coproc is bash 4+ (macOS bats runs bash 3.2), so the holder is a background process plus a
+  # FIFO. It prints one line into the FIFO once it owns the lock; the blocking read of that line
+  # means no sleep or polling is needed. It then sleeps until killed; killing it releases the
+  # lock (the OS does that). The FIFO and the holder are removed before any assertion runs, so a
+  # failed assertion leaves nothing behind.
+  fifo="$BATS_TEST_TMPDIR/holder.fifo"
+  mkfifo "$fifo"
+  python3 -I -c 'import fcntl,sys,time; f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX); o=open(sys.argv[2],"w"); o.write("held\n"); o.close(); time.sleep(300)' \
+    "$PROJ/.git/knowledge-sweep.lock" "$fifo" &
+  holder_pid=$!
+  read -r line <"$fifo" || line=""
   [ "$line" = "held" ]
   run --separate-stderr python3 -I "$KN" apply --root "$PROJ" --plan "$BATS_TEST_TMPDIR/plan.json"
-  kill "$HOLDER_PID" || true
+  kill "$holder_pid" || true
+  wait "$holder_pid" 2>/dev/null || true
+  rm -f "$fifo"
   [ "$status" -eq 3 ]
   [[ "$stderr" == *locked* ]]
   [ -z "$(git -C "$PROJ" status --porcelain)" ]
@@ -734,9 +743,10 @@ ledger_py() {
   esc_line aaaaaaaaaaaaaaaa 20260101T000000Z-agent-a-aaaaa1.md 5
   commit_all
   cp "$PROJ/signals/done/ledger.jsonl" "$BATS_TEST_TMPDIR/ledger.before"
-  size=$(stat -c %s "$BATS_TEST_TMPDIR/ledger.before")
+  size=$(wc -c < "$BATS_TEST_TMPDIR/ledger.before" | tr -d " ")
   plan_apply
-  cmp -n "$size" "$BATS_TEST_TMPDIR/ledger.before" "$PROJ/signals/done/ledger.jsonl"
+  # BSD cmp -n reports EOF when the first file is exactly the limit long; compare head -c prefixes.
+  cmp "$BATS_TEST_TMPDIR/ledger.before" <(head -c "$size" "$PROJ/signals/done/ledger.jsonl")
   [ "$(ledger_py "len(L)")" = "2" ]
 }
 

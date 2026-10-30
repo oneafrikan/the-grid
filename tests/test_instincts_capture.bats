@@ -13,6 +13,8 @@ REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 SH="$REPO_ROOT/scripts/instincts.sh"
 FIXTURE="$REPO_ROOT/tests/fixtures/hooks/pretooluse-bash.json"
 
+load helpers/portable
+
 setup() {
   # Env that would redirect git or change capture behaviour must not leak in from the caller.
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GRID_HOST GRID_INSTINCTS GRID_INSTINCTS_SKIP \
@@ -21,7 +23,9 @@ setup() {
   export GRID_STATE_DIR="$BATS_TEST_TMPDIR/state"
   export GRID_LEARNING_DIR="$BATS_TEST_TMPDIR/learning"
   # A temp git repo with a fake origin remote and the opt-in flag on.
-  PROJ="$BATS_TEST_TMPDIR/proj"
+  # Canonical (pwd -P) root: macOS /var is a symlink to /private/var, and the capture code
+  # resolves the project root physically, so a /var/... path would not be seen as inside it.
+  PROJ="$(cd "$BATS_TEST_TMPDIR" && pwd -P)/proj"
   mkdir -p "$PROJ/.grid"
   git -C "$PROJ" init -q
   git -C "$PROJ" remote add origin https://example.test/owner/repo.git
@@ -61,6 +65,20 @@ capture() { printf '%s' "$1" | "$SH" capture; }
 # bash_payload <command> — a PostToolUse Bash payload for that command.
 bash_payload() {
   payload PostToolUse Bash "tool_input=$(python3 -c 'import json,sys; print(json.dumps({"command": sys.argv[1]}))' "$1")"
+}
+
+# file_payload <event> <tool> <path-key> <path> [<key> <json-value>]... — payload for a file tool.
+# tool_input is built in python: bash 3.2 (macOS) mangles a quoted `{\"k\":...}` string inside
+# "$(...)", splitting it at the commas, so the JSON must never be written inline in a test.
+file_payload() {
+  local event="$1" tool="$2" pk="$3" path="$4"; shift 4
+  payload "$event" "$tool" "tool_input=$(python3 -c '
+import json, sys
+k, path, *rest = sys.argv[1:]
+d = {k: path}
+for i in range(0, len(rest), 2):
+    d[rest[i]] = json.loads(rest[i + 1])
+print(json.dumps(d))' "$pk" "$path" "$@")"
 }
 
 # obs_files — list the observation files written (empty when none).
@@ -109,9 +127,9 @@ PY
 @test "file is mode 0600 and the directories are 0700" {
   capture "$(bash_payload 'ls')"
   f="$(only_file)"
-  [ "$(stat -c %a "$f")" = 600 ]
-  [ "$(stat -c %a "$OBSDIR")" = 700 ]
-  [ "$(stat -c %a "$GRID_STATE_DIR/instincts")" = 700 ]
+  [ "$(file_mode "$f")" = 600 ]
+  [ "$(file_mode "$OBSDIR")" = 700 ]
+  [ "$(file_mode "$GRID_STATE_DIR/instincts")" = 700 ]
   # File name is obs-<ISO year>-W<ww>.jsonl
   [[ "$(basename "$f")" =~ ^obs-[0-9]{4}-W[0-9]{2}\.jsonl$ ]]
 }
@@ -149,7 +167,7 @@ PY
 }
 
 @test "an Edit records the project-relative path and no content" {
-  capture "$(payload PostToolUse Edit "tool_input={\"file_path\":\"$PROJ/src/app.py\",\"old_string\":\"OLDMARK\",\"new_string\":\"NEWMARK\"}")"
+  capture "$(file_payload PostToolUse Edit file_path "$PROJ/src/app.py" old_string '"OLDMARK"' new_string '"NEWMARK"')"
   f="$(only_file)"
   [ "$(field "$f" 1 tool)" = Edit ]
   [ "$(field "$f" 1 in)" = src/app.py ]
@@ -157,9 +175,9 @@ PY
 }
 
 @test "Write, MultiEdit and NotebookEdit are recorded by path only" {
-  capture "$(payload PostToolUse Write "tool_input={\"file_path\":\"$PROJ/a.md\",\"content\":\"BODYMARK\"}")"
-  capture "$(payload PostToolUse MultiEdit "tool_input={\"file_path\":\"$PROJ/b.md\",\"edits\":[]}")"
-  capture "$(payload PostToolUse NotebookEdit "tool_input={\"notebook_path\":\"$PROJ/n.ipynb\",\"new_source\":\"BODYMARK\"}")"
+  capture "$(file_payload PostToolUse Write file_path "$PROJ/a.md" content '"BODYMARK"')"
+  capture "$(file_payload PostToolUse MultiEdit file_path "$PROJ/b.md" edits '[]')"
+  capture "$(file_payload PostToolUse NotebookEdit notebook_path "$PROJ/n.ipynb" new_source '"BODYMARK"')"
   f="$(only_file)"
   [ "$(wc -l < "$f")" -eq 3 ]
   [ "$(field "$f" 1 in)" = a.md ]
@@ -277,12 +295,12 @@ skipped() {
   skipped "$(bash_payload 'openssl x509 -in cert.pem')"
   skipped "$(bash_payload 'cat ~/.aws/credentials')"
   skipped "$(bash_payload 'cat ~/.netrc')"
-  skipped "$(payload PostToolUse Edit "tool_input={\"file_path\":\"$PROJ/.env\"}")"
-  skipped "$(payload PostToolUse Write "tool_input={\"file_path\":\"$PROJ/certs/server.pem\"}")"
+  skipped "$(file_payload PostToolUse Edit file_path "$PROJ/.env")"
+  skipped "$(file_payload PostToolUse Write file_path "$PROJ/certs/server.pem")"
 }
 
 @test "a lookalike name such as environment.md is not mistaken for .env" {
-  capture "$(payload PostToolUse Edit "tool_input={\"file_path\":\"$PROJ/docs/environment.md\"}")"
+  capture "$(file_payload PostToolUse Edit file_path "$PROJ/docs/environment.md")"
   [ "$(field "$(only_file)" 1 in)" = docs/environment.md ]
 }
 
@@ -425,8 +443,8 @@ prompt_payload() {
            'cat ~/.git-credentials' 'cat ~/.pypirc' 'ls ~/.ssh/'; do
     capture "$(bash_payload "$c")"
   done
-  capture "$(payload PostToolUse Edit "tool_input={\"file_path\":\"$PROJ/deploy/prod.tfstate\"}")"
-  capture "$(payload PostToolUse Write "tool_input={\"file_path\":\"$PROJ/k/server.key\"}")"
+  capture "$(file_payload PostToolUse Edit file_path "$PROJ/deploy/prod.tfstate")"
+  capture "$(file_payload PostToolUse Write file_path "$PROJ/k/server.key")"
   assert_no_file
 }
 
@@ -504,7 +522,7 @@ PY
 @test "observation files are created 0600 even under a permissive umask" {
   umask 000
   capture "$(bash_payload ls)"
-  [ "$(stat -c %a "$(only_file)")" = 600 ]
+  [ "$(file_mode "$(only_file)")" = 600 ]
 }
 
 # --- WP-028 round 2: whitespace other than a space must not glue a secret flag to its value ----
