@@ -12,3 +12,7 @@ openspec/changes/vetting/design.md	# quotes the audit test fixtures verbatim (ho
 openspec/changes/hook-profiles/design.md	# quotes a placeholder-token fixture the hook must exempt; the string is the spec
 plugins/grid-core/LICENSE	# byte copy of the repo-root LICENSE that each plugin bundle ships; its copyright line names the rights holder, which the licence requires (allow rules are match-level, so this is a path exemption)
 plugins/grid-agents/LICENSE	# same byte copy for the agents bundle (one entry per bundle: a glob would also exempt anything nested below it)
+assets/hero.webp	# site hero image: binary WebP rendered by scripts/build-site-assets.sh, no text to scan
+assets/og.jpg	# social-card JPEG rendered by scripts/build-site-assets.sh, no text to scan
+assets/favicon-48.png	# raster icon rendered from assets/favicon.svg, no text to scan
+assets/apple-touch-icon.png	# raster icon rendered from assets/favicon.svg, no text to scan
