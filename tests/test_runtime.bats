@@ -246,3 +246,113 @@ rsetup() { GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scri
   [ "$status" -eq 2 ]
   [ ! -e "$STUB_LOG" ]
 }
+
+# --- OS-aware messages ------------------------------------------------------------------------
+# Only the wording branches on the OS. `uname` is stubbed on PATH and the Arch marker file is
+# redirected, so all three branches run on any CI box. Nothing here installs or runs bun.
+
+# fake_os <Darwin|Linux> [arch]: a PATH-first `uname` stub, and an arch-release file when asked.
+fake_os() {
+  mkdir -p "$BATS_TEST_TMPDIR/fakebin"
+  printf '#!/bin/sh\necho %s\n' "$1" > "$BATS_TEST_TMPDIR/fakebin/uname"
+  chmod +x "$BATS_TEST_TMPDIR/fakebin/uname"
+  export PATH="$BATS_TEST_TMPDIR/fakebin:$PATH"
+  export GRID_ARCH_RELEASE_FILE="$BATS_TEST_TMPDIR/no-arch-release"
+  if [ "${2:-}" = arch ]; then : > "$BATS_TEST_TMPDIR/arch-release"; GRID_ARCH_RELEASE_FILE="$BATS_TEST_TMPDIR/arch-release"; fi
+}
+
+# A map whose prerequisite is `bun` and is absent from the test PATH (dry run only prints the plan).
+bun_missing_map() {
+  printf '%s\n' '# repo | link | marker | needs | setup' \
+    'gstack | gstack | bin/marker | bun | ./setup --host claude -q' \
+    > "$MOCK_GRID/scripts/lib/runtimes.txt"
+  command -v bun >/dev/null 2>&1 && skip "a real bun is on PATH"
+  return 0
+}
+
+@test "runtime-setup: missing bun on macOS points at Homebrew" {
+  bun_missing_map; fake_os Darwin
+  run rsetup gstack --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"macOS: Homebrew"* ]]
+  [[ "$output" != *"AUR"* ]]
+  [[ "$output" == *"macOS has the system emoji font"* ]]
+}
+
+@test "runtime-setup: missing bun on Arch points at the AUR package and notes pacman packages" {
+  bun_missing_map; fake_os Linux arch
+  run rsetup gstack --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Arch: the AUR package bun-bin"* ]]
+  [[ "$output" == *"pacman -S noto-fonts-emoji"* ]]
+  [[ "$output" != *"apt install"* ]]
+}
+
+@test "runtime-setup: missing bun on Ubuntu/Debian points at the installer and notes apt packages" {
+  bun_missing_map; fake_os Linux
+  run rsetup gstack --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Ubuntu/Debian: the installer from https://bun.sh"* ]]
+  [[ "$output" == *"playwright install-deps chromium"* ]]
+  [[ "$output" == *"apt install fonts-noto-color-emoji"* ]]
+  [[ "$output" != *"Arch:"* ]]
+}
+
+@test "runtime-setup: a real run on macOS ends with the macOS note and no Linux package advice" {
+  fake_os Darwin
+  run rsetup gstack
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"macOS has the system emoji font"* ]]
+  [[ "$output" != *"apt install"* ]]
+  [[ "$output" != *"pacman"* ]]
+}
+
+# --- wire.sh blocked by the audit (the build output is audited like any wired file) -------------
+
+# audit_grid: the mock grid runs the REAL audit (policy and scanner copied in); CURATION.md is absent.
+audit_grid() {
+  enable_audit
+  cp "$REPO_ROOT/policy.yaml" "$MOCK_GRID/policy.yaml"
+  cp "$REPO_ROOT/scripts/audit.py" "$REPO_ROOT/scripts/audit.sh" "$MOCK_GRID/scripts/"
+  cp "$REPO_ROOT"/scripts/lib/*.py "$MOCK_GRID/scripts/lib/"
+}
+
+@test "runtime-setup: wire.sh blocked by the audit exits 3 and prints the next step" {
+  audit_grid
+  # Setup output the audit must flag: a script-class file over limits.max_file_bytes (like a compiled binary).
+  mkdir -p "$MOCK_GRID/repos/gstack/stubskill/dist"
+  dd if=/dev/zero of="$MOCK_GRID/repos/gstack/stubskill/dist/blob.sh" bs=1024 count=1100 2>/dev/null
+  run rsetup gstack
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"BLOCKED by audit"* ]]
+  [[ "$output" == *"wire.sh was BLOCKED by the audit"* ]]
+  [[ "$output" == *"audit.sh --wired --quiet"* ]]
+  [[ "$output" == *"CURATION.md"* ]]
+}
+
+@test "CURATION.md: the gstack browse/dist server-node.mjs findings are allowlisted (5 findings, all allowed)" {
+  local root="$BATS_TEST_TMPDIR/auditroot" out
+  mkdir -p "$root/repos/gstack/browse/dist"
+  # The lines are the ones the real compiled server-node.mjs contains (raw invisible characters).
+  python3 - "$root/repos/gstack/browse/dist/server-node.mjs" <<'PY'
+import sys
+Z = "​"
+lines = [
+    'var m = "[browse] This launch failure matches the macOS XProtect kill signature (#2554): " + "run `bunx playwright install chromium` from your gstack install " + "(~/.claude/skills/gstack for global installs)";',
+    '  const zwsp = "%s";' % Z,
+    '  const zwsp = "%s";' % Z,
+    'const safeResult = result.replace(/--- (BEGIN|END) UNTRUSTED EXTERNAL CONTENT/g, "--- $1 UNTRUSTED EXTERNAL C%sONTENT");' % Z,
+    '  const stripped = raw.replace(/[\\s ​-‍﻿]/g, "");',
+]
+open(sys.argv[1], "w", encoding="utf-8").write("\n".join(lines) + "\n")
+PY
+  out="$(python3 -I "$REPO_ROOT/scripts/audit.py" --root "$root" --grid-dir "$REPO_ROOT" --format json --show-allowed "$root/repos/gstack/browse" || true)"
+  printf '%s' "$out" | python3 -c '
+import json, sys
+fs = json.load(sys.stdin)["findings"]
+mine = [f for f in fs if f["path"].endswith("server-node.mjs") and f["rule"] in ("claude-config-write", "hidden-unicode")]
+assert len(mine) == 5, "expected 5 findings, got %d" % len(mine)
+bad = [f for f in mine if not f["allowed"]]
+assert not bad, "not allowed: %r" % bad
+'
+}
