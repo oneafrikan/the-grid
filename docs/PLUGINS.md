@@ -37,6 +37,7 @@ references in that text point at things that are not there:
 
 - `wire.sh` and the other `scripts/` (for example in `grid-help`).
 - `/ponytail` and `/skill-scout`, which are not shipped.
+- Other shipped text mentions `/ponytail-help`, `SPECS.md`, and the jeffallan skills named in the `grid-agents` text (for example `secure-code-guardian`, `prompt-engineer`); the plugins do not install them, so treat them as optional and ignore them if absent.
 - `docs/model-selection.md` and other repo docs.
 - `repos/openspec`, the wired `security-reviewer` skill and the jeffallan skills.
 - `/tron` reads `~/.claude` to see what is wired; on a plugin-only machine that is empty.
