@@ -104,3 +104,4 @@ s4 test_canon_protection.bats
 s4 test_epistemic_stop_probe.bats
 s4 test_epistemic_stop.bats
 s4 test_epistemic_stop_emit.bats
+s4 test_landing_page.bats
