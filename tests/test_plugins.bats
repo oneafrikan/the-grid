@@ -592,7 +592,7 @@ EOF
   run grep -q "at a tag" "$REPO_ROOT/docs/PLUGINS.md"
   [ "$status" -ne 0 ]
   grep -qF "Installs follow the default branch" "$REPO_ROOT/docs/PLUGINS.md"
-  grep -qF "no release tags exist yet" "$REPO_ROOT/docs/PLUGINS.md"
+  grep -qF "no pin to a" "$REPO_ROOT/docs/PLUGINS.md"
   grep -q "^## Limits of a plugin install" "$REPO_ROOT/docs/PLUGINS.md"
   grep -qi "bump the version" "$REPO_ROOT/docs/PLUGINS.md"
 }
