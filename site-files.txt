@@ -2,5 +2,8 @@
 # are copied whole; '#' starts a comment. Read by scripts/stage-site.sh, which
 # the pages workflow runs. front-door appends its assets here.
 index.html
-the-grid.png
 assets/favicon.svg
+assets/hero.webp
+assets/og.jpg
+assets/favicon-48.png
+assets/apple-touch-icon.png
