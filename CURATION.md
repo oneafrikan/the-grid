@@ -577,7 +577,7 @@ Every entry is a line the scanner flags that was read in context and judged to b
 - rule: hidden-unicode
   path: repos/gstack/browse/dist/server-node.mjs
   contains: 'const zwsp = "\u200b";'
-  reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); a zero-width space constant, used to break the untrusted-content markers so fetched pages cannot [redacted] them; defensive, not hidden instructions; one entry covers both copies
+  reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); a zero-width space constant, used to break the untrusted-content markers so fetched pages cannot imitate them; defensive, not hidden instructions; one entry covers both copies
 - rule: hidden-unicode
   path: repos/gstack/browse/dist/server-node.mjs
   contains: 'const safeResult = result.replace(/--- (BEGIN|END) UNTRUSTED EXTERNAL CONTENT/g, "--- $1 UNTRUSTED EXTERNAL C\u200bONTENT");'
