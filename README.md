@@ -50,6 +50,12 @@ Stop there. If it felt useful, read [USAGE.md](USAGE.md).
 
 - Prefer the manual steps, or a machine without submodules? See [INSTALL.md](INSTALL.md).
 - Already set up and just pulled? Run `bash scripts/wire.sh` again. Composed agents need a recompose first: see [BOOTSTRAP.md](BOOTSTRAP.md) ("Updating an existing machine").
+- Claude Code only, no clone: install the plugins instead (`grid-agents@the-grid` adds the dev team; limits in [docs/PLUGINS.md](docs/PLUGINS.md)).
+
+```bash
+claude plugin marketplace add oneafrikan/the-grid
+claude plugin install grid-core@the-grid
+```
 
 ## What you get
 
@@ -137,6 +143,7 @@ This is one person's working system, shared because the mechanics are reusable, 
 - [docs/model-selection.md](docs/model-selection.md): which model for which job, with prices.
 - [docs/rules.md](docs/rules.md): opt-in coding-convention rule packs.
 - [docs/portability.md](docs/portability.md): writing tests and scripts that run on Linux and macOS.
+- [docs/PLUGINS.md](docs/PLUGINS.md): the Claude Code plugin install and its limits.
 - [docs/harnesses.md](docs/harnesses.md): other AI tools (Codex CLI, OpenCode, Gemini CLI).
 - [hooks/README.md](hooks/README.md): guard hooks and the auto-handoff hook.
 - [CURATION.md](CURATION.md): why each wired repo is trusted.

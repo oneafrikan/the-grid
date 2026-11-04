@@ -12,17 +12,19 @@ claude plugin install grid-core@the-grid
 claude plugin install grid-agents@the-grid
 ```
 
-Install either or both. Installs follow the default branch; no release tags exist yet,
-so there is no pin.
+Install either or both. Installs follow the default branch, so there is no pin to a
+release tag.
 
 ## What is in each bundle
 
 - `grid-core` — the-grid's own skills (`gh-issues-by-severity`, `grid-help`,
   `mine-learnings`, `openspec-help`, `rubber-duck`, `spec-scout`, `standup`,
-  `tighten`, `un-claudish`), `/tron`, and the four cross-desk agents
-  (`core-researcher`, `core-librarian`, `core-gh-triage`, `core-platform-engineer`).
+  `tighten`, `un-claudish`), `/tron`, and the five cross-desk agents
+  (`core-researcher`, `core-librarian`, `core-gh-triage`, `core-platform-engineer`,
+  `core-context-engineer`).
 - `grid-agents` — the composed dev team: the CEO, tech-lead and growth-hacker
-  orchestrators (as skills), the specialist subagents, and `grid-ponytail`.
+  orchestrators and the `gsd` fan-out (all as skills), the specialist subagents, and
+  `grid-ponytail`.
 
 The bundles hold the-grid's **own** content only. Third-party skills are not
 included; `grid install` handles those, with sha-pinned locks.
@@ -68,8 +70,9 @@ hand-edit them.
 - Membership and version live in `plugins/bundles.json`.
 - Bump the version in `plugins/bundles.json` in any PR that changes generated output. It is
   one static string, edited by hand; how a client treats an unchanged version on update is
-  unverified, so a bump is the safe signal. No tags are cut yet; do not document a tag
-  install until one exists.
+  unverified, so a bump is the safe signal. The repo's release tags (v0.1.0 onwards) are
+  separate from the bundle version, and installing from a tag is unverified: do not
+  document it.
 - Regenerate with `python3 scripts/build-plugins.py` (needs `agent-factory/.venv`).
 - `python3 scripts/build-plugins.py --check` reports drift and writes nothing.
 - Only git-tracked files under `skills/` and `agents/` are bundled (`git add` a new file
