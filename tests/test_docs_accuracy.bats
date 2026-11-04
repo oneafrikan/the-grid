@@ -127,58 +127,16 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
   grep -qF "<!--count:library-->$lib<!--/count-->" README.md
 }
 
-@test "F11: index.html wired-skill counts equal the SKILLS.md headline" {
+# index.html no longer carries a hand-written skills catalogue or library table (front-door 7.4);
+# its counts are the same generated markers as README's. The rest is guarded by stamp-counts.py
+# --check in the gate and by tests/test_landing_page.bats.
+@test "F11: index.html count markers equal the SKILLS.md headline" {
   head="$(grep -m1 'skills indexed' SKILLS.md)"
   wired="$(printf '%s\n' "$head" | sed -E 's/.*— ([0-9]+) wired live.*/\1/')"
-  owned="$(printf '%s\n' "$head" | sed -E 's/.*\(([0-9]+) root-owned.*/\1/')"
-  upstream="$(printf '%s\n' "$head" | sed -E 's/.*\+ ([0-9]+) from allowlisted.*/\1/')"
   lib="$(printf '%s\n' "$head" | sed -E 's/.*, ([0-9]+) in library.*/\1/')"
-  flat="$(tr '\n' ' ' < index.html | tr -s ' ')"
-  [[ "$flat" == *"<strong>$wired wired live</strong> ($owned root-owned + $upstream from allowlisted repos)"* ]]
-  [[ "$flat" == *"Another $lib exist in those same partial repos"* ]]
-  # the dedicated library submodules, counted from the generated catalogue
-  nlib="$(awk '/^## Library submodules/{f=1;next} /^## /{f=0} f && /^- \*\*repos\//{n++} END{print n+0}' SKILLS.md)"
-  [[ "$flat" == *"indexed across $nlib dedicated library submodules"* ]]
-}
-
-@test "F11: index.html library and reference summary and table equal SKILLS.md" {
-  flat="$(tr '\n' ' ' < index.html | tr -s ' ')"
-  nlib="$(awk '/^## Library submodules/{f=1;next} /^## /{f=0} f && /^- \*\*repos\//{n++} END{print n+0}' SKILLS.md)"
-  nref="$(awk '/^## Reference submodules/{f=1;next} /^## /{f=0} f && /^- \*\*repos\//{n++} END{print n+0}' SKILLS.md)"
-  sum="$(awk '/^## Library submodules/{f=1;next} /^## /{f=0} f && /^- \*\*repos\//{s+=$(NF-1)} END{print s+0}' SKILLS.md)"
-  # the "over 1,000" wording is only true while the sum stays above it
-  [ "$sum" -gt 1000 ]
-  [[ "$flat" == *"over 1,000 more skills across $nlib library submodules"* ]]
-  case "$nref" in 7) w=Seven ;; 8) w=Eight ;; 9) w=Nine ;; 10) w=Ten ;; *) w="?$nref" ;; esac
-  [[ "$flat" == *"$w more repos are reference-only"* ]]
-  # the per-repo table: one row per SKILLS.md entry, same counts and tier
-  [ "$(grep -c '<td>Library</td>' index.html)" -eq "$nlib" ]
-  [ "$(grep -c '<td>Reference (index)</td>' index.html)" -eq "$nref" ]
-  while read -r repo n; do
-    grep -q "<tr><td><code>repos/$repo</code></td><td>$n</td><td>Library</td></tr>" index.html || { echo "index.html row wrong for $repo ($n)"; false; }
-  done < <(sed -n -E '/^## Library submodules/,/^## Reference/ s/^- \*\*repos\/([^*]+)\*\* — ([0-9]+) skills.*/\1 \2/p' SKILLS.md)
-}
-
-# NF-063: the index.html wired catalogue lists exactly the names SKILLS.md lists as wired.
-# Sorted lists (not sets) are compared, so a missing, extra or duplicated name all fail. A
-# name that two repos both ship (grill-me) appears twice in both files, which is correct.
-@test "F11: index.html wired-skill names equal the SKILLS.md wired names, one for one" {
-  awk '/^## Library submodules/{exit} /^- \*\*/{match($0,/\*\*[^*]+\*\*/); print substr($0,RSTART+2,RLENGTH-4)}' SKILLS.md | sort > "$BATS_TEST_TMPDIR/md"
-  grep -o 'class="skill-name">[^<]*' index.html | sed 's/.*">//' | sort > "$BATS_TEST_TMPDIR/html"
-  [ -s "$BATS_TEST_TMPDIR/md" ]
-  run diff "$BATS_TEST_TMPDIR/md" "$BATS_TEST_TMPDIR/html"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-# The reference rows were only checked by count above; check each name too.
-@test "F11: every SKILLS.md reference submodule has its own index.html table row" {
-  n=0
-  while read -r repo; do
-    n=$((n + 1))
-    grep -q "<tr><td><code>repos/$repo</code></td><td>—</td><td>Reference (index)</td></tr>" index.html || { echo "index.html reference row missing for $repo"; false; }
-  done < <(sed -n -E '/^## Reference submodules/,$ s/^- \*\*repos\/([^*]+)\*\*.*/\1/p' SKILLS.md)
-  [ "$n" -gt 0 ]
+  grep -qF "<!--count:wired-->$wired<!--/count-->" index.html
+  grep -qF "<!--count:library-->$lib<!--/count-->" index.html
+  ! grep -q 'class="skill-name"' index.html || false
 }
 
 @test "F11: BOOTSTRAP gives no hard-coded test or skill totals that drift" {
