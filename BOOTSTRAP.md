@@ -139,6 +139,9 @@ npm install -g @fission-ai/openspec@latest
 #    Dry run prints the command without running it:
 bash ~/.the-grid/scripts/runtime-setup.sh gstack --dry-run
 bash ~/.the-grid/scripts/runtime-setup.sh gstack
+#    Its last step is wire.sh, which audits the freshly built output; if the audit
+#    blocks, the wrapper exits 3 and prints the next command. A missing `bun` prints
+#    the install route for macOS, Arch or Ubuntu (it never installs anything).
 
 # 9. Before your first commit or push: set the global git email to your GitHub
 #    noreply address (<id>+<login>@users.noreply.github.com), or GitHub rejects

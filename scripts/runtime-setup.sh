@@ -20,8 +20,10 @@
 #   6. re-runs wire.sh, then reports (never reverts) dirt inside the submodule.
 #
 # Exit codes: 0 ok, 2 unknown repo / missing prerequisite / occupied link /
-#             bad usage, 3 the settings file changed, otherwise the setup
-#             command's own non-zero status.
+#             bad usage, 3 the settings file changed OR the final wire.sh was
+#             blocked by the audit (build output is audited; the message says
+#             what to run), otherwise the setup command's own non-zero status
+#             or wire.sh's.
 #
 # Env (all optional): GRID_DIR (default: parent of scripts/), SKILLS_DIR
 # (default ~/.claude/skills), CLAUDE_CONFIG_DIR (default ~/.claude), HOME.
@@ -57,6 +59,45 @@ trim() { # trim leading/trailing whitespace without forking
   printf '%s' "$s"
 }
 
+# --- OS-aware messages ------------------------------------------------------
+# Only wording branches on the OS (what to tell the human to do); nothing here installs or
+# runs anything. `uname` is called through PATH so a test can stub it. The Arch marker file
+# can be redirected with GRID_ARCH_RELEASE_FILE for the same reason.
+os_kind() {
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) echo macos ;;
+    Linux)
+      if [ -e "${GRID_ARCH_RELEASE_FILE:-/etc/arch-release}" ]; then echo arch; else echo linux; fi ;;
+    *) echo other ;;
+  esac
+}
+
+# needs_hint <command>: how to get a missing prerequisite on this OS. Only bun has OS-specific advice.
+needs_hint() {
+  [ "$1" = bun ] || return 0
+  case "$(os_kind)" in
+    macos) echo "  macOS: Homebrew (brew install oven-sh/bun/bun) or the installer from https://bun.sh" >&2 ;;
+    arch)  echo "  Arch: the AUR package bun-bin (through your AUR helper) or the installer from https://bun.sh" >&2 ;;
+    linux) echo "  Ubuntu/Debian: the installer from https://bun.sh (needs curl and unzip from apt)" >&2 ;;
+    *)     echo "  see https://bun.sh for install options" >&2 ;;
+  esac
+}
+
+# os_notes: post-run reminders for things setup deliberately skips (it never runs sudo or a
+# package manager by itself). Browser libraries and emoji fonts are the Linux-only gaps.
+os_notes() {
+  case "$(os_kind)" in
+    macos)
+      echo "runtime-setup: note: macOS has the system emoji font; GSTACK_SKIP_COREUTILS=0 would let setup run brew (opt-in, not done)." ;;
+    arch)
+      echo "runtime-setup: note: if the browser fails to launch for missing libraries, install Playwright's Chromium dependencies with pacman (sudo; not done here)."
+      echo "runtime-setup: note: make-pdf shows emoji as boxes without an emoji font: pacman -S noto-fonts-emoji, or GSTACK_SKIP_FONTS=0 to let setup try (sudo)." ;;
+    linux)
+      echo "runtime-setup: note: if the browser fails to launch for missing libraries, run: bunx playwright install-deps chromium (sudo; not done here)."
+      echo "runtime-setup: note: make-pdf shows emoji as boxes without an emoji font: apt install fonts-noto-color-emoji, or GSTACK_SKIP_FONTS=0 to let setup try (sudo)." ;;
+  esac
+}
+
 # --- 1. Look up the row and check prerequisites -------------------------------
 MAP="$GRID_DIR/scripts/lib/runtimes.txt"
 [ -f "$MAP" ] || { echo "runtime-setup: no runtime map at $MAP" >&2; exit 2; }
@@ -78,6 +119,7 @@ fi
 if [ -n "$needs" ] && ! command -v "$needs" >/dev/null 2>&1; then
   echo "runtime-setup: '$needs' is required but not on PATH." >&2
   echo "  the-grid never installs it; the upstream setup prints checksum-verified install instructions." >&2
+  needs_hint "$needs"
   # A dry run only prints the plan and runs nothing, so a machine without the binary can still
   # see it; the real run keeps refusing.
   if [ "$dry" = 1 ]; then
@@ -103,6 +145,7 @@ if [ "$dry" = 1 ]; then
   echo "runtime-setup (dry run): would run, inside $root:"
   echo "  bash -c '$setup_cmd'"
   echo "then compare ${CLAUDE_CONFIG_DIR}/settings.json, remove setup's flat skill dirs under $SKILLS_DIR, and re-run wire.sh."
+  os_notes
   exit 0
 fi
 
@@ -165,7 +208,16 @@ if [ -n "$aliases" ]; then
 fi
 
 # --- 6. Re-wire, then report dirt inside the submodule --------------------------
-bash "$SCRIPT_DIR/wire.sh" || echo "runtime-setup: wire.sh failed" >&2
+bash "$SCRIPT_DIR/wire.sh"; wire_rc=$?
+if [ "$wire_rc" -eq 3 ]; then
+  # wire.sh exit 3 = its audit step blocked, so NO link was changed. Build output
+  # (compiled binaries, bundles) is audited like any wired file; point at the fix.
+  echo "runtime-setup: wire.sh was BLOCKED by the audit (exit 3); the setup output is built but not wired." >&2
+  echo "  next: see which findings: bash $SCRIPT_DIR/audit.sh --wired --quiet" >&2
+  echo "  then review them and add narrow audit-allow entries to CURATION.md, and re-run: bash $SCRIPT_DIR/wire.sh" >&2
+elif [ "$wire_rc" -ne 0 ]; then
+  echo "runtime-setup: wire.sh failed (exit $wire_rc)" >&2
+fi
 if [ -e "$root/.git" ]; then
   dirt="$(git -C "$root" status --short 2>/dev/null || true)"
   if [ -n "$dirt" ]; then
@@ -177,9 +229,11 @@ fi
 # Final verdict on the marker wire.sh warns about.
 if [ -x "$root/$marker" ] || [ -s "$root/$marker" ]; then
   echo "runtime-setup: marker present: $marker"
+  os_notes
 else
   echo "runtime-setup: marker STILL MISSING: $marker (setup did not produce it)" >&2
 fi
 
 if [ "$final_rc" -ne 0 ]; then exit "$final_rc"; fi
+if [ "$setup_rc" -eq 0 ] && [ "$wire_rc" -ne 0 ]; then exit "$wire_rc"; fi
 exit "$setup_rc"

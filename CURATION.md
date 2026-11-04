@@ -569,4 +569,21 @@ Every entry is a line the scanner flags that was read in context and judged to b
   path: repos/jeffallan/skills/wordpress-pro/references/gutenberg-blocks.md
   contains: 'npx @wordpress/create-block my-block --variant dynamic'
   reason: reference doc example command for a human to run in their own project (not run by the skill); a pin would date the example
+- rule: claude-config-write
+  path: repos/gstack/browse/dist/server-node.mjs
+  contains: 'This launch failure matches the macOS XProtect kill signature'
+  contains_substring: true
+  reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); the match is an error-message string telling the human to run a playwright install, which names ~/.claude/skills/gstack as the install directory; it writes nothing. A joined multi-line string, too long to quote whole
+- rule: hidden-unicode
+  path: repos/gstack/browse/dist/server-node.mjs
+  contains: 'const zwsp = "​";'
+  reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); string literal holding a zero-width space that is inserted into the untrusted-content markers and sentinels so page text cannot [redacted] them; defensive, not hidden instructions. Matches two identical lines
+- rule: hidden-unicode
+  path: repos/gstack/browse/dist/server-node.mjs
+  contains: 'const safeResult = result.replace(/--- (BEGIN|END) UNTRUSTED EXTERNAL CONTENT/g, "--- $1 UNTRUSTED EXTERNAL C​ONTENT");'
+  reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); breaks the UNTRUSTED EXTERNAL CONTENT fence inside fetched page text with a zero-width space so the page cannot close the fence early; defensive
+- rule: hidden-unicode
+  path: repos/gstack/browse/dist/server-node.mjs
+  contains: 'const stripped = raw.replace(/[\s ​-‍﻿]/g, "");'
+  reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); regex character class in the auth-token sanitiser that lists U+00A0, U+200B-U+200D and U+FEFF so they are stripped from a bearer token; same line as the allowlisted browse/src/server.ts source, compiled with double quotes
 ```

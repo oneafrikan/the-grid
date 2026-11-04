@@ -373,7 +373,9 @@ Agents and sessions must not leave stale worktrees or local branches behind.
   `runtime root occupied` if a real dir or foreign link is there, and prints
   `runtime MISSING: <repo>` (exit status unaffected) when the marker is absent.
   The setup itself is human-run: `bash scripts/runtime-setup.sh <repo> [--dry-run]`
-  (exit 2 prerequisite/occupied link, 3 if the Claude settings file changed).
+  (exit 2 prerequisite/occupied link, 3 if the Claude settings file changed or the final
+  `wire.sh` was blocked by the audit of the build output; it then prints the next command.
+  A missing `bun` and the post-run notes are OS-aware wording only: macOS, Arch, Ubuntu/Debian).
 - **Baseline override:** `GRID_BASELINE` env var replaces the path of the first
   manifest layer (default `$GRID_DIR/baseline-submodules.txt`); machine overlays
   still load from `$GRID_DIR/machines/`. Tests and CI use it to wire from
