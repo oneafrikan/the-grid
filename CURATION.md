@@ -576,14 +576,14 @@ Every entry is a line the scanner flags that was read in context and judged to b
   reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); the match is an error-message string telling the human to run a playwright install, which names ~/.claude/skills/gstack as the install directory; it writes nothing. A joined multi-line string, too long to quote whole
 - rule: hidden-unicode
   path: repos/gstack/browse/dist/server-node.mjs
-  contains: 'const zwsp = "​";'
-  reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); string literal holding a zero-width space that is inserted into the untrusted-content markers and sentinels so page text cannot [redacted] them; defensive, not hidden instructions. Matches two identical lines
+  contains: 'const zwsp = "\u200b";'
+  reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); a zero-width space constant, used to break the untrusted-content markers so fetched pages cannot [redacted] them; defensive, not hidden instructions; one entry covers both copies
 - rule: hidden-unicode
   path: repos/gstack/browse/dist/server-node.mjs
-  contains: 'const safeResult = result.replace(/--- (BEGIN|END) UNTRUSTED EXTERNAL CONTENT/g, "--- $1 UNTRUSTED EXTERNAL C​ONTENT");'
+  contains: 'const safeResult = result.replace(/--- (BEGIN|END) UNTRUSTED EXTERNAL CONTENT/g, "--- $1 UNTRUSTED EXTERNAL C\u200bONTENT");'
   reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); breaks the UNTRUSTED EXTERNAL CONTENT fence inside fetched page text with a zero-width space so the page cannot close the fence early; defensive
 - rule: hidden-unicode
   path: repos/gstack/browse/dist/server-node.mjs
-  contains: 'const stripped = raw.replace(/[\s ​-‍﻿]/g, "");'
+  contains: 'const stripped = raw.replace(/[\s\u00a0\u200b-\u200d\ufeff]/g, "");'
   reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); regex character class in the auth-token sanitiser that lists U+00A0, U+200B-U+200D and U+FEFF so they are stripped from a bearer token; same line as the allowlisted browse/src/server.ts source, compiled with double quotes
 ```
