@@ -586,4 +586,16 @@ Every entry is a line the scanner flags that was read in context and judged to b
   path: repos/gstack/browse/dist/server-node.mjs
   contains: 'const stripped = raw.replace(/[\s\u00a0\u200b-\u200d\ufeff]/g, "");'
   reason: build output of runtime-setup.sh (compiled locally from the tracked browse/src); regex character class in the auth-token sanitiser that lists U+00A0, U+200B-U+200D and U+FEFF so they are stripped from a bearer token; same line as the allowlisted browse/src/server.ts source, compiled with double quotes
+- rule: oversize-file
+  path: repos/gstack/browse/dist/browse
+  unpinned: true
+  reason: build output of runtime-setup.sh (compiled locally from the tracked source, gitignored); a compiled binary the scanner cannot read; the file name is the same on macOS, Ubuntu and Arch so the path is allowed whatever its bytes are
+- rule: oversize-file
+  path: repos/gstack/browse/dist/find-browse
+  unpinned: true
+  reason: build output of runtime-setup.sh (compiled locally from the tracked source, gitignored); a compiled binary the scanner cannot read; the file name is the same on macOS, Ubuntu and Arch so the path is allowed whatever its bytes are
+- rule: oversize-file
+  path: repos/gstack/make-pdf/dist/pdf
+  unpinned: true
+  reason: build output of runtime-setup.sh (compiled locally from the tracked source, gitignored); a compiled binary the scanner cannot read; the file name is the same on macOS, Ubuntu and Arch so the path is allowed whatever its bytes are
 ```

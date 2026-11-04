@@ -741,6 +741,15 @@ class AllowEntry:
         if self.contains_substring and d.get("contains") is None:
             raise UsageError("%s: contains_substring needs `contains`" % where)
         self.sha256 = d.get("sha256")
+        # `unpinned`: allow an oversize-file finding on one literal path whatever its bytes are.
+        # Only for build output no scanner can read (compiled binaries that differ per OS).
+        self.unpinned = d.get("unpinned", False)
+        if not isinstance(self.unpinned, bool):
+            raise UsageError("%s: unpinned must be true or false" % where)
+        if self.unpinned and (self.rule != "oversize-file" or self.contains is not None
+                              or self.sha256 is not None):
+            raise UsageError("%s: unpinned is only valid on an oversize-file entry with no "
+                             "contains and no sha256" % where)
         # A line inside a SKILL.md / agent .md `hooks:` block is only pinned together with that
         # block (see matches): the same command line moved or repeated is a different block.
         self.hooks_sha256 = d.get("hooks_sha256")
@@ -762,7 +771,7 @@ class AllowEntry:
                                  % (where, self.rule))
             if any(ch in self.path for ch in "*?["):
                 raise UsageError("%s: an entry without `contains` needs a literal path (no glob)" % where)
-            if not (isinstance(self.sha256, str) and re.fullmatch(r"[0-9a-f]{64}", self.sha256)):
+            if not self.unpinned and not (isinstance(self.sha256, str) and re.fullmatch(r"[0-9a-f]{64}", self.sha256)):
                 raise UsageError("%s: an entry without `contains` needs a 64-hex `sha256`" % where)
         self.path_rx = glob_to_regex(self.path)
         self.used = False
@@ -781,7 +790,7 @@ class AllowEntry:
                         or self.contains in f["_line_escaped"])
             want = self.contains.strip()
             return want in (f["_line"].strip(), f["_line_escaped"].strip())
-        return f["sha256"] == self.sha256
+        return self.unpinned or f["sha256"] == self.sha256
 
 
 def load_allowlist(path, policy):
