@@ -105,11 +105,10 @@ common_setup() {
   # ~/.claude, ~/.grid or ~/.the-grid-private.
   MOCK_HOOK_ROOT=$(mktemp_canon)
   mkdir -p "$MOCK_HOOK_ROOT/claude" "$MOCK_HOOK_ROOT/logs" "$MOCK_HOOK_ROOT/state" \
-           "$MOCK_HOOK_ROOT/fallback" "$MOCK_HOOK_ROOT/private"
+           "$MOCK_HOOK_ROOT/private"
   export CLAUDE_CONFIG_DIR="$MOCK_HOOK_ROOT/claude"
   export GRID_HOOK_LOG_DIR="$MOCK_HOOK_ROOT/logs"
   export GRID_HOOK_STATE_DIR="$MOCK_HOOK_ROOT/state"
-  export GRID_HANDOFF_FALLBACK_DIR="$MOCK_HOOK_ROOT/fallback"
   export GRID_PRIVATE_DIR="$MOCK_HOOK_ROOT/private"
   # Machine-local state (~/.grid by default) and the user runtime dir (/run/user/<uid>,
   # where the live systemd manager's sockets live) are sandboxed too. REAL_XDG_RUNTIME_DIR
@@ -188,7 +187,7 @@ assert_sandboxed() {
   # ones that are set are checked. Each must stay out of all three real roots.
   real_dirs=("$real" "${REAL_HOME:-$HOME}/.grid" "${REAL_HOME:-$HOME}/.the-grid-private")
   for d in "${CLAUDE_CONFIG_DIR:-}" "${GRID_HOOK_LOG_DIR:-}" "${GRID_HOOK_STATE_DIR:-}" \
-           "${GRID_HANDOFF_FALLBACK_DIR:-}" "${GRID_PRIVATE_DIR:-}"; do
+           "${GRID_PRIVATE_DIR:-}"; do
     [ -n "$d" ] || continue
     d="$(resolve_deepest "$d")"
     for r in "${real_dirs[@]}"; do
@@ -243,7 +242,7 @@ common_teardown() {
   rm -rf "$MOCK_GRID" "$MOCK_SKILLS" "$OTHER_DIR" "$MOCK_AGENTS" "$MOCK_HOOK_ROOT" "$MOCK_RULES" \
          "${MOCK_HARNESS_ROOT:-}"
   unset AGENTS_DIR SKILLS_DIR RULES_DIR GRID_PRIVATE_ROLES_DIR CLAUDE_CONFIG_DIR GRID_HOOK_LOG_DIR \
-        GRID_HOOK_STATE_DIR GRID_HANDOFF_FALLBACK_DIR GRID_PRIVATE_DIR GRID_RUN_LOG GRID_CLAUDE \
+        GRID_HOOK_STATE_DIR GRID_PRIVATE_DIR GRID_RUN_LOG GRID_CLAUDE \
         GRID_HARNESS_HOME GRID_HARNESS MOCK_HARNESS_ROOT MOCK_HARNESS_HOME \
         GRID_STATE_DIR XDG_RUNTIME_DIR REAL_XDG_RUNTIME_DIR GRID_SKIP_AUDIT
 }

@@ -112,7 +112,7 @@ tok_jwt()       { printf '%s' "ey""JhbGciOiJIUzI1NiJ9.ey""JzdWIiOiIxMjM0NTY3ODkw
 @test "common_setup arms the claude tripwire and sandboxes every hook dir" {
   [ "$GRID_CLAUDE" = "/nonexistent/grid-claude-tripwire" ]
   run -127 "$GRID_CLAUDE"      # executing the tripwire fails: command not found
-  for v in CLAUDE_CONFIG_DIR GRID_HOOK_LOG_DIR GRID_HOOK_STATE_DIR GRID_HANDOFF_FALLBACK_DIR GRID_PRIVATE_DIR; do
+  for v in CLAUDE_CONFIG_DIR GRID_HOOK_LOG_DIR GRID_HOOK_STATE_DIR GRID_PRIVATE_DIR; do
     [ -d "${!v}" ]
   done
   [ -n "$GRID_RUN_LOG" ]

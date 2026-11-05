@@ -8,7 +8,7 @@
 # session opt-out). The machine-wiring scenarios belong to group 4.
 #
 # Safety: `claude` is ALWAYS the stub from tests/helpers/stubs.bash (or the tripwire
-# path from common_setup); HOME, the log/state/fallback/private dirs and the quarantine
+# path from common_setup); HOME, the log/state/private dirs and the quarantine
 # root are temp dirs. No model is called, nothing real is touched. Transcripts are built
 # from the captured fixture shapes with `tx`, never hand-typed JSON. Secret-shaped values
 # are assembled from fragments at run time.
@@ -363,24 +363,29 @@ fake_token() { printf 'gh%s_%s' p "$(printf 'a%.0s' $(seq 36))"; }
   allowed="${allowed%% --disallowedTools*}"
   contains "$allowed" "Read "
   contains "$allowed" "$(edit_rule "$(cd "$P" && pwd -P)/LOGS")"
-  contains "$allowed" "$(edit_rule "$GRID_HANDOFF_FALLBACK_DIR/proj")"
   lacks "$allowed" "git"
   lacks "$allowed" "Write"
   # no bare Edit: every Edit entry carries a path
   refute grep -qE '(^| )Edit( |$)' <<< "$allowed"
+  # the ONLY write grant is the resolved LOGS dir
+  [ "$(grep -o 'Edit(/[^ ]*' <<< "$allowed" | wc -l | tr -d ' ')" -eq 1 ]
   [ "$(cat "$STUB_DIR/claude.cwd")" = "$P" ]
-  # the digest and fallback dirs are passed with --add-dir
-  contains "$line" "--add-dir $GRID_HANDOFF_FALLBACK_DIR/proj"
+  # only the digest dir is passed with --add-dir, and the prompt names no fallback
+  [ "$(grep -o -e '--add-dir' <<< "$line" | wc -l | tr -d ' ')" -eq 1 ]
+  lacks "$line" "allback"
+  contains "$line" "Target directory: $(cd "$P" && pwd -P)/LOGS."
 }
 
 @test "the system prompt carries the write-only rules" {
   f="$REPO_ROOT/hooks/lib/auto-handoff-system.md"
   [ "$(wc -c < "$f")" -lt 1500 ]
   for phrase in 'do not run git' 'never push' 'write nothing else' \
-                'if a write is denied, write both files to the fallback dir' \
-                'run single commands only' 'GRID_HANDOFF_FALLBACK_DIR'; do
+                'if a write is denied, stop and say so' 'the project'"'"'s LOGS folder' \
+                'run single commands only'; do
     grep -qF -- "$phrase" "$f" || { echo "missing: $phrase" >&2; return 1; }
   done
+  # no second place to write to
+  refute grep -qi 'fallback' "$f"
   refute grep -qE 'https?://' "$f"
 }
 
@@ -389,7 +394,7 @@ fake_token() { printf 'gh%s_%s' p "$(printf 'a%.0s' $(seq 36))"; }
   export STUB_CLAUDE_MODE=handoff-logs
   before="$(commits "$P")"
   run_worker
-  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+ push=no-not-private" "$LOG"
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+ push=no-remote" "$LOG"
   [ "$(commits "$P")" -eq $((before + 1)) ]
   [ "$(run_outcome)" = "ok" ]
   # exactly the two handoff files are in the new commit
@@ -397,14 +402,184 @@ fake_token() { printf 'gh%s_%s' p "$(printf 'a%.0s' $(seq 36))"; }
     "LOGS/2026-01-01-testhost-stub-context.md LOGS/2026-01-01-testhost-stub-handoff.md " ]
 }
 
-@test "files in the fallback dir are accepted (not a git repo: left uncommitted)" {
+# ---- where the pair goes: the project's LOGS folder, always, and nowhere else ----------
+
+# The two files of the stub child, for the assertions below.
+PAIR_HF="2026-01-01-testhost-stub-handoff.md"
+PAIR_CF="2026-01-01-testhost-stub-context.md"
+
+# no_stray_handoffs: no handoff file anywhere in the sandbox's would-be fallback places.
+no_stray_handoffs() {
+  mkdir -p "$MOCK_HOOK_ROOT/fallback"
+  [ -z "$(find "$MOCK_HOOK_ROOT/fallback" "$GRID_PRIVATE_DIR" -name '*-handoff.md' -o -name '*-context.md' 2>/dev/null)" ]
+}
+
+@test "LOGS is created when missing (git repo): the pair is written there and committed" {
   mk_tx 6
   rmdir "$P/LOGS"
-  export STUB_CLAUDE_MODE=handoff-fallback
+  export STUB_CLAUDE_MODE=handoff-prompt
+  before="$(commits "$P")"
   run_worker
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+" "$LOG"
+  [ -d "$P/LOGS" ] && [ ! -L "$P/LOGS" ]
+  [ -f "$P/LOGS/$PAIR_HF" ] && [ -f "$P/LOGS/$PAIR_CF" ]
+  [ "$(commits "$P")" -eq $((before + 1)) ]
+  [ "$(git -C "$P" show --name-only --format= HEAD | sort | tr '\n' ' ')" = "LOGS/$PAIR_CF LOGS/$PAIR_HF " ]
+  # a project directory, not an owner-only one (the worker runs with umask 077)
+  [ "$(file_mode "$P/LOGS")" = 755 ]
+  no_stray_handoffs
+}
+
+@test "no git repo: LOGS is created in cwd, the files are only written, nothing is committed" {
+  mk_tx 6
+  NP="$MOCK_HOOK_ROOT/plain-proj"; mkdir -p "$NP"
+  export STUB_CLAUDE_MODE=handoff-prompt
+  run bash "$WORKER" "$SID" "$TXN" "$NP" other
   grep -Eq "action=done reason=ok turns=6 commit=none" "$LOG"
-  [ -f "$GRID_HANDOFF_FALLBACK_DIR/proj/2026-01-01-testhost-stub-handoff.md" ]
+  refute grep -q 'push=' "$LOG"
+  [ -f "$NP/LOGS/$PAIR_HF" ] && [ -f "$NP/LOGS/$PAIR_CF" ]
+  [ ! -e "$NP/.git" ]
+  no_stray_handoffs
+}
+
+@test "cwd in a subdirectory of a repo: the repo root's LOGS is used" {
+  mk_tx 6
+  mkdir -p "$P/sub/deeper"
+  export STUB_CLAUDE_MODE=handoff-prompt
+  before="$(commits "$P")"
+  run bash "$WORKER" "$SID" "$TXN" "$P/sub/deeper" other
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+" "$LOG"
+  [ -f "$P/LOGS/$PAIR_HF" ]
+  [ ! -e "$P/sub/deeper/LOGS" ]
+  [ "$(commits "$P")" -eq $((before + 1)) ]
+}
+
+@test "an existing Logs directory is reused: no second LOGS in another casing" {
+  mk_tx 6
+  # Two mv steps give a real Logs/ on case-insensitive APFS too (see the old R24.qa.F9 test).
+  mv "$P/LOGS" "$P/Logs.tmp" && mv "$P/Logs.tmp" "$P/Logs"
+  export STUB_CLAUDE_MODE=handoff-prompt
+  run_worker
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+" "$LOG"
+  [ -f "$P/Logs/$PAIR_HF" ]
+  [ "$(ls "$P" | grep -ci '^logs$')" -eq 1 ]
+  [ "$(ls "$P" | grep -c '^Logs$')" -eq 1 ]
+  git -C "$P" show --name-only --format= HEAD | grep -qx "Logs/$PAIR_HF"
+}
+
+@test "a LOGS symlink into another git repo: the pair is committed in THAT repo, not the project" {
+  mk_tx 6
+  mkrepo "$MOCK_HOOK_ROOT/other-repo"; OR="$MOCK_HOOK_ROOT/other-repo"
+  mkdir -p "$OR/LOGS"; age_tree "$OR"
+  rmdir "$P/LOGS"; ln -s "$OR/LOGS" "$P/LOGS"; touch -h -t 202001010000 "$P/LOGS"
+  export STUB_CLAUDE_MODE=handoff-prompt
+  before_p="$(commits "$P")"; before_o="$(commits "$OR")"
+  run_worker
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+" "$LOG"
+  refute log_has "target-refused"
+  [ -f "$OR/LOGS/$PAIR_HF" ]
+  [ "$(commits "$OR")" -eq $((before_o + 1)) ]
+  [ "$(git -C "$OR" show --name-only --format= HEAD | sort | tr '\n' ' ')" = "LOGS/$PAIR_CF LOGS/$PAIR_HF " ]
+  [ "$(commits "$P")" -eq "$before_p" ]
+  # the write grant is the resolved directory in the other repo
+  contains "$(allowed_rules)" "$(edit_rule "$(cd "$OR/LOGS" && pwd -P)")"
+}
+
+@test "the private fallback and the locations table are gone: nothing is ever written there" {
+  mk_tx 6
+  # Everything the old design could have used is set up and must stay untouched.
+  export GRID_HANDOFF_FALLBACK_DIR="$MOCK_HOOK_ROOT/fallback"; mkdir -p "$GRID_HANDOFF_FALLBACK_DIR"
+  mkdir -p "$P/notes/handoffs" "$GRID_PRIVATE_DIR/handoffs"
+  printf '| proj | notes/handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  mkdir -p "$HOME/.the-grid-private"
+  printf '| proj | %s |\n' "$MOCK_HOOK_ROOT/work" > "$HOME/.the-grid-private/handoff-locations.md"
+  export STUB_CLAUDE_MODE=handoff-prompt
+  run_worker
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+" "$LOG"
+  [ -f "$P/LOGS/$PAIR_HF" ]
+  [ -z "$(find "$P/notes/handoffs" "$GRID_PRIVATE_DIR/handoffs" "$GRID_HANDOFF_FALLBACK_DIR" -type f)" ]
+  lacks "$(allowed_rules)" "notes"
+  lacks "$(claude_line)" "allback"
+}
+
+@test "a refused LOGS ends the run with nothing written anywhere (no fallback)" {
+  mk_tx 6
+  export GRID_HANDOFF_FALLBACK_DIR="$MOCK_HOOK_ROOT/fallback"; mkdir -p "$GRID_HANDOFF_FALLBACK_DIR"
+  rmdir "$P/LOGS"; ln -s "$P/.git" "$P/LOGS"; touch -h -t 202001010000 "$P/LOGS"
+  export STUB_CLAUDE_MODE=handoff-prompt
+  run_worker
+  log_has "action=error reason=target-refused why=git-dir"
+  [ ! -e "$STUB_DIR/claude.pid" ]          # no child was started
+  no_stray_handoffs
+  [ -z "$(ls -A "$GRID_HANDOFF_FALLBACK_DIR")" ]
+  [ "$(run_outcome)" = "error" ]
+}
+
+# ---- push: the current branch goes to its upstream, and a failed push never fails the handoff ----
+
+# mkremote: $P gets a bare remote "origin" with its branch pushed and tracked.
+mkremote() {
+  BARE="$MOCK_HOOK_ROOT/p-remote.git"
+  git init -q --bare "$BARE"
+  git -C "$P" remote add origin "$BARE"
+  git -C "$P" push -q -u origin HEAD 2>/dev/null
+}
+
+@test "push: the handoff commit is pushed to the project's upstream" {
+  mk_tx 6
+  mkremote
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+ push=yes" "$LOG"
+  [ "$(git -C "$BARE" log --format=%s -1 "$(git -C "$P" branch --show-current)")" = "docs: auto-handoff 2026-01-01-testhost-stub" ]
+  [ "$(git -C "$BARE" rev-parse "$(git -C "$P" branch --show-current)")" = "$(git -C "$P" rev-parse HEAD)" ]
+}
+
+@test "push: other unpushed commits on the branch are published with it" {
+  mk_tx 6
+  mkremote
+  git -C "$P" commit -q --allow-empty -m "unrelated local work"
+  export STUB_CLAUDE_MODE=handoff-logs
+  run_worker
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+ push=yes" "$LOG"
+  git -C "$BARE" log --format=%s "$(git -C "$P" branch --show-current)" | grep -qx "unrelated local work"
+}
+
+@test "push: a branch with a remote but no upstream stays local and the handoff still succeeds" {
+  mk_tx 6
+  mkremote
+  git -C "$P" checkout -q -b topic
+  export STUB_CLAUDE_MODE=handoff-logs
+  before="$(commits "$P")"
+  run_worker
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+ push=no-upstream" "$LOG"
+  [ "$(commits "$P")" -eq $((before + 1)) ]
   [ "$(run_outcome)" = "ok" ]
+  ! git -C "$BARE" rev-parse --verify -q refs/heads/topic
+}
+
+@test "push: a repo with no remote stays local and the handoff still succeeds" {
+  mk_tx 6
+  export STUB_CLAUDE_MODE=handoff-logs
+  before="$(commits "$P")"
+  run_worker
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+ push=no-remote" "$LOG"
+  [ "$(commits "$P")" -eq $((before + 1)) ]
+  [ "$(run_outcome)" = "ok" ]
+}
+
+@test "push: a failing push is logged as push=failed, the local commit stays, the handoff succeeds" {
+  mk_tx 6
+  mkremote
+  git -C "$P" remote set-url origin "$MOCK_HOOK_ROOT/no-such-remote.git"
+  export STUB_CLAUDE_MODE=handoff-logs
+  before="$(commits "$P")"
+  run_worker
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+ push=failed" "$LOG"
+  [ "$(commits "$P")" -eq $((before + 1)) ]
+  [ "$(git -C "$P" show --name-only --format= HEAD | grep -c .)" -eq 2 ]
+  [ "$(run_outcome)" = "ok" ]
+  [ -z "$(git -C "$P" status --porcelain)" ]
 }
 
 @test "silent failure is detected: exit 0 and no handoff file" {
@@ -490,73 +665,6 @@ fake_token() { printf 'gh%s_%s' p "$(printf 'a%.0s' $(seq 36))"; }
   [ ! -e "$GRID_STATE_DIR/handoff-quarantine" ]
 }
 
-@test "mapped handoff location: the rule covers it and no LOGS rule is granted" {
-  mk_tx 6
-  mkdir -p "$HOME/.the-grid-private" "$P/notes/handoffs"
-  rmdir "$P/LOGS"
-  printf '| directory | location |\n|---|---|\n| proj | notes/handoffs |\n' > "$HOME/.the-grid-private/handoff-locations.md"
-  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$P/notes/handoffs"
-  run_worker
-  allowed="$(claude_line)"; allowed="${allowed#*--allowedTools }"; allowed="${allowed%% --disallowedTools*}"
-  contains "$allowed" "$(edit_rule "$P/notes/handoffs")"
-  lacks "$allowed" "LOGS"
-  log_has "action=done"
-  git -C "$P" show --name-only --format= HEAD | grep -q "^notes/handoffs/2026-01-01-testhost-stub-handoff.md$"
-}
-
-@test "mapped location matches the directory case-insensitively: | proj | LOGS | finds Logs/ (R24.qa.F9)" {
-  mk_tx 6
-  mkdir -p "$HOME/.the-grid-private"
-  # Rename via a temp name: on case-insensitive APFS, mkdir Logs is a no-op and rmdir LOGS would
-  # delete the only dir. Two mv steps yield a real Logs/ on both filesystems.
-  mv "$P/LOGS" "$P/Logs.tmp" && mv "$P/Logs.tmp" "$P/Logs"
-  printf '| proj | LOGS |\n' > "$HOME/.the-grid-private/handoff-locations.md"
-  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$P/Logs"
-  run_worker
-  allowed="$(claude_line)"; allowed="${allowed#*--allowedTools }"; allowed="${allowed%% --disallowedTools*}"
-  contains "$allowed" "$(edit_rule "$P/Logs")"
-  log_has "action=done"
-  git -C "$P" show --name-only --format= HEAD | grep -q "^Logs/2026-01-01-testhost-stub-handoff.md$"
-}
-
-@test "a matched row whose directory is missing grants no rule and does not fall through to LOGS" {
-  mk_tx 6
-  mkdir -p "$HOME/.the-grid-private"
-  # P/LOGS exists (the default), but the row names a directory that does not.
-  [ -d "$P/LOGS" ]
-  printf '| proj | notes/handoffs |\n' > "$HOME/.the-grid-private/handoff-locations.md"
-  export STUB_CLAUDE_MODE=handoff-fallback
-  run_worker
-  log_has "action=done"
-  allowed="$(claude_line)"; allowed="${allowed#*--allowedTools }"; allowed="${allowed%% --disallowedTools*}"
-  lacks "$allowed" "$P/LOGS"
-  lacks "$allowed" "$P/notes"
-  contains "$(claude_line)" "Target directory: none"
-  [ ! -e "$P/notes" ]
-}
-
-@test "mapped location outside cwd is committed in its own repo" {
-  mk_tx 6
-  OR="$MOCK_HOOK_ROOT/other-repo"
-  mkdir -p "$OR"
-  git -C "$OR" init -q
-  git -C "$OR" config user.email t@example.com
-  git -C "$OR" config user.name t
-  echo o > "$OR/o.txt"; git -C "$OR" add o.txt; git -C "$OR" commit -q -m base
-  age_tree "$OR"
-  mkdir -p "$HOME/.the-grid-private"
-  printf '| proj | %s |\n' "$OR" > "$HOME/.the-grid-private/handoff-locations.md"
-  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$OR"
-  before_p="$(commits "$P")"; before_o="$(commits "$OR")"
-  run_worker
-  log_has "action=done"
-  [ "$(commits "$OR")" -eq $((before_o + 1)) ]
-  [ "$(git -C "$OR" log -1 --name-only --format= | sort | tr '\n' ' ')" = \
-    "2026-01-01-testhost-stub-context.md 2026-01-01-testhost-stub-handoff.md " ]
-  [ "$(commits "$P")" -eq "$before_p" ]
-  [ -z "$(git -C "$P" status --porcelain)" ]
-}
-
 @test "secret in a handoff file: quarantined, nothing committed, value never logged" {
   mk_tx 6
   tok="$(fake_token)"
@@ -605,24 +713,25 @@ mkprivate() {
   touch -h -t 202001010000 "$P/LOGS"
 }
 
-@test "private repo: pushed when the handoff is the only unpushed commit" {
+@test "the-grid layout: LOGS linked into the private repo, committed and pushed there (not in the project)" {
   mk_tx 6
   mkprivate
   export STUB_CLAUDE_MODE=handoff-logs
+  before_p="$(commits "$P")"
   run_worker
   grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+ push=yes" "$LOG"
   [ "$(git -C "$BARE" log --format=%s -1 HEAD)" = "docs: auto-handoff 2026-01-01-testhost-stub" ]
+  [ "$(commits "$P")" -eq "$before_p" ]
 }
 
-@test "private repo: not pushed when another commit is unpushed" {
+@test "the-grid layout: another unpushed commit in the private repo is published with the handoff" {
   mk_tx 6
   mkprivate
   git -C "$GRID_PRIVATE_DIR" commit -q --allow-empty -m other
-  bare_before="$(git -C "$BARE" rev-parse HEAD)"
   export STUB_CLAUDE_MODE=handoff-logs
   run_worker
-  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+ push=no-other-commits" "$LOG"
-  [ "$(git -C "$BARE" rev-parse HEAD)" = "$bare_before" ]
+  grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+ push=yes" "$LOG"
+  git -C "$BARE" log --format=%s HEAD | grep -qx other
 }
 
 @test "digest is private and removed" {
@@ -705,18 +814,17 @@ git_shim() {
 # clear_run: forget the previous worker run (stub call log, hook log) so a test can run twice.
 clear_run() { : > "$STUB_LOG"; : > "$LOG"; }
 
-@test "a tracked LOGS symlink to a dir outside cwd and private is refused: no rule, nothing written there" {
+@test "a LOGS symlink to a dir that is not a git work tree is refused: no rule, nothing written anywhere" {
   mk_tx 6
   OUTD="$MOCK_HOOK_ROOT/outside"; mkdir -p "$OUTD"
   rmdir "$P/LOGS"; ln -s "$OUTD" "$P/LOGS"
   touch -h -t 202001010000 "$P/LOGS"          # a tracked, old link, as in a real checkout
-  export STUB_CLAUDE_MODE=handoff-fallback
+  export STUB_CLAUDE_MODE=handoff-prompt
   run_worker
-  lacks "$(allowed_rules)" "$OUTD"
-  lacks "$(allowed_rules)" "$(cd "$OUTD" && pwd -P)"
+  [ ! -e "$STUB_DIR/claude.pid" ]             # no child was started
   [ -z "$(ls -A "$OUTD")" ]
-  log_has "target-refused=symlink-outside"
-  log_has "action=done"                       # the run itself still works, via the fallback dir
+  log_has "action=error reason=target-refused why=not-a-git-work-tree"
+  no_stray_handoffs
 }
 
 @test "the the-grid layout (LOGS symlinked into the private repo) still resolves and commits" {
@@ -730,68 +838,55 @@ clear_run() { : > "$STUB_LOG"; : > "$LOG"; }
   grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+" "$LOG"
 }
 
-@test "table rows pointing at HOME, above cwd or into ~/.ssh are refused" {
+# The refusals that protect the system apply to where a LOGS link may point.
+@test "a LOGS symlink to HOME, a parent of the project, / or ~/.ssh is refused" {
   mkdir -p "$HOME/.ssh"
-  export STUB_CLAUDE_MODE=handoff-fallback
-  local row n=0
-  for row in '~' '../..' '~/.ssh'; do
-    n=$((n + 1))
+  export STUB_CLAUDE_MODE=handoff-prompt
+  local what why n=0
+  for what in "$HOME|home-or-root" "/|home-or-root" "$HOME/.ssh|sensitive-dir" "$MOCK_HOOK_ROOT|not-a-git-work-tree"; do
+    n=$((n + 1)); why="${what##*|}"; what="${what%|*}"
     mk_tx 6
-    printf '| proj | %s |\n' "$row" > "$GRID_PRIVATE_DIR/handoff-locations.md"
+    rm -rf "$P/LOGS"; ln -s "$what" "$P/LOGS"; touch -h -t 202001010000 "$P/LOGS"
     SID="11111111-1111-4111-8111-11111111111$n"
     clear_run
     run_worker
-    refute log_has "action=error"
-    log_has "target-refused="
-    lacks "$(allowed_rules)" "$(edit_rule "$HOME")"
-    lacks "$(allowed_rules)" "$(edit_rule "$HOME/.ssh")"
-    lacks "$(allowed_rules)" "$(edit_rule "$MOCK_HOOK_ROOT")"
+    log_has "action=error reason=target-refused why=$why" || { echo "link to $what expected $why" >&2; cat "$LOG" >&2; return 1; }
+    [ ! -e "$STUB_DIR/claude.pid" ]
   done
+  [ -z "$(find "$HOME/.ssh" -type f)" ]
 }
 
-@test "a table row outside cwd and outside any git work tree is refused" {
+@test "handoff-locations.md rows are never read: a row for this project changes nothing" {
   mk_tx 6
-  mkdir -p "$MOCK_HOOK_ROOT/plain"
-  printf '| proj | %s |\n' "$MOCK_HOOK_ROOT/plain" > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  export STUB_CLAUDE_MODE=handoff-fallback
-  run_worker
-  lacks "$(allowed_rules)" "$MOCK_HOOK_ROOT/plain"
-  log_has "target-refused=not-a-git-work-tree"
-}
-
-@test "the locations table is read from GRID_PRIVATE_DIR first, then from ~/.the-grid-private" {
-  mk_tx 6
-  mkdir -p "$P/notes/handoffs" "$P/other" "$HOME/.the-grid-private"
-  rmdir "$P/LOGS"
+  mkdir -p "$P/notes/handoffs" "$HOME/.the-grid-private"
   printf '| proj | notes/handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
   printf '| proj | other |\n' > "$HOME/.the-grid-private/handoff-locations.md"
-  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$P/notes/handoffs"
+  export STUB_CLAUDE_MODE=handoff-prompt
   run_worker
-  contains "$(allowed_rules)" "$(edit_rule "$P/notes/handoffs")"
-  lacks "$(allowed_rules)" "$P/other"
-  log_has "action=done"
+  contains "$(allowed_rules)" "$(edit_rule "$(cd "$P" && pwd -P)/LOGS")"
+  lacks "$(allowed_rules)" "notes"
+  lacks "$(allowed_rules)" "other"
+  [ -f "$P/LOGS/$PAIR_HF" ]
+  [ -z "$(find "$P/notes" -type f)" ]
 }
 
 # Glob metacharacters in a directory name would be placed unescaped into a permission rule
-# (where `*` may widen it). Such a path gets no rule; the fallback dir (whose name is
-# sanitised the same way) is used instead.
-@test "cwd names with glob metacharacters get no rule and use the fallback" {
-  export STUB_CLAUDE_MODE=handoff-target
-  local name san n=0
+# (where `*` may widen it). Such a path gets no rule, so there is nowhere the child may write:
+# the run ends error/target-refused and writes NOTHING (there is no fallback directory).
+@test "project paths with glob metacharacters get no rule: refused, nothing written anywhere" {
+  export STUB_CLAUDE_MODE=handoff-prompt
+  local name n=0
   for name in 'st*r' 'a[b]' 'p(re)n' $'a\nb'; do
     n=$((n + 1))
     mkproj "$name"
     mk_tx 6
-    san="$(printf '%s' "${name//$'\n'/_}" | sed 's/[][*?{}()!]/_/g')"
-    STUB_HANDOFF_DIR="$GRID_HANDOFF_FALLBACK_DIR/$san"
-    export STUB_HANDOFF_DIR
     SID="11111111-1111-4111-8111-22222222222$n"
     clear_run
     run_worker
-    log_has "action=done"
-    # No Edit rule outside the (sanitised) fallback dir: the path with the metacharacter is not granted.
-    [ "$(allowed_rules | grep -o 'Edit(/[^ ]*' | grep -vc "/fallback/$san/")" -eq 0 ]
-    [ -f "$STUB_HANDOFF_DIR/2026-01-01-testhost-stub-handoff.md" ]
+    log_has "action=error reason=target-refused why=unsafe-path" || { echo "name '$name'" >&2; cat "$LOG" >&2; return 1; }
+    [ ! -e "$STUB_DIR/claude.pid" ]
+    [ -z "$(find "$P/LOGS" -type f)" ]
+    no_stray_handoffs
   done
 }
 
@@ -810,7 +905,7 @@ clear_run() { : > "$STUB_LOG"; : > "$LOG"; }
 # no commit, and the path is named in the log. (Writes anywhere else on disk cannot be seen
 # from here; that is what the grants, the deny rules and the environment are for.)
 
-# mkother: $OR, a second git repo (the mapped handoff target), with the table row for it.
+# mkother: $OR, a second git repo, and $P/LOGS a symlink to its root (the handoff target).
 mkother() {
   OR="$MOCK_HOOK_ROOT/other-repo"
   mkdir -p "$OR"
@@ -819,13 +914,12 @@ mkother() {
   git -C "$OR" config user.name t
   echo o > "$OR/o.txt"; git -C "$OR" add o.txt; git -C "$OR" commit -q -m base
   age_tree "$OR"
-  printf '| proj | %s |\n' "$OR" > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  rmdir "$P/LOGS"; ln -s "$OR" "$P/LOGS"; touch -h -t 202001010000 "$P/LOGS"
 }
 
-@test "a stray file the child writes into the fallback dir is detected" {
+@test "a stray file the child writes elsewhere in the project is detected" {
   mk_tx 6
-  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$GRID_HANDOFF_FALLBACK_DIR/proj/extra.txt"
-  mkdir -p "$GRID_HANDOFF_FALLBACK_DIR/proj"
+  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$P/extra.txt"
   before="$(commits "$P")"
   run_worker
   log_has "action=error reason=unexpected-file"
@@ -1440,12 +1534,12 @@ mkrepo() {
 
 # --- the scan covers only the directories the child may write to ---------------------
 
-@test "two sessions in different cwds with fallbacks inside one private repo both finish done" {
-  mkrepo "$GRID_PRIVATE_DIR"
-  export GRID_HANDOFF_FALLBACK_DIR="$GRID_PRIVATE_DIR/handoffs"
-  mkproj a; PA="$P"; mkproj b; PB="$P"
+@test "two sessions in different cwds whose LOGS link to different dirs of one private repo both finish done" {
+  mkrepo "$GRID_PRIVATE_DIR"; mkdir -p "$GRID_PRIVATE_DIR/LOGS-a" "$GRID_PRIVATE_DIR/LOGS-b"; age_tree "$GRID_PRIVATE_DIR"
+  mkproj a; PA="$P"; rmdir "$PA/LOGS"; ln -s "$GRID_PRIVATE_DIR/LOGS-a" "$PA/LOGS"; touch -h -t 202001010000 "$PA/LOGS"
+  mkproj b; PB="$P"; rmdir "$PB/LOGS"; ln -s "$GRID_PRIVATE_DIR/LOGS-b" "$PB/LOGS"; touch -h -t 202001010000 "$PB/LOGS"
   mk_tx 6
-  export STUB_CLAUDE_MODE=handoff-fallback
+  export STUB_CLAUDE_MODE=handoff-logs
   STUB_CLAUDE_SLEEP=1 STUB_HANDOFF_PREFIX=A- bash "$WORKER" "11111111-1111-4111-8111-aaaaaaaaaaaa" "$TXN" "$PA" other &
   STUB_CLAUDE_SLEEP=3 STUB_HANDOFF_PREFIX=B- bash "$WORKER" "11111111-1111-4111-8111-bbbbbbbbbbbb" "$TXN" "$PB" other &
   wait
@@ -1468,7 +1562,6 @@ mkrepo() {
 
 @test "another process writing under the private repo during the run does not fail it" {
   mkrepo "$GRID_PRIVATE_DIR"; mkdir -p "$GRID_PRIVATE_DIR/LOGS"; age_tree "$GRID_PRIVATE_DIR"
-  export GRID_HANDOFF_FALLBACK_DIR="$GRID_PRIVATE_DIR/handoffs"
   mk_tx 6
   export STUB_CLAUDE_MODE=handoff-logs STUB_SIDE_FILE="$GRID_PRIVATE_DIR/LOGS/notes-from-other-agent.md"
   run_worker
@@ -1477,92 +1570,45 @@ mkrepo() {
   [ -f "$STUB_SIDE_FILE" ]                       # never quarantined or moved
 }
 
-# --- a relative table row must resolve inside the cwd or the private repo ----------------
-
-@test "a relative row that a tracked symlink points at another repo is refused" {
-  mkrepo "$MOCK_HOOK_ROOT/victim"; mkdir -p "$MOCK_HOOK_ROOT/victim/sub"
-  mkdir -p "$P/docs"; ln -s "$MOCK_HOOK_ROOT/victim/sub" "$P/docs/handoffs"; touch -h -t 202001010000 "$P/docs/handoffs"
-  printf '| proj | docs/handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  mk_tx 6
-  export STUB_CLAUDE_MODE=handoff-fallback
-  run_worker
-  lacks "$(allowed_rules)" "$MOCK_HOOK_ROOT/victim"
-  log_has "target-refused=outside-cwd"
-  [ -z "$(ls -A "$MOCK_HOOK_ROOT/victim/sub")" ]
-}
-
-@test "a row that resolves through LOGS into another repo's subdirectory is refused too" {
-  mkrepo "$MOCK_HOOK_ROOT/victim"; mkdir -p "$MOCK_HOOK_ROOT/victim/hooks"
-  rmdir "$P/LOGS"; ln -s "$MOCK_HOOK_ROOT/victim/hooks" "$P/LOGS"; touch -h -t 202001010000 "$P/LOGS"
-  printf '| * | LOGS |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  mk_tx 6
-  export STUB_CLAUDE_MODE=handoff-fallback
-  run_worker
-  lacks "$(allowed_rules)" "$MOCK_HOOK_ROOT/victim"
-  log_has "target-refused="
-}
-
-@test "a relative row to a normal subdirectory still works" {
-  mkdir -p "$P/notes/handoffs"; rmdir "$P/LOGS"
-  printf '| proj | notes/handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  mk_tx 6
-  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$P/notes/handoffs"
-  run_worker
-  contains "$(allowed_rules)" "$(edit_rule "$P/notes/handoffs")"
-  refute log_has "target-refused"
-  log_has "action=done"
-}
-
-@test "an absolute row to another repo is still accepted" {
-  mkrepo "$MOCK_HOOK_ROOT/other-abs"
-  printf '| proj | %s |\n' "$MOCK_HOOK_ROOT/other-abs" > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  mk_tx 6
-  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$MOCK_HOOK_ROOT/other-abs"
-  run_worker
-  contains "$(allowed_rules)" "$(edit_rule "$MOCK_HOOK_ROOT/other-abs")"
-  refute log_has "target-refused"
-  log_has "action=done"
-}
-
-@test "the private repo root is never a target" {
-  mkrepo "$GRID_PRIVATE_DIR"
-  rmdir "$P/LOGS"; ln -s "$GRID_PRIVATE_DIR" "$P/LOGS"; touch -h -t 202001010000 "$P/LOGS"
-  mk_tx 6
-  export STUB_CLAUDE_MODE=handoff-fallback
-  run_worker
-  lacks "$(allowed_rules)" "$(edit_rule "$GRID_PRIVATE_DIR")"
-  log_has "target-refused=private-root"
-}
-
-# Each row check on its own: HOME is made a git work tree (a dotfiles repo) so the
-# "inside a git work tree" check cannot be what refuses these.
-@test "row checks refuse for their own reason, with HOME itself a git work tree" {
+# --- where a LOGS link may point -------------------------------------------------------------
+# Each check on its own: HOME is made a git work tree (a dotfiles repo) so the "inside a git
+# work tree" check cannot be what refuses these.
+@test "LOGS link checks refuse for their own reason, with HOME itself a git work tree" {
   git -C "$HOME" init -q
   mkdir -p "$HOME/.ssh" "$HOME/.local/bin" "$HOME/.bashrc.d" "$HOME/project"
-  mkrepo "$MOCK_HOOK_ROOT/other-abs"
-  local rows=("~|home-or-root" "~/.ssh|sensitive-dir" "~/.local/bin|sensitive-dir" "~/.bashrc.d|sensitive-dir" \
-              "~/project|home-work-tree" "$MOCK_HOOK_ROOT/work/../other-abs|dotdot")
+  local rows=("$HOME|home-or-root" "$HOME/.ssh|sensitive-dir" "$HOME/.local/bin|sensitive-dir" \
+              "$HOME/.bashrc.d|sensitive-dir" "$HOME/project|home-work-tree")
   local row n=0 loc why
-  export STUB_CLAUDE_MODE=handoff-fallback
+  export STUB_CLAUDE_MODE=handoff-prompt
   for row in "${rows[@]}"; do
     n=$((n + 1)); loc="${row%%|*}"; why="${row##*|}"
     mk_tx 6
-    printf '| proj | %s |\n' "$loc" > "$GRID_PRIVATE_DIR/handoff-locations.md"
+    rm -rf "$P/LOGS"; ln -s "$loc" "$P/LOGS"; touch -h -t 202001010000 "$P/LOGS"
     SID="11111111-1111-4111-8111-55555555555$n"
     clear_run
     run_worker
-    log_has "target-refused=$why" || { echo "row '$loc' expected $why" >&2; cat "$LOG" >&2; return 1; }
+    log_has "action=error reason=target-refused why=$why" || { echo "link to '$loc' expected $why" >&2; cat "$LOG" >&2; return 1; }
+    [ ! -e "$STUB_DIR/claude.pid" ]
   done
+}
+
+@test "a LOGS link to the root of another git repo is accepted and committed there" {
+  mk_tx 6
+  mkother
+  export STUB_CLAUDE_MODE=handoff-prompt
+  before="$(commits "$OR")"
+  run_worker
+  log_has "action=done"
+  refute log_has "target-refused"
+  [ "$(commits "$OR")" -eq $((before + 1)) ]
 }
 
 # --- a git dir the child creates must never run code as the operator --------------------
 
 @test "a nested .git the child plants in the target dir is refused: no canary, no commit" {
-  mkdir -p "$P/notes/handoffs"; rmdir "$P/LOGS"
-  printf '| proj | notes/handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
   mk_tx 6
   CANARY="$MOCK_HOOK_ROOT/canary"
-  export STUB_CLAUDE_MODE=handoff-nested-git STUB_HANDOFF_DIR="$P/notes/handoffs" STUB_CANARY_CMD="touch $CANARY"
+  export STUB_CLAUDE_MODE=handoff-nested-git STUB_HANDOFF_DIR="$P/LOGS" STUB_CANARY_CMD="touch $CANARY"
   before="$(commits "$P")"
   run_worker
   log_has "action=error reason=unexpected-git-dir"
@@ -1573,15 +1619,13 @@ mkrepo() {
 # Defence in depth: with BOTH detections out, a planted fsmonitor must still not run,
 # because the worker's own git calls switch it off.
 @test "planted git config cannot execute through the worker's git calls (fsmonitor off)" {
-  mkdir -p "$P/notes/handoffs"; rmdir "$P/LOGS"
-  printf '| proj | notes/handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
   mk_tx 6
   CANARY="$MOCK_HOOK_ROOT/canary"
   # a worker copy with the two detections removed (the real files are untouched)
   W2="$BATS_TEST_TMPDIR/w2root"; mkdir -p "$W2/hooks" "$W2/scripts"
   cp -R "$REPO_ROOT/hooks/lib" "$W2/hooks/lib"; cp "$REPO_ROOT/scripts/run-record.sh" "$W2/scripts/"
   sed_i 's/^  have_gitdir "\$RG" || /  true || /; s/^if \[ "\${#NEWGIT\[@\]}" -gt 0 \]; then/if false; then/' "$W2/hooks/lib/auto-handoff-worker.sh"
-  export STUB_CLAUDE_MODE=handoff-nested-git STUB_HANDOFF_DIR="$P/notes/handoffs" STUB_CANARY_CMD="touch $CANARY"
+  export STUB_CLAUDE_MODE=handoff-nested-git STUB_HANDOFF_DIR="$P/LOGS" STUB_CANARY_CMD="touch $CANARY"
   run bash "$W2/hooks/lib/auto-handoff-worker.sh" "$SID" "$TXN" "$P" other
   [ ! -e "$CANARY" ]
 }
@@ -1638,22 +1682,10 @@ mkrepo() {
   [ -s "$BATS_TEST_TMPDIR/ssh.called" ]
 }
 
-@test "an absolute row inside the cwd that resolves outside through a tracked symlink is refused" {
-  mkrepo "$MOCK_HOOK_ROOT/victim"; mkdir -p "$MOCK_HOOK_ROOT/victim/sub"
-  mkdir -p "$P/docs"; ln -s "$MOCK_HOOK_ROOT/victim/sub" "$P/docs/handoffs"; touch -h -t 202001010000 "$P/docs/handoffs"
-  printf '| proj | %s |\n' "$P/docs/handoffs" > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  mk_tx 6
-  export STUB_CLAUDE_MODE=handoff-fallback
-  run_worker
-  lacks "$(allowed_rules)" "$MOCK_HOOK_ROOT/victim"
-  log_has "target-refused="
-  [ -z "$(ls -A "$MOCK_HOOK_ROOT/victim/sub")" ]
-}
-
-@test "a target that resolves into a git dir, or is the whole cwd, is refused" {
+@test "a target that resolves into a git dir, or is the whole project, is refused" {
   mkrepo "$GRID_PRIVATE_DIR"
   local n=0 what
-  export STUB_CLAUDE_MODE=handoff-fallback
+  export STUB_CLAUDE_MODE=handoff-prompt
   for what in "$P/.git" "$GRID_PRIVATE_DIR/.git" "$P/.git/hooks"; do
     n=$((n + 1))
     mk_tx 6
@@ -1661,37 +1693,16 @@ mkrepo() {
     SID="11111111-1111-4111-8111-66666666666$n"
     clear_run
     run_worker
-    log_has "target-refused=git-dir" || { echo "target $what" >&2; cat "$LOG" >&2; return 1; }
-    lacks "$(allowed_rules)" "$P/LOGS"
+    log_has "target-refused why=git-dir" || { echo "target $what" >&2; cat "$LOG" >&2; return 1; }
+    [ ! -e "$STUB_DIR/claude.pid" ]
   done
-  # the whole cwd as a target (a row of "."): refused as cwd-root
-  rm -f "$P/LOGS"; mkdir "$P/LOGS"
-  printf '| proj | . |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
+  # the whole project as a target (LOGS -> .): refused as cwd-root
+  rm -f "$P/LOGS"; ln -s "$P" "$P/LOGS"; touch -h -t 202001010000 "$P/LOGS"
   mk_tx 6
   SID="11111111-1111-4111-8111-666666666669"
   clear_run
   run_worker
-  log_has "target-refused=cwd-root"
-}
-
-@test "a relative row with a .. component is refused" {
-  mkdir -p "$P/notes/handoffs"
-  printf '| proj | notes/../notes/handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  mk_tx 6
-  export STUB_CLAUDE_MODE=handoff-fallback
-  run_worker
-  log_has "target-refused=dotdot"
-  lacks "$(allowed_rules)" "notes/handoffs"
-}
-
-@test "the locations table itself is watched: a change to it is unexpected-file" {
-  printf '| nothing | LOGS |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  touch -t 202001010000 "$GRID_PRIVATE_DIR/handoff-locations.md"
-  mk_tx 6
-  export STUB_CLAUDE_MODE=handoff-outside STUB_OUTSIDE_FILE="$GRID_PRIVATE_DIR/handoff-locations.md"
-  run_worker
-  log_has "action=error reason=unexpected-file"
-  grep -F "reason=unexpected-file" "$LOG" | grep -qF "handoff-locations.md"
+  log_has "target-refused why=cwd-root"
 }
 
 # ~/.local/bin holds the claude launcher link into a ~1 GB versions dir: it is watched by
@@ -1756,78 +1767,27 @@ two_casings() {
     || skip "case-insensitive file system"
 }
 
-# N1: when the row's directory exists in two casings, the skill's "any casing" rule has no
-# single answer. The first sorted variant used to win, and that variant could be a tracked
-# symlink into another work tree. Nothing is granted; the child writes to the fallback dir.
-@test "H-02: a row whose directory exists in two casings grants nothing" {
+# N1: when LOGS exists in two casings, the "any casing" rule has no single answer. The first
+# sorted variant used to win, and that variant could be a tracked symlink into another work
+# tree. Nothing is granted and nothing is written (there is no fallback directory).
+@test "H-02: LOGS and Logs both present: refused as ambiguous-case, nothing written anywhere" {
   mk_tx 6
   two_casings "$P/Logs" "$P/LOGS"
-  printf '| proj | logs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  export STUB_CLAUDE_MODE=handoff-fallback
+  export STUB_CLAUDE_MODE=handoff-prompt
   run_worker
-  log_has "target-refused=ambiguous-case"
-  lacks "$(allowed_rules)" "$P/LOGS"
-  lacks "$(allowed_rules)" "$P/Logs"
-  contains "$(claude_line)" "Target directory: none"
-  log_has "action=done"
+  log_has "action=error reason=target-refused why=ambiguous-case"
+  [ ! -e "$STUB_DIR/claude.pid" ]
+  [ -z "$(find "$P/LOGS" "$P/Logs" -type f)" ]
+  no_stray_handoffs
 }
 
-@test "H-02: an exact-case row is ambiguous too when another casing exists" {
+@test "H-02: LOGS and logs both present: refused as ambiguous-case too" {
   mk_tx 6
   two_casings "$P/logs" "$P/LOGS"
-  printf '| proj | LOGS |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  export STUB_CLAUDE_MODE=handoff-fallback
+  export STUB_CLAUDE_MODE=handoff-prompt
   run_worker
-  log_has "target-refused=ambiguous-case"
-  lacks "$(allowed_rules)" "$P/LOGS"
-  lacks "$(allowed_rules)" "$P/logs"
-}
-
-@test "H-02: the default LOGS lookup refuses two casings as well" {
-  mk_tx 6
-  rm -f "$GRID_PRIVATE_DIR/handoff-locations.md"
-  two_casings "$P/Logs" "$P/LOGS"
-  export STUB_CLAUDE_MODE=handoff-fallback
-  run_worker
-  log_has "target-refused=ambiguous-case"
-  lacks "$(allowed_rules)" "$P/LOGS"
-  lacks "$(allowed_rules)" "$P/Logs"
-}
-
-# N4: the skill matches the DIRECTORY case-insensitively, which includes the components on the way.
-@test "H-02: a row is matched case-insensitively at every component, not only the last" {
-  mk_tx 6
-  mkdir -p "$P/docs/handoffs"; rmdir "$P/LOGS"
-  printf '| proj | Docs/Handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$P/docs/handoffs"
-  run_worker
-  contains "$(allowed_rules)" "$(edit_rule "$P/docs/handoffs")"
-  refute log_has "target-refused"
-  log_has "action=done"
-  git -C "$P" show --name-only --format= HEAD | grep -q "^docs/handoffs/2026-01-01-testhost-stub-handoff.md$"
-}
-
-@test "H-02: two casings of an intermediate component grant nothing" {
-  mk_tx 6
-  two_casings "$P/docs" "$P/Docs"
-  mkdir -p "$P/docs/handoffs" "$P/Docs/handoffs"; rmdir "$P/LOGS"
-  printf '| proj | DOCS/handoffs |\n' > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  export STUB_CLAUDE_MODE=handoff-fallback
-  run_worker
-  log_has "target-refused=ambiguous-case"
-  lacks "$(allowed_rules)" "$P/docs"
-  lacks "$(allowed_rules)" "$P/Docs"
-}
-
-@test "H-02: an absolute row written in another casing still finds the other repo" {
-  mkrepo "$MOCK_HOOK_ROOT/other-abs"
-  printf '| proj | %s/Other-ABS |\n' "$MOCK_HOOK_ROOT" > "$GRID_PRIVATE_DIR/handoff-locations.md"
-  mk_tx 6
-  export STUB_CLAUDE_MODE=handoff-target STUB_HANDOFF_DIR="$MOCK_HOOK_ROOT/other-abs"
-  run_worker
-  contains "$(allowed_rules)" "$(edit_rule "$MOCK_HOOK_ROOT/other-abs")"
-  refute log_has "target-refused"
-  log_has "action=done"
+  log_has "action=error reason=target-refused why=ambiguous-case"
+  [ -z "$(find "$P/LOGS" "$P/logs" -type f)" ]
 }
 
 # N8 / VE5: configuration that the user's own config pulls in is configuration too.
@@ -1994,16 +1954,16 @@ inc_conf() { printf '[core]\n\tpager = cat\n' > "$1"; touch -t 202001010000 "$1"
   grep -F "reason=unexpected-file" "$LOG" | grep -qF "deleted=base.txt"
 }
 
-@test "H-02: a deleted symlink and a deleted file in the fallback dir are reported too" {
+@test "H-02: a deleted symlink and a deleted file in the LOGS dir are reported too" {
   mk_tx 6
   ln -s base.txt "$P/alias"; touch -h -t 202001010000 "$P/alias"
   export STUB_CLAUDE_MODE=handoff-logs STUB_DELETE_FILE="$P/alias"
   run_worker
   grep -F "reason=unexpected-file" "$LOG" | grep -qF "deleted=alias"
-  mkdir -p "$GRID_HANDOFF_FALLBACK_DIR/proj"; echo old > "$GRID_HANDOFF_FALLBACK_DIR/proj/old-note.md"
-  touch -t 202001010000 "$GRID_HANDOFF_FALLBACK_DIR/proj/old-note.md"
+  echo old > "$P/LOGS/old-note.md"
+  touch -t 202001010000 "$P/LOGS/old-note.md"
   SID="11111111-1111-4111-8111-999999999999"; clear_run; mk_tx 6
-  export STUB_DELETE_FILE="$GRID_HANDOFF_FALLBACK_DIR/proj/old-note.md"
+  export STUB_DELETE_FILE="$P/LOGS/old-note.md"
   run_worker
   grep -F "reason=unexpected-file" "$LOG" | grep -qF "deleted="
   grep -F "reason=unexpected-file" "$LOG" | grep -qF "old-note.md"
@@ -2048,22 +2008,22 @@ inc_conf() { printf '[core]\n\tpager = cat\n' > "$1"; touch -t 202001010000 "$1"
   log_has "action=done"
 }
 
-# VS5: every row check refuses for its own reason (HOME is a work tree, so the work-tree
+# VS5: every LOGS-link check refuses for its own reason (HOME is a work tree, so the work-tree
 # check cannot be what refuses these).
 @test "H-02: each sensitive home directory and CLAUDE_CONFIG_DIR is refused on its own" {
   git -C "$HOME" init -q
   mkdir -p "$HOME/.claude" "$HOME/.config" "$HOME/.gnupg" "$HOME/.aws/sub"
   mkrepo "$MOCK_HOOK_ROOT/ccrepo"; mkdir -p "$MOCK_HOOK_ROOT/ccrepo/cfg/sub"
   export CLAUDE_CONFIG_DIR="$(cd "$MOCK_HOOK_ROOT/ccrepo/cfg" && pwd -P)"
-  local rows=("~/.claude" "~/.config" "~/.gnupg" "~/.aws/sub" "$CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR/sub")
+  local rows=("$HOME/.claude" "$HOME/.config" "$HOME/.gnupg" "$HOME/.aws/sub" "$CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR/sub")
   local row n=0
-  export STUB_CLAUDE_MODE=handoff-fallback
+  export STUB_CLAUDE_MODE=handoff-prompt
   for row in "${rows[@]}"; do
     n=$((n + 1)); mk_tx 6
-    printf '| proj | %s |\n' "$row" > "$GRID_PRIVATE_DIR/handoff-locations.md"
+    rm -rf "$P/LOGS"; ln -s "$row" "$P/LOGS"; touch -h -t 202001010000 "$P/LOGS"
     SID="11111111-1111-4111-8111-44444444444$n"
     clear_run
     run_worker
-    log_has "target-refused=sensitive-dir" || { echo "row '$row' expected sensitive-dir" >&2; cat "$LOG" >&2; return 1; }
+    log_has "target-refused why=sensitive-dir" || { echo "LOGS link to '$row' expected sensitive-dir" >&2; cat "$LOG" >&2; return 1; }
   done
 }

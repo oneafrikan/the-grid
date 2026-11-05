@@ -139,9 +139,11 @@ PY
   if grep -n 'kill-list above' "$REPO_ROOT/skills/un-claudish/SKILL.md"; then false; fi
 }
 
-@test "handoff SKILL.md has no 'create the directory if it doesn't exist' (contradicts ask-before-creating)" {
-  if grep -in "create the directory if it doesn't exist" "$REPO_ROOT/skills/handoff/SKILL.md"; then false; fi
-  grep -q 'ask before creating' "$REPO_ROOT/skills/handoff/SKILL.md"
+@test "handoff SKILL.md: always the project's LOGS, created when missing, no table or private fallback" {
+  local s="$REPO_ROOT/skills/handoff/SKILL.md"
+  grep -q 'create `LOGS` and write there' "$s"
+  if grep -in 'ask before creating' "$s"; then false; fi
+  if grep -inE 'handoff-locations|GRID_PRIVATE_DIR|the-grid-private|fallback' "$s"; then false; fi
 }
 
 # The shortening pass dropped the natural-language prompts people actually type (D81:
