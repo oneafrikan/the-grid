@@ -43,7 +43,9 @@ references in that text point at things that are not there:
 - `repos/openspec`, the wired `security-reviewer` skill and the jeffallan skills.
 - `/tron` reads `~/.claude` to see what is wired; on a plugin-only machine that is empty.
 - Orchestrator rosters name agents by bare name (`grid-qa-engineer`); installed agents
-  carry the `grid-agents:` namespace. Whether the bare name resolves is unverified.
+  carry the `grid-agents:` namespace. In Cowork the namespaced names resolved and the
+  orchestrator mapped the bare roster names to them itself; a bare name passed directly to
+  a plugin agent is unverified.
 
 Each bundle carries `LICENSE` and `THIRD-PARTY-NOTICES.md` (copies of the repo root's).
 Not every root skill is shipped: `exclude_skills` in `plugins/bundles.json` records each
@@ -80,13 +82,13 @@ Observed 2026-11-05 on macOS unless marked. Delegation-gate results: `docs/busin
 - **Third-party skills in Cowork**: the bundles carry only the-grid's own content. Add these upstream marketplaces in Cowork the same way (each ships `.claude-plugin/marketplace.json`): `anthropics/skills`, `jeffallan/claude-skills`, `mattpocock/skills`, `DietrichGebert/ponytail`, `obra/superpowers`.
 - No marketplace, so not installable in Cowork this way: `garrytan/gstack`, `HubSpot/agent-cli-skills`, `Fission-AI/openspec`.
 
-Cowork limits (observed):
+Cowork limits (observed; one `/gsd` run, details self-reported by Cowork):
 
-- Plugin subagents are not listed among Cowork's subagent types (only its built-ins). An explicit Agent call with the namespaced name `grid-agents:grid-qa-engineer` still resolved and ran.
-- That subagent's tools ran in Cowork's cloud container (as Cowork reported), which cannot see the folder connected on the Mac. The main session fell back to the linked computer.
-- The Cowork main session can read and run commands on the Mac's connected folder through the linked computer. Only subagents run in the cloud container without it.
-- So orchestrators in Cowork cannot hand local-file work to specialists. Use the Code tab for repo and file work.
-- `/grid-agents:gsd` listed its specialists by bare name. Given a file-summary task it worked through the linked computer itself and invoked no subagent, so bare-name resolution in Cowork is untested.
+- Plugin subagents are not listed among Cowork's subagent types (only its built-ins), yet orchestrators call them by namespaced name (`grid-agents:grid-technical-writer`, `grid-agents:grid-qa-engineer`) and they ran. The roster names agents bare; in that run the orchestrator mapped them to namespaced names itself. A bare name passed directly to a plugin agent is untested.
+- Subagent tools run in Cowork's cloud container, which cannot reach the folder connected on the Mac. The main session can read and run commands on that folder through the linked computer.
+- Local-file work with specialists therefore goes by staging: the main session copies the files into the container, subagents work on the copies, and the main session writes the results back to the Mac. Observed: `/gsd` on two markdown files made 3 subagent calls (two writers in parallel, then one QA pass against the originals); none failed.
+- Write-back replaces the originals in place. Keep the folder under git or back it up first; without git the only originals were in the container.
+- Cowork's container has no access to the Mac's git checkout. Use the Code tab for git repos and worktrees.
 - Installed Cowork plugins were not found on the host under `~/Library/Application Support/Claude`. Where Cowork stores them is unknown.
 
 ## Maintaining the bundles

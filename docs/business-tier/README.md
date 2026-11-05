@@ -15,8 +15,8 @@ context applied. No terminal, no Python, no clone.
 to plugin-supplied subagents?** If yes, the plugin route works as designed. If
 not, the design degrades (see [DELEGATION-GATE.md](DELEGATION-GATE.md)).
 **Answered 2026-11-05 (ADR-008):** Cowork delegates to plugin subagents by namespaced
-name but its subagent tools cannot see the Mac's connected folder; the Code tab
-delegates and sees local files. The business tier ships single-thread skills only;
+name; its subagents work on copies the main session stages into the cloud container and
+writes back. The Code tab delegates and sees local files directly. The business tier ships single-thread skills only;
 Cowork carries the full grid plugins.
 
 ## Reading order
@@ -39,15 +39,14 @@ Cowork carries the full grid plugins.
 
 | # | Question | Blocks | Where |
 |---|----------|--------|-------|
-| OQ-1 | Does Cowork delegate to plugin subagents? Does the Code tab? | everything | **Answered** (ADR-008): both delegate; Cowork subagents have no local-file access (its main session does) |
+| OQ-1 | Does Cowork delegate to plugin subagents? Does the Code tab? | everything | **Answered** (ADR-008): both delegate; Cowork subagents work on files the main session stages in and writes back |
 | OQ-2 | How does business context reach the grid's agents (read-first skill vs build-time injection)? | bundle design | SPEC |
 | OQ-3 | Can a non-technical Mac add a private GitHub marketplace (git credentials)? | onboarding | DELEGATION-GATE |
 | OQ-4 | Do marketplace updates reach colleagues without action? | maintenance | DELEGATION-GATE |
-| OQ-5 | Do orchestrators that name agents bare (`grid-qa-engineer`) resolve against namespaced plugin agents (`grid-agents:grid-qa-engineer`)? | orchestration | **Open.** Namespaced resolves in Cowork; bare untested there (a `/gsd` run delegated nothing). DELEGATION-GATE |
+| OQ-5 | Do orchestrators that name agents bare (`grid-qa-engineer`) resolve against namespaced plugin agents (`grid-agents:grid-qa-engineer`)? | orchestration | **Answered for Cowork** (ADR-008): namespaced resolve; the orchestrator mapped bare roster names itself; a bare name passed directly to a plugin agent is untested. DELEGATION-GATE |
 | OQ-6 | Evaluate Orca as the model for a non-technical ADE (ADR-005). Not yet looked at. | long-term | DECISIONS |
 
 ## Next actions
 
-1. Test OQ-5 in Cowork: an orchestrator delegating to a specialist by bare name (DELEGATION-GATE).
-2. Test OQ-3 (private marketplace credentials) and OQ-4 (update propagation), both untested.
-3. Then: build `research-brief` (Phase 2), then the business-repo template and builder changes.
+1. Test OQ-3 (private marketplace credentials) and OQ-4 (update propagation), both untested.
+2. Then: build `research-brief` (Phase 2), then the business-repo template and builder changes.
