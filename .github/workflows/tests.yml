@@ -86,6 +86,41 @@ jobs:
           echo "docs_only=$docs_only"
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
 
+  # The light job a docs-only change runs INSTEAD of `checks`/`bats` (about a minute, not tens).
+  # Skipping everything would let a markdown edit break checks that read markdown: the personal-
+  # data scan, MAP.md and README count drift, and the front-door docs tests. These four are the
+  # ones that need no venv and no submodule other than bats-core (stdlib python3 only), each run
+  # exactly as scripts/gate.sh runs its stage of the same name. Left out because they need more
+  # setup than this job should have: catalog/sources/budget (need the baseline submodules).
+  docs:
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Only the bats runner: the full `submodules: recursive` checkout is what makes `checks` slow.
+      - name: Fetch bats-core
+        run: git submodule update --init --depth 1 tests/lib/bats-core
+
+      # Same as gate.sh `personal` on CI: no private denylist, generic patterns only.
+      - name: Personal-data scan
+        run: bash scripts/check-personal.sh
+
+      - name: MAP.md is current
+        run: python3 scripts/map.py --check --root "$GITHUB_WORKSPACE"
+
+      - name: README/index.html counts are current
+        env:
+          GRID_DIR: ${{ github.workspace }}
+        run: python3 scripts/stamp-counts.py --check
+
+      - name: Front-door docs tests
+        run: tests/lib/bats-core/bin/bats tests/test_front_door.bats
+
   # Every gate check except bats, run once. The bats suite is split into the shard jobs
   # below (about 21 of the 24 minutes a single job took); the `gate` job at the end
   # aggregates both.
@@ -166,14 +201,14 @@ jobs:
         run: bash scripts/gate.sh --strict --shard "$SHARD"
 
   # The ONE check the main ruleset requires: keep the job id and name `gate`.
-  # It needs every other job. A docs-only change skips `checks` and `bats` on purpose, and gate
-  # then reports success (but only if `changes` itself succeeded). Otherwise it passes only if
-  # each of `checks` and `bats` finished `success`. `if: always()` makes it run (and fail) when a
+  # It needs every other job. A docs-only change skips `checks` and `bats` on purpose and runs the
+  # light `docs` job instead: gate then passes only if `changes` and `docs` both succeeded.
+  # Otherwise it passes only if each of `checks` and `bats` finished `success`. `if: always()` makes it run (and fail) when a
   # needed job failed, was cancelled or was skipped; without it a skipped gate would count as
   # passing. A draft PR skips every job, gate included, as before.
   gate:
     if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
-    needs: [changes, checks, bats]
+    needs: [changes, docs, checks, bats]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -181,16 +216,20 @@ jobs:
         env:
           CHANGES: ${{ needs.changes.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          DOCS: ${{ needs.docs.result }}
           # `bats` is the matrix as a whole: its result is success only if every shard was.
           RESULTS: "checks=${{ needs.checks.result }} bats=${{ needs.bats.result }}"
         run: |
-          echo "changes=$CHANGES docs_only=$DOCS_ONLY"
+          echo "changes=$CHANGES docs_only=$DOCS_ONLY docs=$DOCS"
           echo "$RESULTS"
           if [ "$CHANGES" != "success" ]; then
             echo "gate: FAIL — the changes job was not success ($CHANGES)" >&2; exit 1
           fi
           if [ "$DOCS_ONLY" = "true" ]; then
-            echo "gate: SKIPPED (docs-only change)"; exit 0
+            if [ "$DOCS" != "success" ]; then
+              echo "gate: FAIL — docs-only change, but the docs job was not success ($DOCS)" >&2; exit 1
+            fi
+            echo "gate: docs-only change, light docs checks passed"; exit 0
           fi
           case "$RESULTS" in
             "checks=success bats=success") ;;
