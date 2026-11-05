@@ -192,7 +192,7 @@ are summarised; every other top-level directory, and every file under `scripts/`
     prune-keep.txt      ← names the prune report never proposes to drop
     architect-agent-composition.yaml ← sample compose config from the early design
     architect-agent-factory ← sketch of the early agent-factory tree
-    business-tier/      ← design for a business repo published as a plugin marketplace
+    business-tier/      ← business tier: v0 built as a plain repo (ADR-009); design, decisions and research
       README.md, SPEC.md, DECISIONS.md, RESEARCH.md, DELEGATION-GATE.md
   index.html            ← the GitHub Pages landing page
   site-files.txt        ← the paths GitHub Pages publishes (read by scripts/stage-site.sh)

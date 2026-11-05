@@ -7,6 +7,7 @@ Format: status, date, decision, why, consequences. Add; do not rewrite history. 
 - **Decision:** deliver the grid to non-terminal colleagues as Claude Code plugins distributed from a private git marketplace, consumed in Claude Desktop (Cowork and Code tab).
 - **Why:** plugins install in Cowork, the Code tab and the terminal from one artefact; the public grid already builds two plugins; no new UI to maintain.
 - **Consequence:** gated on the delegation question (DELEGATION-GATE).
+- **Update 2026-11-05:** gate answered (ADR-008). For v0 the grid-bundled-plugins part is deferred by ADR-009.
 
 ## ADR-002 — Agents come from the grid; the business repo holds context (accepted, 2026-10-18)
 
@@ -18,6 +19,7 @@ Format: status, date, decision, why, consequences. Add; do not rewrite history. 
 
 - **Decision:** `compose.py` and the plugin builder run in CI against a pinned grid checkout. Colleagues install built plugins only.
 - **Why:** removes git, Python and venv from non-technical machines. Matches the design of `scripts/build-plugins.py` (generated, committed, drift-checked).
+- **Update 2026-11-05:** deferred for v0 by ADR-009 (no builder, no CI). Colleagues still consume built output: `scripts/package.sh` output, committed.
 
 ## ADR-004 — The private tier is not part of a colleague install (accepted, 2026-10-18)
 
@@ -35,6 +37,7 @@ Format: status, date, decision, why, consequences. Add; do not rewrite history. 
 
 - **Decision:** the first hand-built artefact is the throwaway delegation probe, then `research-brief`. Building is deferred; the operator runs the pilot on a Mac.
 - **Why:** delegation is the deciding question and the probe answers it in about 30 minutes.
+- **Update 2026-11-05:** the pilot order for the first artefacts is superseded by ADR-009 (v0 started with two other skills; `research-brief` is not built).
 
 ## ADR-007 — Plan tiers are out of scope (accepted, 2026-10-18)
 
@@ -60,3 +63,25 @@ Format: status, date, decision, why, consequences. Add; do not rewrite history. 
   - The business-tier skills are single-thread either way.
   - The ADR-005 interaction clause (ADE as main path if Cowork cannot delegate) is not triggered; ADR-005 stays open as a long-term direction.
   - Still untested: OQ-3 (private marketplace credentials), OQ-4 (update propagation), Cowork self-install, docx output.
+
+## ADR-009 — Business tier v0: plain repo, marketplace for git users, zip upload for everyone else (accepted, 2026-11-05)
+
+- **Decision (operator):** build the business repo as the simplest thing that works. It supersedes the builder-first plan (ADR-002/ADR-003 as the v0 path); ADR-008 still sets the surface split (business tier is single-thread skills).
+  - **Repo:** a private repo in the business's own GitHub org (`the-grid-<business>`). The org is on the Team plan, so there is no "internal" visibility; per-team read access is to be arranged with the org admin.
+  - **No builder, no CI, nothing composed from the grid.** Layout:
+    - `.claude-plugin/marketplace.json` lists one plugin.
+    - Skills live in `plugins/<plugin>/skills/<name>/`: `SKILL.md`, plus optional `references/` and `assets/`.
+    - `scripts/package.sh` builds `dist/<name>/`: the `SKILL.md` plus ONE zip of the whole skill folder (assets included). Reproducible, committed.
+  - **Two install routes:**
+    - People with git access to the org add the repo as a plugin marketplace (`claude plugin marketplace add <org>/<repo>`; in Cowork, from its plugin settings) and install the plugin.
+    - Everyone else downloads `dist/<name>/<name>.zip` and uploads it in Claude > Customize > Skills. If the upload rejects the assets, they unzip it, upload the skill, and add the assets into the chat.
+  - **First skills:** two self-contained ones, a house email-style skill and a PowerPoint brand-guide skill that bundles its template and assets.
+- **Why:** smallest footprint that gets skills to colleagues now. The zip route needs no git, no terminal and no plugin install. The marketplace route covers the people who do have org access.
+- **Deferred, not planned now:**
+  - the builder that composes bundles from a pinned grid (`grid.pin`, `bundles.json`);
+  - layering business context into grid roles (OQ-2);
+  - the project-factory business-repo template;
+  - CI on the business repo.
+- **Consequences:**
+  - OQ-3 (private marketplace credentials) only matters to the git-access route.
+  - Still untested: that Customize > Skills accepts a skill zip with assets (the fallback above is the workaround), update propagation (OQ-4), and per-team access (needs the org admin).
