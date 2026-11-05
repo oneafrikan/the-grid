@@ -2,6 +2,14 @@
 
 Claude Code users can install a git repo that ships `.claude-plugin/marketplace.json` with two commands, no clone, no submodules, no `wire.sh`. the-grid has no such channel, so a Claude-Code-only visitor must clone and wire to try anything. Two small bundles of the-grid's own content (`grid-core`, `grid-agents`) give a zero-friction trial path. It stays secondary to the harness-neutral `grid install` (change `manifest-lock-install`).
 
+## Status (2026-11-05)
+
+Shipped. Groups 1 to 4 are done (issues #159 to #162 closed): the builder, the manifest, the generated bundles and marketplace file, the gate checks, `docs/PLUGINS.md`, the provenance review (recorded in `THIRD-PARTY-NOTICES.md` on 2026-11-04) and the publish step. Both bundles are version 0.1.0 and the repo tag `v0.1.0` exists with a GitHub release. Marketplace add and install of both bundles were verified from a clean config.
+
+Differences from the text below: `grid-core` now includes five cross-desk agents (`core-context-engineer` was added after the design was written) and `grid-agents` also ships the `gsd` skill beside the three orchestrators; pinning an install to a tag is unverified and not documented (`docs/PLUGINS.md`); there is no `next` branch.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - Add `plugins/bundles.json`: hand-authored membership manifest (version, owned skills per bundle, which composed projects feed it).

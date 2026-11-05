@@ -5,7 +5,7 @@ Make a green CI run mean the same thing as a green local gate, so the unattended
 ## ADDED Requirements
 
 ### Requirement: CI runs the commit gate with the agent-factory venv
-The CI workflow SHALL run on pushes to `main` and `next` and on every pull request, build `agent-factory/.venv` from `agent-factory/requirements.txt`, and run `bash scripts/gate.sh`, on a pinned runner image with read-only repository permissions, with machine-only tests skipping on a runner.
+The CI workflow SHALL run on pushes to `main` and on every pull request that is not a draft (a draft runs nothing until it is marked ready for review; `main` is the only long-lived branch), build `agent-factory/.venv` from `agent-factory/requirements.txt`, and run `bash scripts/gate.sh`, on a pinned runner image with read-only repository permissions, with machine-only tests skipping on a runner.
 
 #### Scenario: Venv-dependent tests run on a runner
 - **WHEN** the workflow runs on a pull request
@@ -16,9 +16,13 @@ The CI workflow SHALL run on pushes to `main` and `next` and on every pull reque
 - **WHEN** `shellcheck` is not installed on the runner
 - **THEN** the workflow fails at the shellcheck check step instead of the gate skipping lint
 
-#### Scenario: Push to next is gated
-- **WHEN** a commit is pushed to `next`
+#### Scenario: Push to main is gated
+- **WHEN** a commit is pushed to `main`
 - **THEN** the workflow runs
+
+#### Scenario: Draft pull request is not gated
+- **WHEN** a pull request is a draft
+- **THEN** no job runs, and marking it ready for review starts the run
 
 #### Scenario: Workflow regression is caught
 - **WHEN** `CI=true` and `agent-factory/.venv/bin/python` does not exist

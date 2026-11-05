@@ -1,6 +1,6 @@
 ## Purpose
 
-Guarantee that a non-trivial Claude Code session on any machine with the-grid ends with a full-quality handoff document, written by the real `handoff` skill, without the operator having to remember it, without blocking session exit, without touching the operator's other work, and without committing or pushing anything but the handoff itself.
+Guarantee that a non-trivial Claude Code session on any machine with the-grid ends with a full-quality handoff document, written by the real `handoff` skill, without the operator having to remember it, without blocking session exit, without touching the operator's other work, and without committing anything but the handoff itself. Where the handoff lands is fixed: the project's `LOGS` folder, nothing else. After the commit the worker pushes the current branch (2026-11-05, commit e6b0a44; before that it pushed only a private repo, and only when the handoff was the sole unpushed commit).
 
 ## ADDED Requirements
 
@@ -98,15 +98,47 @@ The worker SHALL skip a session when the transcript shows a handoff already ran 
 - **THEN** the worker starts `claude`; with an unreadable transcript it still logs `reason=no-transcript`
 
 ### Requirement: Capped, verified run of the real skill that commits only its own files
-The worker SHALL run `claude -p` in the session's `cwd` with a prompt beginning `/handoff`, `--model sonnet`, `--max-budget-usd`, a tool set limited to `Read`, write access scoped by path to the target and fallback directories (`Edit(//<abs dir>/**)` allow rules in default permission mode, never a bare `Write` or `Edit`) and read-only Bash with `Edit` and all git denied, a wall-clock timeout and a compact transcript digest file, and MUST instruct the child to write only the two handoff files and run no git. The worker itself SHALL then scan every new file under `cwd` (no depth limit) and the fallback directory, refuse to commit (moving nothing) if any new path is outside the verified handoff pair, never move or delete anything under `.git/`, refuse to commit if `.git/config` or `.git/hooks/` changed during the child run, verify that the expected handoff files exist, secret-scan them, commit only them by explicit path, push only the private repo and only when that commit is the sole unpushed one, log every decision and record the outcome with `scripts/run-record.sh`.
+The worker SHALL run `claude -p` in the session's `cwd` with a prompt beginning `/handoff` that names the target directory, `--model sonnet`, `--max-budget-usd`, `--tools Read,Write,Bash`, `--permission-mode default`, `--setting-sources user` and `--strict-mcp-config`, write access scoped by path to ONE directory (an `Edit(//<abs dir>/**)` allow rule for the resolved `LOGS` folder, never a bare `Write` or `Edit`) and read-only Bash with `Edit` and all git denied, a wall-clock timeout and a compact transcript digest file, and MUST instruct the child to write only the two handoff files and run no git. The target is always the `LOGS` folder of the project: the project is the root of the git repo containing `cwd`, else `cwd` itself; an existing `logs`, `Logs` or `LOGS` directory is reused as it is and `LOGS` is created (mode 0755) when none exists. There is no fallback directory, no per-project location table and no environment override. A `LOGS` the worker cannot use SHALL end the run with `action=error reason=target-refused why=<reason>` before any child starts, writing nothing: `cwd-root` or `git-dir` (the folder is the project root or a git directory), `home-or-root`, `sensitive-dir`, `not-a-git-work-tree` or `home-work-tree` (a symlinked `LOGS` that resolves outside the project is accepted only into another git work tree whose root is not `$HOME` or `/`), `ambiguous-case` (two casings exist), `mkdir-failed`, or `unsafe-path` (a glob metacharacter, newline or `..` in the path). The worker itself SHALL then scan every new file under `cwd` (no depth limit) and the target directory, refuse to commit (moving nothing) if any new path is outside the verified handoff pair, never move or delete anything under `.git/`, refuse to commit if `.git/config` or `.git/hooks/` changed during the child run, verify that the expected handoff files exist, secret-scan them, commit only them by explicit path in the repository that holds the files, push the current branch of that repository to its upstream with a plain `git push`, log every decision and record the outcome with `scripts/run-record.sh`. A push that cannot happen or fails SHALL leave the commit local and MUST NOT fail the handoff.
 
 #### Scenario: Invocation shape
 - **WHEN** the worker spawns the child with the stub `claude` that `make_stubs` exports as `GRID_CLAUDE`
-- **THEN** the stub receives `-p` with a prompt starting `/handoff`, `--model sonnet`, `--max-budget-usd`, `--tools` without `Edit`, `--allowedTools` with no `git` pattern, no bare `Write` or `Edit` and an `Edit(//<abs dir>/**)` rule for the fallback dir (and for the resolved target directory when it exists: the matching `handoff-locations.md` row, else `<cwd>/LOGS`), `--disallowedTools` naming `Edit` and `Bash(git:*)`, and `--append-system-prompt-file`, receives `--max-turns 25` and no `--permission-mode`, and its working directory equals the payload `cwd`
+- **THEN** the stub receives `-p` with a prompt starting `/handoff` and ending `Target directory: <abs project>/LOGS.`, `--model sonnet`, `--max-budget-usd`, `--max-turns 25`, `--tools Read,Write,Bash`, `--permission-mode default`, `--allowedTools` holding `Read`, exactly one `Edit(//<abs LOGS>/**)` rule, no `git` pattern and no bare `Write` or `Edit`, `--disallowedTools` naming `Edit` and `Bash(git:*)`, exactly one `--add-dir` (the digest directory) and `--append-system-prompt-file`, and its working directory equals the payload `cwd`
 
 #### Scenario: Write-only rules are in the system prompt
 - **WHEN** the test reads `hooks/lib/auto-handoff-system.md`
-- **THEN** it contains `do not run git`, `never push`, `write nothing else`, `if a write is denied, write both files to the fallback dir`, `run single commands only`, and the fallback directory variable `GRID_HANDOFF_FALLBACK_DIR`
+- **THEN** it is under 1500 bytes and contains `do not run git`, `never push`, `write nothing else`, `if a write is denied, stop and say so`, `the project's LOGS folder` and `run single commands only`, and neither the word `fallback` nor a URL
+
+#### Scenario: LOGS is the target
+- **WHEN** the stub child writes the two handoff files into `<repo root>/LOGS`
+- **THEN** the worker commits exactly those two files, the log has `action=done reason=ok` and the run record has outcome `ok`
+
+#### Scenario: LOGS is created when missing
+- **WHEN** the project has no `logs`, `Logs` or `LOGS` directory
+- **THEN** the worker creates `LOGS` before the child starts and the pair is written and committed there
+
+#### Scenario: No git repo
+- **WHEN** `cwd` is not inside a git repository
+- **THEN** `<cwd>/LOGS` is the target, the files are only written, the log has `commit=none` and no `push=` field
+
+#### Scenario: A subdirectory of a repo
+- **WHEN** `cwd` is a subdirectory of a git repo
+- **THEN** the repo root's `LOGS` is the target
+
+#### Scenario: An existing Logs directory is reused
+- **WHEN** the project has a `Logs` directory and no `LOGS`
+- **THEN** the pair is written into `Logs` and no second directory is created in another casing
+
+#### Scenario: A LOGS symlink into another repo
+- **WHEN** `LOGS` is a symlink to a directory in another git work tree (the private-repo layout)
+- **THEN** the pair is committed, and pushed, in THAT repo, and the project repo has no new commit
+
+#### Scenario: The private fallback and the locations table are gone
+- **WHEN** `GRID_HANDOFF_FALLBACK_DIR`, a `handoffs/` directory in the private repo and a `handoff-locations.md` row for the project all exist
+- **THEN** none of them is read or written, the child's `--allowedTools` holds no rule for them, and the prompt names no fallback
+
+#### Scenario: A refused LOGS writes nothing
+- **WHEN** `LOGS` is a symlink to the project's `.git` directory
+- **THEN** the log has `action=error reason=target-refused why=git-dir`, no child was started, nothing is written anywhere and the run record has outcome `error`
 
 #### Scenario: Unexpected file refused
 - **WHEN** the stub child writes the two handoff files and also `.git/hooks/x`
@@ -116,14 +148,6 @@ The worker SHALL run `claude -p` in the session's `cwd` with a prompt beginning 
 - **WHEN** the stub child writes the two handoff files into `LOGS/` and also `a/b/c/d/e/stray.md` under `cwd`
 - **THEN** the worker logs `action=error reason=unexpected-file` naming `a/b/c/d/e/stray.md`, makes no commit, and moves nothing: `stray.md` and both handoff files stay where they were written
 
-#### Scenario: Mapped location outside cwd is committed in its own repo
-- **WHEN** the matching `handoff-locations.md` row maps the cwd to an absolute directory outside `cwd` that is its own git repo, and the stub child writes the two handoff files there
-- **THEN** the worker finds them, commits exactly the two files in that repo, and the cwd repo has no new commit and no change
-
-#### Scenario: Mapped handoff location
-- **WHEN** `~/.the-grid-private/handoff-locations.md` has a row matching the cwd that maps it to an existing `notes/handoffs` directory
-- **THEN** the child's `--allowedTools` holds `Edit(//<cwd>/notes/handoffs/**)` and no rule for `LOGS`
-
 #### Scenario: Secret in a handoff file
 - **WHEN** the stub child writes a handoff file containing a secret-shaped token
 - **THEN** the worker logs `action=error reason=secret` without the token value, makes no commit, and both files are now in the machine-local quarantine directory `${GRID_STATE_DIR:-$HOME/.grid}/handoff-quarantine/`, outside every git repository
@@ -132,17 +156,25 @@ The worker SHALL run `claude -p` in the session's `cwd` with a prompt beginning 
 - **WHEN** the operator has another file staged in the repo and the stub child writes the two handoff files into `LOGS/`
 - **THEN** the new commit contains exactly the two handoff files and the other file is still staged and uncommitted
 
-#### Scenario: Private repo pushed when the handoff is the only unpushed commit
-- **WHEN** the handoff files land in the repo at `GRID_PRIVATE_DIR`, which has an upstream and no other unpushed commit
+#### Scenario: The handoff commit is pushed
+- **WHEN** the handoff files land in a repo whose branch tracks an upstream
 - **THEN** the worker pushes, the upstream holds the handoff commit, and the log has `push=yes`
 
-#### Scenario: No push when other commits are unpushed
-- **WHEN** the private repo already holds one unpushed commit before the run
-- **THEN** the worker commits the handoff but does not push, the upstream is unchanged, and the log has `push=no-other-commits`
+#### Scenario: Other unpushed commits are published with it
+- **WHEN** the branch already holds an unpushed commit before the run
+- **THEN** the plain push publishes that commit too, and the log has `push=yes`
 
-#### Scenario: Other repos are never pushed
-- **WHEN** the handoff files land in a repo that is not the private repo
-- **THEN** the worker commits them, does not push, and the log has `push=no-not-private`
+#### Scenario: No upstream
+- **WHEN** the repo has a remote but the current branch has no upstream, or HEAD is detached
+- **THEN** the commit stays local, the log has `push=no-upstream`, and the run still ends `action=done reason=ok`
+
+#### Scenario: No remote
+- **WHEN** the repo has no remote
+- **THEN** the commit stays local, the log has `push=no-remote`, and the run still ends `action=done reason=ok`
+
+#### Scenario: A failed push never fails the handoff
+- **WHEN** the push fails (unreachable remote, rejected update, the 60 s bound)
+- **THEN** the commit stays local, the log has `push=failed` and a masked `child|` line with the reason, and the run record has outcome `ok`
 
 #### Scenario: Digest is private and removed
 - **WHEN** the worker runs the child
@@ -161,7 +193,7 @@ The worker SHALL run `claude -p` in the session's `cwd` with a prompt beginning 
 - **THEN** it is killed and the worker logs `action=error reason=timeout`, and no stub process remains
 
 #### Scenario: Success is verified
-- **WHEN** the stub child writes a `*-handoff.md` file into `LOGS/` under `cwd` or into `GRID_HANDOFF_FALLBACK_DIR`
+- **WHEN** the stub child writes a `*-handoff.md` file into the resolved `LOGS` folder
 - **THEN** the log has an `action=done` line and the run record has outcome `ok`
 
 #### Scenario: Silent failure is detected

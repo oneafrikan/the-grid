@@ -2,6 +2,14 @@
 
 Agents repeat the same corrections every session because nothing carries habits from one session to the next. ECC's continuous-learning v2 shows the shape (capture, distil, inject) but also its failure modes: a user logged 10,557 observations and got 0 instincts, v1 and v2 both run, and the background observer costs tokens all day. the-grid needs the loop with the cost made explicit: opt-in per project, capture that costs zero tokens, one cheap batched analysis per project per week, and a hard cap on what is injected.
 
+## Status (2026-11-05)
+
+Built and on `main`: `scripts/instincts.sh` with the capture hooks, the weekly analyser, promotion and injection, the schedule renderer and private-repo sync, registration through the hook-profiles emitter (`learning: on`), the learning-desk integration, and the prompt cases (issues #118 to #125 closed). Opt-in per project; nothing runs unless a project sets `learning: on`.
+
+Not done: group 9 (#126): enabling on one project for a trial week, the live prompt eval, and closing #16, #19 and #20. The weekly schedule is not installed by the repo.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - Per-project opt-in flag `learning: on` in `.grid/project.yaml`. It is independent of the hook profile and off by default.

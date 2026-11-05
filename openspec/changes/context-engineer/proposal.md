@@ -4,6 +4,10 @@ Nobody owns context design. What loads into a session (`CLAUDE.md`, `AGENTS.md`,
 
 Use case: the-grid is a context-budget project (description budget gate, `budget.py`, section splitting, handoff skill, memory rules). Every machine benefits from a role that designs and measures what loads, so the role lives in `core`, not in the dev team.
 
+## Status (2026-11-05)
+
+Built and on `main` (issue #298 closed). `context-engineer` is a `core` role, `ai-engineer` is narrowed to runtime plumbing, `tech-lead` routes architecture and context design, and the counts, docs and generated files were updated. It is wired on the primary machine as `core-context-engineer`. It landed as direct commits on `main` rather than the single PR the tasks describe.
+
 ## What Changes
 
 - New role `context-engineer` in `agent-factory/roles/`, enrolled in `authored-roles.txt`, composed in `examples/core.yaml` (agent name `core-context-engineer`).

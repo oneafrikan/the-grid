@@ -53,6 +53,7 @@ Each guardrail in `GUARDRAILS.md` SHALL be one line of the form `- G<n>: <must-n
 #### Scenario: Honest sweep status
 - **WHEN** `signals/README.md` is read in a repo where `knowledge-signals` has not shipped
 - **THEN** it says no sweep runs and signals are not processed
+- **NOTE (2026-11-05):** the-grid's own READMEs now name the `gh-triage` knowledge sweep (enabled per repo in the gh-triage scope file); `tests/test_charter_files.bats` pins that wording
 
 #### Scenario: Vocabulary restated
 - **WHEN** `signals/README.md` is searched

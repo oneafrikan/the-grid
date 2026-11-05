@@ -17,7 +17,7 @@ The repository SHALL include CONTRIBUTING.md that states the branch to target, t
 
 #### Scenario: Rules present
 - **WHEN** CONTRIBUTING.md is read
-- **THEN** it names `next` as the PR target, `bash scripts/gate.sh` as the check, and the three content rules
+- **THEN** it names `main` as the branch to branch from and land on (2026-11-05: `next` no longer exists), `bash scripts/gate.sh` as the check, and the three content rules
 
 ### Requirement: Changelog
 The repository SHALL include CHANGELOG.md in Keep a Changelog form with an Unreleased section.

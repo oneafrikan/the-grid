@@ -11,7 +11,7 @@ context: |
   - Portability across MACHINES (macOS, Ubuntu, Arch; thin and thick clients) is
     the core value. Git is the sync layer — no external databases or services.
   - Portability across HARNESSES (Claude Code first; Codex, Gemini CLI, OpenCode,
-    Pi, OpenClaw next). Prefer formats several harnesses read; isolate
+    Pi, OpenClaw wired through opt-in harness:<name> entries). Prefer formats several harnesses read; isolate
     harness-specific output behind an emitter.
   - Never a paid product. No sponsored content in any skill. No sprawl: every new
     asset type or pack names its use case (web/app full-stack, marketing, data

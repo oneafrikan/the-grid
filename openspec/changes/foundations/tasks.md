@@ -1,5 +1,8 @@
 # Tasks
 
+> Status 2026-11-05: groups 1 to 5, 8 and 9 are done; group 7 (post-merge verification) is done (Pages source is GitHub Actions, the site returns 200, `repos/` returns 404). Group 6 (gstack runtime setup) is done on the primary machine only; 6.7 (the other machines) is not done. 2.7 stays unticked: it reads a PR's CI run, and that PR no longer exists to re-read.
+> Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 Verify command for every group unless stated: `bash scripts/gate.sh`. Tests are bats and never touch the real `~/.claude` (use `SKILLS_DIR`, `AGENTS_DIR`, `GRID_DIR`, `GRID_HOST` overrides as `tests/helpers/setup.bash` does). Shell is bash and shellcheck-clean; comment generously.
 
 ## 1. Skill discovery exclusion
@@ -102,13 +105,13 @@ Depends on: 4, 5 merged to the working branch and pulled on the machine.
 
 Files: none (run on each machine).
 
-- [ ] 6.1 Prerequisites: `bun` installed (`./setup` exits with checksum-verified install instructions otherwise); network for Playwright Chromium (roughly 150 MB to 300 MB).
-- [ ] 6.2 Back up the Claude settings file (`cp ~/.claude/settings.json ~/.claude/settings.json.pre-gstack`). If `~/.claude/skills/gstack` exists and is not a symlink to `<grid>/repos/gstack` (an earlier standalone gstack install), remove it first (`rm -rf ~/.claude/skills/gstack` after checking it holds nothing you want); the wrapper exits 2 until it is gone. Note that setup also persists gstack's own config under `~/.gstack/` (`skill_prefix`, `timeline_stop_hook`) and caches Playwright Chromium outside `~/.claude`; the settings check does not cover those.
-- [ ] 6.3 `git pull`, `git submodule sync --recursive`, `git submodule update --init --recursive`.
-- [ ] 6.4 `bash scripts/runtime-setup.sh gstack`. It runs `./setup --host claude --no-prefix --no-team --no-plan-tune-hooks --no-timeline-stop-hook -q`, aborts with exit 3 if the settings file changed, removes setup's flat skill dirs, and re-wires.
-- [ ] 6.5 Verify: `bash scripts/wire.sh` prints no `runtime MISSING`; `test -x repos/gstack/browse/dist/browse`; `ls -l ~/.claude/skills/gstack` is a symlink to `repos/gstack`; `diff ~/.claude/settings.json ~/.claude/settings.json.pre-gstack` shows nothing; `repos/gstack/bin/gstack-settings-hook list-sources` lists no gstack sources; `git -C repos/gstack status --short` is empty (report any dirt, do not commit it).
-- [ ] 6.6 In a throwaway repo, run `/browse` or `/qa` once and confirm the browse daemon starts.
-- [ ] 6.7 Do this on each machine (macOS, Ubuntu, Arch). On Linux without the emoji font, `make-pdf` shows tofu for emoji; opt in with `GSTACK_SKIP_FONTS=0 bash scripts/runtime-setup.sh gstack` if sudo is acceptable.
+- [x] 6.1 Prerequisites: `bun` installed (`./setup` exits with checksum-verified install instructions otherwise); network for Playwright Chromium (roughly 150 MB to 300 MB).
+- [x] 6.2 Back up the Claude settings file (`cp ~/.claude/settings.json ~/.claude/settings.json.pre-gstack`). If `~/.claude/skills/gstack` exists and is not a symlink to `<grid>/repos/gstack` (an earlier standalone gstack install), remove it first (`rm -rf ~/.claude/skills/gstack` after checking it holds nothing you want); the wrapper exits 2 until it is gone. Note that setup also persists gstack's own config under `~/.gstack/` (`skill_prefix`, `timeline_stop_hook`) and caches Playwright Chromium outside `~/.claude`; the settings check does not cover those.
+- [x] 6.3 `git pull`, `git submodule sync --recursive`, `git submodule update --init --recursive`.
+- [x] 6.4 `bash scripts/runtime-setup.sh gstack`. It runs `./setup --host claude --no-prefix --no-team --no-plan-tune-hooks --no-timeline-stop-hook -q`, aborts with exit 3 if the settings file changed, removes setup's flat skill dirs, and re-wires.
+- [x] 6.5 Verify: `bash scripts/wire.sh` prints no `runtime MISSING`; `test -x repos/gstack/browse/dist/browse`; `ls -l ~/.claude/skills/gstack` is a symlink to `repos/gstack`; `diff ~/.claude/settings.json ~/.claude/settings.json.pre-gstack` shows nothing; `repos/gstack/bin/gstack-settings-hook list-sources` lists no gstack sources; `git -C repos/gstack status --short` is empty (report any dirt, do not commit it).
+- [x] 6.6 In a throwaway repo, run `/browse` or `/qa` once and confirm the browse daemon starts.
+- [ ] 6.7 (Not done 2026-11-05: only the primary machine has run it.) Do this on each machine (macOS, Ubuntu, Arch). On Linux without the emoji font, `make-pdf` shows tofu for emoji; opt in with `GSTACK_SKIP_FONTS=0 bash scripts/runtime-setup.sh gstack` if sudo is acceptable.
 
 Acceptance: 6.5 all true on each machine.
 
@@ -118,12 +121,12 @@ Depends on: 2, 3, 9 merged to `main`.
 
 Files: `SKILLS.md` (regenerated), none otherwise. One repo-settings change (7.2).
 
-- [ ] 7.0 Apply the same mattpocock renames and deletions, and delete `-openspec/release-openspec`, in the personal `baseline-submodules.txt` and any machine overlay that lists them (gitignored, not committed).
-- [ ] 7.1 On a machine with a personal `baseline-submodules.txt`, run `bash scripts/wire.sh` (regenerates `SKILLS.md`), then `bash scripts/gate.sh`; commit the regenerated `SKILLS.md`.
-- [ ] 7.2 Switch the Pages source to GitHub Actions: repo Settings, Pages, Source = "GitHub Actions" (or `gh api -X PUT repos/<owner>/<repo>/pages -f build_type=workflow`, using the token of the account that owns the repo). Then re-run the latest `pages` workflow run on `main` (`gh run rerun <id>`, or `gh workflow run pages --ref main`).
-- [ ] 7.3 After that run, check the `pages` run concluded `success` (`gh run list --workflow pages --branch main --limit 1`) and `curl -sI <pages-url> | head -1` is `200` (the repo is under a personal account: use that account's token for `gh`). Also confirm a push to `next` started a `tests` run (`gh run list --branch next --limit 1`), and confirm `repos/` is not served (`curl -sI <pages-url>repos/` returns 404).
-- [ ] 7.4 If the `pages` run fails, open an issue with the failing step's log excerpt. Do not fix it inside this change; the legacy source with `.nojekyll` can be restored by switching the source back.
-- [ ] 7.5 Confirm CI is green on `main` and that the ECC section count in `SKILLS.md` equals `find_skill_mds repos/ecc | wc -l` (source `scripts/lib/find-skill-mds.sh`).
+- [x] 7.0 Apply the same mattpocock renames and deletions, and delete `-openspec/release-openspec`, in the personal `baseline-submodules.txt` and any machine overlay that lists them (gitignored, not committed).
+- [x] 7.1 On a machine with a personal `baseline-submodules.txt`, run `bash scripts/wire.sh` (regenerates `SKILLS.md`), then `bash scripts/gate.sh`; commit the regenerated `SKILLS.md`.
+- [x] 7.2 Switch the Pages source to GitHub Actions: repo Settings, Pages, Source = "GitHub Actions" (or `gh api -X PUT repos/<owner>/<repo>/pages -f build_type=workflow`, using the token of the account that owns the repo). Then re-run the latest `pages` workflow run on `main` (`gh run rerun <id>`, or `gh workflow run pages --ref main`).
+- [x] 7.3 After that run, check the `pages` run concluded `success` (`gh run list --workflow pages --branch main --limit 1`) and `curl -sI <pages-url> | head -1` is `200` (the repo is under a personal account: use that account's token for `gh`). Also confirm a push to `next` started a `tests` run (`gh run list --branch next --limit 1`), and confirm `repos/` is not served (`curl -sI <pages-url>repos/` returns 404).
+- [x] 7.4 If the `pages` run fails, open an issue with the failing step's log excerpt. Do not fix it inside this change; the legacy source with `.nojekyll` can be restored by switching the source back.
+- [x] 7.5 Confirm CI is green on `main` and that the ECC section count in `SKILLS.md` equals `find_skill_mds repos/ecc | wc -l` (source `scripts/lib/find-skill-mds.sh`).
 
 Acceptance: Pages source is "GitHub Actions", the site returns 200 and `repos/` returns 404 (or the 7.4 issue exists); `SKILLS.md` committed and `bash scripts/catalog.sh --check` passes.
 

@@ -2,6 +2,14 @@
 
 The public repo still carries personal residue: machine names, account and org handles, a real email in `user.yaml.example`, deployment plans for private hosts, a personal desk blueprint, 1.1 MB of third-party PDFs/zips of unclear licence under `__assets/`, and a skill whose document-locations table encodes one person's folders. A stranger cloning it sees someone else's infrastructure, and nothing stops the residue returning. The earlier `LOGS/` audit removed the dev journal only; this change finishes the job and adds a gate so it stays done.
 
+## Status (2026-11-05)
+
+Built and on `main`: the scan (`scripts/check-personal.sh`), the moves into the private repo, the in-place genericising and the gate wiring (issues #65 to #70 closed). Group 7 (HUMAN close-out: comments on #42 and #54, the history-rewrite decision, issue titles, and the loop box denylist check; #71) is still open.
+
+Changed since this was written: the `handoff-locations` capability no longer has a private table. On 2026-11-05 (commit e6b0a44) the handoff skill and the auto-handoff worker both write to the project's `LOGS` folder only, creating it when missing; the spec, proposal and design carry the amendment.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - Inventory every tracked non-submodule file and sort each hit into four buckets: move to the private repo, delete (duplicate), genericise in place, keep (credit and author voice).
@@ -16,7 +24,7 @@ The public repo still carries personal residue: machine names, account and org h
 
 - `public-repo-hygiene`: what may and may not appear in the public tree, and where personal material lives instead.
 - `personal-data-gate`: the scan that enforces it (generic patterns, private denylist, allowlist, size/type block, gate wiring).
-- `handoff-locations`: the handoff skill defaults to `LOGS/` and reads an optional private table for per-project overrides.
+- `handoff-locations`: the handoff skill defaults to `LOGS/` and reads an optional private table for per-project overrides. (Amended 2026-11-05: the table is gone; the skill always writes to the project's `LOGS`, see the spec and Status.)
 
 ### Modified
 

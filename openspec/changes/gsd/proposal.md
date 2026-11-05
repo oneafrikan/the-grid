@@ -4,6 +4,10 @@
 
 Use case: several small, independent fixes in one session, each of which would eat context window if done inline. `gsd` splits them, fans them out to specialists with their own context windows, merges the branches, and has `qa-engineer` verify. Security and CI/release gates wait for feature releases.
 
+## Status (2026-11-05)
+
+Built and on `main` (issue #299 closed): the `gsd` light fan-out orchestrator is composed into the `grid` project as a bare-named skill (`/gsd`), standalone and not under the CEO. It is wired on the primary machine.
+
 ## What Changes
 
 - New orchestrator role `gsd` in `agent-factory/roles/`, composed in `examples/grid.yaml` with `bare: true` (invoked as `/gsd`), enrolled in `authored-roles.txt`.

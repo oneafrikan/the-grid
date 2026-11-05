@@ -2,6 +2,12 @@
 
 Four cheap workflow gaps show up when comparing the-grid with ECC and gstack. Behaviour modes need hand-typed prompts. Orchestrators ask the human open-ended questions that cannot be answered by number. Release gates rely on one reviewer. Paid evals are all-or-nothing. Golden-output tests for the compiler (#23) are also still missing, and they are what make the decision-brief change (and the later multi-harness and plugin work) safe to ship.
 
+## Status (2026-11-05)
+
+Built and on `main`: context modes and `contexts/aliases.sh`, `GRID_USER_CONFIG` with the tracked `agent-factory/user.public.yaml` and the compose golden tests (`scripts/compose-goldens.sh`; closes #23), the decision-brief fragment, the two-reviewer release gate in `tech-lead`, `run_evals.py --changed`, and `deploy.py --identity`. Issues #85 to #91 are closed. The aliases (group 6) are installed on the primary machine; other machines are not recorded.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - Add a `GRID_USER_CONFIG` env override to `compose.py` and a tracked, neutral `agent-factory/user.public.yaml`, so composed output can be made machine-independent. This is the only place the override is introduced; `multi-harness` and `plugin-marketplace` depend on it.

@@ -2,9 +2,17 @@
 
 The commit gate is the unattended loop's only truth signal, and today it is not trustworthy: CI never builds the agent-factory venv (about 81 tests skip), three tests always fail on a runner, the Pages site returns 404, the ECC submodule is counted as 1027 skills when only 293 are real, and gstack's skills are wired without the runtime they call. Nothing downstream (loop, install, budget, hooks) can be verified until these are fixed.
 
+## Status (2026-11-05)
+
+Shipped on `main` (issues #56 to #64 closed). Groups 1 to 5, 7, 8 and 9 are done. Group 6 (gstack runtime setup, #61) is done on the primary machine only; running it on the other machines (6.7) is not done. Task 2.7 is left open (it reads a PR's CI run, gone since the merge).
+
+Changed since this was written: (1) CI is now a `checks` job, four bats shards and an aggregating `gate` job, on pushes to `main` and non-draft pull requests (`next` is gone); the `ci-gate` spec is amended. (2) `scripts/runtime-setup.sh gstack` now handles the audit: when the final `wire.sh` is blocked by it, the script exits 3 and says what to run; `CURATION.md` holds the matching `audit-allow` entries, including the `unpinned: true` flag that `scripts/audit.py` accepts for an `oversize-file` finding on one literal path. It prints OS-aware prerequisites and notes for macOS, Ubuntu and Arch. The `runtime-check` spec and design carry both.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
-- CI: runs on pushes to `main` and `next` and on every pull request, on a pinned `ubuntu-24.04` image with least-privilege permissions; builds the agent-factory venv (the single owner of that step), runs `scripts/gate.sh`, fails loudly if the venv or shellcheck is missing; the live-skills-dir test skips on runners.
+- CI: runs on pushes to `main` and `next` (2026-11-05: `main` only) and on every pull request, on a pinned `ubuntu-24.04` image with least-privilege permissions; builds the agent-factory venv (the single owner of that step), runs `scripts/gate.sh`, fails loudly if the venv or shellcheck is missing; the live-skills-dir test skips on runners.
 - `wire.sh` gains `GRID_BASELINE` (override path to the baseline manifest). Tests that scan "wired" skills run the real `wire.sh` into a temp dir with it instead of re-implementing discovery. Later changes depend on this variable.
 - Pages: deploy by GitHub Actions from an explicit file list (`site-files.txt`: `index.html` plus assets; no `repos/` served, no submodule fetch), keeping `.nojekyll` as a legacy-source fallback (the failing legacy build is Jekyll choking on front matter in `repos/**`, not the submodule fetch); the operator switches the Pages source to "GitHub Actions" after merge; convert the 22 SSH submodule URLs in `.gitmodules` to HTTPS (issue #37, fresh-machine bootstrap) and regenerate `docs/SOURCES.md`.
 - Skill discovery: `find_skill_mds` (shared by `wire.sh` and `catalog.sh`) drops locale translations, root-level harness-copy dot-dirs, and per-repo listed paths (ECC 1027 to 293).

@@ -2,6 +2,14 @@
 
 Agents in a grid project start cold. There is no single place that says what the project is for, what must never happen, or what already exists; the only memory is `CLAUDE.md` (569 lines in the-grid today), an 85-line `LEARNINGS.md` read on demand, and per-role prose. Four evidence vocabularies exist side by side (RAN/READ/UNTESTED in `agent-factory/docs/role-authoring.md:48`, STATED/OBSERVED/INFERRED in `roles/oracle/AGENTS.md:30`, H/M/L in `roles/researcher/SKILL.md:153`, librarian `tier` in `roles/librarian/SKILL.md:71`) and nothing says how they relate. This change lays the foundation: small charter files in every project, a generated map, and one compact vocabulary in the shared agent boot text. It builds no signal flow; `knowledge-signals` (A2) builds on it.
 
+## Status (2026-11-05)
+
+Built and on `main`. All six groups are done. No GitHub issues track this change; the commits and `tests/test_charter_files.bats` are the evidence, and the operator approved `PURPOSE.md` and `GUARDRAILS.md` (commit 3ef0287).
+
+Changed since this was written: `knowledge-signals` has shipped, so the scenarios below that describe a repo "before `knowledge-signals` has shipped" no longer describe the-grid. `MAP.md` now names the sweep as `gh-triage knowledge sweep`, and `signals/README.md` and `knowledge/README.md` say the sweep is enabled per repo in the gh-triage scope file. Those scenarios still hold for a project that lacks the `Knowledge sweep` heading in its gh-triage `AGENTS.md`.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - New files in every project repo, seeded and retrofitted by `project-factory/templates/_common` with the existing never-overwrite rule: `PURPOSE.md`, `GUARDRAILS.md`, `BEHAVIOUR.md`, `scripts/map.py`, `signals/README.md`, `knowledge/README.md`, `knowledge/canon/.gitkeep`, and a pre-commit shim `.githooks/pre-commit`. `MAP.md` is NOT shipped in `_common`: `cut-project.sh` generates it after the copy.
