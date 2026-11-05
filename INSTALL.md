@@ -1,16 +1,13 @@
 # Install
 
-Short guide for a new machine. [BOOTSTRAP.md](BOOTSTRAP.md) is the full reference
-(updating, precedence, troubleshooting). Using the Claude Desktop app? See
-[Claude Code (terminal and the Desktop Code tab)](#claude-code-terminal-and-the-desktop-code-tab)
-and [Claude Cowork (Desktop app)](#claude-cowork-desktop-app).
+Short guide for a new machine. [BOOTSTRAP.md](BOOTSTRAP.md) is the full reference (updating, precedence, troubleshooting).
+Using the Claude Desktop app? See [Claude Desktop](#claude-desktop-code-tab-and-cowork).
 
 ## Prerequisites
 
 - `git`, `bash` and Claude Code.
 - `python3`, only for the agent teams (`--with-agents`), plus its `venv` module.
-  On Debian/Ubuntu: `sudo apt install python3-venv`, because
-  `bootstrap.sh --with-agents` runs `python3 -m venv`.
+  On Debian/Ubuntu: `sudo apt install python3-venv`, because `bootstrap.sh --with-agents` runs `python3 -m venv`.
 - Node >= 20.19, only for the `openspec-*` skills (see below).
 
 ## Install
@@ -38,79 +35,12 @@ git submodule update --init --recursive
 bash scripts/wire.sh
 ```
 
-Skills are live immediately. For the full sequence (including the agent-factory
-compose step) see [BOOTSTRAP.md](BOOTSTRAP.md). For a machine that needs only the
-curated skills, with no submodules, see its
-[Install without submodules](BOOTSTRAP.md#install-without-submodules) section
-(`grid install`).
+Skills are live immediately. For the full sequence (including the agent-factory compose step) see [BOOTSTRAP.md](BOOTSTRAP.md).
+For a machine that needs only the curated skills, with no submodules, see its [Install without submodules](BOOTSTRAP.md#install-without-submodules) section (`grid install`).
 
-## Claude Code (terminal and the Desktop Code tab)
+## Claude Desktop (Code tab and Cowork)
 
-The terminal and the Desktop app's Code tab share `~/.claude`, so one install
-covers both. Detail: [docs/PLUGINS.md](docs/PLUGINS.md#claude-desktop-code-tab-and-cowork).
-
-Pick **one** route per machine. Doing both lists every agent twice.
-
-**Route 1, full (clone):** follow [Install](#install) above (`bootstrap.sh`, or
-`wire.sh`). Skills are live immediately.
-
-**Route 2, no clone (plugins):**
-
-1. Open a terminal.
-2. Add the marketplace:
-   ```bash
-   claude plugin marketplace add oneafrikan/the-grid
-   ```
-3. Install the two plugins:
-   ```bash
-   claude plugin install grid-core@the-grid
-   claude plugin install grid-agents@the-grid
-   ```
-4. Start a new Claude Code session so they load.
-
-**Verify:**
-
-1. Open the Desktop app's Code tab (or run `claude` in a terminal).
-2. Ask: "what skills and sub-agents do you have".
-3. You should see `grid-*` and `core-*` agents listed (Route 2 shows the `grid-agents`
-   ones with a `grid-agents:` prefix).
-
-**Code tab facts:** it delegates to subagents by bare name (for example
-`grid-qa-engineer`) and sees the local folder directly. It is the route for git
-repos and worktrees.
-
-## Claude Cowork (Desktop app)
-
-Cowork does not read `~/.claude`, so `wire.sh` does nothing for it. It gets the
-grid only from plugins installed in Cowork. Detail:
-[docs/PLUGINS.md](docs/PLUGINS.md#claude-desktop-code-tab-and-cowork).
-
-1. Open the Claude Desktop app and switch to Cowork.
-2. In Cowork's plugin settings, add the marketplace `oneafrikan/the-grid`. It is
-   public: no git credentials are needed.
-3. Install `grid-core` and `grid-agents`.
-4. Fallback that worked: ask Cowork in chat to add the marketplace and install both
-   plugins.
-
-Optional third-party skills: add the upstream marketplaces listed in
-[docs/PLUGINS.md](docs/PLUGINS.md#claude-desktop-code-tab-and-cowork) the same way.
-`garrytan/gstack`, `HubSpot/agent-cli-skills` and `Fission-AI/openspec` have no
-marketplace and cannot be installed in Cowork this way.
-
-**Verify:**
-
-1. Start a fresh Cowork session.
-2. Ask what skills and sub-agents it has.
-3. You should see the `grid-core` skills and the four orchestrator skills (`gsd`,
-   `grid-tech-lead`, `grid-ceo-orchestrator`, `grid-growth-hacker`). Plugin agents are
-   not listed there, but the orchestrators call them by `grid-agents:` name.
-
-**Caveats:**
-
-- Subagents work on copies staged into Cowork's cloud container; the results are
-  written back to your folder.
-- Write-back replaces the originals. Keep the folder under git or back it up first.
-- Use the Code tab for git repos.
+The Code tab shares `~/.claude` with the terminal, so the install above covers it. Cowork does not read `~/.claude`: add the marketplace `oneafrikan/the-grid` in Cowork, then install `grid-core` and `grid-agents`. Step by step: [docs/install-desktop.md](docs/install-desktop.md).
 
 ## The `openspec-*` skills need a CLI
 
