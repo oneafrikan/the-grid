@@ -17,8 +17,8 @@
   "bundles": {
     "grid-core": {
       "description": "the-grid's own skills plus the cross-desk core agents (researcher, librarian, gh-triage, platform-engineer, context-engineer) and /tron.",
-      "skills": ["gh-issues-by-severity", "grid-help", "mine-learnings", "openspec-help",
-                 "rubber-duck", "spec-scout", "standup", "tighten", "un-claudish"],
+      "skills": ["gh-issues-by-severity", "grid-help", "growth-psych", "mine-learnings",
+                 "openspec-help", "rubber-duck", "spec-scout", "standup", "tighten", "un-claudish"],
       "compose": ["core"],
       "agents": []
     },

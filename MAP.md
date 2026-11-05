@@ -27,7 +27,7 @@
 
 ### Skills
 
-- root-owned: caveman, gh-issues-by-severity, grid-help, grill-me, handoff, mine-learnings, openspec-help, rubber-duck, setup-repo-skills, skill-scout, spec-scout, standup, tighten, un-claudish
+- root-owned: caveman, gh-issues-by-severity, grid-help, grill-me, growth-psych, handoff, mine-learnings, openspec-help, rubber-duck, setup-repo-skills, skill-scout, spec-scout, standup, tighten, un-claudish
 - Full index of every skill: `SKILLS.md`
 
 ### Knowledge

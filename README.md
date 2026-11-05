@@ -37,7 +37,7 @@ Needs git, bash, python3 (for the agent teams) and Claude Code. Node >= 20.19 on
 You should now see:
 
 - `bootstrap.sh` ends with `==> Bootstrap complete. Open a fresh Claude session to pick up new skills/agents.`
-- `ls ~/.claude/skills | wc -l` prints a number near <!--count:wired-->132<!--/count--> (plus the orchestrator skills; duplicate skill names across repos collapse to one link, so it is not exact), and `ls ~/.claude/skills/tron` lists a `SKILL.md`.
+- `ls ~/.claude/skills | wc -l` prints a number near <!--count:wired-->133<!--/count--> (plus the orchestrator skills; duplicate skill names across repos collapse to one link, so it is not exact), and `ls ~/.claude/skills/tron` lists a `SKILL.md`.
 - In a new Claude Code session `/tron` replies with a short question about what you want to do.
 
 Fork first if you plan to customise: the clone URL above is read-only for you.
@@ -59,7 +59,7 @@ claude plugin install grid-core@the-grid
 
 ## What you get
 
-- <!--count:wired-->132<!--/count--> curated skills as slash commands (/standup, /review, /ship, /skill-scout). <!--count:library-->100<!--/count--> more sit on a searchable shelf, switched off.
+- <!--count:wired-->133<!--/count--> curated skills as slash commands (/standup, /review, /ship, /skill-scout). <!--count:library-->100<!--/count--> more sit on a searchable shelf, switched off.
 - <!--count:roles-->40<!--/count--> ready-made agent roles: a dev team, a finance desk, a Socratic tutor (/morpheus), and /tron, which tells you which one to use.
 - One git pull plus wire.sh makes every machine identical; a per-machine overlay handles the differences.
 - Project templates with specs and agents already wired in.
