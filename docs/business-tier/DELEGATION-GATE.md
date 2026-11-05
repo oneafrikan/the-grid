@@ -82,7 +82,7 @@ Run each on: terminal (control), Code tab, Cowork. Record in the table.
 | D1 two subagent invocations | delegates (control, known) | one bare-name subagent invocation ran with local folder access; two-agent run not tested | one namespaced subagent invocation ran; two-agent run not tested | Cowork: subagent tools run in Cowork's cloud container, without access to the Mac's connected folder |
 | D2 tools restriction | | not tested | not tested | |
 | D3 handoff composed | | not tested | not tested | |
-| D4 name resolution (bare / namespaced) | | bare resolved (wired channel); namespaced failed (no plugin installed in the Code tab) | namespaced name resolved; bare name not tested | Cowork: plugin agents not listed in Cowork's subagent types |
+| D4 name resolution (bare / namespaced) | | bare resolved (wired channel); namespaced failed (no plugin installed in the Code tab) | namespaced name resolved; bare name not tested | Cowork: plugin agents not listed in Cowork's subagent types. With `grid-agents` installed, `/grid-agents:gsd` listed its specialists by bare name; a file-summary task made it work through the linked computer itself and invoke no subagent, so bare-name resolution is still untested |
 | D5 natural language | | not tested | not tested | |
 | Update propagation | | not tested | not tested | |
 | Cowork self-install | n/a | n/a | not tested | |

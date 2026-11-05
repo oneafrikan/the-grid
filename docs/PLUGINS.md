@@ -84,7 +84,9 @@ Cowork limits (observed):
 
 - Plugin subagents are not listed among Cowork's subagent types (only its built-ins). An explicit Agent call with the namespaced name `grid-agents:grid-qa-engineer` still resolved and ran.
 - That subagent's tools ran in Cowork's cloud container (as Cowork reported), which cannot see the folder connected on the Mac. The main session fell back to the linked computer.
+- The Cowork main session can read and run commands on the Mac's connected folder through the linked computer. Only subagents run in the cloud container without it.
 - So orchestrators in Cowork cannot hand local-file work to specialists. Use the Code tab for repo and file work.
+- `/grid-agents:gsd` listed its specialists by bare name. Given a file-summary task it worked through the linked computer itself and invoked no subagent, so bare-name resolution in Cowork is untested.
 - Installed Cowork plugins were not found on the host under `~/Library/Application Support/Claude`. Where Cowork stores them is unknown.
 
 ## Maintaining the bundles

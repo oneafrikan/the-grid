@@ -1,7 +1,7 @@
 # Business tier — the-grid for people who don't use a terminal
 
 **Status:** design agreed, nothing built. Last updated 2026-11-05.
-**Tracking issue:** #274. **Related:** #241 (Portal), #159-#162 (plugin marketplace, already built on `next`), #55 (uplift).
+**Tracking issue:** #274. **Related:** #241 (Portal), #159-#162 (plugin marketplace, already built on `main`), #55 (uplift).
 
 ## One-line goal
 
@@ -29,7 +29,7 @@ Cowork carries the full grid plugins.
 ## Picking this up in a new session
 
 - Read this file, then `DELEGATION-GATE.md` results table. If it is still empty, the pilot has not been run.
-- `main` is far behind `next` (hundreds of commits at time of writing). Work and PRs go to `next`.
+- Work and PRs go to `main`.
 - The public grid already ships two plugins (`grid-core`, `grid-agents`) built by
   `scripts/build-plugins.py` from `plugins/bundles.json`; see `docs/PLUGINS.md`.
   The business tier is a second consumer of that builder. Not yet read in detail.
@@ -39,15 +39,15 @@ Cowork carries the full grid plugins.
 
 | # | Question | Blocks | Where |
 |---|----------|--------|-------|
-| OQ-1 | Does Cowork delegate to plugin subagents? Does the Code tab? | everything | **Answered** (ADR-008): both delegate; Cowork has no local-file access |
+| OQ-1 | Does Cowork delegate to plugin subagents? Does the Code tab? | everything | **Answered** (ADR-008): both delegate; Cowork subagents have no local-file access (its main session does) |
 | OQ-2 | How does business context reach the grid's agents (read-first skill vs build-time injection)? | bundle design | SPEC |
 | OQ-3 | Can a non-technical Mac add a private GitHub marketplace (git credentials)? | onboarding | DELEGATION-GATE |
 | OQ-4 | Do marketplace updates reach colleagues without action? | maintenance | DELEGATION-GATE |
-| OQ-5 | Do orchestrators that name agents bare (`grid-qa-engineer`) resolve against namespaced plugin agents (`grid-agents:grid-qa-engineer`)? | orchestration | DELEGATION-GATE |
+| OQ-5 | Do orchestrators that name agents bare (`grid-qa-engineer`) resolve against namespaced plugin agents (`grid-agents:grid-qa-engineer`)? | orchestration | **Open.** Namespaced resolves in Cowork; bare untested there (a `/gsd` run delegated nothing). DELEGATION-GATE |
 | OQ-6 | Evaluate Orca as the model for a non-technical ADE (ADR-005). Not yet looked at. | long-term | DECISIONS |
 
 ## Next actions
 
-1. Operator runs the probe plugin on a Mac (DELEGATION-GATE, Phase 1) and fills in the results table.
-2. Branch on the result (decision tree in DELEGATION-GATE).
-3. Only then: build `research-brief` (Phase 2), then the business-repo template and builder changes.
+1. Test OQ-5 in Cowork: an orchestrator delegating to a specialist by bare name (DELEGATION-GATE).
+2. Test OQ-3 (private marketplace credentials) and OQ-4 (update propagation), both untested.
+3. Then: build `research-brief` (Phase 2), then the business-repo template and builder changes.
