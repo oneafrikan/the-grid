@@ -26,7 +26,7 @@ jobs:
   # forever and could not merge. Here the workflow always runs and `gate` always reports.
   # Docs-only = at least one changed file, every changed file ends in `.md`, and none is under a
   # directory whose markdown is executable content (skill bodies, role prompts, rule packs,
-  # plugin bundles, templates, hooks, eval cases, workflows). Anything else, an unusable base
+  # plugin bundles, templates, hooks, eval cases, test fixtures and goldens, workflows). Anything else, an unusable base
   # (new branch, force push) or a failed diff is NOT docs-only: when unsure, run the full gate.
   changes:
     # Drafts run nothing (see the `gate` job); skipping here skips every dependent job too.
@@ -74,7 +74,7 @@ jobs:
             docs_only=true
             while IFS= read -r f; do
               case "$f" in
-                skills/*|agents/*|agent-factory/*|rules/*|plugins/*|project-factory/*|automation-factory/*|hooks/*|evals/*|.github/*) docs_only=false ;;
+                skills/*|agents/*|agent-factory/*|rules/*|plugins/*|project-factory/*|automation-factory/*|hooks/*|evals/*|tests/*|.github/*) docs_only=false ;;
                 *.md) ;;
                 *) docs_only=false ;;
               esac
