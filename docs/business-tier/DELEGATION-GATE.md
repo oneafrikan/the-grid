@@ -77,16 +77,18 @@ Run each on: terminal (control), Code tab, Cowork. Record in the table.
 
 | Check | Terminal | Code tab | Cowork | Notes |
 |-------|----------|----------|--------|-------|
-| Both tabs present | n/a | | | |
-| Marketplace add (private repo) | | | | |
-| D1 two subagent invocations | | | | |
-| D2 tools restriction | | | | |
-| D3 handoff composed | | | | |
-| D4 name resolution (bare / namespaced) | | | | |
-| D5 natural language | | | | |
-| Update propagation | | | | |
-| Cowork self-install | n/a | n/a | | |
-| docx output (Phase 2) | | | | |
+| Both tabs present | n/a | yes | yes | |
+| Marketplace add (private repo) | | not tested (read the wired `~/.claude` instead) | public repo added, no credentials; private repo not tested | |
+| D1 two subagent invocations | delegates (control, known) | subagents listed from `~/.claude`; two-agent run not tested | one namespaced subagent invocation ran; two-agent run not tested | Cowork: subagent tools run in Cowork's cloud container, without access to the Mac's connected folder |
+| D2 tools restriction | | not tested | not tested | |
+| D3 handoff composed | | not tested | not tested | |
+| D4 name resolution (bare / namespaced) | | | namespaced name resolved; bare name not tested | Cowork: plugin agents not listed in Cowork's subagent types |
+| D5 natural language | | not tested | not tested | |
+| Update propagation | | not tested | not tested | |
+| Cowork self-install | n/a | n/a | not tested | |
+| docx output (Phase 2) | | not tested | not tested | |
+
+Results recorded 2026-11-05, macOS, Claude Desktop.
 
 ## Decision tree
 

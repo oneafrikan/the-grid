@@ -2,7 +2,8 @@
 
 the-grid ships two Claude Code plugins from this repo, as a zero-clone way to
 try it. **Claude Code only** — for other harnesses, or for third-party skills,
-use `grid install`.
+use `grid install`. Claude Desktop (Code tab, Cowork): see
+[Claude Desktop](#claude-desktop-code-tab-and-cowork).
 
 ## Install
 
@@ -62,6 +63,27 @@ Plugin components are namespaced by plugin name:
 A machine that already wired the-grid (`wire.sh`) has the agents in
 `~/.claude/agents/`. Installing `grid-agents` on top lists each agent twice (the
 second under the `grid-agents:` namespace). Pick one channel per machine.
+
+## Claude Desktop (Code tab and Cowork)
+
+Observed 2026-11-05 on macOS unless marked. Delegation-gate results: `docs/business-tier/DELEGATION-GATE.md`.
+
+- **Code tab** runs Claude Code on the Mac and reads `~/.claude`. A machine wired with `wire.sh` (or `grid install`) gets the full wired set of skills and subagents there, with no plugin install.
+- The one-channel-per-machine rule applies to the Code tab too.
+- Installing the plugins from inside the Code tab is documented by Anthropic but untested here.
+- **Cowork does not read `~/.claude`.** It sees only Anthropic's built-in skills plus plugins installed in Cowork.
+- **Install in Cowork**: in Cowork's plugin settings, add the marketplace `oneafrikan/the-grid` (public, no git credentials needed), then install `grid-core` and `grid-agents`. The exact UI path is unverified.
+- Fallback that worked: ask Cowork in chat to add the marketplace and install the two plugins.
+- **Verify**: in a fresh Cowork session ask what skills and sub-agents it has. The `grid-core` skills and the four `grid-agents` orchestrator skills (`gsd`, `grid-tech-lead`, `grid-ceo-orchestrator`, `grid-growth-hacker`) should be listed.
+- **Third-party skills in Cowork**: the bundles carry only the-grid's own content. Add these upstream marketplaces in Cowork the same way (each ships `.claude-plugin/marketplace.json`): `anthropics/skills`, `jeffallan/claude-skills`, `mattpocock/skills`, `DietrichGebert/ponytail`, `obra/superpowers`.
+- No marketplace, so not installable in Cowork this way: `garrytan/gstack`, `HubSpot/agent-cli-skills`, `Fission-AI/openspec`.
+
+Cowork limits (observed):
+
+- Plugin subagents are not listed among Cowork's subagent types (only its built-ins). An explicit Agent call with the namespaced name `grid-agents:grid-qa-engineer` still resolved and ran.
+- That subagent's tools ran in Cowork's cloud container (as Cowork reported), which cannot see the folder connected on the Mac. The main session fell back to the linked computer.
+- So orchestrators in Cowork cannot hand local-file work to specialists. Use the Code tab for repo and file work.
+- Installed Cowork plugins were not found on the host under `~/Library/Application Support/Claude`. Where Cowork stores them is unknown.
 
 ## Maintaining the bundles
 
