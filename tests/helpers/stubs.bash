@@ -54,10 +54,11 @@
 #     (a lingering grandchild, pid in grandchild.pid), STUB_CLAUDE_SLEEP_AFTER (linger after writing),
 #     STUB_CLAUDE_PRINT (text printed on stdout); modes handoff-modify (edits base.txt), handoff-secret-third.
 #     STUB_DELETE_FILE (path the handoff-* child removes while it runs).
-#     STUB_CLAUDE_MODE         unset = the behaviour above. handoff-logs | handoff-fallback | handoff-target |
+#     STUB_CLAUDE_MODE         unset = the behaviour above. handoff-logs | handoff-prompt | handoff-target |
 #                              handoff-extra | handoff-stray act like the auto-handoff child: write
 #                              2026-01-01-testhost-stub-{handoff,context}.md (body ${STUB_HANDOFF_BODY:-stub}) into
-#                              $PWD/LOGS, $GRID_HANDOFF_FALLBACK_DIR/<basename PWD>, $STUB_HANDOFF_DIR, $PWD/LOGS
+#                              $PWD/LOGS, the prompt's "Target directory: <path>." (what the worker resolved),
+#                              $STUB_HANDOFF_DIR, $PWD/LOGS
 #                              (+ .git/hooks/x and a line in .git/config), $PWD/LOGS (+ a/b/c/d/e/stray.md), then
 #                              exit $STUB_CLAUDE_EXIT (default 0). They first sleep STUB_CLAUDE_SLEEP seconds and
 #                              copy the digest named in the prompt to $STUB_DIR/claude.digest.
@@ -201,7 +202,8 @@ case "${STUB_CLAUDE_MODE:-}" in
     write_pair() { mkdir -p "$1"; printf '%s\n' "$body" > "$1/$hf"; printf '%s\n' "$body" > "$1/$cf"; }
     case "$STUB_CLAUDE_MODE" in
       handoff-logs)     write_pair "$PWD/LOGS" ;;
-      handoff-fallback) write_pair "$GRID_HANDOFF_FALLBACK_DIR/$(basename "$PWD")" ;;
+      handoff-prompt)   # the pair into the "Target directory: <path>." the worker put at the end of the prompt ($2)
+        write_pair "$(printf '%s' "$2" | sed -n 's/.*Target directory: \(.*\)\.$/\1/p')" ;;
       handoff-target)   write_pair "$STUB_HANDOFF_DIR" ;;
       handoff-extra)    # a planted git hook and a changed git config (the write-only boundary failing)
         write_pair "$PWD/LOGS"

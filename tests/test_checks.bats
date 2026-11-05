@@ -172,12 +172,6 @@ tripwire_attempt() (
   [[ "$output" == *"REFUSING"* ]] || false
 }
 
-@test "tripwire refuses GRID_HANDOFF_FALLBACK_DIR inside the real home" {
-  run tripwire_attempt GRID_HANDOFF_FALLBACK_DIR .grid/fallback
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"REFUSING"* ]] || false
-}
-
 @test "tripwire refuses GRID_PRIVATE_DIR inside the real home" {
   run tripwire_attempt GRID_PRIVATE_DIR .the-grid-private
   [ "$status" -eq 1 ]

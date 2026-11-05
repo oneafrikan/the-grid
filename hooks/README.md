@@ -174,7 +174,8 @@ is set, so prefer the local settings target for a team that does not all use the
 
 What it does: when a session ends, a detached worker checks whether the session was
 worth a handoff and, if so, runs the real `/handoff` skill headless (`claude -p`) over a
-compact digest of the transcript, then commits the two handoff files itself. It is a
+compact digest of the transcript, then commits the two handoff files itself (and pushes
+the branch; see step 5 of "What the worker does after the child"). It is a
 machine-level hook, on by default wherever it is wired, and independent of project
 profiles. The hook returns in well under a second; the worker runs in its own session.
 
@@ -297,34 +298,45 @@ Every run is in the log and in the run record (`scripts/run-record.sh`, role
 
 **The child can only write.** It runs in the session's directory with
 `--tools Read,Write,Bash`. Write access is path-scoped allow rules,
-`Edit(//<abs dir>/**)`, for the handoff target directory and the fallback directory
-only; `Edit` itself and `Bash(git:*)` are denied, and Bash is limited to `hostname`,
+`Edit(//<abs dir>/**)`, for one directory only: the project's `LOGS` folder (below).
+`Edit` itself and `Bash(git:*)` are denied, and Bash is limited to `hostname`,
 `realpath`, `readlink`, `ls` and `date`. A system prompt (`lib/auto-handoff-system.md`)
-tells it to write only the two files and run no git. The target directory is resolved
-the way the handoff skill resolves it: the first matching row of `handoff-locations.md`
-in the private dir (`$GRID_PRIVATE_DIR`, else `~/.the-grid-private/`), else an existing
-`logs` directory of the session's directory in any casing. If it does not exist the
-child writes to the fallback directory instead. A row's directory is matched ignoring
-case at every component (`Docs/Handoffs` finds `docs/handoffs`). When two directories
-match (`Logs` and `LOGS`, or an exact-case row plus another casing) nothing is granted:
-the spawn line says `target-refused=ambiguous-case` and the child writes to the
-fallback directory.
+tells it to write only the two files and run no git.
+
+**Where the files go.** Always the `LOGS` folder of the project the session ran in, and
+nowhere else (the same rule as the manual `/handoff` skill):
+
+- The project is the root of the git repo that contains the session's directory; with no
+  repo, the session's directory itself. So the folder is `<repo root>/LOGS`, or
+  `<cwd>/LOGS` outside a repo.
+- If a `logs`, `Logs` or `LOGS` directory already exists there it is used as it is (no
+  second one in another casing). If none exists the worker creates `LOGS` (the child has
+  no `mkdir`) with mode 0755.
+- In a git repo the pair is committed (explicit paths) and the branch pushed (step 5
+  below). With no repo the files are just written: `commit=none`, no `push=`.
+- The-grid's own layout works as before: there `LOGS` is a gitignored symlink into the
+  private repo, so the files physically live in that repo and are committed and pushed
+  there, not in the-grid.
+- There is no fallback directory and no per-project location table
+  (`handoff-locations.md` is not read), and nothing depends on whether the repo is
+  public or who owns it. If `LOGS` cannot be used (see Confinement) the run ends
+  `action=error reason=target-refused why=<reason>` and writes nothing at all.
 
 **Confinement.** Whether Claude Code honours the `Edit(//<abs>/**)` rule form was not
 proven live (operator check B1), so the rules are not the only barrier:
 
-- The resolved target must lie under the session's directory or the private repo. A
-  `LOGS` symlink that points elsewhere is refused (only the fallback directory is
-  granted; the spawn log line says `target-refused=<why>`). A table row written as a
-  RELATIVE path must resolve inside the session's directory or the private repo too
-  (`outside-cwd` otherwise: a tracked symlink at that path cannot redirect the grant).
-  Only a row written as an ABSOLUTE path may name another repo, and then only if it has
-  no `..`, is inside a git work tree whose root is not `$HOME`, and is not `$HOME`, `/`
-  or under `~/.ssh`, `.claude`, `.config`, `.gnupg`, `.aws`, `.local/bin` or `.bashrc.d`.
-  The private repo's own root is never a target (`private-root`): the child could
-  rewrite `handoff-locations.md`, which decides future grants.
+- The write grant is `<resolved LOGS>/**` and nothing else. A `LOGS` inside the project
+  is accepted unless it is the project root itself (`cwd-root`) or a git directory
+  (`git-dir`). A `LOGS` that resolves OUTSIDE the project (a symlink) is accepted only
+  into another git work tree whose root is not `$HOME` or `/`, and is refused when it is
+  `$HOME` or `/` (`home-or-root`), under `~/.ssh`, `.claude`, `.config`, `.gnupg`, `.aws`,
+  `.local/bin`, `.bashrc.d` or `CLAUDE_CONFIG_DIR` (`sensitive-dir`), not in a git work
+  tree (`not-a-git-work-tree`) or in `$HOME` as a work tree (`home-work-tree`). Two
+  casings at once (`Logs` and `LOGS`) is `ambiguous-case`; a `LOGS` that cannot be
+  created is `mkdir-failed`.
 - A path with a glob metacharacter (`* ? [ ] { } ( ) !`) or a newline, or with a `..`
-  component, gets no rule; the fallback directory name is sanitised the same way.
+  component, gets no rule (`unsafe-path`): the run ends without a handoff rather than
+  writing somewhere else.
 - The child runs with `--permission-mode default`, `--setting-sources user` and
   `--strict-mcp-config`, with extra denies for `~/.ssh`, `~/.claude`, `~/.config`,
   `~/.gnupg`, `~/.aws`, shell startup files, `~/.gitconfig` and anything under a `.git`
@@ -357,8 +369,7 @@ proven live (operator check B1), so the rules are not the only barrier:
 
 1. A change (content compared, before and after) to git `config`, `HEAD`, `info/`,
    `hooks/`, a submodule's config and hooks, a linked worktree's config, hooks and
-   info, or a `core.hooksPath` directory, in the session's repo, the target repo or the
-   fallback repo; or to shell startup files, `~/.ssh/{authorized_keys,config,config.d,rc}`,
+   info, or a `core.hooksPath` directory, in the session's repo or the target repo; or to shell startup files, `~/.ssh/{authorized_keys,config,config.d,rc}`,
    `~/{.gitconfig,.npmrc,.xprofile,.pam_environment,.local/bin,.bashrc.d}`,
    `~/.config/{autostart,systemd/user,git/attributes}`, Claude's
    `settings*.json`, `.credentials.json`, `CLAUDE.md`, `hooks/` and `commands/`, is
@@ -376,13 +387,13 @@ proven live (operator check B1), so the rules are not the only barrier:
    that did not exist before the run, anywhere under the scanned directories, is
    `unexpected-git-dir`.
 2. Every file or symlink (symlinks are not followed) that is new or changed during the run,
-   under the session's directory (any depth, `.git/` excluded), the fallback directory
-   and the target directory is collected (NOT the rest of the repo the commit lands in:
+   under the session's directory (any depth, `.git/` excluded) and the target directory
+   is collected (NOT the rest of the repo the commit lands in:
    other agents write there while the run is going, and a sibling session's files must
    not fail this one; two workers that share a write directory or a repo take turns), and a symlink named
    `*-handoff.md` or `*-context.md` is reported whatever its age. Exactly one
    `<p>-handoff.md` and at most one `<p>-context.md` with the same prefix, in the target
-   or fallback directory, are expected. Anything else is `unexpected-file` (no commit,
+   (`LOGS`) directory, are expected. Anything else is `unexpected-file` (no commit,
    every path logged, nothing moved or deleted); no handoff file at all is
    `no-handoff-file`. A file or symlink that was there before the run and is gone after
    it is `unexpected-file` too, logged as `deleted=<paths>` (the child only creates
@@ -425,9 +436,11 @@ proven live (operator check B1), so the rules are not the only barrier:
 4. The pair is committed by explicit path in the repository that holds the real files, so
    the operator's other staged work is not swept in. Outside any repository the files
    stay on disk (`commit=none`). A failed commit is `commit-failed`.
-5. It pushes only when that repository is the private repo
-   (`${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}`), its branch has an upstream, and the
-   handoff commit is the only unpushed one. A plain `git push`, nothing else.
+5. It pushes the current branch of that repository to its upstream: a plain `git push`
+   (bounded to 60 s, no credential prompt). **This publishes every unpushed commit on the
+   branch, not only the handoff commit.** It never fails the handoff: no remote
+   (`push=no-remote`), no upstream or a detached HEAD (`push=no-upstream`) or a failed
+   push (`push=failed`, reason in a `child|` line) leaves the commit local.
 
 **What the model sees and what the log keeps.** The digest the child reads is scanned
 with the same strict table before the child starts: a matching line becomes
@@ -444,10 +457,6 @@ such as "the password is X", and the first 200 characters of a tool input cut mi
 token prefix too short to match). `{"password":"..."}` is redacted. File names in the
 `paths=` log field are masked like other log text.
 
-**Fallback directory.**
-`${GRID_HANDOFF_FALLBACK_DIR:-${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}/handoffs}/<basename of the session directory>/`.
-The worker creates it first.
-
 **Environment knobs** (all optional):
 
 | Variable | Default | Meaning |
@@ -458,8 +467,6 @@ The worker creates it first.
 | `GRID_AUTOHANDOFF_MAX_USD` | 1.00 | `--max-budget-usd` for the child |
 | `GRID_AUTOHANDOFF_WAIT` | 120 | seconds a second session in the same directory waits for the first before skipping as `cwd-busy` |
 | `GRID_AUTOHANDOFF_FORCE` | unset | `1` skips the already-ran, short-session and marker checks (parity runs, tests) |
-| `GRID_HANDOFF_FALLBACK_DIR` | see above | where a handoff lands when the target directory is missing or denied |
-| `GRID_PRIVATE_DIR` | `~/.the-grid-private` | the one repo the worker may push |
 | `GRID_AUTOHANDOFF_KEEP_ENV` | unset | extra variables the child keeps under `env -i`: names or `PREFIX*`, comma separated (the stub in tests needs `STUB_*,GRID_*`) |
 | `GRID_CLAUDE` | `claude` | the binary the worker runs (tests point it at a stub) |
 | `GRID_HOOK_LOG_DIR` | `~/.grid/hook-logs` | log directory (mode 0700) |
@@ -488,10 +495,10 @@ ts=<UTC time> session=<id> action=<skip|spawn|done|error> reason=<token> [turns=
 - `action=error`: `terminated` (the worker got TERM, HUP or the hook's outer alarm; a
   half-made commit was unstaged), `timeout`, `claude-exit-<n>` (127 means the binary could not be run),
   `no-handoff-file`, `unexpected-file` and `unexpected-git-dir` (see `paths=` and `deleted=`), `repo-busy`, `secret`, `commit-failed`,
-  `digest-failed`.
-- `push=`: `yes`; `no-not-private` (not the private repo); `no-upstream`;
-  `no-other-commits` (an earlier unpushed commit exists, so nothing was sent); `failed`
-  (the commit stays local).
+  `digest-failed`, `target-refused` (no usable `LOGS`: see `why=`; no child was started and
+  nothing was written).
+- `push=`: `yes`; `no-remote`; `no-upstream`; `failed` (all three leave the commit
+  local). Absent when nothing was committed (`commit=none`).
 - Lines starting `child|` are the child's own output, cut to 4000 bytes.
 
 **Claude Code facts this is built on** (Claude Code **2.1.296**, captured 2026-10-11,

@@ -16,7 +16,7 @@ Write a handoff document summarising the current conversation so a fresh agent c
 - `<slug>` is a 2-4 word kebab-case summary of the session topic (e.g. `machine-overlays`, `agent-factory-roster`)
 - `-handoff` is appended to make the file self documenting
 
-**Save location:** the location resolved by the Document locations reference below (ask before creating the directory).
+**Save location:** the project's `LOGS` folder, always (see Document locations below). No other location.
 
 **Rules:**
 - Do not duplicate content already captured in commits, diffs, PRDs, plans, or ADRs — reference them by path or URL instead
@@ -36,40 +36,31 @@ Also write a context file using today's actual date.
 
 ## Document locations reference
 
-Default: save to `LOGS/` — ask before creating it if it doesn't exist.
+Both files go to the `LOGS` folder of the project the session ran in. Nothing else
+decides this: no per-project table, no other directory, and not whether the repo is
+public or who owns it. Do not ask where.
 
-Optional per-project overrides: if `handoff-locations.md` exists in the private dir
-(`$GRID_PRIVATE_DIR`, default `~/.the-grid-private/`), read its table first (rows: `| directory-name-or-glob | location |`).
-If the file is absent or no row matches, use the default above.
-
-**Table rules** (the unattended auto-handoff worker applies the same ones):
-- The first column matches the working directory's basename, or its full
-  path as a glob. The first matching row wins.
-- `location` is relative to the working directory unless it is absolute; a
-  leading `~` is the home directory.
-- A matched row whose directory does not exist stops the search: do not fall
-  through to the default. Interactive use asks before creating it; the
-  unattended worker creates nothing and writes to its fallback directory.
-
-**Case handling:** match the directory case-insensitively — if a directory
-matching the row's `location` (or the default `LOGS/`) already exists on disk
-in any casing (`logs`, `Logs`, `LOGS`), write there as-is. Do not compare
-on-disk casing against git's tracked casing, do not check `core.ignorecase`,
-do not investigate or flag a mismatch — that's out of scope for this skill
-and wastes tokens. Only create a new directory (using the table's casing)
-when nothing matching exists at all.
+- **Project:** if the working directory is inside a git repo, the repo root
+  (`git rev-parse --show-toplevel`); otherwise the working directory itself.
+- **Folder:** `<project>/LOGS`. If a directory named `logs` in any casing (`logs`,
+  `Logs`, `LOGS`) already exists there, write there as-is; never create a second one in
+  another casing, and do not compare with git's tracked casing or `core.ignorecase`.
+- **Missing:** create `LOGS` and write there.
+- **Automated runs** (the SessionEnd worker) name the folder in the prompt as
+  `Target directory`: use exactly that path; it is already resolved and created.
 
 ---
 
 ## After writing
 
-Resolve the save directory to its real path first (`realpath <dir>` /
-`readlink -f <dir>`) — it may be a symlink into a **different** git repo than
-the one you're working in (e.g. the-grid's `LOGS/` symlinks to a separate
-private repo). Commit — and push, if a remote is configured — inside
-whichever repo actually contains the resolved path, not necessarily the
-project repo. If the resolved path isn't inside a git repo at all, leave the
-files on disk and say so; don't invent a repo to commit to.
+Resolve the folder to its real path first (`realpath <dir>`): it may be a symlink into
+a **different** git repo (e.g. the-grid's `LOGS/` links to a separate private repo).
+The repo that matters is the one containing the resolved path, not necessarily the
+project repo.
 
-Otherwise: commit both files with the session's other changes if the project
-is a git repo.
+- **In a git repo:** commit the two files by explicit path only
+  (`git add -- <f1> <f2>`, then `git commit -m "docs: handoff <slug>" -- <f1> <f2>`),
+  never the session's other changes. Then `git push` the current branch. A plain push
+  also publishes any other unpushed commit on that branch. No remote or upstream, or a
+  failed push: say so, leave the commit local, and carry on; never fail over it.
+- **No git repo:** leave the files in the folder and say so. Do not create a repo.

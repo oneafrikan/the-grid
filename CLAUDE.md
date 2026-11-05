@@ -66,7 +66,14 @@ submodules into two tiers:
 - `LOGS/` — dev journal (handoffs/context from the `handoff` skill). **Gitignored,
   not tracked** (#24/#39) — personal and not useful to a fork. On machines that want
   it, it's a symlink into a separate private repo; nothing in the-grid requires it
-  to exist.
+  to exist. The `handoff` skill and the SessionEnd auto-handoff worker always write
+  handoffs to the project's own `LOGS` folder (`<repo root>/LOGS` when the session ran
+  inside a git repo, else `<cwd>/LOGS`; an existing `logs`/`Logs`/`LOGS` is reused, a
+  missing one is created), with no fallback directory and no location table. In a git repo
+  they commit the two files by explicit path in the repo that holds them (here: the private
+  repo behind the symlink) and then `git push` the branch, which also publishes any other
+  unpushed commit on it; with no repo the files are only written. See `hooks/README.md`
+  "Auto-handoff".
 - `scripts/budget.py` + `docs/budget-target.json` — measures the skill/role description listing (Claude Code shares one small description budget across all skills and drops the overflow silently) and gates it: `--check` runs in `gate.sh` against a committed ratchet (owned skills + roles always; the baseline scope against the tracked `baseline-submodules.example.txt` once submodules are initialised, else exit 3 = skipped). A target missing `per_entry_max_chars`, `owned.skill_body_max_bytes` or `schema: 1` fails. `--report` shows the numbers. Lowering a number is normal (`--update-target`); raising one needs `--allow-raise` and review.
 - `scripts/usage/weekly.sh` + `scripts/usage/install-schedule.sh` — the weekly usage job (extract, then commit `usage/<host>.json` to the private repo) and the installer that renders its launchd/systemd/cron schedule via `scripts/lib/render-schedule.sh`. The installer only writes files and PRINTS the activation commands; activating is a human step. See `docs/usage.md`.
 - `scripts/prune-report.sh` (wraps `scripts/usage/prune_report.py`; `scripts/usage/aggregate.py` is the importable per-host summer, no CLI) — read-only report that proposes what to drop from the baseline from the per-host usage files (demote a repo, `name-only` a skill, unused agents); `docs/prune-keep.txt` lists names never proposed. Never reads `tokens`/`hooks`. See `docs/usage.md`.

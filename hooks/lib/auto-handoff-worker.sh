@@ -11,13 +11,16 @@
 #   3  fewer than MIN_TURNS human turns -> skip   short-session
 #   4  same session, no new turns       -> skip   no-new-turns
 #      (GRID_AUTOHANDOFF_FORCE=1 bypasses 2 to 4 only)
-#   5  digest the transcript into a private temp dir; create the fallback dir
+#   5  digest the transcript into a private temp dir; resolve the project's LOGS dir
+#      (<repo root of cwd, else cwd>/LOGS; an existing logs/Logs/LOGS is reused; created
+#      when missing). It is the ONLY place a handoff goes: no fallback dir, no table.
 #   6  snapshot the watched git state and the scanned dirs, run `claude -p "/handoff ..."`
 #      in <cwd> (write-only tool set, scrubbed env, wall-clock alarm, budget cap)
 #   7  verify what the child wrote: git state untouched, exactly one handoff pair, nothing else changed
 #   8  secret-scan both files (always); a hit quarantines them
 #   9  commit the pair by explicit path, in the repo that holds the files
-#  10  push, but only the private repo and only when that commit is the sole unpushed one
+#  10  push the current branch to its upstream (this also publishes any other unpushed
+#      commit on that branch); no remote, no upstream or a failed push leaves the commit local
 #  11  log, record the run (the per-session marker is written just before step 6)
 #
 # The child only WRITES the two files. This script (deterministic shell) checks,
@@ -27,8 +30,7 @@
 # Log: one line per decision in ${GRID_HOOK_LOG_DIR:-$HOME/.grid/hook-logs}/auto-handoff.log
 #   ts=<UTC> session=<id> action=<skip|spawn|done|error> reason=<token> [turns= commit= push= paths= ...]
 # Env knobs: GRID_AUTOHANDOFF_{MIN_TURNS,MAX_BYTES,TIMEOUT,MAX_USD,FORCE,WAIT,KEEP_ENV},
-#   GRID_HANDOFF_FALLBACK_DIR, GRID_PRIVATE_DIR, GRID_CLAUDE, GRID_HOOK_LOG_DIR,
-#   GRID_HOOK_STATE_DIR, GRID_STATE_DIR (quarantine root).
+#   GRID_CLAUDE, GRID_HOOK_LOG_DIR, GRID_HOOK_STATE_DIR, GRID_STATE_DIR (quarantine root).
 #
 # Bash 3.2-compatible (no mapfile, no associative arrays); no `set -u` (empty arrays).
 
@@ -73,8 +75,6 @@ FORCE="${GRID_AUTOHANDOFF_FORCE:-0}"
 LOG="${GRID_HOOK_LOG_DIR:-$HOME/.grid/hook-logs}/auto-handoff.log"
 STATE="${GRID_HOOK_STATE_DIR:-$HOME/.grid/hook-state}/handoff"
 QUARANTINE="${GRID_STATE_DIR:-$HOME/.grid}/handoff-quarantine"
-PRIVATE="${GRID_PRIVATE_DIR:-$HOME/.the-grid-private}"
-FALLBACK_ROOT="${GRID_HANDOFF_FALLBACK_DIR:-$PRIVATE/handoffs}"
 
 # Temp state, all removed by the EXIT trap (the digest is a copy of the conversation).
 DIGEST_DIR=""; SNAP_DIR=""
@@ -156,8 +156,6 @@ join_csv() { local out="" i; for i in "$@"; do out="${out:+$out,}$i"; done; prin
 # safe_csv <items...>: join_csv for file names that go into the log. A name can look like a
 # credential (the child chose it), so it gets the same masking as other log text.
 safe_csv() { join_csv "$@" | secret_mask_stream | tr -d '\n'; }
-# trim <string>: strip surrounding whitespace.
-trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
 
 # The ONE transcript prefilter: lines that are not valid JSON (a truncated last line
 # must not break parsing) and sidechain (subagent) lines are dropped. Every later
@@ -285,7 +283,7 @@ lock_path_wait() {
 }
 lock_path_wait "$CWD_REAL" cwd
 
-# ---- 5: digest, fallback dir, target dir -------------------------------------------
+# ---- 5: digest, then the project's LOGS dir ------------------------------------------
 # Explicit template: BSD/macOS `mktemp -d` with no template ignores $TMPDIR (it uses the
 # per-user DARWIN_USER_TEMP_DIR), so the dirs would escape a caller-set TMPDIR. GNU honours
 # TMPDIR either way, so this is the same place there.
@@ -299,16 +297,6 @@ REDACTED="$(secret_redact_file "$DIGEST")"
 [[ "$REDACTED" =~ ^[0-9]+$ ]] || REDACTED=0
 REDACTED_TOKEN=""; [ "$REDACTED" -gt 0 ] && REDACTED_TOKEN=" redacted=$REDACTED"
 
-# The child writes into <fallback>/<basename of cwd>; the worker creates it (the child
-# has no mkdir). A failure to create it is not fatal: the child may still use <target>.
-# The directory name goes into a permission rule, so glob metacharacters and newlines in
-# the cwd's name become `_` here (see add_rule); the prompt names this exact path.
-FALLBACK_NAME="$(basename "$CWD")"; FALLBACK_NAME="${FALLBACK_NAME//$'\n'/_}"
-FALLBACK_NAME="$(printf '%s' "$FALLBACK_NAME" | sed 's/[][*?{}()!]/_/g')"
-FALLBACK="$FALLBACK_ROOT/$FALLBACK_NAME"
-mkdir -p "$FALLBACK" 2>/dev/null
-FALLBACK_REAL="$(rp "$FALLBACK" 2>/dev/null)" || FALLBACK_REAL="$FALLBACK"
-
 # ci_eq <a> <b>: equal ignoring case. nocasematch rather than tr in a subshell: this runs
 # once per directory entry. LC_ALL=C (top of file) keeps it to ASCII, like the skill's casings.
 ci_eq() {
@@ -321,7 +309,7 @@ ci_eq() {
 # ci_walk <dir> <rest>: count the existing directories that spell <rest> (components
 # separated by /) below <dir>, ignoring case at EVERY component. Sets CI_N (stops counting
 # at 2: more than one is already ambiguous) and CI_HIT (the last one found). `.` and empty
-# components are dropped, `..` is kept literally (accept_target refuses a row holding one).
+# components are dropped, `..` is kept literally (the only caller passes the fixed name LOGS).
 CI_N=0; CI_HIT=""
 ci_walk() {
   local cur="$1" rest="$2" comp cand
@@ -355,147 +343,90 @@ ci_dir() {
   esac
 }
 
-# resolve_target: the directory the handoff skill will choose, with the skill's own
-# first-match rule (skills/handoff/SKILL.md "Document locations reference"):
-#   1. the first row of ~/.the-grid-private/handoff-locations.md whose first column
-#      matches the cwd name or path glob; its location (relative = against cwd, ~ = home,
-#      directory matched case-insensitively at every component). A matched row whose
-#      directory is missing ends the search: no fallthrough to 2.
-#   2. otherwise the existing direct child of cwd named logs, in any casing
-# Sets TARGET to an absolute, EXISTING directory, or "" (no rule for it is then
-# granted and the child can write only to the fallback dir).
+# resolve_target: the project's LOGS directory, the ONLY place a handoff is ever written:
+#   project root = the repo root when cwd is inside a git repo, else cwd itself
+#   target       = the one existing direct child of the project root named logs in any
+#                  casing (logs, Logs, LOGS: never a second directory in another casing),
+#                  else <project root>/LOGS, created here (the child has no mkdir)
+# There is no other source: no table, no fallback directory, and nothing depends on whether
+# the repo is public or who owns it. Sets PROJ_ROOT and TARGET (absolute), or TARGET="" with
+# TARGET_WHY (two casings exist, or LOGS could not be created).
 TARGET_WHY=""
+PROJ_ROOT=""
 resolve_target() {
-  TARGET=""; TARGET_ROW=0; ROW_LOC=""; ROW_ABS=0
-  # The table lives with the private data: GRID_PRIVATE_DIR first, then the default home
-  # location (the skill documents ~/.the-grid-private/ and reads only that one).
-  local table="$PRIVATE/handoff-locations.md" base line c1 c2 loc matched=0
-  [ -r "$table" ] || table="$HOME/.the-grid-private/handoff-locations.md"
-  base="$(basename "$CWD")"
-  if [ -r "$table" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      case "$line" in '|'*) ;; *) continue ;; esac
-      IFS='|' read -r _ c1 c2 _ <<< "$line"
-      c1="$(trim "$c1")"; c1="${c1//\`/}"
-      c2="$(trim "$c2")"; c2="${c2//\`/}"
-      [ -n "$c1" ] || continue
-      case "$c1" in *[!-]*) ;; *) continue ;; esac     # a |---|---| separator row
-      # c1 is a glob on purpose (a directory name or a path pattern).
-      # shellcheck disable=SC2254
-      case "$base" in $c1) matched=1 ;; esac
-      # shellcheck disable=SC2254
-      case "$CWD" in $c1) matched=1 ;; esac
-      if [ "$matched" = 1 ]; then
-        loc="$c2"
-        # a leading ~ is a literal in the table; expand it to $HOME by hand
-        case "$loc" in \~|\~/*) loc="$HOME${loc#\~}" ;; esac
-        # Was the row absolute AS WRITTEN? (decided before $CWD is prepended: a relative row
-        # must resolve inside the cwd or the private repo, see accept_target.)
-        # cbase/crel: the part of the row that is matched exactly (the cwd, ~, /) and the
-        # part below it that is matched ignoring case.
-        local cbase="$CWD" crel="$c2"
-        case "$c2" in
-          \~|\~/*) cbase="$HOME"; crel="${c2#\~}" ;;
-          /*) cbase=/; crel="$c2" ;;
-        esac
-        case "$loc" in /*) ROW_ABS=1 ;; *) loc="$CWD/$loc" ;; esac
-        loc="${loc%/}"
-        ROW_LOC="$loc"
-        # The skill matches the directory case-insensitively (`LOGS` finds `Logs/`), at
-        # every component, so ci_dir does the same; two matches grant nothing.
-        ci_dir "$cbase" "$crel"
-        # A matched row whose directory is still missing stops the search: no fallthrough
-        # to the default, and no rule is granted (the child writes to the fallback dir).
-        [ -n "$TARGET" ] && TARGET_ROW=1
-        return 0
-      fi
-    done < "$table"
+  TARGET=""
+  PROJ_ROOT="$("${WGIT[@]}" -C "$CWD" rev-parse --show-toplevel 2>/dev/null)" || PROJ_ROOT=""
+  if [ -n "$PROJ_ROOT" ]; then PROJ_ROOT="$(rp "$PROJ_ROOT" 2>/dev/null)" || PROJ_ROOT=""; fi
+  [ -n "$PROJ_ROOT" ] || PROJ_ROOT="$CWD_REAL"
+  ci_dir "$PROJ_ROOT" LOGS
+  [ -z "$TARGET_WHY" ] || return 0
+  if [ -z "$TARGET" ]; then
+    # (umask 022 for the new directory only: the worker's umask 077 would make a project
+    # directory owner-only. The files the child writes keep 077.)
+    TARGET="$PROJ_ROOT/LOGS"
+    (umask 022; mkdir -p "$TARGET") 2>/dev/null || { TARGET=""; TARGET_WHY="mkdir-failed"; }
   fi
-  ci_dir "$CWD" LOGS
   return 0
 }
 resolve_target
 
 # accept_target: containment for the directory the child will be granted write access to.
-# `[ -d ]` follows symlinks, so a tracked LOGS -> <any dir> link, or a table row (the agent
-# can edit that file), used to turn into a write grant anywhere (R07.sec.F1, high). The
-# resolved path must now be under the cwd or the private repo. The one designed exception
-# is a table row that was written as an ABSOLUTE path to another repo (tests: "mapped
-# location outside cwd"): no `..` component, inside a git work tree whose root is not HOME,
-# and not HOME, / or a sensitive dir. A row written relative must resolve inside the cwd
-# or the private repo, like the default LOGS: otherwise a tracked symlink at the relative
-# path would turn it into a grant anywhere. The private repo's ROOT is never a target (the
-# child could rewrite handoff-locations.md, which decides future grants). Anything refused:
-# TARGET stays empty, only the fallback dir is granted, and the spawn log line says why
-# (target-refused=<why>).
-PRIVATE_REAL="$(rp "$PRIVATE" 2>/dev/null)" || PRIVATE_REAL="$PRIVATE"
-TARGET_REAL=""   # (TARGET_WHY is initialised above resolve_target: ci_dir may already have refused)
+# `[ -d ]` follows symlinks, so a LOGS that is a link can point anywhere. The one designed
+# case is the-grid's own layout: LOGS is a link into another git work tree (the private
+# repo), and the files are then committed in THAT repo. So a LOGS that resolves outside the
+# project is accepted only when it is inside a git work tree whose root is not HOME or /,
+# is not HOME, / or a sensitive dir (~/.ssh, ~/.claude, ~/.config, ...), and is not or inside
+# a git dir. Inside the project it is accepted unless it is the project root itself or a git
+# dir (a grant there lets the child rewrite config or hooks that the worker's own commit would
+# then trust). Anything refused: TARGET stays empty, nothing is written ANYWHERE, and the run
+# ends error/target-refused with why=<reason>.
+TARGET_REAL=""
 accept_target() {
   [ -n "$TARGET" ] || return 0
   local real s top
-  real="$(rp "$TARGET")" || { TARGET=""; return 0; }
-  # Never a target, wherever it came from: the private repo's root, the whole cwd, or
-  # anything that is (or sits inside) a git dir: a grant there lets the child rewrite
-  # config or hooks that the worker's own commit would then trust.
-  if [ "$real" = "$PRIVATE_REAL" ]; then TARGET_WHY="private-root"; TARGET=""; return 0; fi
-  if [ "$real" = "$CWD_REAL" ]; then TARGET_WHY="cwd-root"; TARGET=""; return 0; fi
+  real="$(rp "$TARGET")" || { TARGET=""; TARGET_WHY="unresolvable"; return 0; }
+  if [ "$real" = "$CWD_REAL" ] || [ "$real" = "$PROJ_ROOT" ]; then TARGET_WHY="cwd-root"; TARGET=""; return 0; fi
   case "$real/" in */.git/*) TARGET_WHY="git-dir"; TARGET=""; return 0 ;; esac
   if [ "$(git -C "$real" rev-parse --is-inside-git-dir 2>/dev/null)" = true ]; then
     TARGET_WHY="git-dir"; TARGET=""; return 0
   fi
-  # A `..` in a table row is refused outright: the lexical and the resolved meaning of
-  # `<link>/../x` differ, and a rule built from either would be the wrong one.
-  if [ "$TARGET_ROW" = 1 ]; then
-    case "$ROW_LOC/" in */../*) TARGET_WHY="dotdot"; TARGET=""; return 0 ;; esac
-  fi
   case "$real/" in
-    "$CWD_REAL"/*|"$PRIVATE_REAL"/*) TARGET_REAL="$real"; return 0 ;;
+    "$PROJ_ROOT"/*|"$CWD_REAL"/*) TARGET_REAL="$real"; return 0 ;;
   esac
-  if [ "$TARGET_ROW" != 1 ]; then
-    TARGET_WHY="symlink-outside"
-  elif [ "$ROW_ABS" != 1 ]; then
-    TARGET_WHY="outside-cwd"
-  else
-    # An absolute row that LOOKS inside the cwd or the private repo but resolves outside
-    # (a tracked symlink on the way) is the same redirect as a relative one.
-    case "$ROW_LOC/" in
-      "$CWD"/*|"$CWD_REAL"/*|"$PRIVATE"/*|"$PRIVATE_REAL"/*) TARGET_WHY="symlink-outside" ;;
-    esac
-    if [ -z "$TARGET_WHY" ]; then
-      case "$real" in
-        /|"$HOME"|"$HOME_REAL") TARGET_WHY="home-or-root" ;;
-      esac
-    fi
-    if [ -z "$TARGET_WHY" ]; then
-      for s in .claude .config .gnupg .aws .local/bin .bashrc.d .ssh; do
-        case "$real/" in "$HOME/$s"/*|"$HOME_REAL/$s"/*) TARGET_WHY="sensitive-dir" ;; esac
-      done
-      [ -n "${CLAUDE_CONFIG_DIR:-}" ] && case "$real/" in "$CLAUDE_CONFIG_DIR"/*) TARGET_WHY="sensitive-dir" ;; esac
-    fi
-    if [ -z "$TARGET_WHY" ]; then
-      if [ "$(git -C "$real" rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
-        TARGET_WHY="not-a-git-work-tree"
-      else
-        # HOME itself being a work tree (a dotfiles repo) must not make every path under it
-        # a valid target.
-        top="$(git -C "$real" rev-parse --show-toplevel 2>/dev/null)"; top="$(rp "$top" 2>/dev/null)"
-        case "$top" in "$HOME"|"$HOME_REAL"|/) TARGET_WHY="home-work-tree" ;; esac
-      fi
-    fi
-    [ -z "$TARGET_WHY" ] && { TARGET_REAL="$real"; return 0; }
+  case "$real" in
+    /|"$HOME"|"$HOME_REAL") TARGET_WHY="home-or-root" ;;
+  esac
+  if [ -z "$TARGET_WHY" ]; then
+    for s in .claude .config .gnupg .aws .local/bin .bashrc.d .ssh; do
+      case "$real/" in "$HOME/$s"/*|"$HOME_REAL/$s"/*) TARGET_WHY="sensitive-dir" ;; esac
+    done
+    [ -n "${CLAUDE_CONFIG_DIR:-}" ] && case "$real/" in "$CLAUDE_CONFIG_DIR"/*) TARGET_WHY="sensitive-dir" ;; esac
   fi
+  if [ -z "$TARGET_WHY" ]; then
+    if [ "$(git -C "$real" rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
+      TARGET_WHY="not-a-git-work-tree"
+    else
+      # HOME itself being a work tree (a dotfiles repo) must not make every path under it
+      # a valid target.
+      top="$(git -C "$real" rev-parse --show-toplevel 2>/dev/null)"; top="$(rp "$top" 2>/dev/null)"
+      case "$top" in "$HOME"|"$HOME_REAL"|/) TARGET_WHY="home-work-tree" ;; esac
+    fi
+  fi
+  [ -z "$TARGET_WHY" ] && { TARGET_REAL="$real"; return 0; }
   TARGET=""
 }
 accept_target
+# No usable LOGS means no handoff: nothing is written anywhere else (there is no fallback).
+[ -n "$TARGET" ] || finish_error target-refused "why=${TARGET_WHY:-unknown}"
 
 # Path-scoped write rules: Edit(//<abs path>/**) in default permission mode is the form
 # Claude Code enforces (tests/fixtures/hooks/README.md, task 0.6); `//` anchors at the
 # filesystem root, so it is "/" in front of the absolute path. Never a bare Edit/Write.
+# The only grant is <resolved LOGS>/** (the link spelling and its real path).
 RULES=()
 add_rule() {
   # A path with a glob metacharacter (or a newline) would widen or break the rule, and a
-  # `..` component is not a normalised path: grant nothing for it. The fallback dir (whose
-  # name is sanitised below) then remains the child's place to write.
+  # `..` component is not a normalised path: grant nothing for it.
   case "$1" in
     *[\*\?\[\]\{\}\(\)\!]*|*$'\n'*) return 0 ;;
     */../*|*/..) return 0 ;;
@@ -504,22 +435,20 @@ add_rule() {
   for x in "${RULES[@]}"; do [ "$x" = "$r" ] && return 0; done
   RULES+=("$r")
 }
-if [ -n "$TARGET" ]; then add_rule "$TARGET"; add_rule "$TARGET_REAL"; fi
-add_rule "$FALLBACK"; add_rule "$FALLBACK_REAL"
+add_rule "$TARGET"; add_rule "$TARGET_REAL"
+# Nothing could be granted (a metacharacter in the path): no handoff, and again no fallback.
+[ "${#RULES[@]}" -gt 0 ] || finish_error target-refused "why=unsafe-path"
 
-# The directories the child writes into are shared state too: two sessions in different
-# cwds can resolve to the same target (LOGS symlinked into the private repo) or the same
-# fallback dir, and each would see the other's pair as "changed during my run". Take a lock
-# per write directory as well, in sorted order (no two workers can wait on each other).
-while IFS= read -r wd; do
-  [ -n "$wd" ] && lock_path_wait "$wd" dir
-done < <(printf '%s\n' "$FALLBACK_REAL" "$TARGET_REAL" | sort -u)
+# The directory the child writes into is shared state too: two sessions in different cwds
+# can resolve to the same target (LOGS symlinked into the private repo), and each would see
+# the other's pair as "changed during my run". Take a lock per write directory as well.
+lock_path_wait "$TARGET_REAL" dir
 
 # ---- 6: snapshot .git, stamp, run the child ----------------------------------------
 # A changed git config, hook, info/ file or HEAD means the write-only boundary failed, and
 # the commit below runs in the TARGET repo, not only the cwd repo: a hook planted there
 # would execute as the operator (R07.sec.F2). So every repo we will read or commit in is
-# watched: the cwd repo, the target repo and the fallback repo. State = path + type +
+# watched: the cwd repo and the target repo. State = path + type +
 # checksum (or link target), written outside any directory the child can see.
 GITDIRS=()
 # add_gitdir <dir>: remember the git dir (and the common dir of a linked worktree, where
@@ -569,7 +498,6 @@ git_state() { git_watch "$1" | state_lines; }
 
 add_gitdir "$CWD"
 [ -n "$TARGET_REAL" ] && add_gitdir "$TARGET_REAL"
-add_gitdir "$FALLBACK_REAL"
 i=0
 for d in "${GITDIRS[@]}"; do
   git_state "$d" > "$SNAP_DIR/git$i.state"
@@ -588,12 +516,12 @@ done
 INC_WATCH=(); INC_MAX=64
 SSH_DIR="$HOME/.ssh"; SSH_DIR_REAL="$HOME_REAL/.ssh"
 # covers_run_dir <path>: true when <path> is, or is a directory above, a place this run itself
-# writes (the cwd, the fallback dir, the target dir). Watching it would count the worker's own
+# writes (the cwd, the target dir). Watching it would count the worker's own
 # handoff as a change by the child: an ssh `Include ~/projects/*` made every run end
 # unexpected-file (NF-077 VF1). Those places are scanned anyway, as ROOTS, below.
 covers_run_dir() {
   local p="${1%/}" r
-  for r in "$CWD" "$CWD_REAL" "$FALLBACK" "$FALLBACK_REAL" "$TARGET_REAL"; do
+  for r in "$CWD" "$CWD_REAL" "$TARGET_REAL"; do
     [ -n "$r" ] || continue
     case "$r/" in "$p"/*) return 0 ;; esac
   done
@@ -689,8 +617,6 @@ home_watch() {
   done
   local c="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
   printf '%s\n' "$c"/settings*.json "$c/.credentials.json" "$c/CLAUDE.md" "$c/hooks" "$c/commands" "$HOME/.config/systemd/user"
-  # The table that decides future write grants.
-  printf '%s\n' "$PRIVATE/handoff-locations.md" "$HOME/.the-grid-private/handoff-locations.md"
   # What the user's git and ssh config include (found once, above).
   if [ "${#INC_WATCH[@]}" -gt 0 ]; then printf '%s\n' "${INC_WATCH[@]}"; fi
 }
@@ -720,12 +646,12 @@ home_watch_lite() { printf '%s\n' "$HOME/.local/bin"; }
 home_state() { { home_watch | watch_through_links | state_lines; home_watch_lite | state_lines lite; } | sort -u; }
 home_state > "$SNAP_DIR/home.state"
 
-# Roots the verification scans: ONLY the directories the child may write to: the cwd, the
-# fallback dir and the target dir. Not the whole work tree of the repo the commit lands in:
+# Roots the verification scans: ONLY the directories the child may write to: the cwd and
+# the target dir. Not the whole work tree of the repo the commit lands in:
 # the private repo holds the live LOGS/ that other agents write all the time, and another
 # session's pair or note would be blamed on this run (the git STATE of those repos is still
 # watched, in 7a). All real paths: find -P never follows a link out of a root.
-ROOTS=("$CWD_REAL" "$FALLBACK_REAL")
+ROOTS=("$CWD_REAL")
 if [ -n "$TARGET_REAL" ]; then
   case "$TARGET_REAL/" in
     "$CWD_REAL"/*) ;;
@@ -797,8 +723,8 @@ scan_new_and_quarantine() {
   return 0
 }
 
-TARGET_TEXT="${TARGET:-none (use the fallback directory)}"
-PROMPT="/handoff Source conversation is the digest file $DIGEST, not this session. Target directory: $TARGET_TEXT. Fallback directory: $FALLBACK."
+# The prompt must end with "Target directory: <path>." (the test stub reads it from there).
+PROMPT="/handoff Source conversation is the digest file $DIGEST, not this session. Target directory: $TARGET."
 
 # The turn marker is written BEFORE the child runs: whatever the outcome, this session
 # is not paid for again until it gains MIN_TURNS new turns (an error outcome used to leave
@@ -888,7 +814,7 @@ env -i "${CHILD_ENV[@]}" "$PERL_BIN" -e "$TIMEOUT_PL" "$TIMEOUT" \
   --tools "Read,Write,Bash" \
   --allowedTools "Read" "${RULES[@]}" "Bash(hostname:*)" "Bash(realpath:*)" "Bash(readlink:*)" "Bash(ls:*)" "Bash(date:*)" \
   --disallowedTools "${DENY[@]}" \
-  --add-dir "$DIGEST_DIR" --add-dir "$FALLBACK" \
+  --add-dir "$DIGEST_DIR" \
   --append-system-prompt-file "$HERE/auto-handoff-system.md" \
   < /dev/null > "$OUT" 2>&1 &
 CHILD_PID=$!
@@ -993,12 +919,12 @@ done
 if [ "${#HANDOFFS[@]}" -eq 0 ]; then { scan_new_and_quarantine; finish_error no-handoff-file "$QNOTE"; }; fi
 
 # EXPECTED: one <p>-handoff.md and at most one <p>-context.md with the same <p>, in one
-# directory that is the target dir or the fallback dir. Everything else is UNEXPECTED.
+# directory that is the target (LOGS) dir. Everything else is UNEXPECTED.
 HF=""; CTX=""
 if [ "${#HANDOFFS[@]}" -eq 1 ]; then
   h="${NEW[${HANDOFFS[0]}]}"
   hdir="$(dirname "$h")"
-  if { [ -n "$TARGET_REAL" ] && [ "$hdir" = "$TARGET_REAL" ]; } || [ "$hdir" = "$FALLBACK_REAL" ]; then
+  if [ "$hdir" = "$TARGET_REAL" ]; then
     HF="$h"
     prefix="$(basename "$h")"; prefix="${prefix%-handoff.md}"
     for r in "${NEW[@]}"; do
@@ -1037,7 +963,7 @@ if [ "${#HITS[@]}" -gt 0 ]; then
 fi
 
 # ---- 9: commit the pair, by explicit path, in the repo that holds the real files ----
-# A git dir the child CREATED (a nested .git in the target or fallback dir) would make the
+# A git dir the child CREATED (a nested .git in the target dir) would make the
 # commit below run its config as the operator (core.fsmonitor, hooks, a ssh command). The
 # before/after .git listing in 7a catches a new .git entry; this is the second line: the
 # git dir that governs the commit directory must be one that existed before the run.
@@ -1077,20 +1003,24 @@ else
   fi
 fi
 
-# ---- 10: push, only the private repo and only our own commit -----------------------
+# ---- 10: push the current branch to its upstream ----------------------------------------
+# A plain `git push` of the branch the commit is on. NOTE: that publishes EVERY unpushed
+# commit on the branch, not only the handoff commit (the operator's decision: handoffs
+# are shared as soon as they are written). Never a reason to fail the handoff: no remote,
+# no upstream (or a detached HEAD) and a failed push (network, auth, a rejected non-fast-
+# forward, the 60 s bound) all leave the commit local and only change the push= token.
+# GIT_TERMINAL_PROMPT=0: a credential prompt must fail fast in a detached worker.
 PUSH=""
 if [ "$COMMIT" != "none" ]; then
-  if [ "$T" != "$PRIVATE_REAL" ]; then
-    PUSH="no-not-private"
+  if [ -z "$("${WGIT[@]}" -C "$T" remote 2>/dev/null)" ]; then
+    PUSH="no-remote"
   elif ! "${WGIT[@]}" -C "$T" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
     PUSH="no-upstream"
-  elif [ "$("${WGIT[@]}" -C "$T" rev-list --count '@{u}..HEAD' 2>/dev/null)" != "1" ]; then
-    # A push sends every unpushed commit; only a handoff-only push is safe unattended.
-    PUSH="no-other-commits"
-  elif run_bounded 60 "${WGIT[@]}" -C "$T" push -q >/dev/null 2>&1; then
+  elif run_bounded 60 env GIT_TERMINAL_PROMPT=0 "${WGIT[@]}" -C "$T" push -q > "$GOUT" 2>&1; then
     PUSH="yes"
   else
     PUSH="failed"
+    printf 'child| push failed: %s\n' "$(head -c 400 "$GOUT" | secret_mask_stream | tr '\n' ' ')" >> "$LOG" 2>/dev/null
   fi
 fi
 
