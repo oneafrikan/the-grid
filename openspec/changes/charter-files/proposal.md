@@ -52,6 +52,8 @@ None exist to modify: `openspec/specs/` is absent on this branch. The coupling w
 - Colleagues on Cowork read `PURPOSE.md`/`MAP.md` through the `CLAUDE.md` trailhead if Cowork loads `CLAUDE.md` (UNVERIFIED; pilot).
 - Not designed here: the business tier itself.
 
+> **Update 2026-11-05:** the v0 business repo is a plain private repo and is not seeded by `cut-project.sh` (ADR-009 in `docs/business-tier/DECISIONS.md`, PR #306); the bullets above apply only if a cut is built later.
+
 ## Non-goals
 
 - No signal file format (the field list in `AGENTS_base.md` restates A2's), sweep, `knowledge/` entry format beyond the two fields `map.py` reads (`claim`, and `stage` for `status`), or `gh-triage` change (A2). No `knowledge.py` (A2 creates and mirrors it).

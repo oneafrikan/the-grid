@@ -46,6 +46,8 @@ None in the OpenSpec sense: `openspec/specs/` does not exist on `next` (checked)
 
 The business tier (`docs/business-tier`, PR #280; may not exist in every worktree) makes `the-grid-<business>` a PROJECT repo. The loop must therefore instantiate against any repo with no the-grid dependency at run time: hooks fall back to a built-in parser when `~/.the-grid` is absent, `instantiate.sh` takes `--repo`, and nothing assumes the-grid's layout. The business-tier build work will itself be done by the loop later. Nothing here designs the business tier.
 
+> **Update 2026-11-05:** the v0 business repo is a plain private repo (marketplace, skills, a packaging script) with no project-factory cut, CI, issue loop or sweep (ADR-009 in `docs/business-tier/DECISIONS.md`, PR #306); this section applies only if those are built later.
+
 ## Impact
 
 - Pattern: `automation-factory/patterns/issue-loop/` (`run-issue.sh`, `wake.sh` new; `run-issues.sh` removed; hooks, `setup.sh`, templates, README rewritten).
