@@ -1,6 +1,6 @@
 # Business tier — the-grid for people who don't use a terminal
 
-**Status:** design agreed, nothing built. Last updated 2026-10-18.
+**Status:** design agreed, nothing built. Last updated 2026-11-05.
 **Tracking issue:** #274. **Related:** #241 (Portal), #159-#162 (plugin marketplace, already built on `next`), #55 (uplift).
 
 ## One-line goal
@@ -14,7 +14,10 @@ context applied. No terminal, no Python, no clone.
 **Does a Claude Desktop surface (Cowork, Code tab) delegate from an orchestrator
 to plugin-supplied subagents?** If yes, the plugin route works as designed. If
 not, the design degrades (see [DELEGATION-GATE.md](DELEGATION-GATE.md)).
-Nothing past the probe plugin should be built until this is answered on a Mac.
+**Answered 2026-11-05 (ADR-008):** Cowork delegates to plugin subagents by namespaced
+name but its subagent tools cannot see the Mac's connected folder; the Code tab
+delegates and sees local files. The business tier ships single-thread skills only;
+Cowork carries the full grid plugins.
 
 ## Reading order
 
@@ -36,7 +39,7 @@ Nothing past the probe plugin should be built until this is answered on a Mac.
 
 | # | Question | Blocks | Where |
 |---|----------|--------|-------|
-| OQ-1 | Does Cowork delegate to plugin subagents? Does the Code tab? | everything | DELEGATION-GATE |
+| OQ-1 | Does Cowork delegate to plugin subagents? Does the Code tab? | everything | **Answered** (ADR-008): both delegate; Cowork has no local-file access |
 | OQ-2 | How does business context reach the grid's agents (read-first skill vs build-time injection)? | bundle design | SPEC |
 | OQ-3 | Can a non-technical Mac add a private GitHub marketplace (git credentials)? | onboarding | DELEGATION-GATE |
 | OQ-4 | Do marketplace updates reach colleagues without action? | maintenance | DELEGATION-GATE |

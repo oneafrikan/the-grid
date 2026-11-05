@@ -40,3 +40,19 @@ Format: status, date, decision, why, consequences. Add; do not rewrite history. 
 
 - **Decision:** assume colleagues have Claude Desktop installed and are logged in. The design does not depend on or alter how Claude plan tiers work.
 - **Caveat:** research reported that Enterprise Cowork may be cloud-only and Team has no group scoping. These are noted in RESEARCH.md, not designed around.
+
+## ADR-008 — Surface split: Cowork for cloud work, Code tab for local work, business tier single-thread (accepted, 2026-11-05)
+
+- **Decision (operator):** "anything that runs in the cloud can be done in Cowork; the business tier should ship business-wide single-thread skills; Cowork ships the full agent army." Interpreted as:
+  - **Cowork:** cloud-side work (research, drafting, docs, connectors). The full the-grid plugins (`grid-core` + `grid-agents`) are installed there.
+  - **Business tier** (`the-grid-<business>` plugin for colleagues): business-wide single-thread skills only. No dependence on subagent delegation.
+  - **Code tab:** local file and repo work. It reads the wired `~/.claude`, delegates to subagents and sees the local folder.
+- **Why (DELEGATION-GATE results, 2026-11-05, macOS):**
+  - Cowork: one subagent invocation by namespaced name (`grid-agents:grid-qa-engineer`) ran, so delegation to plugin agents works. Its tools ran in Cowork's cloud container, which cannot see the folder connected on the Mac.
+  - Code tab: a bare-name subagent (`grid-qa-engineer`) ran and listed the connected folder's files. The namespaced name failed because no plugin is installed there.
+- **OQ-1 answered for Cowork:** delegation works, local file access does not. Two-agent runs (D1 full), D2, D3 and D5 are still untested; this decision does not depend on them.
+- **Consequences:**
+  - Plan B in the decision tree (flattened orchestrators for Cowork) is not needed for the full grid; only the business-tier skills are single-thread.
+  - Orchestrated work on local files runs in the Code tab.
+  - The ADR-005 interaction clause (ADE as main path if Cowork cannot delegate) is not triggered; ADR-005 stays open as a long-term direction.
+  - Still untested: OQ-3 (private marketplace credentials), OQ-4 (update propagation), Cowork self-install, docx output.

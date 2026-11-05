@@ -1,7 +1,7 @@
 # Claude Code plugins
 
 the-grid ships two Claude Code plugins from this repo, as a zero-clone way to
-try it. **Claude Code only** — for other harnesses, or for third-party skills,
+try it. **Claude Code and the Claude Desktop app (Code tab, Cowork) only** — for other harnesses, or for third-party skills,
 use `grid install`. Claude Desktop (Code tab, Cowork): see
 [Claude Desktop](#claude-desktop-code-tab-and-cowork).
 
@@ -70,6 +70,8 @@ Observed 2026-11-05 on macOS unless marked. Delegation-gate results: `docs/busin
 
 - **Code tab** runs Claude Code on the Mac and reads `~/.claude`. A machine wired with `wire.sh` (or `grid install`) gets the full wired set of skills and subagents there, with no plugin install.
 - The one-channel-per-machine rule applies to the Code tab too.
+- In the Code tab (wired, no plugin installed) an Agent call with `subagent_type: grid-agents:grid-qa-engineer` failed as an invalid agent type: names are bare there, not namespaced.
+- The bare name `grid-qa-engineer` ran (in the background) and listed the files of the folder connected on the Mac, so local file access works.
 - Installing the plugins from inside the Code tab is documented by Anthropic but untested here.
 - **Cowork does not read `~/.claude`.** It sees only Anthropic's built-in skills plus plugins installed in Cowork.
 - **Install in Cowork**: in Cowork's plugin settings, add the marketplace `oneafrikan/the-grid` (public, no git credentials needed), then install `grid-core` and `grid-agents`. The exact UI path is unverified.
