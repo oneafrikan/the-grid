@@ -154,6 +154,9 @@ Spec-driven development uses OpenSpec, wired on every machine (the `openspec-*` 
 The convention and the two thin layers the-grid adds are described in [CONTRIBUTING.md](CONTRIBUTING.md).
 Run `/openspec-help` for the reference card.
 
+An optional companion, not part of the-grid: [grid-fleet](https://github.com/oneafrikan/grid-fleet) is a terminal dashboard for Claude Code sessions, tokens, subagent usage and limits across machines (Python, stdlib only).
+It is a separate repo and the-grid does not depend on it.
+
 ## Credits and license
 
 Wires skills from upstream projects, listed with licences in [docs/SOURCES.md](docs/SOURCES.md).
