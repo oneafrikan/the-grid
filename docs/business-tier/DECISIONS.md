@@ -83,5 +83,5 @@ Format: status, date, decision, why, consequences. Add; do not rewrite history. 
   - the project-factory business-repo template;
   - CI on the business repo.
 - **Consequences:**
-  - OQ-3 (private marketplace credentials) only matters to the git-access route.
-  - Still untested: that Customize > Skills accepts a skill zip with assets (the fallback above is the workaround), update propagation (OQ-4), and per-team access (needs the org admin).
+  - OQ-3 (private marketplace credentials) answered for accounts with org access (operator-run, 2026-11-05, Claude Desktop on macOS): a private org repo added as a marketplace needed no extra credentials, the plugin synced, and the Plugins page showed the skill with all its files including assets (a .pptx and images). A "Try in Cowork" action was offered. It only matters to the git-access route.
+  - Still untested: that Customize > Skills accepts a skill zip with assets, used by a colleague without repo access (the fallback above is the workaround); whether the skill uses its bundled assets when building in Cowork; update propagation (OQ-4); and per-team access (needs the org admin).
