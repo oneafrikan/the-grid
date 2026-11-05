@@ -1,6 +1,6 @@
 # Business tier — the-grid for people who don't use a terminal
 
-**Status:** design agreed, nothing built. Last updated 2026-11-05.
+**Status:** v0 built (ADR-009). Last updated 2026-11-05.
 **Tracking issue:** #274. **Related:** #241 (Portal), #159-#162 (plugin marketplace, already built on `main`), #55 (uplift).
 
 ## One-line goal
@@ -32,7 +32,7 @@ Cowork carries the full grid plugins.
 - Work and PRs go to `main`.
 - The public grid already ships two plugins (`grid-core`, `grid-agents`) built by
   `scripts/build-plugins.py` from `plugins/bundles.json`; see `docs/PLUGINS.md`.
-  The business tier is a second consumer of that builder. Not yet read in detail.
+  The v0 business repo does not use that builder (ADR-009); a builder-based business build is deferred.
 - Keep this directory business-neutral: the repo is public. Use `<business>` or `acme`.
 
 ## Open questions
@@ -40,13 +40,14 @@ Cowork carries the full grid plugins.
 | # | Question | Blocks | Where |
 |---|----------|--------|-------|
 | OQ-1 | Does Cowork delegate to plugin subagents? Does the Code tab? | everything | **Answered** (ADR-008): both delegate; Cowork subagents work on files the main session stages in and writes back |
-| OQ-2 | How does business context reach the grid's agents (read-first skill vs build-time injection)? | bundle design | SPEC |
-| OQ-3 | Can a non-technical Mac add a private GitHub marketplace (git credentials)? | onboarding | DELEGATION-GATE |
-| OQ-4 | Do marketplace updates reach colleagues without action? | maintenance | DELEGATION-GATE |
+| OQ-2 | How does business context reach the grid's agents (read-first skill vs build-time injection)? | bundle design | **Deferred** (ADR-009): v0 ships self-contained skills with no grid roles. SPEC |
+| OQ-3 | Can a non-technical Mac add a private GitHub marketplace (git credentials)? | onboarding | **Open, git users only** (ADR-009): everyone else uses the zip upload. DELEGATION-GATE |
+| OQ-4 | Do marketplace updates reach colleagues without action? | maintenance | **Open, untested.** Marketplace route: unknown. Zip route: no propagation by design, a colleague re-downloads and re-uploads. DELEGATION-GATE |
 | OQ-5 | Do orchestrators that name agents bare (`grid-qa-engineer`) resolve against namespaced plugin agents (`grid-agents:grid-qa-engineer`)? | orchestration | **Answered for Cowork** (ADR-008): namespaced resolve; the orchestrator mapped bare roster names itself; a bare name passed directly to a plugin agent is untested. DELEGATION-GATE |
 | OQ-6 | Evaluate Orca as the model for a non-technical ADE (ADR-005). Not yet looked at. | long-term | DECISIONS |
 
 ## Next actions
 
-1. Test OQ-3 (private marketplace credentials) and OQ-4 (update propagation), both untested.
-2. Then: build `research-brief` (Phase 2), then the business-repo template and builder changes.
+1. Arrange per-team read access to the business repo with the org admin.
+2. Confirm that the Claude > Customize > Skills upload accepts a skill zip with assets (fallback: unzip, upload the skill, add the assets in chat).
+3. Add skills as needed.

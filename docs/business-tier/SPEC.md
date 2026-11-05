@@ -1,7 +1,8 @@
 # Business tier — spec
 
-Status: agreed design, unbuilt. Items marked **[unverified]** come from research
-or inference and are what the Mac pilot tests. See [RESEARCH.md](RESEARCH.md).
+Status: v0 built as a plain repo (ADR-009; see section 8). Sections 2 to 5 describe the
+builder-first design, which is **deferred** (ADR-009), not the v0 path. Items marked
+**[unverified]** come from research or inference. See [RESEARCH.md](RESEARCH.md).
 
 ## 1. Principle
 
@@ -14,6 +15,8 @@ Tiers: public (`the-grid`) < business (`the-grid-<business>`) < private (`the-gr
 Colleagues get public + business only. The private tier is the operator's.
 
 ## 2. End-to-end user journey
+
+> **Deferred (ADR-009).** The template, `grid.pin`, `bundles.json` and CI build below are not part of v0. The v0 journey is section 8.
 
 **A. One-off setup (maintainer, terminal)**
 1. Cut `the-grid-<business>` from a business template (project-factory; template not yet written).
@@ -40,6 +43,8 @@ Colleagues get public + business only. The private tier is the operator's.
 **E. Terminal users:** same repo, same plugins via `claude plugin ...`, or wire it with `wire.sh`.
 
 ## 3. Repo architecture
+
+> **Deferred (ADR-009).** The generated plugins, builder, `grid.pin` and CI below are not built. The v0 layout is section 8.
 
 ```
 the-grid-<business>/
@@ -70,6 +75,8 @@ the-grid-<business>/
 | b. Build-time injection | Builder appends a context block to every bundled agent | Deterministic | Duplicates text into every agent; context cost; builder complexity |
 
 Leaning (a), with (b) as fallback if the pilot shows agents skip the boot step. Decide after the delegation gate.
+
+**Deferred (ADR-009):** v0 ships self-contained skills and applies no context to grid roles.
 
 ## 4. The Claude flow
 
@@ -108,3 +115,25 @@ colleague message
 - Any custom UI (see DECISIONS ADR-005 for the long-term direction).
 - Touching how Claude plan tiers work.
 - Non-Claude runtimes (low adoption; the multi-harness work in the uplift covers them separately).
+
+## 8. v0 as built (ADR-009)
+
+A private repo in the business's own GitHub org (`the-grid-<business>`). No builder, no CI, nothing composed from the grid.
+
+```
+the-grid-<business>/
+├── .claude-plugin/marketplace.json     # one plugin
+├── plugins/<plugin>/skills/<name>/     # SKILL.md, optional references/ and assets/
+├── scripts/package.sh                  # builds dist/<name>/
+└── dist/<name>/                        # SKILL.md + <name>.zip (whole skill folder), reproducible, committed
+```
+
+Two install routes:
+
+1. **Git access to the org:** add the repo as a plugin marketplace (`claude plugin marketplace add <org>/<repo>`; in Cowork, from its plugin settings) and install the plugin.
+2. **Everyone else:** download `dist/<name>/<name>.zip` and upload it in Claude > Customize > Skills. If the upload rejects the assets, unzip it, upload the skill, and add the assets into the chat.
+
+- Skills are single-thread (ADR-008).
+- First skills: a house email-style skill and a PowerPoint brand-guide skill that bundles its template and assets.
+- Untested: that the Skills upload accepts a zip with assets, update propagation (OQ-4), per-team access (needs the org admin).
+- Deferred: the builder, layering business context into grid roles (OQ-2), the project-factory business-repo template, CI on the business repo.
