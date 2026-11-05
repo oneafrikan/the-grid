@@ -369,7 +369,7 @@ proven live (operator check B1), so the rules are not the only barrier:
 
 1. A change (content compared, before and after) to git `config`, `HEAD`, `info/`,
    `hooks/`, a submodule's config and hooks, a linked worktree's config, hooks and
-   info, or a `core.hooksPath` directory, in the session's repo or the target repo; or to shell startup files, `~/.ssh/{authorized_keys,config,config.d,rc}`,
+   info, or a `core.hooksPath` directory, in the session's repo or the target repo; or to shell startup files, `authorized_keys`, `config`, `config.d` and `rc` in the home `.ssh` directory,
    `~/{.gitconfig,.npmrc,.xprofile,.pam_environment,.local/bin,.bashrc.d}`,
    `~/.config/{autostart,systemd/user,git/attributes}`, Claude's
    `settings*.json`, `.credentials.json`, `CLAUDE.md`, `hooks/` and `commands/`, is

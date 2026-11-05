@@ -421,8 +421,10 @@ no_stray_handoffs() {
   before="$(commits "$P")"
   run_worker
   grep -Eq "action=done reason=ok turns=6 commit=[0-9a-f]+" "$LOG"
-  [ -d "$P/LOGS" ] && [ ! -L "$P/LOGS" ]
-  [ -f "$P/LOGS/$PAIR_HF" ] && [ -f "$P/LOGS/$PAIR_CF" ]
+  [ -d "$P/LOGS" ]
+  [ ! -L "$P/LOGS" ]
+  [ -f "$P/LOGS/$PAIR_HF" ]
+  [ -f "$P/LOGS/$PAIR_CF" ]
   [ "$(commits "$P")" -eq $((before + 1)) ]
   [ "$(git -C "$P" show --name-only --format= HEAD | sort | tr '\n' ' ')" = "LOGS/$PAIR_CF LOGS/$PAIR_HF " ]
   # a project directory, not an owner-only one (the worker runs with umask 077)
@@ -437,7 +439,8 @@ no_stray_handoffs() {
   run bash "$WORKER" "$SID" "$TXN" "$NP" other
   grep -Eq "action=done reason=ok turns=6 commit=none" "$LOG"
   refute grep -q 'push=' "$LOG"
-  [ -f "$NP/LOGS/$PAIR_HF" ] && [ -f "$NP/LOGS/$PAIR_CF" ]
+  [ -f "$NP/LOGS/$PAIR_HF" ]
+  [ -f "$NP/LOGS/$PAIR_CF" ]
   [ ! -e "$NP/.git" ]
   no_stray_handoffs
 }
