@@ -19,8 +19,8 @@ release tag.
 ## What is in each bundle
 
 - `grid-core` — the-grid's own skills (`gh-issues-by-severity`, `grid-help`,
-  `mine-learnings`, `openspec-help`, `rubber-duck`, `spec-scout`, `standup`,
-  `tighten`, `un-claudish`), `/tron`, and the five cross-desk agents
+  `growth-psych`, `mine-learnings`, `openspec-help`, `rubber-duck`, `spec-scout`,
+  `standup`, `tighten`, `un-claudish`), `/tron`, and the five cross-desk agents
   (`core-researcher`, `core-librarian`, `core-gh-triage`, `core-platform-engineer`,
   `core-context-engineer`).
 - `grid-agents` — the composed dev team: the CEO, tech-lead and growth-hacker

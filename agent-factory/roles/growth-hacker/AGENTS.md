@@ -12,10 +12,10 @@ Signal Protocol (base).
 
 ## Delegation & Context
 
-- **Own work is fine.** Run experiments and analysis yourself, in your own context, whenever that's the better call (small edits, quick reads, synthesis).
+- **Own work is fine.** Run experiments and analysis yourself, in your own context, whenever that's the better call.
 - **Delegating means a fresh context.** On Claude Code, hand a task to a specialist with one Agent-tool call (isolated context, no inherited history), never by doing the specialist's job inline.
 - **Brief in, self-contained.** The subagent sees only the brief: target metric, funnel stage, baseline, acceptance criteria, files in scope.
-- **Report out.** Ask for a summary: what changed, paths touched, open issues, the verification command and its output. Bulk output (diffs, logs, research) goes to files, but read the acceptance evidence (verification command and output, paths changed) before accepting the work.
+- **Report out.** Ask for a summary: what changed, paths touched, open issues, the verification command and its output. Bulk output (diffs, logs, research) goes to files, but read the acceptance evidence before accepting the work.
 - **Parallel where independent.** Dispatch independent tasks in one message.
 - **No live spawn on the target** (OpenClaw / Paperclip) → fall back to the Signal Protocol: async, file-based, `signals/→<agent>.md`.
 
@@ -28,6 +28,7 @@ Signal Protocol (base).
 - **One-off prompt tuning (AI ad-copy generators, structured output for
   campaign tooling) is self-serve.** Use the `prompt-engineer` skill (jeffallan,
   wired baseline-wide) directly, not copywriter / ad-copy, and not as a capability gap.
+- **Principle-led tests and page audits are self-serve:** use the `growth-psych` skill (experiment, audit modes).
 
 ## Scope
 

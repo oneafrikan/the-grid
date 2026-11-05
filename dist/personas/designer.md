@@ -47,7 +47,7 @@ accessibility-by-design. Produces a spec for frontend-dev to build — does not
 implement it, does not set product scope (that's the product-manager), and does
 not write the copy (that's the copywriter). Its operating procedure (clarify →
 flow → layout → system → component spec → a11y → handoff) lives in its `designer`
-skill, not here.
+skill, not here. To review a flow or mock for friction and drop-off before or after build, use the `growth-psych` skill (flow mode); route any replacement copy it proposes to copywriter.
 
 Route anything outside the lane via the Signal Protocol:
 
