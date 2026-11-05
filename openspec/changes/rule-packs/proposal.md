@@ -2,6 +2,14 @@
 
 Claude Code loads `.claude/rules/**/*.md` natively, and `paths:` frontmatter makes a rule load only when a matching file is touched. the-grid distributes skills and agents but no coding conventions, and the one big rule source it indexes (ECC) bakes in house opinions (mandatory TDD, 80% coverage, "never mutate", auto-spawned agents) and has no packs for SQL/BigQuery, dbt, Bash, Terraform, Django, Flask, Laravel or WordPress. Path-scoped rule packs give every machine and harness the stack conventions for the work at hand at near-zero idle token cost.
 
+## Status (2026-11-05)
+
+Built and on `main`: the rule format and lint (`scripts/rules.py lint|list|emit`), the opt-in `rules:<pack>` wiring, the Cursor, `AGENTS.md` and `GEMINI.md` emitters, `docs/rules.md`, and all 17 packs (issues #105 to #116 closed).
+
+Not done: the real-harness smoke test and choice of wired packs (group 13, #117), and the human spot-check of the packs that merged without a clean two-reviewer pass (#225). No pack is wired by default.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - New source format: `rules/<pack>/<topic>.md` (frontmatter = `paths:` only) plus `rules/<pack>/pack.yaml` and `README.md` (sources table).

@@ -2,6 +2,12 @@
 
 Installing the-grid today means cloning about 36 submodules to use roughly 120 wired skills. Nothing records what was installed, so drift cannot be detected, repaired or cleanly removed. Nothing pins a skill to a reviewed commit with a content hash, and upstream changes to wired skills are invisible until someone updates a submodule by hand. A stranger or a thin client needs one command that fetches only the curated set, verifies it, vets it, and can prove later that it is unmodified.
 
+## Status (2026-11-05)
+
+Built and on `main` (issues #92 to #98 closed): the submodule-free install path (`scripts/grid`, `grid.yaml`, `grid.lock`, the machine-local ledger, `GRID_NO_CATALOG`), with `python3 scripts/grid lock` required in any change that edits the baseline example or a `repos/*` pointer (the gate's `lock` check fails otherwise).
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - Add `grid.yaml` (tracked): upstream sources (HTTPS URL, optional ref) and a pointer to the default wired set, which keeps the existing baseline grammar, including the typed entries other changes add (`project:`, `rules:<pack>`, `harness:<name>`).

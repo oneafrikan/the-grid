@@ -233,6 +233,8 @@ gstack | gstack | browse/dist/browse | bun | GSTACK_SKIP_COREUTILS=${GSTACK_SKIP
 6. Run `wire.sh` (re-creates the wired symlinks and the runtime link). Then print `git -C repos/<repo> status --short` if non-empty under a `WARNING: setup modified tracked files in the submodule` heading (setup's `gstack-patch-names` rewrites `name:` lines in tracked `SKILL.md` files in some prefix states); report only, never revert or commit.
 7. Re-running is a no-op: setup rebuilds nothing, step 5 finds no real dirs, `wire.sh` is idempotent.
 
+Added 2026-11-05: (a) if the step-6 `wire.sh` exits 3 (its audit step blocked, no link changed) the script reports that the setup output is built but not wired, points at `scripts/audit.sh --wired --quiet` and the `audit-allow` entries in `CURATION.md`, and exits 3. (b) `bun` install advice and the post-run notes branch on the OS (macOS, Ubuntu/Debian, Arch; `uname` and an Arch marker file, both overridable in tests); only wording branches, nothing is installed. (c) `CURATION.md` carries the gstack build-output entries; `scripts/audit.py` gained `unpinned: true` for an `oversize-file` entry on a literal path.
+
 ### Hook-free setup: the exact flags
 
 | Flag | Effect | Why |
@@ -263,7 +265,7 @@ Both are in `teardown_grid_links` (`scripts/wire.sh`, currently around line 172)
 - Decided: `skill-excludes.txt` is read from `scripts/lib/` next to `find-skill-mds.sh` (not from `GRID_DIR`), because mock-grid tests use the real script and repo names that do not match any row.
 - Decided: the openspec maintainer skills under `.agents/skills/` stop being wired, because the baseline comment says 12 workflow skills and already subtracts `release-openspec` as maintainer-only; the now-dead `-openspec/release-openspec` line is deleted from the example baseline.
 - Decided: `SKILLS.md` is regenerated only on a machine that has a personal `baseline-submodules.txt`; an agent without one leaves it and says so in the PR body, because the catalogue is built from the personal baseline and a wrong baseline would commit wrong output.
-- Decided: CI triggers on pushes to `main` and `next` and on every pull request, because loop-built PRs target `next` and must be gated.
+- Decided: CI triggers on pushes to `main` and `next` and on every pull request, because loop-built PRs target `next` and must be gated. (Amended 2026-11-05: `next` no longer exists. The workflow runs on pushes to `main` and on pull requests that are not drafts, as a `checks` job, four bats shards (`tests/shards.txt`) and one aggregating job named `gate`.)
 - Decided: CI runs `bash scripts/gate.sh`, not bare bats, so CI and the loop's verify step are the same command.
 - Decided: keep `submodules: recursive` in CI, because `tests/lib/bats-core` and the example-baseline tests need the submodules; `actions/checkout` clones them shallow, which is the cheap form.
 - Decided: `skills dir exists` skips when `CI=true`, and still fails on a real machine, because it is a machine-health check and a skipped test on a runner is honest where a forced pass is not.

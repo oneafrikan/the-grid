@@ -2,6 +2,14 @@
 
 Claude Code lists every skill name but shares one description budget (1% of context) across all of them, and silently drops the least-invoked descriptions on overflow. On the reference machine 165 wired skills produce a ~30k-char listing with ~60 descriptions already dropped, and only 11 skills were invoked in 36 days. Nothing in the-grid measures this, stops it growing, or tells the operator what to prune, and transcripts that hold the evidence expire after ~30 days.
 
+## Status (2026-11-05)
+
+Built and on `main`: `scripts/budget.py` with the committed ratchet `docs/budget-target.json` (checked by `gate.sh`), the one-line role descriptions, the shortened owned skill descriptions and sectioned long bodies, the usage extractor (`scripts/usage/`), the weekly job and per-OS schedule installer, and the read-only prune report (`scripts/prune-report.sh`). Groups 1 to 7 are done (issues #77 to #83 closed).
+
+Parked, not done: group 8 (#84). The operator has not installed the usage schedules, set retention or applied a first prune, and will do so once the repo is in regular use. `scripts/usage/install-schedule.sh` only writes files and prints the activation commands, so nothing is scheduled until then.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - Add `scripts/budget.py`: measures listing chars of the owned skills, public role descriptions and (where a baseline exists) the baseline wired set; `--check` runs in `gate.sh` and fails on regression against a committed target ratchet.

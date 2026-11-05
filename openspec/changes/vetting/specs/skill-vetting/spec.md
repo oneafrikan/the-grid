@@ -134,6 +134,11 @@ The scanner SHALL suppress a finding only when an `audit-allow` entry in `CURATI
 - **WHEN** an allowlisted file gains a second line that matches the same rule but not the entry's `contains`
 - **THEN** the new line is reported
 
+#### Scenario: An unreadable build artefact is allowed by path (added 2026-11-05)
+- **WHEN** an `oversize-file` entry has a literal `path` and `unpinned: true`, with no `contains` and no `sha256`
+- **THEN** the `oversize-file` finding on that path is allowed whatever the file's bytes are, and the scanner exits 2 naming the entry if `unpinned` is set on any other rule, on a glob path, or together with `contains` or `sha256`
+- **AND** this is meant only for compiled build output that differs per OS (the gstack `browse/dist` binaries), so a `sha256` pin would go stale on every machine
+
 ### Requirement: Machine-readable report for other tools
 
 The scanner SHALL emit, with `--format json`, a versioned document containing `policy_sha256`, counts and the full finding list in a deterministic order, with invisible and non-printable code points in excerpts escaped.

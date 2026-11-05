@@ -2,6 +2,14 @@
 
 Claude Code hooks are the only way to make a safety rule or a habit unconditional, but today the-grid ships none. Hooks are wired by hand per machine, and the one place they exist (issue-loop) hard-codes absolute paths. The operator runs `/handoff` at the end of every session and wants it never forgotten on any machine. Two needs follow: per-project guard hooks (a profile declared once and emitted portably), and one machine-level auto-handoff that is on wherever the-grid is installed.
 
+## Status (2026-11-05)
+
+Built and on `main` (issues #99 to #103 closed). Groups 0 to 4 are done; group 5 (handoff parity check and rollout, #104) is parked by the operator until the repo is in regular use, so it is not done.
+
+Changed since this was written (2026-11-05, commit e6b0a44): the `auto-handoff` worker and the manual `handoff` skill share one placement rule. Handoffs always go to `<repo root>/LOGS` (else `<cwd>/LOGS` outside a repo); an existing `logs`, `Logs` or `LOGS` is reused and `LOGS` is created when missing. The private-repo fallback directory, the `handoff-locations.md` lookup and `GRID_HANDOFF_FALLBACK_DIR` are removed. After committing by explicit path in the repo that holds the files, the worker runs a plain `git push` of the current branch (log token `push=yes|no-remote|no-upstream|failed`; it never fails the handoff and it publishes every unpushed commit on the branch). It refuses an unusable `LOGS` with `target-refused` (project root, git directory, a symlink out of the project that is not a git work tree, ambiguous casing) and writes nothing. The `auto-handoff` spec, proposal and design carry the amendments; `hooks/README.md` ("Auto-handoff") is the full description.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - New `hooks/` directory in the-grid: a launcher (`hooks/run.sh`), a catalogue (`hooks/catalogue.json`: id, scope, event, matcher, minimum profile, fail mode, token-cost note) and one script per hook.
@@ -10,7 +18,7 @@ Claude Code hooks are the only way to make a safety rule or a habit unconditiona
   - `--user` mode (stdlib only): maintains the machine-level hooks in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`.
   - Generated entries carry a marker; hand-written hooks are never touched; re-runs are no-ops.
 - Two project guard hooks (a mistake-catcher, not a security boundary): `pre-bash-no-bypass` (blocks `--no-verify`, hook-disabling config and force-push, including one level of shell wrapping) and `pre-bash-secret-scan` (blocks a commit or `git add` that adds a secret or a sensitive file). The secret pattern table lives once in `hooks/lib/secret-patterns.sh`.
-- One machine-level hook, `auto-handoff`: on SessionEnd, if no handoff ran in the session, a detached worker runs `claude -p "/handoff"` (Sonnet, budget, time and `--max-turns 25` caps) over a transcript digest. The child may only write the two handoff files, through path-scoped `Edit(//<abs dir>/**)` allow rules (default permission mode) for the target and fallback directories; the worker refuses to commit if any other new file appeared (detect only, nothing moved), refuses to commit if `.git/config` or `.git/hooks/` changed (never touching `.git/` itself), checks them, secret-scans them, commits them by explicit path, and pushes only the private repo when that commit is the sole unpushed one.
+- One machine-level hook, `auto-handoff`: on SessionEnd, if no handoff ran in the session, a detached worker runs `claude -p "/handoff"` (Sonnet, budget, time and `--max-turns 25` caps) over a transcript digest. The child may only write the two handoff files, through a path-scoped `Edit(//<abs dir>/**)` allow rule (default permission mode) for the project's `LOGS` folder; the worker refuses to commit if any other new file appeared (detect only, nothing moved), refuses to commit if `.git/config` or `.git/hooks/` changed (never touching `.git/` itself), checks them, secret-scans them, commits them by explicit path, and pushes the current branch (see Status: the original fallback directory and private-only push were replaced on 2026-11-05).
 - `wire.sh` turns `auto-handoff` on by default on every run; a manifest line `-hook:auto-handoff` (baseline or machine overlay) turns it off for that machine. `GRID_DISABLED_HOOKS=auto-handoff` turns it off for one session.
 - `deploy.py` accepts the new `hooks` key; the project-factory `.grid/project.yaml` skeleton gains a commented `hooks:` block; `scripts/gate.sh` shellchecks `hooks/`.
 

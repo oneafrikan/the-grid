@@ -9,6 +9,12 @@ reviews, PRs land on `next`) before any other workstream can use it. Two further
 reusable shapes, a metric-driven improvement loop and a scheduled CLI agent, are
 currently locked inside private or one-off code.
 
+## Status (2026-11-05)
+
+Superseded by `issue-loop-v2` (see `SUPERSEDED.md`). The runner, hooks, config and scheduling this change specified were rebuilt there; `karpathy-loop` and `cli-agent-cron` (Phase B) are deferred, not deleted (issues #132 to #134 open). Do not implement from this folder.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 Two phases in one change.

@@ -2,6 +2,12 @@
 
 Wired skills, agents and hooks run with the user's full shell and file access, and the-grid pulls most of them from third-party repos. Snyk's February 2026 scan of 3,984 public skills found 76 confirmed malicious payloads and 13.4% with a critical issue (vendor-sourced figures). Today nothing in the-grid checks wired content for pipe-to-shell installs, unpinned `npx -y`, credential shapes, hidden Unicode or prompt-injection text, and nothing records why a source is trusted or a skill was left out.
 
+## Status (2026-11-05)
+
+Built and on `main` (issues #72 to #76 closed): `policy.yaml`, `scripts/lib/miniyaml.py`, `scripts/audit.py`, `scripts/audit.sh`, `CURATION.md`, the `wire.sh` audit step and the gate's `audit` check. The scanner has been hardened since (frontmatter and `hooks:` vetting, `hook-declared`, `unscannable-file`, `contains_substring`, `hooks_sha256`; see the notes in the spec). `scripts/audit.py` and `policy.yaml` are the source of truth where they differ from the text below.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - Add `policy.yaml` (tracked): allowed source repos, banned-pattern rules with severities, file-class globs.

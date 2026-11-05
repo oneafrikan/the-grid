@@ -2,6 +2,14 @@
 
 the-grid wires skills, rules and composed agents only into Claude Code. Its stated remit is every harness: Codex, Gemini CLI, OpenCode, Pi and OpenClaw. Vendor docs checked on 2026-10-09 show all five read the same `SKILL.md` format from one shared directory, `~/.agents/skills`, so getting skills to them is cheap. Agents need a small generated emitter per harness. ECC's hand-ported harness mirrors drifted to 11-50% coverage, so here every copy is generated from one source and pinned by goldens.
 
+## Status (2026-11-05)
+
+Built and on `main`: the harness registry (`scripts/lib/harnesses.txt`: claude, codex, opencode, gemini, antigravity, pi, openclaw) with opt-in `harness:<name>` wiring, the shared agent emitter plumbing, the Codex, OpenCode and Gemini CLI targets, the Pi and OpenClaw skills-only rows, rules delivery through `rules.py emit`, and the portable personas (`dist/personas/`). Issues #135 to #142 are closed.
+
+Not done: the smoke test on real installs of each harness (group 9, #143), so the "Verified on a real install" table in `docs/harnesses.md` is not filled in from this change.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - Add a harness registry (`scripts/lib/harnesses.txt`) and a `harness:<name>` manifest entry (plus `GRID_HARNESS` env). `wire.sh` links the wired skill set into `~/.agents/skills`, one directory that Codex, Gemini CLI, OpenCode, Pi and OpenClaw (and Cursor) all read.

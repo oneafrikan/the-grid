@@ -4,6 +4,14 @@ Agents learn things (a command that works, a trap, a decision) and today nothing
 
 This change reuses the shape the operator already runs (agents file markdown signals; `gh-triage` sweeps on cron and files GitHub issues) and applies it to knowledge. Agents file immutable signals; one sweep writes the store; anything that changes what the project treats as settled goes to a human.
 
+## Status (2026-11-05)
+
+Built and on `main`: `scripts/knowledge.py` (`hash`, `file`, `check`, `plan`, `apply`) mirrored byte-identically into the project template, the `gh-triage` knowledge sweep step, the seeded READMEs and stage directories, and the secret-scan and eval-case coverage. The lint of `signals/` and `knowledge/` runs in `scripts/map.py --check` (change `epistemic-enforcement`). No GitHub issues track this change.
+
+Not done: group 7. The sweep is off by default and no repo has switched it on; nothing moves from `signals/` into `knowledge/` automatically yet. The open questions on Cowork commits and non-terminal filers are unanswered.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - `signal-format`: a signal is one immutable markdown file in the project's own repo, `signals/<UTC timestamp>-<filer>-<hash6>.md`, with fixed frontmatter (`filed_by`, `claim`, `stage`, `warrant`, optional `supersedes` / `contradicts` / `confirms` / `guardrail`, `status: pending`). No secrets. Per-repo convention README seeded with the repo.

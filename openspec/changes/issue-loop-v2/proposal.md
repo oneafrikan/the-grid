@@ -8,6 +8,12 @@
 
 This change keeps `main`'s simple shape, folds in the parts of `next` that are good, closes the two gaps, and adds a waker so the loop can start itself. It supersedes `openspec/changes/loops`.
 
+## Status (2026-11-05)
+
+Built and on `main`: groups 1 to 7, 9, 11 and 13 (runner, hooks, config and seed, `instantiate.sh`, migration, the `cron-run.sh` waker, backoff, poison rule and stale-lock takeover) and the scripted proof in group 8 (8.1 to 8.6). The loop is live in this repo as an untracked `loop/` instance in `MODE=direct` with its issues in the private tracker; `docs/issue-loop-runbook.md` is the operating record (state as of 2026-10-21).
+
+Open, with the evidence already recorded in `tasks.md` under each item: the throwaway-repo HUMAN proofs (8.7 to 8.9, 10.1 to 10.5, 12.1 to 12.4), the remaining part of 11.4, and 7.0/7.4 (the `_retired/` removal waits for the operator's GitHub-side cleanup). `next` no longer exists; read it as `main`.
+
 ## What Changes
 
 Three stages, each its own PR(s) to `next`, all built AFTER `next` is merged into `main`. The loop cannot build itself: these are built by worktree agents and operator-merged PRs.

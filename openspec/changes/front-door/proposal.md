@@ -2,6 +2,14 @@
 
 A visitor cannot tell what the-grid is. The Pages site 404s, `index.html` has a hidden H1, no repo link and a 5.6 MB poster, and the README buries a good TL;DR under ASCII art, a film quote and ~300 lines of maintainer notes. The quickstart URL is a placeholder, there is no SECURITY.md, CONTRIBUTING.md, tag, About line or topics, and hand-synced counts drift. The project is meant to be public, so the front door has to carry the message.
 
+## Status (2026-11-05)
+
+Mostly shipped. Done: generated counts, the doc split (INSTALL, CONTRIBUTING, architecture, roadmap, private projects), the trust files (SECURITY.md, CHANGELOG.md), the README rewrite, the site assets script, `index.html` rebuilt with the rendered `assets/hero.webp`, `assets/og.jpg`, `assets/favicon.svg`, `assets/favicon-48.png` and `assets/apple-touch-icon.png` (all in `site-files.txt`), `tests/test_landing_page.bats`, the translation pipeline, the demo tape, the repo-metadata script, the applied GitHub About, homepage and topics, and the release. `the-grid.png` is no longer tracked; the source art lives in the private repo. `v0.1.0` is tagged (annotated, on 0d40806) and released on GitHub, and README Status reads "Versioned from v0.1.0".
+
+Not done, kept open on purpose: copy sign-off (group 11, #154), demo render and social preview (group 12, #155; the repo has `docs/demo/demo.tape` but no rendered GIF), and generated translations (group 13, #156; the README language switcher is empty). Also unverified: the Search Console step 14.4, and the live-site checks of 15.1.
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - Rewrite `README.md` to ~150-180 lines in the author's first-person voice: hero line, who it's for, a copy-paste quickstart with the real clone URL and a "you should now see" check, outcomes, a mermaid architecture diagram, status. The Tron banner, Flynn quote and ASCII art stay.

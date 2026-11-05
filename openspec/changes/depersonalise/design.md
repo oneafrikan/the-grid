@@ -116,7 +116,7 @@ deny	plugins/*	author-name-in-rendered-text	Gareth
 - Decided: `allow` rules are line-level, not match-level; a real address sharing a line with an allowed one is caught by the private denylist, not by cleverer regex.
 - Decided: scan uses `git ls-files`, not `find`, so untracked local files (`LOGS/`, `baseline-submodules.txt`) are never scanned or reported.
 - Decided: file-type and size blocks are in code with an env override (`GRID_MAX_BYTES`), not in the pattern file, because they act on files, not lines.
-- Decided: handoff location overrides come from `~/.the-grid-private/handoff-locations.md` (same private-path convention as roles), not from a new env var or `user.yaml` field.
+- Decided: handoff location overrides come from `~/.the-grid-private/handoff-locations.md` (same private-path convention as roles), not from a new env var or `user.yaml` field. (SUPERSEDED 2026-11-05, commit e6b0a44: the overrides were dropped; handoffs always go to the project's `LOGS` folder, created when missing, for both the skill and the auto-handoff worker.)
 - Decided: no new `user.yaml` fields; #54 persona fields are out of scope.
 - Decided: #42 and #54 stay open; the final HUMAN group comments on both with what this change did and did not cover.
 - Decided: one PR per group, but the private-repo archive (group 1) is HUMAN because it commits to a second repo and the unattended loop is scoped to this repo.

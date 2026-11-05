@@ -2,6 +2,14 @@
 
 `charter-files` (A1) and `knowledge-signals` (A2) add prose rules, a signal template and a sweep. Prose is advisory: nothing fails when a signal has a bad `stage`, a `supersedes` address points at nothing, a "canonical" entry sits outside `knowledge/canon/`, or an agent says "done" with no evidence. This change adds the mechanical checks that make those failures loud, and keeps canon changes behind a human.
 
+## Status (2026-11-05)
+
+Built and on `main` for map-lint, the completion-warrant hook (`epistemic-stop`, profile `strict`, off by default), canon protection (CODEOWNERS, PR template, `CLAUDE.md` block, direct-write ban tests) and the six researcher and librarian eval cases. No GitHub issues track this change.
+
+Not done: the live eval baselines (task 5.3). Every case carries `expect_today: unknown`, so no pass rate is recorded yet. The map-lint delta for `repo-map` stays a delta (no `openspec/specs/` baseline exists to merge it into).
+
+Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 ## What Changes
 
 - `scripts/map.py --check` also lints `signals/` and `knowledge/` through the shared parser in `scripts/knowledge.py` (A2): stage enum and stage-vs-directory, signal grammar and unedited-since-filing (from git history, per A2), warrant and the different-filer rule re-derived from evidence, ledger consistency, and that every frontmatter address resolves. It rides A1's existing `map` gate check; no second check is added. The project-template copy of `knowledge.py` is A2's.

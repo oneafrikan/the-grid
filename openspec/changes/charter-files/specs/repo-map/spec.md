@@ -97,6 +97,7 @@ The Topology section SHALL name the sweep as `gh-triage knowledge sweep` only wh
 #### Scenario: No sweep yet
 - **WHEN** map.py runs before `knowledge-signals` has shipped
 - **THEN** the sweep line reads `none configured`
+- **NOTE (2026-11-05):** `knowledge-signals` has shipped, so the-grid's own `MAP.md` now reads `gh-triage knowledge sweep`; `none configured` applies where the heading is absent
 
 ### Requirement: Memory statement
 The Epistemology section SHALL state which memory is always in context (CLAUDE.md learnings summary, up to 6 instincts when `learning: on`, canon lines in MAP.md) and which is on demand only (`LEARNINGS.md`, `knowledge/` below canon).

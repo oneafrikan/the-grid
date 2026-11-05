@@ -251,12 +251,12 @@ Sleep 8s
 - Decided: Discussions stay off; CONTRIBUTING says "issues only". Reason: no capacity to moderate a second channel.
 - Decided: SECURITY.md reports through GitHub private vulnerability reporting (HUMAN enables it); no email address in the repo.
 - Decided: SECURITY.md promises "best-effort acknowledgement within 7 days", no bounty, supported = latest tag and `main`.
-- Decided: CONTRIBUTING.md says to branch from and open PRs against `next` (the integration branch) and that nothing reaches `main` unreviewed. Reason: matches the current workflow; revisit if `next` is retired.
+- Decided: CONTRIBUTING.md says to branch from and open PRs against `next` (the integration branch) and that nothing reaches `main` unreviewed. Reason: matches the current workflow; revisit if `next` is retired. (Done 2026-11-05: `next` is retired; CONTRIBUTING.md says to branch from `main` and land on `main`.)
 - Decided: CHANGELOG.md is Keep-a-Changelog style with `## [Unreleased]` and a `## [0.1.0]` entry added in the tag task.
 - Decided: topics applied now are the 9 listed; `codex`, `gemini-cli` and `opencode` are added by a later edit only after `multi-harness#9` (HUMAN smoke test) passes for that harness. Reason: topics are a claim about what the repo does; today only Claude Code works.
 - Decided: the GitHub About text is the hero sentence minus "Inspired by Tron" plus an honest suffix ("Claude Code today, more AI tools next"); reason: About is shown standalone and must not overclaim.
 - Decided: `scripts/repo-metadata.sh` is the only way metadata is applied, so the HUMAN task is one reviewed command and reproducible later.
-- Decided: tag `v0.1.0` is annotated, created by HUMAN on `main` after `next` is merged, with `gh release create v0.1.0 --notes-from-tag`; README Status wording changes from "No versioning" to "Versioned from v0.1.0; v0.x may still break between tags".
+- Decided: tag `v0.1.0` is annotated, created by HUMAN on `main` after `next` is merged, with `gh release create v0.1.0 --notes-from-tag` (done 2026-11-04: annotated tag `v0.1.0` on 0d40806, GitHub release published); README Status wording changes from "No versioning" to "Versioned from v0.1.0; v0.x may still break between tags".
 - Decided: the LAMP build prompt (#7) is retired by `depersonalise` (moved to the private archive); this change only closes #7 with a comment in the HUMAN sign-off. Reason: the file is already gone when this change lands.
 - Decided: demo recording is HUMAN (needs a real terminal and Claude auth); the tape lives in the repo so it is re-renderable; the GIF is referenced from README.md only after it exists (index.html gets a text link, no embedded image: it would be ~3 MB of page weight above a 450 KB budget), and must be <= 3 MB.
 - Decided: demo tape hides the initial clone and shows the idempotent bootstrap re-run, with a README caption saying so; reason: the real clone takes minutes and would blow the 20 s budget.

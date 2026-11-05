@@ -55,3 +55,12 @@ For each row in `scripts/lib/runtimes.txt` whose repo is wired, `wire.sh` SHALL 
 #### Scenario: Second run
 - **WHEN** the script is run twice in a row
 - **THEN** the skills dir and settings file are the same after both runs and `wire.sh --check` exits 0
+
+#### Scenario: The audit blocks the final wire (added 2026-11-05)
+- **WHEN** the setup output (for gstack, compiled binaries under `browse/dist`) draws a high audit finding and the final `wire.sh` exits 3 without changing any link
+- **THEN** the script says the output is built but not wired, names `scripts/audit.sh --wired --quiet` and the `audit-allow` entries in `CURATION.md` as the route, and exits 3
+- **AND** the gstack build output is covered by narrow `audit-allow` entries in `CURATION.md`; an `oversize-file` finding on one literal path (a compiled binary no scanner can read) is allowed with `unpinned: true` (`scripts/audit.py`), which is valid only on an `oversize-file` entry with no `contains` and no `sha256`
+
+#### Scenario: Prerequisite advice and notes are OS-aware (added 2026-11-05)
+- **WHEN** the `needs` command (`bun`) is missing, or a run ends
+- **THEN** the message names the install route for the OS the script runs on (macOS: Homebrew; Ubuntu or Debian: the vendor installer; Arch: the AUR package `bun-bin`), and the post-run notes mention the Linux-only gaps (browser libraries, an emoji font) without running `sudo` or a package manager itself

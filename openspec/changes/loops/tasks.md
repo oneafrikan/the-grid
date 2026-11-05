@@ -1,5 +1,8 @@
 # Tasks
 
+> Status 2026-11-05: SUPERSEDED by `issue-loop-v2` (see `SUPERSEDED.md`); do not implement from this change and do not archive it. Phase A issues #127 to #129 were closed as completed, #130 and #131 as not planned; the Phase B issues (#132 `karpathy-loop`, #133 `cli-cron`, #134 docs index) are open and deferred. The unchecked boxes below are not a to-do list.
+> Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) and no longer exists; `main` is the only branch. Read every `next` below as `main`: branch from `main` and target `main`.
+
 Phase A (groups 1 to 5) is built interactively by the operator, after
 `foundations`, and merged to `next` BEFORE any overnight run. Phase B (groups 6
 to 8) is loop-buildable afterwards and merges after `instincts` (cross-change merge

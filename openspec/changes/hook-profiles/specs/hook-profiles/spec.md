@@ -23,9 +23,13 @@ The emitter SHALL resolve the project hook set from the `hooks:` key of `<projec
 - **WHEN** the profile is `standard`
 - **THEN** the emitted set contains the `minimal` hook and the `standard` hook
 
-#### Scenario: Strict equals standard for now
-- **WHEN** the profile is `strict`
-- **THEN** the emitted set is the same as for `standard`
+#### Scenario: Strict equals standard when no hook needs it
+- **WHEN** the profile is `strict` and the catalogue holds no hook with `min_profile: strict`
+- **THEN** the emitted set is byte-identical to the one for `standard`
+
+#### Scenario: Strict adds the completion-warrant Stop hook (added 2026-11-05)
+- **WHEN** the profile is `strict` against the real catalogue
+- **THEN** the emitted set is the `standard` set plus `epistemic-stop` (a `Stop` handler, `min_profile: strict`, change `epistemic-enforcement`), and `standard` and `off` emit no `Stop` handler
 
 #### Scenario: Unknown key is rejected
 - **WHEN** the `hooks:` mapping contains `enable: [pre-bash-secret-scan]`
