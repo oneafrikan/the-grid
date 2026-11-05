@@ -1077,7 +1077,7 @@ stub_git_with_bats_restore() {
 @test "shards: the aggregate job is still named gate, needs every other job and fails on anything but success" {
   local wf="$REPO_ROOT/.github/workflows/tests.yml"
   grep -qE '^  gate:[[:space:]]*$' "$wf"
-  grep -qE '^    needs:[[:space:]]*\[checks, bats\]' "$wf"
+  grep -qE '^    needs:[[:space:]]*\[changes, docs, checks, bats\]' "$wf"
   # always(): without it a failed/cancelled/skipped dependency skips gate, which reads as green
   grep -qE '^    if:.*always\(\)' "$wf"
   grep -qF '"checks=success bats=success"' "$wf"
