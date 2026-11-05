@@ -231,6 +231,7 @@ Every `docs/*.md` file in the repo, so a reader can reach each from here:
 - [agent-retro.md](agent-retro.md) — review loop that starts from the run record
 - [harnesses.md](harnesses.md) — non-Claude harness targets
 - [instincts.md](instincts.md) — habit learning from your own sessions
+- [install-desktop.md](install-desktop.md) — step-by-step install on the Claude Desktop app (Code tab and Cowork)
 - [issue-loop-runbook.md](issue-loop-runbook.md) — operating runbook for the issue-loop
 - [model-selection.md](model-selection.md) — which model for which job
 - [portability.md](portability.md) — rules for tests and scripts that run on Linux and macOS

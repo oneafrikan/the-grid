@@ -77,16 +77,18 @@ Run each on: terminal (control), Code tab, Cowork. Record in the table.
 
 | Check | Terminal | Code tab | Cowork | Notes |
 |-------|----------|----------|--------|-------|
-| Both tabs present | n/a | | | |
-| Marketplace add (private repo) | | | | |
-| D1 two subagent invocations | | | | |
-| D2 tools restriction | | | | |
-| D3 handoff composed | | | | |
-| D4 name resolution (bare / namespaced) | | | | |
-| D5 natural language | | | | |
-| Update propagation | | | | |
-| Cowork self-install | n/a | n/a | | |
-| docx output (Phase 2) | | | | |
+| Both tabs present | n/a | yes | yes | |
+| Marketplace add (private repo) | | not tested (read the wired `~/.claude` instead) | public repo added, no credentials; private repo not tested | |
+| D1 two subagent invocations | delegates (control, known) | one bare-name subagent invocation ran with local folder access; two-agent run not tested | pass: 3 subagent invocations in one run (two writers in parallel, then one QA agent); none failed | Cowork, self-reported, one run: subagent tools run in Cowork's cloud container and cannot reach the Mac's connected folder; the main session staged copies in and wrote results back to the Mac (write-back replaced the originals in place) |
+| D2 tools restriction | | not tested | not tested | |
+| D3 handoff composed | | not tested | partial: the QA agent checked the writers' output but was handed files, not a reply quoted from agent 1 | |
+| D4 name resolution (bare / namespaced) | | bare resolved (wired channel); namespaced failed (no plugin installed in the Code tab) | namespaced names resolved; the orchestrator mapped its bare roster names to namespaced on its own; a bare name passed directly to a plugin agent not tested | Cowork: plugin agents not listed in Cowork's subagent types. Self-reported, one run |
+| D5 natural language | | not tested | not tested | |
+| Update propagation | | not tested | not tested | |
+| Cowork self-install | n/a | n/a | not tested | |
+| docx output (Phase 2) | | not tested | not tested | |
+
+Results recorded 2026-11-05, macOS, Claude Desktop.
 
 ## Decision tree
 
@@ -98,3 +100,5 @@ Run each on: terminal (control), Code tab, Cowork. Record in the table.
 - **Only D4 fails:** build orchestrators with namespaced agent names (a builder change); otherwise Plan A.
 - **Code tab and terminal both fail D1:** stop; the probe is wrong. Debug the probe before concluding anything.
 - **Plan C, independent of the above:** a non-technical ADE wrapping the unmodified Claude Code binary (ADR-005). It would deliver delegation by construction.
+
+**Outcome (2026-11-05):** see ADR-008 in [DECISIONS.md](DECISIONS.md).

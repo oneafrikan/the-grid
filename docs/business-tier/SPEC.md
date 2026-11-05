@@ -77,14 +77,14 @@ Leaning (a), with (b) as fallback if the pilot shows agents skip the boot step. 
 colleague message
   -> Claude matches a plugin skill/command by its description
   -> loads that playbook (descriptions load first, bodies on demand)
-  -> orchestrator delegates to specialist agents          <- THE GATE (OQ-1)
-  -> agents read/write the connected folder, use connectors if any
+  -> orchestrator delegates to specialist agents          <- OQ-1, OQ-5 answered for Cowork (ADR-008)
+  -> the main session reads and writes the connected folder; subagents work on copies it stages into the cloud container and writes back; connectors if any
   -> first-party docx/xlsx/pdf skills render the deliverable
   -> result + sources + assumptions; approval asked for outward actions
 ```
 
-- Naming: plugin skills are `/plugin:skill`, agents are `plugin:agent`. Orchestrator rosters name agents bare; resolution is unverified (OQ-5, noted in `docs/PLUGINS.md`).
-- Fallback if Cowork will not delegate: build orchestrators as single-thread playbooks (see DELEGATION-GATE).
+- Naming: plugin skills are `/plugin:skill`, agents are `plugin:agent`. Orchestrator rosters name agents bare; in Cowork the orchestrator resolved them to namespaced names itself (OQ-5, see `docs/PLUGINS.md`).
+- Cowork delegates to plugin subagents (OQ-1 answered, ADR-008). In the observed run the orchestrator mapped bare roster names to namespaced ones itself (OQ-5); a bare name passed directly to a plugin agent is untested. Namespacing roster names in the Cowork bundles is an optional hardening step (see DELEGATION-GATE).
 
 ## 5. What the end user gets
 

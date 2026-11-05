@@ -83,3 +83,35 @@ Apply going forward: don't write bash-style unquoted-`$var` splitting in
 shell commands run interactively across Gareth's machines — check the
 active shell first, or avoid relying on word-splitting at all (arrays /
 explicit quoting).
+
+## Claude Desktop surfaces differ: Code tab = ~/.claude; Cowork = plugins only, cloud subagents with staging — 2026-11-05
+<!-- learning-hash: b5c294e1 -->
+**Category:** gotcha
+**Source:** docs/business-tier/DELEGATION-GATE.md (Results), docs/business-tier/DECISIONS.md (ADR-008), INSTALL.md
+
+The Desktop app has two surfaces that wire differently. The Code tab runs Claude
+Code and reads the wired `~/.claude` (bare agent names, local folder visible).
+Cowork ignores `~/.claude`: it sees only plugins installed in Cowork, plugin agents
+are not listed but resolve by namespaced name, and subagents run in a cloud
+container on files the main session stages in and writes back (originals replaced
+in place).
+
+Apply going forward: install per surface (INSTALL.md), send git and worktree work
+to the Code tab, and warn anyone using Cowork on a folder to keep it under git or
+backed up. Cowork details are self-reported from one run.
+
+## Reconciling local branches after an upstream history rewrite — 2026-11-05
+<!-- learning-hash: 0c0f792d -->
+**Category:** gotcha
+**Source:** session of 2026-11-05 (origin/main force-rewritten)
+
+On 2026-11-05 `origin/main` was force-rewritten with an identical tree and new
+SHAs. `git cherry` / patch-id reported false "unmerged" commits because the
+rewrite altered early commits. The reliable check was
+`git rev-list --count <old-main>..<branch>` against the pre-rewrite main SHA
+(from the reflog), plus a subject match against the new main. The fix was
+`git reset --hard origin/main`, never a pull or merge of the two histories.
+
+Apply going forward: after an upstream history rewrite, do not trust patch-id
+tools to say what is merged. Count commits against the old main from the reflog,
+match subjects against the new main, then reset the branch to the new main.

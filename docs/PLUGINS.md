@@ -1,8 +1,9 @@
 # Claude Code plugins
 
 the-grid ships two Claude Code plugins from this repo, as a zero-clone way to
-try it. **Claude Code only** — for other harnesses, or for third-party skills,
-use `grid install`.
+try it. **Claude Code and the Claude Desktop app (Code tab, Cowork) only** — for other harnesses, or for third-party skills,
+use `grid install`. Claude Desktop (Code tab, Cowork): see
+[Claude Desktop](#claude-desktop-code-tab-and-cowork).
 
 ## Install
 
@@ -42,7 +43,9 @@ references in that text point at things that are not there:
 - `repos/openspec`, the wired `security-reviewer` skill and the jeffallan skills.
 - `/tron` reads `~/.claude` to see what is wired; on a plugin-only machine that is empty.
 - Orchestrator rosters name agents by bare name (`grid-qa-engineer`); installed agents
-  carry the `grid-agents:` namespace. Whether the bare name resolves is unverified.
+  carry the `grid-agents:` namespace. In Cowork the namespaced names resolved and the
+  orchestrator mapped the bare roster names to them itself; a bare name passed directly to
+  a plugin agent is unverified.
 
 Each bundle carries `LICENSE` and `THIRD-PARTY-NOTICES.md` (copies of the repo root's).
 Not every root skill is shipped: `exclude_skills` in `plugins/bundles.json` records each
@@ -62,6 +65,31 @@ Plugin components are namespaced by plugin name:
 A machine that already wired the-grid (`wire.sh`) has the agents in
 `~/.claude/agents/`. Installing `grid-agents` on top lists each agent twice (the
 second under the `grid-agents:` namespace). Pick one channel per machine.
+
+## Claude Desktop (Code tab and Cowork)
+
+Observed 2026-11-05 on macOS unless marked. Delegation-gate results: `docs/business-tier/DELEGATION-GATE.md`.
+
+- **Code tab** runs Claude Code on the Mac and reads `~/.claude`. A machine wired with `wire.sh` (or `grid install`) gets the full wired set of skills and subagents there, with no plugin install.
+- The one-channel-per-machine rule applies to the Code tab too.
+- In the Code tab (wired, no plugin installed) an Agent call with `subagent_type: grid-agents:grid-qa-engineer` failed as an invalid agent type: names are bare there, not namespaced.
+- The bare name `grid-qa-engineer` ran (in the background) and listed the files of the folder connected on the Mac, so local file access works.
+- Installing the plugins from inside the Code tab is documented by Anthropic but untested here.
+- **Cowork does not read `~/.claude`.** It sees only Anthropic's built-in skills plus plugins installed in Cowork.
+- **Install in Cowork**: in Cowork's plugin settings, add the marketplace `oneafrikan/the-grid` (public, no git credentials needed), then install `grid-core` and `grid-agents`. The exact UI path is unverified.
+- Fallback that worked: ask Cowork in chat to add the marketplace and install the two plugins.
+- **Verify**: in a fresh Cowork session ask what skills and sub-agents it has. The `grid-core` skills and the four `grid-agents` orchestrator skills (`gsd`, `grid-tech-lead`, `grid-ceo-orchestrator`, `grid-growth-hacker`) should be listed.
+- **Third-party skills in Cowork**: the bundles carry only the-grid's own content. Add these upstream marketplaces in Cowork the same way (each ships `.claude-plugin/marketplace.json`): `anthropics/skills`, `jeffallan/claude-skills`, `mattpocock/skills`, `DietrichGebert/ponytail`, `obra/superpowers`.
+- No marketplace, so not installable in Cowork this way: `garrytan/gstack`, `HubSpot/agent-cli-skills`, `Fission-AI/openspec`.
+
+Cowork limits (observed; one `/gsd` run, details self-reported by Cowork):
+
+- Plugin subagents are not listed among Cowork's subagent types (only its built-ins), yet orchestrators call them by namespaced name (`grid-agents:grid-technical-writer`, `grid-agents:grid-qa-engineer`) and they ran. The roster names agents bare; in that run the orchestrator mapped them to namespaced names itself. A bare name passed directly to a plugin agent is untested.
+- Subagent tools run in Cowork's cloud container, which cannot reach the folder connected on the Mac. The main session can read and run commands on that folder through the linked computer.
+- Local-file work with specialists therefore goes by staging: the main session copies the files into the container, subagents work on the copies, and the main session writes the results back to the Mac. Observed: `/gsd` on two markdown files made 3 subagent calls (two writers in parallel, then one QA pass against the originals); none failed.
+- Write-back replaces the originals in place. Keep the folder under git or back it up first; without git the only originals were in the container.
+- Cowork's container has no access to the Mac's git checkout. Use the Code tab for git repos and worktrees.
+- Installed Cowork plugins were not found on the host under `~/Library/Application Support/Claude`. Where Cowork stores them is unknown.
 
 ## Maintaining the bundles
 

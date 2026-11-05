@@ -40,3 +40,23 @@ Format: status, date, decision, why, consequences. Add; do not rewrite history. 
 
 - **Decision:** assume colleagues have Claude Desktop installed and are logged in. The design does not depend on or alter how Claude plan tiers work.
 - **Caveat:** research reported that Enterprise Cowork may be cloud-only and Team has no group scoping. These are noted in RESEARCH.md, not designed around.
+
+## ADR-008 — Surface split: Cowork for cloud work, Code tab for local work, business tier single-thread (accepted, 2026-11-05)
+
+- **Decision (operator):** "anything that runs in the cloud can be done in Cowork; the business tier should ship business-wide single-thread skills; Cowork ships the full agent army." Interpreted as:
+  - **Cowork:** cloud-side work (research, drafting, docs, connectors). The full the-grid plugins (`grid-core` + `grid-agents`) are installed there.
+  - **Business tier** (`the-grid-<business>` plugin for colleagues): business-wide single-thread skills only. No dependence on subagent delegation.
+  - **Code tab:** local file and repo work. It reads the wired `~/.claude`, delegates to subagents and sees the local folder directly.
+- **Why (DELEGATION-GATE results, 2026-11-05, macOS; Cowork details self-reported, one run):**
+  - Cowork: `/gsd` made 3 subagent calls by namespaced name (`grid-agents:grid-technical-writer` twice in parallel, then `grid-agents:grid-qa-engineer`); none failed. The roster names specialists bare; the orchestrator passed the namespaced names itself.
+  - Cowork files: subagent tools run in Cowork's cloud container, which cannot reach the folder connected on the Mac. The main session can (through the linked computer): it copied the files into the container, subagents worked on the copies, and the main session wrote the results back. Write-back replaced the originals in place.
+  - Code tab: a bare-name subagent (`grid-qa-engineer`) ran and listed the connected folder's files. The namespaced name failed because no plugin is installed there.
+- **OQ-1 answered:** Cowork delegates. Subagents work in the cloud container on files the main session copies in, and results are written back to the Mac. D2 and D5 are still untested, D3 is partial; this decision does not depend on them.
+- **OQ-5 answered for Cowork:** namespaced names resolve and the orchestrator mapped its bare roster names itself. A bare name passed directly to a plugin agent is untested.
+- **Consequences:**
+  - Plan B in the decision tree (flattened orchestrators for Cowork) is not needed. No builder change is required now. Namespacing roster names in the Cowork bundles stays an optional hardening step if a later run fails.
+  - Cowork is viable for orchestrated local-file work by staging, but write-back replaces originals in place: keep the folder under version control or back it up first.
+  - The Code tab stays the route for git repos and worktrees (Cowork's container has no access to the Mac's git checkout).
+  - The business-tier skills are single-thread either way.
+  - The ADR-005 interaction clause (ADE as main path if Cowork cannot delegate) is not triggered; ADR-005 stays open as a long-term direction.
+  - Still untested: OQ-3 (private marketplace credentials), OQ-4 (update propagation), Cowork self-install, docx output.

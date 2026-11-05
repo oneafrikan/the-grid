@@ -1,14 +1,13 @@
 # Install
 
-Short guide for a new machine. [BOOTSTRAP.md](BOOTSTRAP.md) is the full reference
-(updating, precedence, troubleshooting).
+Short guide for a new machine. [BOOTSTRAP.md](BOOTSTRAP.md) is the full reference (updating, precedence, troubleshooting).
+Using the Claude Desktop app? See [Claude Desktop](#claude-desktop-code-tab-and-cowork).
 
 ## Prerequisites
 
 - `git`, `bash` and Claude Code.
 - `python3`, only for the agent teams (`--with-agents`), plus its `venv` module.
-  On Debian/Ubuntu: `sudo apt install python3-venv`, because
-  `bootstrap.sh --with-agents` runs `python3 -m venv`.
+  On Debian/Ubuntu: `sudo apt install python3-venv`, because `bootstrap.sh --with-agents` runs `python3 -m venv`.
 - Node >= 20.19, only for the `openspec-*` skills (see below).
 
 ## Install
@@ -36,11 +35,12 @@ git submodule update --init --recursive
 bash scripts/wire.sh
 ```
 
-Skills are live immediately. For the full sequence (including the agent-factory
-compose step) see [BOOTSTRAP.md](BOOTSTRAP.md). For a machine that needs only the
-curated skills, with no submodules, see its
-[Install without submodules](BOOTSTRAP.md#install-without-submodules) section
-(`grid install`).
+Skills are live immediately. For the full sequence (including the agent-factory compose step) see [BOOTSTRAP.md](BOOTSTRAP.md).
+For a machine that needs only the curated skills, with no submodules, see its [Install without submodules](BOOTSTRAP.md#install-without-submodules) section (`grid install`).
+
+## Claude Desktop (Code tab and Cowork)
+
+The Code tab shares `~/.claude` with the terminal, so the install above covers it. Cowork does not read `~/.claude`: add the marketplace `oneafrikan/the-grid` in Cowork, then install `grid-core` and `grid-agents`. Step by step: [docs/install-desktop.md](docs/install-desktop.md).
 
 ## The `openspec-*` skills need a CLI
 

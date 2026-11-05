@@ -606,6 +606,14 @@ Durable lessons mined from project history — full context and sources in
   debugger commands on top, while `systematic-debugging` is already the
   universal default everywhere via `superpowers`' `using-superpowers` skill —
   so neither needs a role-specific routing note on its own.
+- Claude Desktop's two surfaces wire differently: the Code tab reads the wired
+  `~/.claude`; Cowork reads only plugins installed in Cowork and runs subagents in a
+  cloud container with staged copies (write-back replaces originals) — see
+  LEARNINGS.md ("Claude Desktop surfaces differ...") and `INSTALL.md`.
+- After an upstream history rewrite, `git cherry`/patch-id reports false unmerged
+  commits; count `git rev-list <old-main>..<branch>` from the reflog, match subjects
+  against the new main, then `git reset --hard origin/main` — see LEARNINGS.md
+  ("Reconciling local branches after an upstream history rewrite").
 
 ## About
 
