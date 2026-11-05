@@ -47,6 +47,8 @@ No spec delta: `openspec/specs/` does not exist yet, so there is no baseline to 
 - A colleague using Claude Desktop (Cowork) can file only if Cowork can commit and push. UNVERIFIED; the pilot answers it. Until then such a colleague has no filing route (open question 1).
 - The sweep checkout and `gh` login are the operator's own; no new identity is introduced.
 
+> **Update 2026-11-05:** the v0 business repo is a plain private repo with no project-factory cut, CI or sweep (ADR-009 in `docs/business-tier/DECISIONS.md`, PR #306); business-repo signals are swept only if a sweep is built later.
+
 ## Non-goals
 
 - No weekly promoter job, confirmer agent, `knowledge.py promote`, canon-PR runner or cli-cron.

@@ -44,6 +44,8 @@ Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) an
 - The Stop hook needs a terminal Claude Code session. Colleagues on Cowork get none of L2; whether Cowork runs hooks is UNVERIFIED (pilot, cf. docs/business-tier, PR #280).
 - Lint runs in the business repo's CI, not on a colleague's machine, so a non-terminal user still cannot land a malformed signal.
 
+> **Update 2026-11-05:** the v0 business repo is a plain private repo with no project-factory cut, charter files, CI or gate (ADR-009 in `docs/business-tier/DECISIONS.md`, PR #306); the bullets above apply only if those are built later.
+
 ## Non-goals
 
 - No promoter job, confirmer agent, `knowledge.py promote`, canon-PR runner or cli-cron.
