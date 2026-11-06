@@ -40,6 +40,7 @@ You should now see:
 - `ls ~/.claude/skills | wc -l` prints a number near <!--count:wired-->133<!--/count--> (plus the orchestrator skills; duplicate skill names across repos collapse to one link, so it is not exact), and `ls ~/.claude/skills/tron` lists a `SKILL.md`.
 - In a new Claude Code session `/tron` replies with a short question about what you want to do.
 - Agents say "No operator set yet." until you run `cp ~/.the-grid/agent-factory/user.yaml.example ~/.the-grid/agent-factory/user.yaml`, fill in your name and contact, and re-run `bash ~/.the-grid/scripts/bootstrap.sh --with-agents` (safe to repeat).
+- Optional: gstack's browser-driven skills (`/browse`, `/qa`, `/scrape`) need a one-off runtime setup, and bootstrap prints `runtime MISSING: gstack` until it is done. Skip it unless you want those skills. It needs [bun](https://bun.sh) and downloads a browser: `bash ~/.the-grid/scripts/runtime-setup.sh gstack` (add `--dry-run` to preview). Detail in [BOOTSTRAP.md](BOOTSTRAP.md) step 8.
 
 Fork first if you plan to customise: the clone URL above is read-only for you.
 
