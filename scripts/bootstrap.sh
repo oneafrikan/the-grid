@@ -85,4 +85,17 @@ else
   echo "==> [4/4] Skipping agent-factory (pass --with-agents to compose + wire the team)"
 fi
 
+# Remind (print only, never prompt: this must stay safe unattended) when agents were
+# composed without an operator identity. compose.py bakes user.yaml into every agent, so a
+# missing file ships agents saying "No operator set yet." until it is added and re-composed.
+# Re-running this script is idempotent (venv reused, compose.py rewrites its output, wire.sh
+# rebuilds links), so it is the simplest way to recompose.
+user_cfg="${GRID_USER_CONFIG:-$GRID_DIR/agent-factory/user.yaml}"
+if [[ "$WITH_AGENTS" == "1" && ! -f "$user_cfg" ]]; then
+  # Absolute paths so the commands work from any directory, not only inside the clone.
+  echo "==> NOTE: no operator identity yet ($user_cfg). Agents will say \"No operator set yet.\""
+  echo "==>   cp \"$GRID_DIR/agent-factory/user.yaml.example\" \"$user_cfg\"   # then fill in your name and contact"
+  echo "==>   bash \"$GRID_DIR/scripts/bootstrap.sh\" --with-agents   # re-run so the agents pick it up"
+fi
+
 echo "==> Bootstrap complete. Open a fresh Claude session to pick up new skills/agents."

@@ -35,8 +35,8 @@ git submodule update --init --recursive
 bash scripts/wire.sh
 ```
 
-Skills are live immediately. For the full sequence (including the agent-factory compose step) see [BOOTSTRAP.md](BOOTSTRAP.md).
-For a machine that needs only the curated skills, with no submodules, see its [Install without submodules](BOOTSTRAP.md#install-without-submodules) section (`grid install`).
+After `--with-agents`, copy `~/.the-grid/agent-factory/user.yaml.example` to `~/.the-grid/agent-factory/user.yaml`, fill in your name and contact, and re-run it so agents pick it up.
+Skills are live immediately. Full sequence: [BOOTSTRAP.md](BOOTSTRAP.md). With no submodules: [Install without submodules](BOOTSTRAP.md#install-without-submodules) (`grid install`).
 
 ## Claude Desktop (Code tab and Cowork)
 

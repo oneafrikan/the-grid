@@ -39,6 +39,7 @@ You should now see:
 - `bootstrap.sh` ends with `==> Bootstrap complete. Open a fresh Claude session to pick up new skills/agents.`
 - `ls ~/.claude/skills | wc -l` prints a number near <!--count:wired-->133<!--/count--> (plus the orchestrator skills; duplicate skill names across repos collapse to one link, so it is not exact), and `ls ~/.claude/skills/tron` lists a `SKILL.md`.
 - In a new Claude Code session `/tron` replies with a short question about what you want to do.
+- Agents say "No operator set yet." until you run `cp ~/.the-grid/agent-factory/user.yaml.example ~/.the-grid/agent-factory/user.yaml`, fill in your name and contact, and re-run `bash ~/.the-grid/scripts/bootstrap.sh --with-agents` (safe to repeat).
 
 Fork first if you plan to customise: the clone URL above is read-only for you.
 

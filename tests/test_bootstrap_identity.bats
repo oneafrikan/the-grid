@@ -30,3 +30,34 @@ setup() {
   run bash "$BOOTSTRAP"
   [[ "$output" != *"WARN:"* ]]
 }
+
+# Reminder for a missing agent-factory/user.yaml. A stub grid lets --with-agents run end to end:
+# fake wire.sh, a no-op fake venv python, and the example seed files bootstrap copies.
+stub_grid() {
+  local g="$BATS_TEST_TMPDIR/grid"
+  mkdir -p "$g/scripts" "$g/machines" "$g/agent-factory/.venv/bin"
+  : > "$g/baseline-submodules.example.txt"; : > "$g/machines/example.txt"
+  printf '#!/bin/sh\n' > "$g/scripts/wire.sh"
+  printf '#!/bin/sh\nexit 0\n' > "$g/agent-factory/.venv/bin/python"
+  chmod +x "$g/agent-factory/.venv/bin/python"
+}
+
+@test "bootstrap: --with-agents reminds about user.yaml when it is missing" {
+  stub_grid
+  git config --global user.email "1+x@users.noreply.github.com"
+  run bash "$BOOTSTRAP" --with-agents
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cp \"$GRID_DIR/agent-factory/user.yaml.example\" \"$GRID_DIR/agent-factory/user.yaml\""* ]]
+  [[ "$output" == *"bash \"$GRID_DIR/scripts/bootstrap.sh\" --with-agents"* ]]
+}
+
+@test "bootstrap: no user.yaml reminder when it exists or without --with-agents" {
+  stub_grid
+  git config --global user.email "1+x@users.noreply.github.com"
+  run bash "$BOOTSTRAP"
+  [[ "$output" != *"user.yaml"* ]]
+  : > "$GRID_DIR/agent-factory/user.yaml"
+  run bash "$BOOTSTRAP" --with-agents
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"user.yaml"* ]]
+}
