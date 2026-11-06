@@ -47,8 +47,8 @@ stub_grid() {
   git config --global user.email "1+x@users.noreply.github.com"
   run bash "$BOOTSTRAP" --with-agents
   [ "$status" -eq 0 ]
-  [[ "$output" == *"cp agent-factory/user.yaml.example agent-factory/user.yaml"* ]]
-  [[ "$output" == *"bootstrap.sh --with-agents"* ]]
+  [[ "$output" == *"cp \"$GRID_DIR/agent-factory/user.yaml.example\" \"$GRID_DIR/agent-factory/user.yaml\""* ]]
+  [[ "$output" == *"bash \"$GRID_DIR/scripts/bootstrap.sh\" --with-agents"* ]]
 }
 
 @test "bootstrap: no user.yaml reminder when it exists or without --with-agents" {
