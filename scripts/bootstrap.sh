@@ -63,7 +63,7 @@ rs_rollback() {
   RS_BAK=""
 }
 reshallow_all() {
-  local paths=() p pin head gitdir kb_before kb_after err
+  local paths=() p pin head gitdir kb_before kb_after err ignored bak wtbak
   local total_kb=0 n_ok=0 n_skip=0 n_fail=0
   # Collect first: git inside the loop must not share a stdin with the read.
   while read -r _ p; do paths+=("$p"); done < <(git config -f .gitmodules --get-regexp '^submodule\..*\.path$')
@@ -82,7 +82,17 @@ reshallow_all() {
       echo "reshallow: $p: skipped (already shallow)"; n_skip=$((n_skip+1)); continue
     elif [[ -n "$(git -C "$p" status --porcelain)" ]]; then
       echo "reshallow: $p: skipped (dirty working tree)"; n_skip=$((n_skip+1)); continue
-    elif [[ "$head" != "$pin" ]]; then
+    fi
+    # Gitignored files (build output) are invisible to `status --porcelain` but would be lost
+    # with the old working tree, so any of them means skip. .DS_Store (any depth) is exempt:
+    # macOS litters every checkout with it. ls-files lists each ignored file; status --ignored
+    # collapses a whole directory to one entry, which would hide a .DS_Store-only directory.
+    ignored="$(git -C "$p" ls-files --others --ignored --exclude-standard | grep -Ev '(^|/)\.DS_Store$' || true)"
+    if [[ -n "$ignored" ]]; then
+      echo "reshallow: $p: skipped (ignored files present: $(printf '%s\n' "$ignored" | head -n 3 | paste -sd, -))"
+      n_skip=$((n_skip+1)); continue
+    fi
+    if [[ "$head" != "$pin" ]]; then
       echo "reshallow: $p: skipped (HEAD ${head:0:12} is not the recorded pin ${pin:0:12}; local or unpushed work?)"
       n_skip=$((n_skip+1)); continue
     elif [[ "$gitdir" != */modules/* ]]; then
@@ -98,7 +108,11 @@ reshallow_all() {
               && git submodule update --init --depth 1 -- "$p" </dev/null 2>&1)" \
        && [[ "$(git -C "$p" rev-parse --is-shallow-repository)" == "true" ]] \
        && [[ "$(git -C "$p" rev-parse HEAD)" == "$pin" ]]; then
-      rm -rf "$RS_BAK" "$RS_WTBAK"; RS_BAK=""
+      # Disarm the rollback BEFORE deleting the backups: a Ctrl-C during the rm must not make
+      # rs_rollback remove this verified clone and restore a half-deleted backup. A backup left
+      # by a kill here is just a "leftover backup" skip on the next run.
+      bak="$RS_BAK" wtbak="$RS_WTBAK"; RS_BAK=""
+      rm -rf "$bak" "$wtbak"
       kb_after="$(du -sk "$gitdir" | cut -f1)"
       total_kb=$((total_kb + kb_before - kb_after)); n_ok=$((n_ok+1))
       echo "reshallow: $p: shallow at ${pin:0:12} ($((kb_before/1024)) MiB -> $((kb_after/1024)) MiB)"

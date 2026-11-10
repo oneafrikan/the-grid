@@ -153,3 +153,29 @@ mk_reshallow_fixture() {
   [ "$(git -C "$GRID_DIR/sub" rev-parse --is-shallow-repository)" = false ]
   [ "$(git -C "$GRID_DIR/sub" rev-list --count HEAD)" = 3 ]
 }
+
+# Gitignored files are invisible to `git status --porcelain` but would be lost with the old
+# working tree, so --reshallow must skip on them; .DS_Store alone must not block the conversion.
+@test "reshallow: skips a submodule holding a gitignored non-.DS_Store file, and the file survives" {
+  mk_reshallow_fixture
+  printf '*.o\n.DS_Store\n' > "$HOME/ignore"
+  git config --global core.excludesFile "$HOME/ignore"
+  echo built > "$GRID_DIR/sub/build.o"
+  run bash "$BOOTSTRAP" --reshallow
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sub: skipped (ignored files present: build.o)"* ]]
+  [ "$(cat "$GRID_DIR/sub/build.o")" = built ]
+  [ "$(git -C "$GRID_DIR/sub" rev-list --count HEAD)" = 3 ]
+}
+
+@test "reshallow: ignored .DS_Store files (any depth) do not block the conversion" {
+  mk_reshallow_fixture
+  printf '*.o\n.DS_Store\n' > "$HOME/ignore"
+  git config --global core.excludesFile "$HOME/ignore"
+  mkdir "$GRID_DIR/sub/d"
+  : > "$GRID_DIR/sub/.DS_Store"; : > "$GRID_DIR/sub/d/.DS_Store"
+  run bash "$BOOTSTRAP" --reshallow
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 converted, 0 skipped, 0 failed"* ]]
+  [ "$(git -C "$GRID_DIR/sub" rev-list --count HEAD)" = 1 ]
+}

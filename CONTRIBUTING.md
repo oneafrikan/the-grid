@@ -100,6 +100,8 @@ bash scripts/wire.sh
 
 A newly added submodule is **library-only** by default (indexed in `SKILLS.md`, not symlinked). To wire its skills live on every machine, add its name to `baseline-submodules.txt` (or to a single machine's `machines/<host>.txt` overlay) and re-run `bash scripts/wire.sh`.
 
+Submodules are cloned shallow (depth 1). Before `python3 scripts/grid lock` on a repo whose pin you bumped, run `git -C repos/<x> fetch --unshallow origin`: the lock proves the pin is on the upstream ref, which needs history.
+
 ## Running tests
 
 ```bash
