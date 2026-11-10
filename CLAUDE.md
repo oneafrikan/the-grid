@@ -275,6 +275,7 @@ A repo-root `SKILL.md` (gstack marker) is excluded, matching wire.sh.
 
 ```bash
 git submodule add <repo-url> repos/<name>
+git config -f .gitmodules submodule.repos/<name>.shallow true
 git submodule update --init
 bash scripts/wire.sh
 ```
@@ -284,6 +285,14 @@ skills live everywhere, add its `repos/<name>` dir name to `baseline-submodules.
 (or to a single machine's `machines/<host>.txt` overlay) and re-run
 `bash scripts/wire.sh`. This keeps `~/.claude/skills/` small even as the-grid indexes
 thousands of ecosystem skills.
+
+**Submodules are shallow.** `bootstrap.sh` clones each not-yet-initialised submodule at
+`--depth 1` (pinned commit only); `.gitmodules` carries `shallow = true` for every entry (a
+bats guard enforces it). Existing full checkouts are never truncated by a normal run;
+`bash scripts/bootstrap.sh --reshallow` converts them on purpose (opt-in, skips dirty or
+off-pin ones, restores on failure). A maintainer on shallow submodules must run
+`git -C repos/<x> fetch --unshallow origin` before `grid lock` on a repo whose pin they bump,
+because the lock proves the pin is on the upstream ref and that needs history.
 
 ### Reference submodules (indexes, not skill collections)
 

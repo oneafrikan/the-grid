@@ -26,6 +26,16 @@ active_lines() {
   ! grep -Eq '^[[:space:]]*url[[:space:]]*=[[:space:]]*(git@|ssh://)' "$REPO_ROOT/.gitmodules"
 }
 
+@test "every .gitmodules submodule has shallow = true (clones arrive depth 1, no history)" {
+  local key missing=""
+  # One line per submodule: "submodule.<name>.path <value>"; strip the suffix to get the key.
+  while read -r key _; do
+    key="${key%.path}"
+    [ "$(git config -f "$REPO_ROOT/.gitmodules" --get "$key.shallow")" = "true" ] || missing="$missing $key"
+  done < <(git config -f "$REPO_ROOT/.gitmodules" --get-regexp '\.path$')
+  [ -z "$missing" ] || { echo "missing shallow = true:$missing" >&3; false; }
+}
+
 @test ".nojekyll exists at the repo root" {
   [ -f "$REPO_ROOT/.nojekyll" ]
 }

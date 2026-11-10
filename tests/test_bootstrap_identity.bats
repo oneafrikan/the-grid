@@ -61,3 +61,121 @@ stub_grid() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"user.yaml"* ]]
 }
+
+# --- bootstrap.sh --reshallow (opt-in conversion of full submodule checkouts to depth 1) ---
+# Fixture: upstream U (3 commits, then a 4th so the pin is BEHIND its tip like most real pins),
+# superproject S pinning U's 3rd commit as submodule "sub", and clone C with a FULL checkout of
+# it. file:// URLs because git ignores depth for plain paths; protocol.file.allow because git
+# blocks file transport inside submodules by default. All of it lives under BATS_TEST_TMPDIR.
+mk_reshallow_fixture() {
+  git config --global user.email "1+x@users.noreply.github.com"
+  git config --global user.name t
+  git config --global init.defaultBranch main
+  git config --global protocol.file.allow always
+  local t="$BATS_TEST_TMPDIR" i
+  git init -q "$t/u"
+  for i in 1 2 3; do git -C "$t/u" commit -q --allow-empty -m "u$i"; done
+  git init -q "$t/s"
+  git -C "$t/s" submodule add -q "file://$t/u" sub
+  git -C "$t/s" commit -q -m "add sub"
+  git -C "$t/u" commit -q --allow-empty -m "u4"
+  git clone -q "file://$t/s" "$t/c"
+  git -C "$t/c" submodule update --init -q
+  export GRID_DIR="$t/c"
+  [ "$(git -C "$t/c/sub" rev-list --count HEAD)" = 3 ]
+}
+
+@test "reshallow: converts a full submodule to depth 1 at its pin, then a second run is a no-op" {
+  mk_reshallow_fixture
+  pin="$(git -C "$GRID_DIR" ls-files -s sub | awk '{print $2}')"
+  run bash "$BOOTSTRAP" --reshallow
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"reshallow: sub: shallow at"* ]]
+  [[ "$output" == *"1 converted, 0 skipped, 0 failed"* ]]
+  [ "$(git -C "$GRID_DIR/sub" rev-list --count HEAD)" = 1 ]
+  [ "$(git -C "$GRID_DIR/sub" rev-parse --is-shallow-repository)" = true ]
+  [ "$(git -C "$GRID_DIR/sub" rev-parse HEAD)" = "$pin" ]
+  # No backup left behind, and git still sees a clean submodule at the pin.
+  [ -z "$(find "$BATS_TEST_TMPDIR/c" -name '*.reshallow-bak' | head -n 1)" ]
+  [ -z "$(git -C "$GRID_DIR" status --porcelain)" ]
+  run bash "$BOOTSTRAP" --reshallow
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sub: skipped (already shallow)"* ]]
+  [[ "$output" == *"0 converted, 1 skipped, 0 failed"* ]]
+}
+
+@test "reshallow: skips a dirty submodule and leaves its history alone" {
+  mk_reshallow_fixture
+  echo wip > "$GRID_DIR/sub/scratch.txt"
+  run bash "$BOOTSTRAP" --reshallow
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sub: skipped (dirty working tree)"* ]]
+  [ "$(git -C "$GRID_DIR/sub" rev-list --count HEAD)" = 3 ]
+  [ -f "$GRID_DIR/sub/scratch.txt" ]
+}
+
+@test "reshallow: skips a submodule whose HEAD moved off the recorded pin" {
+  mk_reshallow_fixture
+  git -C "$GRID_DIR/sub" commit -q --allow-empty -m "local work"
+  run bash "$BOOTSTRAP" --reshallow
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sub: skipped (HEAD "*"is not the recorded pin"* ]]
+  [ "$(git -C "$GRID_DIR/sub" rev-list --count HEAD)" = 4 ]
+}
+
+@test "reshallow: a failed re-clone restores the original submodule untouched" {
+  mk_reshallow_fixture
+  # Break the remote the way a dropped network would: the fresh clone cannot succeed.
+  git -C "$GRID_DIR" config submodule.sub.url "file://$BATS_TEST_TMPDIR/does-not-exist"
+  run bash "$BOOTSTRAP" --reshallow
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sub: FAILED, original restored"* ]]
+  [ "$(git -C "$GRID_DIR/sub" rev-list --count HEAD)" = 3 ]
+  [ "$(git -C "$GRID_DIR/sub" rev-parse --is-shallow-repository)" = false ]
+  [ -z "$(git -C "$GRID_DIR/sub" status --porcelain)" ]
+  [ -z "$(find "$BATS_TEST_TMPDIR/c" -name '*.reshallow-bak' | head -n 1)" ]
+}
+
+# Step 1 of a normal run: new submodules arrive at depth 1, existing full ones are never truncated.
+# The fixture has no wire.sh/example baseline, so the run fails after step 1; only step 1 is asserted.
+@test "bootstrap step 1: a not-yet-cloned submodule is fetched at depth 1 even when its pin is behind the tip" {
+  mk_reshallow_fixture
+  git -C "$GRID_DIR" submodule deinit -q -f sub
+  rm -rf "$GRID_DIR/.git/modules/sub"
+  run bash "$BOOTSTRAP"
+  [ "$(git -C "$GRID_DIR/sub" rev-parse --is-shallow-repository)" = true ]
+  [ "$(git -C "$GRID_DIR/sub" rev-list --count HEAD)" = 1 ]
+}
+
+@test "bootstrap step 1: an existing full submodule keeps its history" {
+  mk_reshallow_fixture
+  run bash "$BOOTSTRAP"
+  [ "$(git -C "$GRID_DIR/sub" rev-parse --is-shallow-repository)" = false ]
+  [ "$(git -C "$GRID_DIR/sub" rev-list --count HEAD)" = 3 ]
+}
+
+# Gitignored files are invisible to `git status --porcelain` but would be lost with the old
+# working tree, so --reshallow must skip on them; .DS_Store alone must not block the conversion.
+@test "reshallow: skips a submodule holding a gitignored non-.DS_Store file, and the file survives" {
+  mk_reshallow_fixture
+  printf '*.o\n.DS_Store\n' > "$HOME/ignore"
+  git config --global core.excludesFile "$HOME/ignore"
+  echo built > "$GRID_DIR/sub/build.o"
+  run bash "$BOOTSTRAP" --reshallow
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sub: skipped (ignored files present: build.o)"* ]]
+  [ "$(cat "$GRID_DIR/sub/build.o")" = built ]
+  [ "$(git -C "$GRID_DIR/sub" rev-list --count HEAD)" = 3 ]
+}
+
+@test "reshallow: ignored .DS_Store files (any depth) do not block the conversion" {
+  mk_reshallow_fixture
+  printf '*.o\n.DS_Store\n' > "$HOME/ignore"
+  git config --global core.excludesFile "$HOME/ignore"
+  mkdir "$GRID_DIR/sub/d"
+  : > "$GRID_DIR/sub/.DS_Store"; : > "$GRID_DIR/sub/d/.DS_Store"
+  run bash "$BOOTSTRAP" --reshallow
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 converted, 0 skipped, 0 failed"* ]]
+  [ "$(git -C "$GRID_DIR/sub" rev-list --count HEAD)" = 1 ]
+}

@@ -1,108 +1,144 @@
 [submodule "tests/lib/bats-core"]
 	path = tests/lib/bats-core
 	url = https://github.com/bats-core/bats-core.git
+	shallow = true
 [submodule "repos/mattpocock"]
 	path = repos/mattpocock
 	url = https://github.com/mattpocock/skills.git
+	shallow = true
 [submodule "repos/superpowers"]
 	path = repos/superpowers
 	url = https://github.com/obra/superpowers.git
+	shallow = true
 [submodule "repos/gstack"]
 	path = repos/gstack
 	url = https://github.com/garrytan/gstack.git
+	shallow = true
 [submodule "repos/jeffallan"]
 	path = repos/jeffallan
 	url = https://github.com/jeffallan/claude-skills.git
+	shallow = true
 [submodule "repos/anthropic"]
 	path = repos/anthropic
 	url = https://github.com/anthropics/skills.git
+	shallow = true
 [submodule "repos/voltagent"]
 	path = repos/voltagent
 	url = https://github.com/VoltAgent/awesome-openclaw-skills.git
+	shallow = true
 [submodule "repos/clawhub"]
 	path = repos/clawhub
 	url = https://github.com/openclaw/clawhub.git
+	shallow = true
 [submodule "repos/openclaw"]
 	path = repos/openclaw
 	url = https://github.com/openclaw/openclaw.git
+	shallow = true
 [submodule "repos/voltagent-agent-skills"]
 	path = repos/voltagent-agent-skills
 	url = https://github.com/VoltAgent/awesome-agent-skills.git
+	shallow = true
 [submodule "repos/sjkncs"]
 	path = repos/sjkncs
 	url = https://github.com/sjkncs/awesome-openclaw-skills.git
+	shallow = true
 [submodule "repos/hesamsheikh"]
 	path = repos/hesamsheikh
 	url = https://github.com/hesamsheikh/awesome-openclaw-usecases.git
+	shallow = true
 [submodule "repos/wordpress"]
 	path = repos/wordpress
 	url = https://github.com/WordPress/agent-skills.git
+	shallow = true
 [submodule "repos/automattic"]
 	path = repos/automattic
 	url = https://github.com/Automattic/agent-skills.git
+	shallow = true
 [submodule "repos/automattic-wordpress"]
 	path = repos/automattic-wordpress
 	url = https://github.com/Automattic/wordpress-agent-skills.git
+	shallow = true
 [submodule "repos/sarai-wp-openclaw"]
 	path = repos/sarai-wp-openclaw
 	url = https://github.com/Sarai-Chinwag/wp-openclaw.git
+	shallow = true
 [submodule "repos/jdevalk"]
 	path = repos/jdevalk
 	url = https://github.com/jdevalk/skills.git
+	shallow = true
 [submodule "repos/robertbstillwell"]
 	path = repos/robertbstillwell
 	url = https://github.com/robertbstillwell/marketing-skills.git
+	shallow = true
 [submodule "repos/sebclawops"]
 	path = repos/sebclawops
 	url = https://github.com/sebclawops/openclaw-google-ads.git
+	shallow = true
 [submodule "repos/nowork-toprank"]
 	path = repos/nowork-toprank
 	url = https://github.com/nowork-studio/notfair-plugin.git
+	shallow = true
 [submodule "repos/mattberman-google-ads"]
 	path = repos/mattberman-google-ads
 	url = https://github.com/TheMattBerman/google-ads-copilot.git
+	shallow = true
 [submodule "repos/mattberman-meta-ads"]
 	path = repos/mattberman-meta-ads
 	url = https://github.com/TheMattBerman/meta-ads-kit.git
+	shallow = true
 [submodule "repos/amekala-ads-mcp"]
 	path = repos/amekala-ads-mcp
 	url = https://github.com/amekala/ads-mcp.git
+	shallow = true
 [submodule "repos/deanpeters"]
 	path = repos/deanpeters
 	url = https://github.com/deanpeters/Product-Manager-Skills.git
+	shallow = true
 [submodule "repos/paperclip"]
 	path = repos/paperclip
 	url = https://github.com/paperclipai/paperclip.git
+	shallow = true
 [submodule "repos/spillwave-astro"]
 	path = repos/spillwave-astro
 	url = https://github.com/spillwavesolutions/publishing-astro-websites-agentic-skill.git
+	shallow = true
 [submodule "repos/alirezarezvani"]
 	path = repos/alirezarezvani
 	url = https://github.com/alirezarezvani/claude-skills.git
+	shallow = true
 [submodule "repos/mozilla-bq-etl"]
 	path = repos/mozilla-bq-etl
 	url = https://github.com/mozilla/bigquery-etl-skills.git
+	shallow = true
 [submodule "repos/hubspot"]
 	path = repos/hubspot
 	url = https://github.com/HubSpot/agent-cli-skills.git
+	shallow = true
 [submodule "repos/ponytail"]
 	path = repos/ponytail
 	url = https://github.com/DietrichGebert/ponytail.git
+	shallow = true
 [submodule "repos/quant-zero"]
 	path = repos/quant-zero
 	url = https://github.com/marcohwlam/quant-zero
+	shallow = true
 [submodule "repos/openspec"]
 	path = repos/openspec
 	url = https://github.com/Fission-AI/openspec.git
+	shallow = true
 [submodule "repos/avoid-ai-writing"]
 	path = repos/avoid-ai-writing
 	url = https://github.com/conorbronsdon/avoid-ai-writing.git
+	shallow = true
 [submodule "repos/humanize-writing"]
 	path = repos/humanize-writing
 	url = https://github.com/jpeggdev/humanize-writing.git
+	shallow = true
 [submodule "repos/removing-ai-isms"]
 	path = repos/removing-ai-isms
 	url = https://github.com/gvsg-rs/removing-ai-isms.git
+	shallow = true
 [submodule "repos/ecc"]
 	path = repos/ecc
 	url = https://github.com/affaan-m/ECC.git
+	shallow = true
