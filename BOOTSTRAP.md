@@ -360,6 +360,26 @@ green. If one is not, something is misconfigured.
 
 ---
 
+## Uninstalling
+
+`scripts/uninstall.sh` removes what the-grid put on a machine, for decommissioning it or resetting a test HOME. It is a **dry run** until you pass `--yes`, and it works from any directory.
+
+```bash
+bash ~/.the-grid/scripts/uninstall.sh          # dry run: prints what it would remove, changes nothing
+bash ~/.the-grid/scripts/uninstall.sh --yes    # remove it
+bash ~/.the-grid/scripts/uninstall.sh --yes --purge   # also delete the clone and ~/.grid
+```
+
+- **Removed:** links whose target resolves into the clone (`~/.claude/skills`, `~/.claude/agents`, the gstack runtime link, `~/.claude/rules/grid/`, other harness dirs), the generated auto-handoff entry in `~/.claude/settings.json`, the marked rules block in other harnesses' instruction files, and the `grid install` ledger and dirs.
+- **Kept:** real dirs, foreign links, your own hooks and keys, your own text in instruction files, `~/.the-grid-private`, and `~/.grid` (it also holds instincts and learning data; only `--purge` deletes it).
+- **Scheduled jobs** (launchd, systemd, cron) are detected and their deactivation commands printed. It never runs them: activating them was your step, so deactivating is too.
+- **`--purge`** refuses when the clone has uncommitted changes, unpushed commits, stashes or dirty worktrees, unless `--force`. A second `--yes` run says "nothing to remove".
+- A rules block it cannot remove cleanly (a symlinked file, damaged markers) is printed, not edited.
+
+Status: dry-run and `--yes` verified in temp dirs only (`tests/test_uninstall.bats`); never run against a real home by the author.
+
+---
+
 ## Troubleshooting
 
 **Symlink is broken:**
