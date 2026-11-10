@@ -67,6 +67,15 @@ fi
 # Everything below runs inside main(), invoked on the last line. bash has then parsed the
 # whole file before --purge deletes the clone this script lives in.
 main() {
+  # A relative GRID_DIR or GRID_STATE_DIR is refused up front: --purge does `cd /` before it
+  # deletes, and from there a relative path would name something else.
+  local rel_v
+  for rel_v in GRID_DIR GRID_STATE_DIR; do
+    case "${!rel_v:-}" in
+      ""|/*) ;;
+      *) echo "uninstall: $rel_v must be an absolute path (got '${!rel_v}'); nothing was changed" >&2; exit 2 ;;
+    esac
+  done
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
   GRID_DIR="${GRID_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
   # Canonical spelling, as wire.sh: ownership is decided on resolved paths.

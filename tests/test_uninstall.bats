@@ -360,6 +360,21 @@ uninstall() { # [args...]: from an unrelated cwd, as the contract says
   [ ! -e "$MOCK_GRID" ]
 }
 
+@test "guard: a relative GRID_DIR or GRID_STATE_DIR is refused (rc 2), nothing changed" {
+  wire_machine; make_clone
+  mkdir -p "$OTHER_DIR/rel-state"
+  before="$(snap_all)"
+  cd "$OTHER_DIR"
+  GRID_DIR=../x run bash "$UNINSTALL" --yes --purge
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"GRID_DIR must be an absolute path"* ]]
+  GRID_DIR="$MOCK_GRID" GRID_STATE_DIR=rel-state run bash "$UNINSTALL" --yes --purge
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"GRID_STATE_DIR must be an absolute path"* ]]
+  [ -d "$OTHER_DIR/rel-state" ]
+  [ "$before" = "$(snap_all)" ]
+}
+
 # ----------------------------------------------------------------- 5. ${GRID_DIR}-private
 
 @test "a link into \${GRID_DIR}-private is never touched, with or without --yes" {
