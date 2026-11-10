@@ -27,7 +27,7 @@ Colleagues get public + business only. The private tier is the operator's.
 **B. Colleague onboarding (target: about 2 minutes)**
 1. Claude Desktop is installed and logged in (assumed; plan tiers are out of scope).
 2. Open Cowork or the Code tab.
-3. One sentence: "Add the marketplace github.com/<org>/the-grid-<business> and show me what is available." **[unverified]** Fallback: the Plugins UI (+ > Plugins).
+3. In Cowork: Customize > Plugins > Manage marketplaces, add `<org>/the-grid-<business>`, then install from the plugin listing. A chat request to add the marketplace and install does not work: it installs into Cowork's cloud sandbox only (2026-11-10).
 4. Tick the bundles wanted (job-shaped: SEO, PPC, content, product management, analyst).
 5. Run `/start` (front door), say what the job is, get pointed to the right bundle.
 6. Connect a working folder.
@@ -130,8 +130,8 @@ the-grid-<business>/
 
 Two install routes:
 
-1. **Git access to the org:** add the repo as a plugin marketplace (`claude plugin marketplace add <org>/<repo>`; in Cowork, from its plugin settings) and install the plugin.
-2. **Everyone else:** download `dist/<name>/<name>.zip` and upload it in Claude > Customize > Skills. If the upload rejects the assets, unzip it, upload the skill, and add the assets into the chat.
+1. **Git access to the org:** add the repo as a plugin marketplace (`claude plugin marketplace add <org>/<repo>`; in Cowork, Customize > Plugins > Manage marketplaces) and install the plugin from the listing.
+2. **Everyone else:** download `dist/<name>/<name>.zip` and upload it in Claude > Customize > Skills > Upload skill (not Customize > Plugins, which rejects a skill zip). If the upload rejects the assets, unzip it, upload the skill, and add the assets into the chat.
 
 - Skills are single-thread (ADR-008).
 - First skills: a house email-style skill and a PowerPoint brand-guide skill that bundles its template and assets.

@@ -2,12 +2,27 @@
 
 Step-by-step install for the Claude Desktop app: the Code tab and Cowork. The short version lives in [INSTALL.md](../INSTALL.md#claude-desktop-code-tab-and-cowork).
 
+## Which route is yours?
+
+| User type | Route | Gets |
+|---|---|---|
+| Terminal Claude Code user who wants everything | clone + `bootstrap.sh --with-agents` ([INSTALL.md](../INSTALL.md#install)) | all wired skills and agents |
+| Desktop app, Code tab | the same install as the terminal, because it shares `~/.claude` | same |
+| Claude Code, no clone | `claude plugin marketplace add oneafrikan/the-grid`, then install `grid-core` and `grid-agents` | plugin skills and agents |
+| Desktop app, Cowork | Customize → Plugins → Manage marketplaces → add `oneafrikan/the-grid` → install `grid-core` and `grid-agents` → fresh Cowork session | `grid-core`: skills plus the orchestrators `gsd`, `grid-tech-lead`, `grid-ceo-orchestrator`, `grid-growth-hacker`; `grid-agents`: the specialist agents |
+| Teams: colleagues who never use git | point at [docs/business-tier](business-tier/README.md): git users add the business repo as a marketplace; everyone else uploads one zip per skill under Customize → Skills | the business repo's skills |
+
+Pick **one** route per surface:
+
+- The clone install plus the plugins lists every agent twice.
+- A plugin plus a zip of the same skill gives that skill twice.
+
 ## Claude Code (terminal and the Desktop Code tab)
 
 The terminal and the Desktop app's Code tab share `~/.claude`, so one install
 covers both. Detail: [PLUGINS.md](PLUGINS.md#claude-desktop-code-tab-and-cowork).
 
-Pick **one** route per machine. Doing both lists every agent twice.
+Pick **one** route per machine (see above).
 
 **Route 1, full (clone):** follow [Install](../INSTALL.md#install) in INSTALL.md (`bootstrap.sh`, or
 `wire.sh`). Skills are live immediately.
@@ -44,11 +59,26 @@ grid only from plugins installed in Cowork. Detail:
 [PLUGINS.md](PLUGINS.md#claude-desktop-code-tab-and-cowork).
 
 1. Open the Claude Desktop app and switch to Cowork.
-2. In Cowork's plugin settings, add the marketplace `oneafrikan/the-grid`. It is
+2. In Customize → Plugins → Manage marketplaces, add `oneafrikan/the-grid`. It is
    public: no git credentials are needed.
-3. Install `grid-core` and `grid-agents`.
-4. Fallback that worked: ask Cowork in chat to add the marketplace and install both
-   plugins.
+3. Install `grid-core` and `grid-agents` from the plugin listing.
+4. Start a fresh Cowork session.
+
+Troubleshooting: if the plugins are missing from the listing although the marketplace
+shows in Manage marketplaces (seen after the plugins had been uninstalled), remove the
+marketplace there and add it again. The listing comes back.
+
+Do not ask Cowork in chat to add the marketplace and install the plugins. That runs the
+`claude` command-line tool inside Cowork's cloud sandbox and installs into that
+throwaway container: nothing appears in Customize → Plugins and a fresh session has
+nothing. Cowork's built-in `cowork-plugin-management` plugin cannot install from a
+marketplace either.
+
+New releases may need a marketplace refresh or a reinstall; auto-update in Cowork is
+not verified.
+
+A private marketplace (a GitHub repo the account can read) works in the Desktop app
+with no extra credentials; see OQ-3 in [business-tier](business-tier/README.md).
 
 Optional third-party skills: add the upstream marketplaces listed in
 [PLUGINS.md](PLUGINS.md#claude-desktop-code-tab-and-cowork) the same way.
@@ -62,6 +92,13 @@ marketplace and cannot be installed in Cowork this way.
 3. You should see the `grid-core` skills and the four orchestrator skills (`gsd`,
    `grid-tech-lead`, `grid-ceo-orchestrator`, `grid-growth-hacker`). Plugin agents are
    not listed there, but the orchestrators call them by `grid-agents:` name.
+
+## Skill zip uploads (colleagues without repo access)
+
+- Upload under Customize → Skills → Upload skill, not Customize → Plugins.
+- The Plugins upload rejects a skill zip: "Zip must contain a .claude-plugin/plugin.json file or a top-level SKILL.md declaring plugin components".
+- Zip layout: one folder named after the skill, with `SKILL.md` inside. The folder name must match the skill's `name`.
+- Do not also install the same skill as a plugin: it appears twice.
 
 **Caveats:**
 

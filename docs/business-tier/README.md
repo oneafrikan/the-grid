@@ -5,9 +5,8 @@
 
 ## One-line goal
 
-A colleague on a Mac types one sentence into Claude Desktop and the right
-the-grid agents and skills become callable from Cowork, with the business's own
-context applied. No terminal, no Python, no clone.
+A colleague adds one marketplace in Claude Desktop's plugin settings, or uploads a
+zip, and the right skills become callable from Cowork. No terminal, no Python, no clone.
 
 ## The one question everything hangs on
 
@@ -18,6 +17,17 @@ not, the design degrades (see [DELEGATION-GATE.md](DELEGATION-GATE.md)).
 name; its subagents work on copies the main session stages into the cloud container and
 writes back. The Code tab delegates and sees local files directly. The business tier ships single-thread skills only;
 Cowork carries the full grid plugins.
+
+## Install, by user type
+
+| User | Route |
+|---|---|
+| Git user | `claude plugin marketplace add <org>/the-grid-<business>`, then install the plugin |
+| Cowork user with access to the business repo | Customize → Plugins → Manage marketplaces → add the business repo → install the plugin from the listing → fresh Cowork session (not by asking Cowork in chat: that installs into its cloud sandbox only) |
+| Colleague without access to the business repo | download one skill's zip, upload it under Customize → Skills → Upload skill (not Customize → Plugins, which rejects a skill zip) |
+
+Pick one route per surface: a plugin plus a zip of the same skill lists that skill twice.
+The public grid's own routes are in [install-desktop.md](../install-desktop.md).
 
 ## Reading order
 
