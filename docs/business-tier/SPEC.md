@@ -131,7 +131,7 @@ the-grid-<business>/
 Two install routes:
 
 1. **Git access to the org:** add the repo as a plugin marketplace (`claude plugin marketplace add <org>/<repo>`; in Cowork, from its plugin settings) and install the plugin.
-2. **Everyone else:** download `dist/<name>/<name>.zip` and upload it in Claude > Customize > Skills. If the upload rejects the assets, unzip it, upload the skill, and add the assets into the chat.
+2. **Everyone else:** download `dist/<name>/<name>.zip` and upload it in Claude > Customize > Skills > Upload skill (not Customize > Plugins, which rejects a skill zip). If the upload rejects the assets, unzip it, upload the skill, and add the assets into the chat.
 
 - Skills are single-thread (ADR-008).
 - First skills: a house email-style skill and a PowerPoint brand-guide skill that bundles its template and assets.

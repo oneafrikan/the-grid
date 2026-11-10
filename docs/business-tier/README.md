@@ -19,6 +19,17 @@ name; its subagents work on copies the main session stages into the cloud contai
 writes back. The Code tab delegates and sees local files directly. The business tier ships single-thread skills only;
 Cowork carries the full grid plugins.
 
+## Install, by user type
+
+| User | Route |
+|---|---|
+| Git user | `claude plugin marketplace add <org>/the-grid-<business>`, then install the plugin |
+| Cowork user with access to the business repo | Customize → Plugins → add the business repo as a marketplace → install the plugin → fresh Cowork session |
+| Colleague without access to the business repo | download one skill's zip, upload it under Customize → Skills → Upload skill (not Customize → Plugins, which rejects a skill zip) |
+
+Pick one route per surface: a plugin plus a zip of the same skill lists that skill twice.
+The public grid's own routes are in [install-desktop.md](../install-desktop.md).
+
 ## Reading order
 
 1. [SPEC.md](SPEC.md) — journey, repo architecture, Claude flow, what the user gets
