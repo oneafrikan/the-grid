@@ -59,11 +59,10 @@ them they write:
 
 - **`~/.claude/skills/`**: symlinks into this repo, one per wired skill.
 - **`~/.claude/agents/`**: symlinks to the composed specialist subagents.
-- **`~/.claude/settings.json`**: one generated auto-handoff SessionEnd hook entry,
-  on by default. Your own hooks and keys are left alone; the first write
-  reformats the file as 2-space-indented JSON. Opt out with `-hook:auto-handoff` in
-  `baseline-submodules.txt` or `machines/<host>.txt`, then re-run `wire.sh`
-  ([hooks/README.md](hooks/README.md)).
+- **`~/.claude/settings.json`**: one generated auto-handoff SessionEnd hook entry, on by default.
+  Your own hooks and keys are left alone; the first write reformats the file as 2-space-indented
+  JSON. Opt out with `-hook:auto-handoff` in `baseline-submodules.txt` or `machines/<host>.txt`,
+  then re-run `wire.sh` ([hooks/README.md](hooks/README.md)).
 - **`~/.claude/rules/grid/`**: symlinks to coding-convention rule packs. Opt-in:
   nothing is written without a `rules:<pack>` entry ([docs/rules.md](docs/rules.md)).
 - **Other harness directories** (such as `~/.agents/skills`): opt-in via
@@ -76,7 +75,8 @@ them they write:
 
 It never overwrites a real directory or a foreign symlink in those folders; it
 only replaces symlinks that point into this repo. Neither script writes `~/.grid/`
-(only `grid install` does).
+(only `grid install` does). To undo all of it: `bash scripts/uninstall.sh` (a dry run;
+`--yes` removes, see [BOOTSTRAP.md](BOOTSTRAP.md#uninstalling)).
 
 ## Reconciling a machine (removing stale shadows)
 
