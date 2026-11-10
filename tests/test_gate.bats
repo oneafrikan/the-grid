@@ -138,6 +138,16 @@ run_gate() { ( cd "$G" && env -i HOME="$G" PATH="$G/stubbin" ${GATE_ENV[@]+"${GA
   [ "$(cat "$BATS_TEST_TMPDIR/bats-require-venv")" = "1" ]
 }
 
+@test "the gate strips git's exec dir from the PATH bats sees (a hook prepends it; #305)" {
+  # Inside a git hook, GIT_EXEC_PATH is set and its dir leads PATH. The stub records PATH.
+  printf '#!/usr/bin/env bash\necho "$PATH" > "%s/bats-path"\necho "1..0"\nexit 0\n' "$BATS_TEST_TMPDIR" > "$G/tests/lib/bats-core/bin/bats"
+  bats_answers_version "$G/tests/lib/bats-core/bin/bats"
+  GATE_ENV=(GIT_EXEC_PATH=/fake/libexec/git-core "PATH=/fake/libexec/git-core:$G/stubbin")
+  run run_gate
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/bats-path")" = "$G/stubbin" ]
+}
+
 # --- --pre-commit: the FAST, staged-files-only mode ------------------------------------------------
 # The full gate is merge-time (CI, plain `bash scripts/gate.sh`); the hook only checks what is staged.
 

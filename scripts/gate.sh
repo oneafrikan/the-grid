@@ -147,6 +147,19 @@ fi
 # git exports GIT_INDEX_FILE / GIT_DIR into hooks; inherited, they make the git
 # calls the checks run inside submodules (catalog's tracked-file discovery) look
 # at the parent repo's index and fail. The checks must see a plain environment.
+#
+# Git ALSO prepends its exec dir (.../libexec/git-core) to PATH for a hook (#305). Left there,
+# `command -v git` resolves to the dashed copy inside libexec, and a test that symlinks that
+# `git` into a stub PATH gets a git that cannot find its subcommands ("'submodule' is not a git
+# command"). Strip it, so the checks and bats see the PATH an interactive shell would. This
+# must run before GIT_EXEC_PATH is unset (it names the dir). Bash 3.2-safe.
+if [ -n "${GIT_EXEC_PATH:-}" ]; then
+  _gate_path=":$PATH:"
+  _gate_path="${_gate_path//:"$GIT_EXEC_PATH":/:}"
+  _gate_path="${_gate_path#:}"
+  PATH="${_gate_path%:}"
+  unset _gate_path
+fi
 unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_PREFIX GIT_EXEC_PATH
 
 FAILED=()
