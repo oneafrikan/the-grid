@@ -76,8 +76,10 @@ Observed 2026-11-05 on macOS unless marked. Delegation-gate results: `docs/busin
 - The bare name `grid-qa-engineer` ran (in the background) and listed the files of the folder connected on the Mac, so local file access works.
 - Installing the plugins from inside the Code tab is documented by Anthropic but untested here.
 - **Cowork does not read `~/.claude`.** It sees only Anthropic's built-in skills plus plugins installed in Cowork.
-- **Install in Cowork**: in Cowork's plugin settings, add the marketplace `oneafrikan/the-grid` (public, no git credentials needed), then install `grid-core` and `grid-agents`. The exact UI path is unverified.
-- Fallback that worked: ask Cowork in chat to add the marketplace and install the two plugins.
+- **Install in Cowork**: Customize → Plugins → Manage marketplaces, add `oneafrikan/the-grid` (public, no git credentials needed), then install `grid-core` and `grid-agents` from the plugin listing and start a fresh Cowork session.
+- If the plugins are missing from the listing although the marketplace shows in Manage marketplaces, remove the marketplace there and add it again.
+- Do not install by asking Cowork in chat: that runs `claude` in Cowork's cloud sandbox and installs into the throwaway container, so nothing reaches Customize → Plugins. Cowork's built-in `cowork-plugin-management` plugin cannot install from a marketplace either.
+- New releases may need a marketplace refresh or a reinstall; auto-update in Cowork is not verified.
 - **Verify**: in a fresh Cowork session ask what skills and sub-agents it has. The `grid-core` skills and the four `grid-agents` orchestrator skills (`gsd`, `grid-tech-lead`, `grid-ceo-orchestrator`, `grid-growth-hacker`) should be listed.
 - **Third-party skills in Cowork**: the bundles carry only the-grid's own content. Add these upstream marketplaces in Cowork the same way (each ships `.claude-plugin/marketplace.json`): `anthropics/skills`, `jeffallan/claude-skills`, `mattpocock/skills`, `DietrichGebert/ponytail`, `obra/superpowers`.
 - No marketplace, so not installable in Cowork this way: `garrytan/gstack`, `HubSpot/agent-cli-skills`, `Fission-AI/openspec`.

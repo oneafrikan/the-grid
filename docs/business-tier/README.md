@@ -24,7 +24,7 @@ Cowork carries the full grid plugins.
 | User | Route |
 |---|---|
 | Git user | `claude plugin marketplace add <org>/the-grid-<business>`, then install the plugin |
-| Cowork user with access to the business repo | Customize → Plugins → add the business repo as a marketplace → install the plugin → fresh Cowork session |
+| Cowork user with access to the business repo | Customize → Plugins → Manage marketplaces → add the business repo → install the plugin from the listing → fresh Cowork session (not by asking Cowork in chat: that installs into its cloud sandbox only) |
 | Colleague without access to the business repo | download one skill's zip, upload it under Customize → Skills → Upload skill (not Customize → Plugins, which rejects a skill zip) |
 
 Pick one route per surface: a plugin plus a zip of the same skill lists that skill twice.

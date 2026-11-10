@@ -90,6 +90,8 @@ Run each on: terminal (control), Code tab, Cowork. Record in the table.
 
 Results recorded 2026-11-05, macOS, Claude Desktop.
 
+Note 2026-11-10: a chat-driven install (asking Cowork in chat to add the marketplace and install the plugins) was later found to land in Cowork's cloud sandbox only, so it is not a working install route. The working route is Customize → Plugins → Manage marketplaces. See `docs/install-desktop.md`.
+
 ## Decision tree
 
 - **Cowork passes D1-D4:** Plan A. Cowork is the primary surface; the Code tab handles repo and code work.
