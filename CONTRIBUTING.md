@@ -93,6 +93,7 @@ Root-level skills win over any same-named skill in a submodule — that's the es
 ```bash
 cd ~/.the-grid
 git submodule add <repo-url> repos/some-skill-repo
+git config -f .gitmodules submodule.repos/some-skill-repo.shallow true
 git submodule update --init
 bash scripts/wire.sh
 ```

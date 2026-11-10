@@ -208,6 +208,8 @@ cd ~/.the-grid
 git pull                                    # 1. latest the-grid (source of truth)
 git submodule sync --recursive              # 2. only if the pull changed .gitmodules (URLs)
 git submodule update --init --recursive     #    sync submodule pointers
+# Optional, once: shrink old full-history submodule checkouts to depth 1 (skips dirty/off-pin
+# ones, restores on failure; a second run is a no-op): bash ~/.the-grid/scripts/bootstrap.sh --reshallow
 
 # 3. If ANYTHING under agent-factory/ changed (roles, compose.py, or a compose
 #    config), recompose — projects/ is git-ignored, so a pull alone does NOT
