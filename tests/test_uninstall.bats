@@ -318,6 +318,48 @@ uninstall() { # [args...]: from an unrelated cwd, as the contract says
   [ -d "$HOME/.the-grid-private" ]
 }
 
+@test "guard: --purge refuses a state dir inside or equal to the Claude config dir, or inside the clone" {
+  wire_machine; make_clone
+  mkdir -p "$CLAUDE_CONFIG_DIR/state" "$MOCK_GRID/state"
+  printf 'x\n' > "$CLAUDE_CONFIG_DIR/state/f"
+  GRID_STATE_DIR="$CLAUDE_CONFIG_DIR/state" uninstall --yes --purge
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"inside, the Claude config dir"* ]]
+  GRID_STATE_DIR="$CLAUDE_CONFIG_DIR" uninstall --yes --purge
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Claude config dir"* ]]
+  GRID_STATE_DIR="$MOCK_GRID/state" uninstall --yes --purge
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"inside, the clone"* ]]
+  [ -f "$CLAUDE_CONFIG_DIR/state/f" ]
+  [ -d "$MOCK_GRID" ]
+  [ -L "$SKILLS_DIR/skill-alpha" ]
+}
+
+@test "guard: a GRID_DIR that is HOME or an ancestor of it is refused (rc 2), even for a dry run" {
+  wire_machine
+  before="$(snap_all)"
+  cd "$OTHER_DIR"
+  GRID_DIR="$HOME" run bash "$UNINSTALL"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"is, or contains, your home directory"* ]]
+  GRID_DIR="$(dirname "$HOME")" run bash "$UNINSTALL" --yes
+  [ "$status" -eq 2 ]
+  [ "$before" = "$(snap_all)" ]
+}
+
+@test "guard: a symlinked state dir given with a trailing slash loses only the link, never its target" {
+  wire_machine; make_clone
+  mkdir -p "$ELSEWHERE/real-state"; printf 'keep\n' > "$ELSEWHERE/real-state/instincts.json"
+  ln -s "$ELSEWHERE/real-state" "$HOME/state-link"
+  GRID_STATE_DIR="$HOME/state-link/" uninstall --yes --purge
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"a symlink: only the link goes"* ]]
+  [ ! -L "$HOME/state-link" ]
+  [ "$(cat "$ELSEWHERE/real-state/instincts.json")" = keep ]
+  [ ! -e "$MOCK_GRID" ]
+}
+
 # ----------------------------------------------------------------- 5. ${GRID_DIR}-private
 
 @test "a link into \${GRID_DIR}-private is never touched, with or without --yes" {

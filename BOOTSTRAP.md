@@ -376,7 +376,7 @@ bash ~/.the-grid/scripts/uninstall.sh --yes --purge   # also delete the clone an
 - **`--purge`** refuses when the clone has uncommitted changes, unpushed commits, stashes or dirty worktrees, unless `--force`. A second `--yes` run says "nothing to remove".
 - A rules block it cannot remove cleanly (a symlinked file, damaged markers) is printed, not edited.
 
-Status: dry-run and `--yes` verified in temp dirs only (`tests/test_uninstall.bats`); never run against a real home by the author.
+Status: verified end to end in a fake HOME (full bootstrap, uninstall, reinstall, purge; `tests/test_uninstall.bats`). It has never been run against a real home.
 
 ---
 

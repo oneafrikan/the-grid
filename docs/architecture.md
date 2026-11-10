@@ -126,6 +126,7 @@ are summarised; every other top-level directory, and every file under `scripts/`
     catalog.sh          ← regenerates SKILLS.md
     sources.sh          ← regenerates docs/SOURCES.md; --check link-checks every URL
     reconcile.sh        ← moves stale skill shadows aside (dated backup dir) on a new machine
+    uninstall.sh        ← removes what the grid installed (dry run unless --yes; --purge also deletes the clone)
     check-grid.sh       ← full bats suite + broken-symlink scan (CI / pre-push gate)
     gate.sh             ← the commit gate: shellcheck, catalog, role lint, composed output, tests
     instantiate.sh      ← cuts an automation-factory pattern into a target repo

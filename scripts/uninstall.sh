@@ -96,8 +96,21 @@ main() {
   RULES_DIR="${RULES_DIR:-$HOME_DIR/.claude/rules}"
   CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME_DIR/.claude}"
   STATE="${GRID_STATE_DIR:-$HOME_DIR/.grid}"
+  # No trailing slash: "link/" makes rm follow a symlinked state dir into its target.
+  while [ "${STATE%/}" != "$STATE" ] && [ -n "${STATE%/}" ]; do STATE="${STATE%/}"; done
   # The children (deploy_hooks.py, scripts/grid) read these, so pass the resolved values.
   export CLAUDE_CONFIG_DIR SKILLS_DIR GRID_STATE_DIR="$STATE"
+
+  # A GRID_DIR that is HOME or contains it makes every link in HOME "ours": refuse, even
+  # for a dry run. (Only a hand-set GRID_DIR can do this; the default is the clone.)
+  if [ -n "$HOME_DIR" ]; then
+    local home_phys
+    home_phys="$(cd "$HOME_DIR" 2>/dev/null && pwd -P || true)"
+    if [ -n "$home_phys" ] && { [ "$GRID_DIR" = / ] || path_inside "$home_phys" "$GRID_DIR"; }; then
+      echo "uninstall: refusing: GRID_DIR ($GRID_DIR) is, or contains, your home directory; nothing was changed" >&2
+      exit 2
+    fi
+  fi
 
   # harness registry helpers (harness_names/field/path, rules block removal).
   # shellcheck source=lib/harness.sh disable=SC1091
@@ -422,9 +435,27 @@ guard_path() {
 purge_preflight() {
   [ "$PURGE" = 1 ] || return 0
   local state_phys="" why="" wt n ignored
-  [ ! -d "$STATE" ] || state_phys="$(cd -P "$STATE" && pwd -P)"
+  if [ -L "$STATE" ]; then
+    # A symlinked state dir: only the link is removed, so judge the link's own location,
+    # not its target.
+    state_phys="$(cd -P "$(dirname "$STATE")" && pwd -P)/${STATE##*/}"
+  elif [ -d "$STATE" ]; then
+    state_phys="$(cd -P "$STATE" && pwd -P)"
+  fi
   guard_path "$GRID_DIR" "the clone" || exit 1
-  [ -z "$state_phys" ] || guard_path "$state_phys" "the state dir" || exit 1
+  if [ -n "$state_phys" ]; then
+    guard_path "$state_phys" "the state dir" || exit 1
+    # The state dir must not be (or sit in) the Claude config dir or the clone: both
+    # hold things --purge must not take with it.
+    local cfg_phys
+    cfg_phys="$(cd "$CLAUDE_CONFIG_DIR" 2>/dev/null && pwd -P || true)"
+    if [ -n "$cfg_phys" ] && path_inside "$state_phys" "$cfg_phys"; then
+      echo "uninstall: refusing to purge the state dir ($state_phys): it is, or is inside, the Claude config dir ($cfg_phys)" >&2; exit 1
+    fi
+    if path_inside "$state_phys" "$GRID_DIR"; then
+      echo "uninstall: refusing to purge the state dir ($state_phys): it is, or is inside, the clone ($GRID_DIR)" >&2; exit 1
+    fi
+  fi
 
   # Work that exists only in the clone: uncommitted changes, commits no remote has, stashes,
   # and the same for linked worktrees inside it. --force overrides, naming what it overrides.
@@ -470,7 +501,11 @@ step_purge() {
   }
   # Run from outside the dir being deleted.
   cd /
-  if [ -d "$STATE" ]; then
+  if [ -L "$STATE" ]; then
+    # Never rm -rf through a symlink: drop the link, keep what it points at.
+    if [ "$YES" = 1 ] && ! rm -- "$STATE"; then say_failed "state dir link $STATE (cannot remove)"
+    else say_remove "state dir $STATE (a symlink: only the link goes, its target is kept)"; fi
+  elif [ -d "$STATE" ]; then
     if [ "$YES" = 1 ] && ! rm -rf -- "$STATE"; then say_failed "state dir $STATE (cannot remove)"
     else say_remove "state dir $STATE"; fi
   fi
