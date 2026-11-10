@@ -5,9 +5,8 @@
 
 ## One-line goal
 
-A colleague on a Mac types one sentence into Claude Desktop and the right
-the-grid agents and skills become callable from Cowork, with the business's own
-context applied. No terminal, no Python, no clone.
+A colleague adds one marketplace in Claude Desktop's plugin settings, or uploads a
+zip, and the right skills become callable from Cowork. No terminal, no Python, no clone.
 
 ## The one question everything hangs on
 
