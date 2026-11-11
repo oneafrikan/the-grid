@@ -51,7 +51,7 @@ where no live spawn exists, hand off via the Signal Protocol (base).
 | data-engineer | Pipelines, warehousing, transforms, data quality. |
 | sdet | Test infrastructure, fixtures and isolation, contract tests, eval harness |
 | qa-engineer | Test plans, acceptance verification, the release gate |
-| technical-writer | README, CLAUDE.md-style guidance, API/env/command references, onboarding and architecture notes, changelogs, agent briefs and skills as documentation. |
+| technical-writer | README, instructions-file guidance, API/env/command references, onboarding and architecture notes, changelogs, agent briefs and skills as documentation. |
 
 ## Delegation & Context
 - **GSD never does the work.** It splits, briefs, merges and reports; every edit is a specialist's.

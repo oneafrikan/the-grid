@@ -106,46 +106,6 @@ stub_agent() {
   grep -qF "skill	skill-alpha	$MOCK_GRID/skills/skill-alpha/	wired	" "$MANIFEST"
 }
 
-@test "repo metadata references are portable while Claude runtime dependencies remain excluded" {
-  make_skill "$MOCK_GRID/skills/grid-metadata" grid-metadata
-  printf 'Read .grid/project.yaml, ~/.the-grid and CLAUDE.md.\n' >> "$MOCK_GRID/skills/grid-metadata/SKILL.md"
-  make_skill "$MOCK_GRID/skills/claude-env" claude-env
-  printf 'Read CLAUDE_PROJECT_DIR.\n' >> "$MOCK_GRID/skills/claude-env/SKILL.md"
-  printf 'harness:codex\n' > "$OVERLAY"
-  wire
-  [ "$status" -eq 0 ]
-  [ -L "$HS/grid-metadata" ]
-  [ ! -e "$HS/claude-env" ]
-  [ ! -e "$HS/claude-skill" ]
-}
-
-@test "Codex root agents win over composed names and survive repeat wiring" {
-  mkdir -p "$MOCK_GRID/agents/_codex"
-  printf 'root\n' > "$MOCK_GRID/agents/_codex/grid-ponytail.toml"
-  stub_agent codex grid-ponytail.toml
-  printf 'harness:codex\n' > "$OVERLAY"
-  wire
-  [ "$status" -eq 0 ]
-  local live="$GRID_HARNESS_HOME/.codex/agents/grid-ponytail.toml"
-  [ "$(readlink "$live")" = "$MOCK_GRID/agents/_codex/grid-ponytail.toml" ]
-  wire
-  [ "$status" -eq 0 ]
-  [ "$(readlink "$live")" = "$MOCK_GRID/agents/_codex/grid-ponytail.toml" ]
-  wire --check
-  [ "$status" -eq 0 ]
-}
-
-@test "Codex root adapters preserve a foreign destination" {
-  mkdir -p "$MOCK_GRID/agents/_codex" "$GRID_HARNESS_HOME/.codex/agents"
-  printf 'generated\n' > "$MOCK_GRID/agents/_codex/grid-ponytail.toml"
-  printf 'mine\n' > "$GRID_HARNESS_HOME/.codex/agents/grid-ponytail.toml"
-  printf 'harness:codex\n' > "$OVERLAY"
-  wire
-  [ "$status" -eq 0 ]
-  [ "$(cat "$GRID_HARNESS_HOME/.codex/agents/grid-ponytail.toml")" = mine ]
-  [[ "$output" == *"exists, not managed): grid-ponytail.toml"* ]]
-}
-
 @test "GRID_HARNESS replaces the manifest set for the run" {
   printf 'harness:antigravity\n' > "$OVERLAY"
   GRID_HARNESS=pi wire
@@ -1086,7 +1046,7 @@ disable-model-invocation: true'
   [ -z "$(tree "$GRID_HARNESS_HOME")" ]
 }
 
-@test "skill_portable: edge gaps (comment in name, bare .claude, CLAUDE.md, ~/.the-grid, symlink escape, newline dir name)" {
+@test "skill_portable: edge gaps (comment in name, bare .claude, CLAUDE.md, ~/.the-grid not flagged, symlink escape, newline dir name)" {
   . "$REPO_ROOT/scripts/lib/skill-portable.sh"
   local d="$BATS_TEST_TMPDIR/edge" nl=$'\n' s
   fm_skill "$d/foo" 'name: foo # a trailing comment'
@@ -1094,10 +1054,11 @@ disable-model-invocation: true'
   [ "$status" -eq 0 ]
   fm_skill "$d/m1" 'name: m1' 'see .claude config'
   fm_skill "$d/m2" 'name: m2' 'read CLAUDE.md first'
+  for s in m1 m2; do portable_fails "$d/$s" claude-specific; done
+  # The-grid's own names are not harness-specific: .the-grid and .grid/ must NOT cause a skip.
   fm_skill "$d/m3" 'name: m3' 'in ~/.the-grid/x'
   fm_skill "$d/m4" 'name: m4' 'state in ~/.grid/y'
-  portable_fails "$d/m1" claude-specific
-  for s in m2 m3 m4; do
+  for s in m3 m4; do
     run skill_portable "$d/$s"
     [ "$status" -eq 0 ]
   done
@@ -1202,4 +1163,31 @@ metadata:
 "contexts": y'
   run skill_portable "$d/prefix"
   [ "$status" -eq 0 ]
+}
+
+@test "Codex root agents win over composed names and survive repeat wiring" {
+  mkdir -p "$MOCK_GRID/agents/_codex"
+  printf 'root\n' > "$MOCK_GRID/agents/_codex/grid-ponytail.toml"
+  stub_agent codex grid-ponytail.toml
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  local live="$GRID_HARNESS_HOME/.codex/agents/grid-ponytail.toml"
+  [ "$(readlink "$live")" = "$MOCK_GRID/agents/_codex/grid-ponytail.toml" ]
+  wire
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$live")" = "$MOCK_GRID/agents/_codex/grid-ponytail.toml" ]
+  wire --check
+  [ "$status" -eq 0 ]
+}
+
+@test "Codex root adapters preserve a foreign destination" {
+  mkdir -p "$MOCK_GRID/agents/_codex" "$GRID_HARNESS_HOME/.codex/agents"
+  printf 'generated\n' > "$MOCK_GRID/agents/_codex/grid-ponytail.toml"
+  printf 'mine\n' > "$GRID_HARNESS_HOME/.codex/agents/grid-ponytail.toml"
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  [ "$(cat "$GRID_HARNESS_HOME/.codex/agents/grid-ponytail.toml")" = mine ]
+  [[ "$output" == *"exists, not managed): grid-ponytail.toml"* ]]
 }

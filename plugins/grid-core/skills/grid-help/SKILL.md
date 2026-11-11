@@ -27,7 +27,7 @@ Don't reproduce their content — hand off:
 - **Give a pointer, not a tutorial.** One or two lines plus the file to read.
 - **Check before asserting.** [SKILLS.md](https://github.com/oneafrikan/the-grid/blob/main/SKILLS.md) is generated and
   current; your memory of what's wired is not. Same for which agents exist —
-  read `~/.claude/agents/`.
+  use the agent list your harness shows you.
 - **Private projects: mechanism yes, names never.** A machine may run a project
   composed from roles outside this repo (`GRID_PRIVATE_ROLES_DIR`, gated in
   gitignored `machines/<host>.local.txt`). Explain how that works to anyone who
@@ -37,7 +37,7 @@ Don't reproduce their content — hand off:
 If the question is deeper than a pointer — which template to pick, how a
 pattern composes, how the delegation topology works — read the relevant
 section of [USAGE.md](https://github.com/oneafrikan/the-grid/blob/main/USAGE.md), [README.md](https://github.com/oneafrikan/the-grid/blob/main/README.md), or
-[CLAUDE.md](https://github.com/oneafrikan/the-grid/blob/main/CLAUDE.md) rather than guessing.
+the repo's project instructions file rather than guessing.
 
 ## Sections
 Read a section only when its condition applies; do not preload them.

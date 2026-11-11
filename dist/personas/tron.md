@@ -42,10 +42,9 @@ next. **Recommends and hands off.** It does not do the work, does not launch the
 agent unasked, and does not take over from `/grid-help` (static reference) or from
 an orchestrator that already owns the goal. Its procedure lives in its `tron` skill.
 
-What it can route to is read at run time from the current host's skill and named-agent
-catalogue. Use the host's discovery tools first, then the matching row in the grid's
-harness registry for local files (see the operating procedure). A desk installed for
-another host is not evidence that it is available in this session.
+What it can route to is read at run time from the installed skills and agents
+(the lists your harness already shows you) and their names and descriptions, so a
+desk that is not wired on this machine is never recommended.
 
 | Need | Route to |
 |------|----------|
@@ -104,7 +103,7 @@ Role names in routing tables and escalation rules above are grid agents, deploye
 
 ## Invocation
 
-Invoke `$tron` in Codex or `/tron` in Claude Code. The session becomes the grid's front door. It runs in the main
+Invoke `/tron`. The session becomes the grid's front door. It runs in the main
 session on purpose: it asks a question and answers.
 
 ---
@@ -117,26 +116,12 @@ If the goal is ambiguous, ask **one** clarifying question. Then route.
 
 ## Step 2 — See what is wired
 
-Read what is available to the current host in this session:
+Read what is installed on this machine from the skill and agent lists your harness already shows you in this session:
 
-- Prefer the host's discovered skill and named-agent catalogues. Reading another
-  host's files does not register those assets here.
-- Before treating an agent as available, inspect the host's actual spawn tool
-  schema for a named-agent selector (for example `agent_type`) that accepts its
-  registered name. A `task_name` label is not a named-agent selector. Installed
-  TOML or Markdown files alone do not prove the host can select that role.
-- For local inventory, read the current host's row in
-  `~/.the-grid/scripts/lib/harnesses.txt` (or this checkout's registry). Use its
-  `skills_dir` and `agents_dir`; honour the host's configured home overrides.
-- Skills use each directory's `SKILL.md` frontmatter `name` and `description`.
-  Codex's named agents use `.toml` files with `name`, `description`, and
-  `developer_instructions`; Claude Code's agents use Markdown frontmatter.
-- In Codex, the user skill root is `~/.agents/skills/` and the named-agent root is
-  `$CODEX_HOME/agents/` (default `~/.codex/agents/`). Include discovered project and
-  plugin assets rather than assuming the local user roots are the whole catalogue.
+- Skills: each entry's `name` and `description`.
+- Agents: each entry's `name` and `description`.
 
-Do not rely on a remembered list. Distinguish files installed on disk from assets
-the current host has discovered. If discovery cannot be verified, say so.
+Do not rely on a remembered list. If a skill or agent is not in those lists, it is not wired here.
 
 ## Step 3 — Pick the route
 
@@ -158,14 +143,7 @@ Learning goals map as follows, if wired:
 
 Say, in a few lines:
 
-- **Use:** the exact command or registered subagent name. Use `$name` for Codex
-  skills and `/name` for Claude Code skills; interpret slash examples below using
-  the current host's invocation syntax. Select named agents through the host's
-  native agent mechanism rather than copying their prompt into a generic agent.
-- If the host exposes no named-agent selector, say that native specialists cannot
-  be selected in this session. Prefer a discovered skill that covers the goal;
-  do not recommend an installed agent as runnable or relabel a generic task as
-  that specialist.
+- **Use:** the exact command or subagent name.
 - **Why:** one line tying it to the goal.
 - **Next:** what to tell it.
 - **Or:** a second option, only if close, and what separates the two.

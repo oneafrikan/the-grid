@@ -259,5 +259,5 @@ the parent. Earlier sandbox_mode mapping examples in this design are superseded:
 Codex output now disables features.shell_tool when Bash is explicitly absent and
 otherwise inherits permissions. Root-owned Markdown agents get generated TOML
 adapters through compose.py --root-agents --target codex; wire gives these adapters
-precedence without replacing foreign files. Grid metadata and repo guidance are
-portable; actual Claude runtime dependencies and guard keys remain excluded.
+precedence without replacing foreign files. The parallel session's portability
+policy and shared role wording remain unchanged.

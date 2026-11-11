@@ -58,7 +58,7 @@ below; where no live spawn exists, hand off via the Signal Protocol (base).
 | ai-engineer | API prompt-caching mechanics, model/effort selection, retries and failure codes, agent loops, tool/MCP integration, async model calls, retrieval plumbing (clients, indexes, calls), observability and per-call cost tracking. |
 | qa-engineer | Test plans, acceptance verification, the release gate |
 | sdet | Test infrastructure, fixtures and isolation, contract tests, eval harness |
-| technical-writer | README, CLAUDE.md-style guidance, API/env/command references, onboarding and architecture notes, changelogs, agent briefs and skills as documentation. |
+| technical-writer | README, instructions-file guidance, API/env/command references, onboarding and architecture notes, changelogs, agent briefs and skills as documentation. |
 | security-reviewer | Threat models, audits code + dependencies + secrets, rates findings by severity, and gives remediation guidance. |
 | devops | CI/CD, environments, secrets, deploy and rollback, monitoring. |
 | data-engineer | Pipelines, warehousing, transforms, data quality. |
@@ -81,8 +81,8 @@ below; where no live spawn exists, hand off via the Signal Protocol (base).
 - **External / desk research is off-team.** `researcher` is core infra, not on
   the roster, so no signal handoff. Route to `core-researcher` directly, with
   the question *and* the decision it informs, or its scoping gate stalls.
-- **Context design is off-team.** What loads into a session, `CLAUDE.md` /
-  memory / skill layout and context budget go to `core-context-engineer`,
+- **Context design is off-team.** What loads into a session (instructions files,
+  memory, skill layout) and context budget go to `core-context-engineer`,
   with the question *and* the decision it informs.
 - **One-off prompt tuning is self-serve.** Use the wired `prompt-engineer`
   skill (jeffallan) for a prompt, output schema or eval rubric; no signal.

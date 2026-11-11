@@ -85,7 +85,7 @@ skill@~/.agents/skills<TAB>claude-skill<TAB><target><TAB>skipped<TAB>claude-spec
 | `description-missing` | the description is empty or absent |
 | `description-long` | description over 1024 chars after YAML folding |
 | `claude-only-guard` | the frontmatter carries a Claude-only guard key: `disable-model-invocation`, `allowed-tools`, `hooks` or `context` (top-level keys only) |
-| `claude-specific` | a file in the skill mentions `.claude` (not `.claude-foo`) or `CLAUDE_` (`.git` and `node_modules` are not read, binary files are skipped) |
+| `claude-specific` | a file in the skill mentions `.claude` (not `.claude-foo`), `CLAUDE_` or `CLAUDE.md`; the-grid's own `.the-grid` and `.grid/` do not count, they are not tied to one harness (`.git` and `node_modules` are not read, binary files are skipped) |
 | `symlink-escape` | a symlink inside the skill dir resolves outside it |
 | `runtime-root` | the link targets a submodule root (the `gstack` runtime-root link), which is not a skill |
 | `exists, not managed` | something is already at the destination (see below) |
@@ -232,21 +232,20 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
   role instructions and set the parent permissions appropriately for the work.
 - Strings round-trip through `tomllib`; `tests/lib/validate_harness.py codex-agent FILE...`
   rejects ignored parent settings as well as invalid TOML.
-- Orchestrators remain skills. Tron reads the current host's discovered inventory,
-  uses native Codex agent TOML and `$skill` invocation, and falls back to the harness
-  registry for local inventory. It distinguishes disk installation from runtime discovery.
+- Orchestrators remain skills. Shared role wording and portability policy are preserved
+  from the parallel harness-agnostic update.
 - Shared skill wiring continues withholding Claude-only guards and runtime dependencies.
-  Grid metadata and repository `CLAUDE.md` references alone do not make a skill incompatible.
+  Grid metadata alone is portable; the existing `CLAUDE.md` exclusion remains.
 - Open a fresh Codex session after wiring. Confirm discovered names, select a native named
   specialist and invoke an imported skill. Successful file generation is not runtime verification.
 
-Read-only local smoke test (2026-11-11, Codex CLI 0.167.1): discovery reported
-81 grid skills plus five system skills without errors, and typed `$tron` skill
-invocation loaded successfully. All 27 generated agent definitions parsed, but
-the runtime spawn tool exposed only task labels and no named-agent selector.
-Process-local multi-agent feature overrides did not expose one. Native specialist
+Read-only local schema probe (2026-11-11, Codex CLI 0.167.1): all 27 generated
+agent definitions parsed, but the runtime spawn tool exposed task labels without a
+named-agent selector. Process-local multi-agent feature overrides and
+`workspace-write` with `on-request` approvals did not expose one. Native specialist
 execution remains unverified on this client surface; a `task_name` is not a role
-selector. Tron must report this limitation and prefer a discovered matching skill.
+selector. Skill discovery counts and typed invocation must be rechecked after
+reconciling the parallel session's shared wording and portability changes.
 
 ### OpenCode
 

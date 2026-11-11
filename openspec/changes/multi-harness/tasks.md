@@ -168,10 +168,9 @@ Added after the original groups. Path and format come from agy's bundled docs (`
 
 ## Codex runtime parity repair
 
-- [x] Correct false-positive portability rejection of grid metadata and repo guidance while retaining Claude runtime and guard exclusions.
-- [x] Make Tron discover assets for the current host and use native Codex names and invocation.
+- [x] Preserve the parallel session's shared role wording and portability policy unchanged.
 - [x] Generate native root-owned agents from their single Markdown source with safe repeat runs and root precedence.
 - [x] Replace ignored Codex sandbox overrides with supported no-shell capability restrictions; retain inherited models and permissions.
 - [x] Run targeted harness regression tests and compose golden checks.
-- [x] Verify fresh Codex skill discovery and typed imported-skill invocation (81 grid skills plus five system skills; Tron invoked).
+- [ ] Recheck fresh Codex skill discovery and typed imported-skill invocation after reconciling shared wording and portability policy.
 - [ ] Exercise a native named specialist: CLI 0.167.1 exposes task labels without a named-agent selector; generated definitions alone do not satisfy this check.
