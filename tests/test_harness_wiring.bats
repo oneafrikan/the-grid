@@ -717,7 +717,7 @@ description: >
   # Only the gemini agent target was linked: nothing from the codex/opencode/openclaw stubs,
   # and no Antigravity dir (.gemini holds just agents/ and agents/a.md).
   [ "$(find "$GRID_HARNESS_HOME/.gemini" -mindepth 1 | wc -l | tr -d ' ')" -eq 2 ]
-  [ ! -e "$GRID_HARNESS_HOME/.gemini/antigravity-cli" ]
+  [ ! -e "$GRID_HARNESS_HOME/.gemini/config" ]
   [ ! -e "$GRID_HARNESS_HOME/.codex" ]
   [ ! -e "$GRID_HARNESS_HOME/.config" ]
   # Idempotent, and no drift afterwards.
@@ -729,12 +729,12 @@ description: >
   [ "$status" -eq 0 ]
 }
 
-@test "GRID_HARNESS=antigravity links skills into .gemini/antigravity-cli/skills and creates no agents dir" {
+@test "GRID_HARNESS=antigravity links skills into .gemini/config/skills and creates no agents dir" {
   stub_all_agents
   GRID_HARNESS=antigravity wire
   [ "$status" -eq 0 ]
-  [ -L "$GRID_HARNESS_HOME/.gemini/antigravity-cli/skills/skill-alpha" ]
-  [ -L "$GRID_HARNESS_HOME/.gemini/antigravity-cli/skills/skill-beta" ]
+  [ -L "$GRID_HARNESS_HOME/.gemini/config/skills/skill-alpha" ]
+  [ -L "$GRID_HARNESS_HOME/.gemini/config/skills/skill-beta" ]
   # Skills-only: no agents dir, no agent link, and the shared dir is not used.
   [ ! -e "$GRID_HARNESS_HOME/.gemini/agents" ]
   [ ! -e "$GRID_HARNESS_HOME/.agents" ]

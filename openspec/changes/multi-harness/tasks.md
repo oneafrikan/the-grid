@@ -83,7 +83,7 @@ Depends on: 1, 2, 3. Lower priority than 3 and 4 (operator answer). It can be le
 - [x] 5.1 Edit `agent-factory/compose.py`: add `GEMINI_TOOLS` (the map from design.md), the `E_TOOL_UNMAPPED` check, and `emit_gemini_agent(agent, slug)`, then register `"gemini-cli"`.
 - [x] 5.2 Add `gemini-cli` to `scripts/compose-goldens.sh` and run `--update`. Acceptance: `fx-readonly.md` lists `read_file, read_many_files, grep_search, glob, list_directory, run_shell_command` in that order, and the other specialist has no `tools` and no `model`.
 - [x] 5.3 Add to `tests/test_harness_formats.bats`: a temp private-roles dir with a role whose `tools: [Teleport]` makes `compose.py --target gemini-cli --out <tmp>` exit 1 with `E_TOOL_UNMAPPED`, and leaves `<tmp>` without a `_gemini-cli` dir. Add `gemini-agent FILE...` to `validate_harness.py` (`name` matches `^[a-z0-9_-]+$` and `description` is non-empty) and run it over the goldens.
-- [x] 5.4 Add to `tests/test_harness_wiring.bats`: `GRID_HARNESS=gemini` links agents into `.gemini/agents/` and skills into `.agents/skills/`. `GRID_HARNESS=antigravity` links skills into `.gemini/antigravity-cli/skills/` and creates no agents dir.
+- [x] 5.4 Add to `tests/test_harness_wiring.bats`: `GRID_HARNESS=gemini` links agents into `.gemini/agents/` and skills into `.agents/skills/`. `GRID_HARNESS=antigravity` links skills into `.gemini/config/skills/` and creates no agents dir.
 - [x] 5.5 Add the Gemini and Antigravity rows to `docs/harnesses.md`, with the 2026-06-18 transition note and the caveat that the Antigravity path is unverified.
 - Verify: `bash scripts/gate.sh`.
 

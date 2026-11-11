@@ -12,6 +12,6 @@ claude       ~/.claude/skills                 ~/.claude/agents            claude
 codex        ~/.agents/skills                 ~/.codex/agents             codex           ~/.codex/AGENTS.md            agents-md
 opencode     ~/.agents/skills                 ~/.config/opencode/agents   opencode        ~/.config/opencode/AGENTS.md  agents-md
 gemini       ~/.agents/skills                 ~/.gemini/agents            gemini-cli      ~/.gemini/GEMINI.md           gemini
-antigravity  ~/.gemini/antigravity-cli/skills -                           -               -                             -
+antigravity  ~/.gemini/config/skills          -                           -               -                             -
 pi           ~/.agents/skills                 -                           -               ~/.pi/agent/AGENTS.md         agents-md
 openclaw     ~/.agents/skills                 -                           -               -                             -
