@@ -1306,26 +1306,69 @@ SH
   wire
   [ "$status" -eq 0 ]
   local live="$GRID_HARNESS_HOME/.codex/agents/a.toml"
+  chmod 600 "$live"
   cp "$live" "$BATS_TEST_TMPDIR/original"
-  local stubs="$BATS_TEST_TMPDIR/restore-failure" real_python real_cp backup
-  real_python="$(command -v python3)"; real_cp="$(command -v cp)"
+  local stubs="$BATS_TEST_TMPDIR/restore-failure" real_python backup
+  real_python="$(command -v python3)"
   mkdir -p "$stubs"
   cat > "$stubs/python3" <<'SH'
 #!/usr/bin/env bash
-case "$*" in *codex-agent-copy.py*copy*a.toml*) exit 9 ;; esac
+case "$*" in
+  *codex-agent-copy.py*copy*a.toml*) exit 9 ;;
+  *codex-agent-copy.py*restore*) exit 8 ;;
+esac
 exec "$REAL_COPY_PYTHON" "$@"
 SH
-  cat > "$stubs/cp" <<'SH'
-#!/usr/bin/env bash
-case "$2" in */wire-copies.*/*) exit 8 ;; esac
-exec "$REAL_COPY_CP" "$@"
-SH
-  chmod +x "$stubs/python3" "$stubs/cp"
-  REAL_COPY_CP="$real_cp" REAL_COPY_PYTHON="$real_python" PATH="$stubs:$PATH" wire
+  chmod +x "$stubs/python3"
+  REAL_COPY_PYTHON="$real_python" PATH="$stubs:$PATH" wire
   [ "$status" -ne 0 ]
   backup="$(printf '%s\n' "$stderr" | sed -n 's/^wire:.*backups kept at //p')"
   [ -n "$backup" ] && [ -d "$backup" ]
   cmp "$backup/1" "$BATS_TEST_TMPDIR/original"
+  "$real_python" -c 'import os,stat,sys; assert stat.S_IMODE(os.stat(sys.argv[1]).st_mode)==0o600' "$backup/1"
+  rm -rf "$backup"
+}
+
+@test "Codex rollback preserves a foreign arrival and original backup at atomic publication" {
+  stub_agent codex a.toml
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  local live="$GRID_HARNESS_HOME/.codex/agents/a.toml"
+  chmod 600 "$live"
+  cp "$live" "$BATS_TEST_TMPDIR/original"
+  local stubs="$BATS_TEST_TMPDIR/restore-race" real_python backup
+  real_python="$(command -v python3)"
+  mkdir -p "$stubs"
+  cat > "$stubs/python3" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *codex-agent-copy.py*copy*a.toml*) exit 9 ;;
+  *codex-agent-copy.py*restore*)
+    exec "$REAL_COPY_PYTHON" - "$@" <<'PY'
+import os,runpy,sys
+real_link=os.link
+def raced_link(source,destination):
+    # A foreign writer arrives after restore has staged its temporary payload.
+    with open(destination,"xb") as stream:
+        stream.write(b"foreign arrival\n")
+    return real_link(source,destination)
+os.link=raced_link
+sys.argv=sys.argv[2:]  # Drop the stdin program name and interpreter's -I.
+runpy.run_path(sys.argv[0],run_name="__main__")
+PY
+    ;;
+esac
+exec "$REAL_COPY_PYTHON" "$@"
+SH
+  chmod +x "$stubs/python3"
+  REAL_COPY_PYTHON="$real_python" PATH="$stubs:$PATH" wire
+  [ "$status" -ne 0 ]
+  [ "$(cat "$live")" = "foreign arrival" ]
+  backup="$(printf '%s\n' "$stderr" | sed -n 's/^wire:.*backups kept at //p')"
+  [ -n "$backup" ] && [ -d "$backup" ]
+  cmp "$backup/1" "$BATS_TEST_TMPDIR/original"
+  "$real_python" -c 'import os,stat,sys; assert stat.S_IMODE(os.stat(sys.argv[1]).st_mode)==0o600' "$backup/1"
   rm -rf "$backup"
 }
 
