@@ -5,6 +5,9 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+- Changed: README front door rewritten: hero image and install command first, what the install writes and how to undo it next to the command, a dotfiles mapping and a five-node diagram (the full diagram moved to `docs/architecture.md`), terms, a layers ladder and a "Safe to run" list.
+- Changed: a "Works with" table in the README states what each AI tool gets and whether it is in daily use (Claude Code, Codex CLI, Antigravity CLI) or wired but not yet smoke-tested (Gemini CLI, OpenCode, Pi, OpenClaw); `docs/roadmap.md` updated to match.
+
 ## [0.1.0] - 2026-11-04
 
 First tagged release. Versioned from here; v0.x may still break between tags.

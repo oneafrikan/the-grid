@@ -1,30 +1,14 @@
 # the-grid
 
+![The words THE-GRID in glowing blue neon letters above a perspective grid floor and a distant city skyline.](assets/hero.webp)
+
 **Inspired by Tron. Dotfiles for your AI assistant: curated skills and agent teams, wired identically onto every machine and every AI tool you use.**
 
 [![tests](https://github.com/oneafrikan/the-grid/actions/workflows/tests.yml/badge.svg)](https://github.com/oneafrikan/the-grid/actions/workflows/tests.yml) [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![site](https://img.shields.io/badge/site-oneafrikan.github.io%2Fthe--grid-informational)](https://oneafrikan.github.io/the-grid/)
 
-Works today with Claude Code. Other AI tools: see [docs/roadmap.md](docs/roadmap.md).
+Running in daily use on Claude Code, Codex CLI and Antigravity CLI. Gemini CLI, OpenCode, Pi and OpenClaw are wired too: see [Works with](#works-with).
 
 <!-- langs --><!-- /langs -->
-
-```
-████████╗██╗  ██╗███████╗    ██████╗ ██████╗ ██╗██████╗ 
-╚══██╔══╝██║  ██║██╔════╝    ██╔════╝██╔══██╗██║██╔══██╗
-   ██║   ███████║█████╗      ██║  ███╗██████╔╝██║██║  ██║
-   ██║   ██╔══██║██╔══╝      ██║   ██║██╔══██╗██║██║  ██║
-   ██║   ██║  ██║███████╗    ╚██████╔╝██║  ██║██║██████╔╝
-   ╚═╝   ╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚═╝  ╚═╝╚═╝╚══════╝
- _______________________________________________________
- \_ \_ \_ \_ \_ \_ \_ \_ \_ \_ \_ \_ \_ \_ \_ \_ \_ \_ _/
-```
-
-## Who it's for
-
-- You use more than one machine (laptop, server, work, home) and your Claude Code setup keeps drifting between them.
-- You collect skills from many repos and installing everything buries your session. You want a short live list and a searchable shelf.
-- You build agent teams (tech lead, QA, security reviewer) and want each role defined once and wired the same everywhere.
-- Not for you if you want a supported product, a GUI or a one-click installer. I built this for my own machines and share it because the mechanics are reusable.
 
 ## Quickstart
 
@@ -32,39 +16,102 @@ Works today with Claude Code. Other AI tools: see [docs/roadmap.md](docs/roadmap
 git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid && bash ~/.the-grid/scripts/bootstrap.sh --with-agents
 ```
 
-Needs git, bash, python3 (for the agent teams) and Claude Code. Node >= 20.19 only if you use the openspec-* skills (see [INSTALL.md](INSTALL.md)).
+- Writes: symlinks into `~/.claude/skills` and `~/.claude/agents`, one auto-handoff SessionEnd hook entry in `~/.claude/settings.json` (opt out with `-hook:auto-handoff`), and `.wired.manifest` plus `SKILLS.md` inside the clone. Rule packs and other tools' directories only with opt-in entries. Full list: [INSTALL.md](INSTALL.md) ("What it touches").
+- Undo: `bash ~/.the-grid/scripts/uninstall.sh` prints what it would remove; add `--yes` to remove it. It removes only links that resolve into the clone and keeps `~/.grid` unless you add `--purge`.
+- Needs git, bash, python3 (to build the agent teams). Node >= 20.19 only for the `openspec-*` skills.
 
-You should now see:
-
-- `bootstrap.sh` ends with `==> Bootstrap complete. Open a fresh Claude session to pick up new skills/agents.`
-- `ls ~/.claude/skills | wc -l` prints a number near <!--count:wired-->133<!--/count--> (plus the orchestrator skills; duplicate skill names across repos collapse to one link, so it is not exact), and `ls ~/.claude/skills/tron` lists a `SKILL.md`.
-- In a new Claude Code session `/tron` replies with a short question about what you want to do.
-- Agents say "No operator set yet." until you run `cp ~/.the-grid/agent-factory/user.yaml.example ~/.the-grid/agent-factory/user.yaml`, fill in your name and contact, and re-run `bash ~/.the-grid/scripts/bootstrap.sh --with-agents` (safe to repeat).
-- Optional: gstack's browser-driven skills (`/browse`, `/qa`, `/scrape`) need a one-off runtime setup, and bootstrap prints `runtime MISSING: gstack` until it is done. Skip it unless you want those skills. It needs [bun](https://bun.sh) and downloads a browser: `bash ~/.the-grid/scripts/runtime-setup.sh gstack` (add `--dry-run` to preview). Detail in [BOOTSTRAP.md](BOOTSTRAP.md) step 8.
-
-Fork first if you plan to customise: the clone URL above is read-only for you.
-
-Or paste this into Claude:
-
-> Clone https://github.com/oneafrikan/the-grid.git to ~/.the-grid, run bash ~/.the-grid/scripts/bootstrap.sh --with-agents, tell me what it printed, then tell me to open a fresh session and run /tron.
-
-Stop there. If it felt useful, read [USAGE.md](USAGE.md).
-
-- Prefer the manual steps, or a machine without submodules? See [INSTALL.md](INSTALL.md).
-- Already set up and just pulled? Run `bash scripts/wire.sh` again. Composed agents need a recompose first: see [BOOTSTRAP.md](BOOTSTRAP.md) ("Updating an existing machine").
-- Claude Code only, no clone: install the plugins instead (`grid-agents@the-grid` adds the dev team; limits in [docs/PLUGINS.md](docs/PLUGINS.md)).
+Just looking? Try the plugins first. Claude Code only, no clone and no symlinks; `grid-agents@the-grid` adds the dev team ([docs/PLUGINS.md](docs/PLUGINS.md) has the limits).
 
 ```bash
 claude plugin marketplace add oneafrikan/the-grid
 claude plugin install grid-core@the-grid
 ```
 
+Or paste this into your coding agent:
+
+> Clone https://github.com/oneafrikan/the-grid.git to ~/.the-grid, run bash ~/.the-grid/scripts/bootstrap.sh --with-agents and tell me what it printed. If you are not Claude Code, read ~/.the-grid/docs/harnesses.md and tell me which harness: line to add for you.
+
+You should now see:
+
+- `bootstrap.sh` ends with `==> Bootstrap complete. Open a fresh Claude session to pick up new skills/agents.`
+- `ls ~/.claude/skills | wc -l` prints a number near <!--count:wired-->133<!--/count--> (plus the orchestrator skills; duplicate names across repos collapse to one link, so it is not exact).
+- In a new Claude Code session `/tron` replies with a short question about what you want to do.
+
+Optional next steps:
+
+- Tell the agents who you are (they say "No operator set yet." until you do): `cp ~/.the-grid/agent-factory/user.yaml.example ~/.the-grid/agent-factory/user.yaml`, fill in your name and contact, re-run the bootstrap (safe to repeat).
+- gstack's browser skills (`/browse`, `/qa`, `/scrape`) need [bun](https://bun.sh) and a browser download. Until you run `bash ~/.the-grid/scripts/runtime-setup.sh gstack` (add `--dry-run` to preview), bootstrap prints `runtime MISSING: gstack`. Detail in [BOOTSTRAP.md](BOOTSTRAP.md) step 8.
+- Fork first if you plan to customise; the clone URL above is read-only for you. Manual steps and the submodule-free install: [INSTALL.md](INSTALL.md). After a `git pull`, re-run `bash ~/.the-grid/scripts/wire.sh` (recompose agents first: [BOOTSTRAP.md](BOOTSTRAP.md), "Updating an existing machine").
+
+## Works with
+
+| Tool | What it gets | Status |
+|---|---|---|
+| Claude Code | skills, agents, plugins (`grid-core`, `grid-agents`), guard hooks, rule packs | running in daily use |
+| Codex CLI | skills, agents (compose `--target codex`) | running in daily use |
+| Antigravity CLI | skills | running in daily use |
+| Gemini CLI | skills, agents (compose `--target gemini-cli`) | wired, not yet smoke-tested on a real install |
+| OpenCode | skills, agents (compose `--target opencode`) | wired, not yet smoke-tested on a real install |
+| Pi | skills | wired, not yet smoke-tested on a real install |
+| OpenClaw | skills | wired, not yet smoke-tested on a real install |
+| Cursor | rule packs only (`scripts/rules.py emit --harness cursor`) | generated, not yet smoke-tested |
+
+Claude Code is on by default. The rest, Cursor aside, are opt-in with one `harness:<name>` line in your machine overlay, then a re-wire:
+
+```bash
+echo 'harness:codex' >> ~/.the-grid/machines/"$(hostname -s)".txt && bash ~/.the-grid/scripts/wire.sh
+```
+
+Codex CLI, Gemini CLI, OpenCode, Pi and OpenClaw all read `~/.agents/skills`, so the skills are linked there once and reach every one of them. Agents need a compose for that tool's target first (`bootstrap.sh` composes Claude Code only). Paths, skip rules and what is unverified per tool: [docs/harnesses.md](docs/harnesses.md).
+
+## The problem
+
+- "My laptop has the skill. The server does not."
+- "I installed every skill pack I liked, and now each session starts buried in descriptions it never uses."
+- "Claude Code, Codex and Antigravity each want their own copy of the same skills."
+
+Not for you if you want a supported product, a GUI or a one-click installer.
+
+## How it works
+
+It is a dotfiles repo with one new part.
+
+| You know it from dotfiles | In the-grid |
+|---|---|
+| A repo you clone to `~` | `~/.the-grid` |
+| Symlinks into `$HOME` | symlinks into `~/.claude/skills`, `~/.claude/agents` and each opted-in tool's directories |
+| A package list | the allowlist, `baseline-submodules.txt` |
+| Per-host config | the overlay, `machines/<host>.txt` |
+| (new) | agent roles written once and compiled per tool by `agent-factory/compose.py` |
+
+```mermaid
+flowchart LR
+  S["Sources<br/>skills/, repos/* submodules, agent roles"] --> A["Allowlist<br/>baseline-submodules.txt"]
+  A --> W[wire.sh]
+  H["Host overlay<br/>machines/HOST.txt"] --> W
+  W -->|symlinks| T["Tool dirs<br/>~/.claude, ~/.agents/skills, ..."]
+```
+
+![Terminal output: wire.sh links skills and agents, ls counts the links, uninstall.sh dry run lists what it would remove](assets/terminal-demo.svg)
+
+Real output captured in a throwaway home: `wire.sh`, a link count, then an `uninstall.sh` dry run. The long wire listing is trimmed.
+
+Edit a skill once and every wired copy changes, because they are links. A skill in `skills/` overrides a same-named upstream one. The full diagram, the repo layout and every step `wire.sh` takes are in [docs/architecture.md](docs/architecture.md).
+
+Terms:
+
+- Skill: a folder with a `SKILL.md`. Your tool loads it as a slash command or an instruction set.
+- Agent (role): defined once as `role x stack x skills`. In Claude Code an orchestrator becomes a slash command and a specialist becomes a subagent.
+- Wired or library: wired skills are symlinked live. Library skills are indexed in [SKILLS.md](SKILLS.md), found with `/skill-scout` and not loaded.
+- Overlay: `machines/<host>.txt`, which adds or removes allowlist entries for one machine.
+- Harness: an AI coding tool the-grid wires into, switched on with `harness:<name>`.
+
 ## What you get
 
-- <!--count:wired-->133<!--/count--> curated skills as slash commands (/standup, /review, /ship, /skill-scout). <!--count:library-->100<!--/count--> more sit on a searchable shelf, switched off.
-- <!--count:roles-->40<!--/count--> ready-made agent roles: a dev team, a finance desk, a Socratic tutor (/morpheus), and /tron, which tells you which one to use.
-- One git pull plus wire.sh makes every machine identical; a per-machine overlay handles the differences.
-- Project templates with specs and agents already wired in.
+- You choose what is live. The allowlist plus your machine's overlay decides which skills load; the rest stays on the shelf.
+- <!--count:wired-->133<!--/count--> curated skills wired as slash commands (`/standup`, `/review`, `/ship`, `/skill-scout`), and <!--count:library-->100<!--/count--> more indexed and switched off.
+- <!--count:roles-->40<!--/count--> agent roles: a dev team, a finance desk, a Socratic tutor (`/morpheus`), and `/tron`, which tells you which one to use.
+- One `git pull` plus `wire.sh` makes every machine match.
 
 Lost? The help skills are the entry point:
 
@@ -75,32 +122,19 @@ Lost? The help skills are the entry point:
 | `/openspec-help` | How do I add specs to a repo? |
 | `/ponytail-help` | Which ponytail (minimum-diff) mode do I want? |
 
-## How it works
+## Layers
 
-```mermaid
-flowchart LR
-  subgraph Sources
-    R["repos/* submodules<br/>upstream skill repos"]
-    S["skills/<br/>my own skills + edited forks"]
-    A["agent-factory roles<br/>role x stack x skills"]
-  end
-  M["allowlist<br/>baseline + machines/HOST.txt"]
-  C[compose.py]
-  W[wire.sh]
-  R --> M --> W
-  S --> W
-  A --> C --> W
-  W -->|symlinks| K["~/.claude/skills<br/>~/.claude/agents"]
-  R -. not on allowlist .-> L["Library<br/>SKILLS.md + /skill-scout"]
-```
+1. Wire skills (start here; each level works without the next): `bash ~/.the-grid/scripts/bootstrap.sh` without `--with-agents` syncs the submodules and links the allowlisted skills.
+2. Agent teams: `--with-agents` also composes the roles and links them. [USAGE.md](USAGE.md) covers orchestrators and specialists.
+3. Build your own: [agent-factory](agent-factory/README.md) composes your own roles, [automation-factory](automation-factory/patterns/issue-loop/README.md) cuts the issue-loop into a repo, [project-factory](project-factory/README.md) seeds or retrofits a project, and the `openspec-*` skills add spec-driven planning through OpenSpec ([CONTRIBUTING.md](CONTRIBUTING.md)).
 
-- **Wired vs library.** Only repos on the allowlist are symlinked live. Everything else is indexed in [SKILLS.md](SKILLS.md) and found with `/skill-scout`.
-- **Per-machine overlay.** A shared baseline plus an optional `machines/<host>.txt` adds or removes entries for one machine.
-- **Symlinks, not copies.** Edit a skill once and every wired copy changes. A skill in `skills/` overrides a same-named upstream one.
-- **Agents compiled from one source.** `compose.py` builds each role from `role x stack x skills`; `wire.sh` links the result.
+## Safe to run
 
-Four sibling pieces produce the assets: `agent-factory/` (agent teams), `automation-factory/` (reusable automation patterns), `project-factory/` (project templates) and the skill wiring itself.
-The layout, every script and the full `wire.sh` sequence are in [docs/architecture.md](docs/architecture.md).
+- Audit before wiring. `wire.sh` runs `scripts/audit.sh` against `policy.yaml` before it touches a link. A high-severity finding blocks the run with nothing changed. [CURATION.md](CURATION.md) records why each wired repo is trusted.
+- It never replaces a real directory or a foreign symlink. It only replaces links that point into the clone.
+- Outside the clone, the one file it edits by default is `~/.claude/settings.json`: a single auto-handoff hook entry. Opt out with `-hook:auto-handoff` in your overlay. [SECURITY.md](SECURITY.md) and [INSTALL.md](INSTALL.md) list every write, opt-in ones included.
+- `bash scripts/uninstall.sh` is a dry run until you add `--yes`. Submodules clone shallow, at their pinned commit.
+- The bats suite and the gate run in CI on every push to `main` and every ready pull request (badge above). CI runs on Linux; the suite also runs on macOS's Bash 3.2 ([docs/portability.md](docs/portability.md)).
 
 ## Why "the grid"
 
@@ -120,47 +154,31 @@ Kevin Flynn, *TRON: Legacy* (2010)
 
 Same idea, smaller scale: a shared place where your skills and agents live, and one command to get in.
 
+<!-- OWNER: one sentence on why Tron (personal) goes here, after the quote -->
+
+**Get in.**
+
+```bash
+git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid && bash ~/.the-grid/scripts/bootstrap.sh --with-agents
+```
+
 ## Status
 
-This is one person's working system, shared because the mechanics are reusable, not a supported product.
+One person's working system, shared because the mechanics are reusable. Not a supported product, and opinionated: the wiring model, the factories and the compose format are my choices.
 
-- **It will change under you.** Versioned from v0.1.0; v0.x may still break between tags.
-- **It is opinionated.** The wiring model, the factories and the compose format are my choices, not a consensus design.
-- **Personal config is gitignored, not mixed in.** `baseline-submodules.txt`, `machines/<host>.txt` and the dev-journal `LOGS/` convention are personal and untracked. You get a generic `.example` starting point for the first two and owe nothing for the third. A fork never inherits my machine names, account routing or notes.
-- **Fork rather than depend.** The wiring model (manifest, symlinks, compose-then-wire) is the transferable part. Copy it and point it at your own skills.
-- **`wire.sh` mostly writes symlinks that point into this repo, but not only.** It never clobbers a real directory or a foreign symlink in `~/.claude/skills/`. It also keeps one auto-handoff hook entry in `~/.claude/settings.json` (on by default; opt out with `-hook:auto-handoff`). With opt-in entries it links rule packs under `~/.claude/rules/grid/` and other harness directories. Inside the clone it writes `.wired.manifest` and `SKILLS.md`. The full list is in [INSTALL.md](INSTALL.md) ("What it touches"). Read the script before running it; it writes to your home directory.
+- Versioned from v0.1.0 (tagged 2026-11-04). v0.x may still break between tags.
+- Personal config is gitignored. `baseline-submodules.txt`, `machines/<host>.txt` and `LOGS/` stay untracked, and the first two ship as `.example` starting points, so a fork inherits none of my machine names or notes.
+- Fork rather than depend. The transferable part is the wiring model: manifest, symlinks, compose then wire.
 
 ## Docs
 
-- [USAGE.md](USAGE.md): daily use, orchestrators vs specialists, promoting a library skill.
-- [INSTALL.md](INSTALL.md): the short install guide and what the scripts touch.
-- [BOOTSTRAP.md](BOOTSTRAP.md): the full boot, update and troubleshooting reference.
-- [SKILLS.md](SKILLS.md): generated index of every skill.
-- [CONTRIBUTING.md](CONTRIBUTING.md): adding skills and repos, running tests, the gate.
-- [SECURITY.md](SECURITY.md): what the scripts write and how to report a problem.
-- [CHANGELOG.md](CHANGELOG.md): release notes.
-- [docs/architecture.md](docs/architecture.md): how the pieces fit, and the complete docs index.
-- [docs/roadmap.md](docs/roadmap.md): what is built, what is not.
-- [docs/private-projects.md](docs/private-projects.md): keeping a private desk out of the public repo.
-- [docs/model-selection.md](docs/model-selection.md): which model for which job, with prices.
-- [docs/rules.md](docs/rules.md): opt-in coding-convention rule packs.
-- [docs/portability.md](docs/portability.md): writing tests and scripts that run on Linux and macOS.
-- [docs/PLUGINS.md](docs/PLUGINS.md): the Claude Code plugin install and its limits.
-- [docs/harnesses.md](docs/harnesses.md): other AI tools (Codex CLI, OpenCode, Gemini CLI).
-- [hooks/README.md](hooks/README.md): guard hooks and the auto-handoff hook.
-- [CURATION.md](CURATION.md): why each wired repo is trusted.
-- [agent-factory/README.md](agent-factory/README.md): composing agent teams.
-- [project-factory/README.md](project-factory/README.md): scaffolding new projects.
-
-Spec-driven development uses OpenSpec, wired on every machine (the `openspec-*` skills).
-The convention and the two thin layers the-grid adds are described in [CONTRIBUTING.md](CONTRIBUTING.md).
-Run `/openspec-help` for the reference card.
-
-An optional companion, not part of the-grid: [grid-fleet](https://github.com/oneafrikan/grid-fleet) is a terminal dashboard for Claude Code sessions, tokens, subagent usage and limits across machines (Python, stdlib only).
-It is a separate repo and the-grid does not depend on it.
+- Start: [USAGE.md](USAGE.md) (daily use), [INSTALL.md](INSTALL.md) (install and what it touches), [BOOTSTRAP.md](BOOTSTRAP.md) (full boot, update, troubleshooting), [SKILLS.md](SKILLS.md) (generated skill index).
+- Project: [CONTRIBUTING.md](CONTRIBUTING.md) (skills, repos, tests, the gate, OpenSpec), [SECURITY.md](SECURITY.md), [CHANGELOG.md](CHANGELOG.md), [docs/roadmap.md](docs/roadmap.md) (what is built, what is not).
+- How it fits: [docs/architecture.md](docs/architecture.md) (full diagram, repo layout, complete docs index), [docs/harnesses.md](docs/harnesses.md) (other tools), [docs/PLUGINS.md](docs/PLUGINS.md) (plugin limits), [docs/rules.md](docs/rules.md) (rule packs), [hooks/README.md](hooks/README.md) (guard and auto-handoff hooks).
+- Going further: [docs/private-projects.md](docs/private-projects.md) (a private desk), [docs/model-selection.md](docs/model-selection.md) (which model for which job), [docs/portability.md](docs/portability.md) (scripts that run on Linux and macOS).
+- Factories: [agent-factory](agent-factory/README.md), [automation-factory](automation-factory/patterns/issue-loop/README.md), [project-factory](project-factory/README.md).
+- Optional companion, a separate repo the-grid does not depend on: [grid-fleet](https://github.com/oneafrikan/grid-fleet), a terminal dashboard for Claude Code sessions, tokens, subagent usage and limits across machines.
 
 ## Credits and license
 
-Wires skills from upstream projects, listed with licences in [docs/SOURCES.md](docs/SOURCES.md).
-
-Built by [Gareth Knight](https://github.com/oneafrikan). MIT licensed ([LICENSE](LICENSE)); submodules under `repos/` keep their own licences.
+Wires skills from upstream projects, listed with licences in [docs/SOURCES.md](docs/SOURCES.md). Built by [Gareth Knight](https://github.com/oneafrikan). MIT licensed ([LICENSE](LICENSE)); submodules under `repos/` keep their own licences.
