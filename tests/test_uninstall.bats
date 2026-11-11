@@ -82,7 +82,8 @@ add_foreign() {
   printf 'developer_instructions = "owned"\n' > "$source/owned.toml"
   printf 'developer_instructions = "edited"\n' > "$source/edited.toml"
   wire_machine
-  [ -f "$dir/owned.toml" ] && [ ! -L "$dir/owned.toml" ]
+  [ -f "$dir/owned.toml" ]
+  [ ! -L "$dir/owned.toml" ]
   printf '# user edit\n' >> "$dir/edited.toml"
   cp "$dir/edited.toml" "$BATS_TEST_TMPDIR/edited-copy"
   printf 'mine\n' > "$dir/foreign.toml"

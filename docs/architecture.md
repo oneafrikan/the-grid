@@ -187,6 +187,8 @@ are summarised; every other top-level directory, and every file under `scripts/`
       skill_frontmatter.py ← reads a SKILL.md's name and description
       skill-portable.sh   ← sourced by wire.sh: portable-skill helpers
       harness.sh          ← sourced by wire.sh: non-Claude harness wiring
+      codex-agent-copy.py ← renders and recognises the physical Codex agent copies wire.sh writes
+      md-fast.sh          ← single definition of markdown-only changes, read by gate.sh --fast and CI
       harnesses.txt       ← registry of non-Claude harness dirs
       rules-markers.txt   ← marker lines of the managed rules block
       runtimes.txt        ← wired repos whose skills need a runtime root

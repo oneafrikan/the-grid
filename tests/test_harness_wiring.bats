@@ -59,7 +59,8 @@ stub_agent() {
 
 # Codex refuses symlinked role files even when discovery lists their names.
 assert_codex_copy() {
-  [ -f "$1" ] && [ ! -L "$1" ]
+  [ -f "$1" ]
+  [ ! -L "$1" ]
   local info; info="$(python3 -I "$REPO_ROOT/scripts/lib/codex-agent-copy.py" inspect "$1")"
   [ "${info%%$'\t'*}" = "$2" ]
   cmp <(tail -n +2 "$1") "$2"
@@ -99,7 +100,8 @@ assert_codex_copy() {
   [ -L "$MOCK_SKILLS/long-desc" ]
   # Claude dirs are still populated; no other harness dir exists (no agents composed).
   [ -L "$MOCK_SKILLS/skill-alpha" ]
-  [ ! -e "$GRID_HARNESS_HOME/.codex" ] && [ ! -e "$GRID_HARNESS_HOME/.config" ]
+  [ ! -e "$GRID_HARNESS_HOME/.codex" ]
+  [ ! -e "$GRID_HARNESS_HOME/.config" ]
 }
 
 @test "skip reasons are recorded in .wired.manifest" {
@@ -536,7 +538,9 @@ only_shared_dir() {
   assert_sandboxed
   [[ "$GRID_HARNESS_HOME" == *" "* ]]
   [ -d "$GRID_HARNESS_HOME" ]
-  [ -z "${GRID_HARNESS:-}" ] && [ -z "${XDG_CONFIG_HOME:-}" ] && [ -z "${GRID_DRY_HOME:-}" ]
+  [ -z "${GRID_HARNESS:-}" ]
+  [ -z "${XDG_CONFIG_HOME:-}" ]
+  [ -z "${GRID_DRY_HOME:-}" ]
 }
 
 # ---------------------------------------------------------------- unit: harness.sh
@@ -879,7 +883,8 @@ STUB
   [ "$status" -eq 0 ]
   [ -L "$MOCK_SKILLS/foreign" ]
   [ -L "$HS/skill-alpha" ]                                  # the grid's own skills do go
-  [ ! -e "$HS/foreign" ] && [ ! -L "$HS/foreign" ]
+  [ ! -e "$HS/foreign" ]
+  [ ! -L "$HS/foreign" ]
 }
 
 @test "-harness:<h> with opencode still active keeps the shared links and removes the per-harness agents (codex, pi, gemini, openclaw)" {
@@ -1323,7 +1328,8 @@ SH
   REAL_COPY_PYTHON="$real_python" PATH="$stubs:$PATH" wire
   [ "$status" -ne 0 ]
   backup="$(printf '%s\n' "$stderr" | sed -n 's/^wire:.*backups kept at //p')"
-  [ -n "$backup" ] && [ -d "$backup" ]
+  [ -n "$backup" ]
+  [ -d "$backup" ]
   cmp "$backup/1" "$BATS_TEST_TMPDIR/original"
   "$real_python" -c 'import os,stat,sys; assert stat.S_IMODE(os.stat(sys.argv[1]).st_mode)==0o600' "$backup/1"
   rm -rf "$backup"
@@ -1366,7 +1372,8 @@ SH
   [ "$status" -ne 0 ]
   [ "$(cat "$live")" = "foreign arrival" ]
   backup="$(printf '%s\n' "$stderr" | sed -n 's/^wire:.*backups kept at //p')"
-  [ -n "$backup" ] && [ -d "$backup" ]
+  [ -n "$backup" ]
+  [ -d "$backup" ]
   cmp "$backup/1" "$BATS_TEST_TMPDIR/original"
   "$real_python" -c 'import os,stat,sys; assert stat.S_IMODE(os.stat(sys.argv[1]).st_mode)==0o600' "$backup/1"
   rm -rf "$backup"
