@@ -122,6 +122,7 @@ are summarised; every other top-level directory, and every file under `scripts/`
   scripts/
     grid                ← submodule-free install CLI (install, lock, doctor, repair, ...; BOOTSTRAP.md)
     bootstrap.sh        ← one-shot setup: submodules → wire (--with-agents: compose too)
+    bootstrap-user.sh   ← no-sudo per-user LLM workstation setup (uv, Node, Claude Code, gh, then this repo); see [install-new-user.md](install-new-user.md)
     wire.sh             ← creates the ~/.claude symlinks (idempotent)
     catalog.sh          ← regenerates SKILLS.md
     sources.sh          ← regenerates docs/SOURCES.md; --check link-checks every URL

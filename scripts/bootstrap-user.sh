@@ -38,6 +38,12 @@
 
 set -euo pipefail
 
+# Download scratch dir. Script-level (not local to main) because the EXIT trap fires after
+# main() returns, when a local would be gone and `set -u` would abort with "TMP: unbound".
+TMP=""
+cleanup() { [ -z "${TMP:-}" ] || rm -rf "$TMP"; }
+trap cleanup EXIT
+
 # ---- pins (verified 2026-11-11; see PR description) --------------------------------
 # nvm v0.40.8: published 2026-09-21. v0.41.0 existed but was < 2 weeks old.
 NVM_VERSION_DEFAULT="v0.40.8"
@@ -111,14 +117,14 @@ main() {
   local RULES="$HOME/.claude-rules"
   local STAMP_DIR="$HOME/.local/state"
   local STAMP="$STAMP_DIR/the-grid-bootstrap-user.head"
-  local summary=() preflight_fail=0 TMP=""
+  local summary=() preflight_fail=0
 
   # Later steps need what earlier steps install, within this one process.
   export PATH="$LOCAL_BIN:$PATH"
 
   # Scratch dir for downloads: real runs only (a dry run must create nothing), removed on exit.
   # Created here, not lazily in a helper: $(...) would run a helper in a subshell and lose TMP.
-  if [ "$DRY" = 0 ]; then TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT; fi
+  if [ "$DRY" = 0 ]; then TMP="$(mktemp -d)"; fi
   # fetch URL DEST: download over https; fail loudly.
   fetch() { curl -fsSL --retry 3 --connect-timeout 10 -o "$2" "$1"; }
 
@@ -273,7 +279,7 @@ main() {
     git clone -q "$RULES_URL" "$RULES"
   fi
   if grep -qs "^@~/.claude-rules/rules.md\$" "$HOME/.claude/CLAUDE.md"; then
-    log 7 SKIP "~/.claude/CLAUDE.md already imports claude-rules"
+    log 7 SKIP "$HOME/.claude/CLAUDE.md already imports claude-rules"
   elif [ "$DRY" = 1 ]; then
     log 7 PLAN "bash $RULES/deploy.sh (writes ~/.claude/CLAUDE.md; backs up a hand-written one)"
   else
@@ -360,9 +366,9 @@ EOF
     local have
     have="$(awk -v b="$MARK_BEGIN" -v e="$MARK_END" '$0==b{f=1} f{print} $0==e{f=0}' "$rc")"
     if [ "$have" = "$block" ]; then
-      log 10 SKIP "~/.bashrc block already present"
+      log 10 SKIP "$HOME/.bashrc block already present"
     else
-      log 10 FAIL "~/.bashrc has a bootstrap-user block that differs from the current one; not rewriting. Compare by hand."
+      log 10 FAIL "$HOME/.bashrc has a bootstrap-user block that differs from the current one; not rewriting. Compare by hand."
       exit 1
     fi
   elif [ "$DRY" = 1 ]; then
@@ -370,7 +376,7 @@ EOF
   else
     # Leading blank line so we never glue onto a file that lacks a trailing newline.
     { echo; printf '%s\n' "$block"; } >> "$rc"
-    log 10 DONE "~/.bashrc updated (open a new shell)"; summary+=("bashrc block")
+    log 10 DONE "$HOME/.bashrc updated (open a new shell)"; summary+=("bashrc block")
   fi
 
   # ---- summary ----------------------------------------------------------------------
