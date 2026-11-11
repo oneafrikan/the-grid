@@ -14,8 +14,8 @@ Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) an
 
 - Add a harness registry (`scripts/lib/harnesses.txt`) and a `harness:<name>` manifest entry (plus `GRID_HARNESS` env). `wire.sh` links the wired skill set into `~/.agents/skills`, one directory that Codex, Gemini CLI, OpenCode, Pi and OpenClaw (and Cursor) all read.
 - Filter what reaches non-Claude harnesses: skills that reference Claude-only paths or break Agent Skills name/description limits are skipped, and the reason is recorded.
-- Add `compose.py` targets `codex` (TOML subagents), `opencode` and `gemini-cli` (Markdown subagents). Orchestrator roles reach every harness as skills, which resolves the open design calls in #32 and #33.
-- Pi, OpenClaw and Antigravity get skills only. Pi has no subagents. OpenClaw keeps its existing `openclaw-native` target.
+- Add `compose.py` targets `codex` (TOML subagents), `opencode`, `gemini-cli` and `antigravity` (Markdown subagents). Orchestrator roles reach every harness as skills, which resolves the open design calls in #32 and #33.
+- Pi and OpenClaw get skills only. Pi has no subagents. OpenClaw keeps its existing `openclaw-native` target.
 - Deliver `rule-packs` rules into each harness's global instruction file by calling `scripts/rules.py emit --harness agents-md|gemini`. This happens only when that file already exists.
 - Extend the `workflow-upgrades` golden-output tests to the new targets, and add per-harness format validators.
 - Add a committed `dist/personas/<role>.md` export (#36).
@@ -47,7 +47,7 @@ Branch note (2026-11-05): `next` was merged into `main` (PR #286, 2026-10-18) an
 - No path-rewriting of Claude-specific skills (gstack's approach). Skills that reference `~/.claude` stay Claude-only. Most of these are the 45 gstack skills.
 - No per-harness skill subsets. The shared directory is one set for every harness that reads it.
 - No hooks translation, no MCP server wiring, no per-harness model pinning. Generated non-Claude agents inherit the session model.
-- No Cursor, Amp, Continue or Antigravity subagent emitters. #34 stays deferred and #35 is closed as skipped. Cursor still gets skills from the shared directory.
+- No Cursor, Amp or Continue subagent emitters (Antigravity was added later, see design.md). #34 stays deferred and #35 is closed as skipped. Cursor still gets skills from the shared directory.
 - No OpenCode `mode: primary` orchestrators. Orchestrators are skills everywhere.
 - No `wire.sh --harness` flag. The `GRID_HARNESS` env var covers one-off runs.
 - No helper script that composes every target. Compose commands are documented in `docs/harnesses.md`.

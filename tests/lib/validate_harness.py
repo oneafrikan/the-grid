@@ -217,6 +217,54 @@ def check_gemini_agent(path: Path) -> list[str]:
     return problems
 
 
+# ── antigravity-agent ────────────────────────────────────────────────────────
+# Antigravity CLI (agy) subagent, per agy's bundled migrate-agent-settings doc: `name`,
+# non-empty `description`, `subagent: true`, `mainAgent: false`, `tools` always present, and
+# no `model` or `color`. The six native tool names are the only ones this repo emits.
+ANTIGRAVITY_TOOL_NAMES = {"read_file", "edit_file", "write_file", "run_command", "manage_task",
+                          "search_web"}
+
+
+@command("antigravity-agent")
+def check_antigravity_agent(path: Path) -> list[str]:
+    """An agy subagent file (see above). `tools` must be a non-empty inline list of the six
+    native names, the form agy's docs show (the-grid's own contract, not an agy rule)."""
+    fm = _frontmatter_reader()
+    lines = fm.frontmatter_lines(str(path))
+    if lines is None:
+        return ["no `---` frontmatter block"]
+    problems = []
+    if not re.fullmatch(r"[a-z0-9_-]+", fm.scalar(lines, "name")):
+        problems.append(f"name {fm.scalar(lines, 'name')!r} does not match ^[a-z0-9_-]+$")
+    if not fm.scalar(lines, "description").strip():
+        problems.append("description is empty")
+    if fm.scalar(lines, "subagent") != "true":
+        problems.append("subagent must be true")
+    if fm.scalar(lines, "mainAgent") != "false":
+        problems.append("mainAgent must be false")
+    top = [ln for ln in lines if ln and ln[0] not in " \t"]
+    for key in ("model", "color"):
+        if any(re.match(key + r"\s*:", ln) for ln in top):
+            problems.append(f"{key} must not be set")
+    tools_lines = [ln for ln in top if re.match(r"tools\s*:", ln)]
+    if len(tools_lines) != 1:
+        problems.append("tools must be present exactly once")
+    else:
+        m = re.fullmatch(r"tools\s*:\s*\[(.*)\]\s*", tools_lines[0])
+        items = [i.strip() for i in m.group(1).split(",") if i.strip()] if m else []
+        if not m or not items:
+            problems.append("tools must be a non-empty inline list, e.g. [read_file]")
+        for item in items:
+            if item not in ANTIGRAVITY_TOOL_NAMES:
+                problems.append(f"tool {item!r} is not one of {', '.join(sorted(ANTIGRAVITY_TOOL_NAMES))}")
+        if len(set(items)) != len(items):
+            problems.append("tools has duplicates")
+    m = re.match(r"---[ \t]*\n.*?\n---[ \t]*\n(.*)\Z", path.read_text(encoding="utf-8"), re.S)
+    if m is None or not m.group(1).strip():
+        problems.append("no body after the frontmatter (the body is the system prompt)")
+    return problems
+
+
 # ── driver ───────────────────────────────────────────────────────────────────
 def main(argv: list[str]) -> int:
     if len(argv) < 3 or argv[1] not in COMMANDS:

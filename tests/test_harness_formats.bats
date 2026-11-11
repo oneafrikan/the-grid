@@ -536,6 +536,114 @@ gemini_roles() {
   [ "$status" -eq 0 ]
 }
 
+# ================================================================ antigravity (agy)
+# agy subagents: ~/.gemini/config/agents/<name>.md. Frontmatter name, description, subagent
+# true, mainAgent false, `tools` always written (inline list of agy's six native names), never
+# model or color. Format taken from agy's bundled migrate-agent-settings doc; the author's own
+# checks, not verification in a live agy session.
+
+@test "antigravity: the validator accepts every golden .md" {
+  files=(); while IFS= read -r _l; do files+=("$_l"); done < <(golden_files antigravity md)
+  # Guard against a vacuous pass: the fixture has three specialists.
+  [ "${#files[@]}" -eq 3 ]
+  run python3 -I "$VALIDATE" antigravity-agent "${files[@]}"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "antigravity: goldens carry the exact frontmatter, all six tools when the role has no allowlist" {
+  local d; d=$(dirname "$(golden_files antigravity md | head -1)")
+  # Read, Grep, Glob, Bash -> read_file (once), run_command, manage_task.
+  run sed -n '1,/^---$/p;' "$d/fx-fx-readonly.md"
+  [ "$(printf '%s\n' "$output" | sed -n '1,7p')" = $'---\nname: fx-fx-readonly\ndescription: Fixture fx-readonly. Fixture role fx-readonly. Use this subagent for fx-readonly work.\nsubagent: true\nmainAgent: false\ntools: [read_file, run_command, manage_task]\n---' ]
+  # No allowlist = every tool, spelled out (an omitted `tools` gets a tiny read-only default).
+  grep -qxF 'tools: [read_file, edit_file, write_file, run_command, manage_task, search_web]' "$d/fx-fx-eng.md"
+  lacks '^(model|color):' "$d"/*.md
+  [ "$(ls "$d" | wc -l)" -eq 3 ]
+}
+
+@test "antigravity: the tracked grid-probe fixture passes the validator and is not a composed role name" {
+  local probe="$REPO_ROOT/tests/fixtures/harness/antigravity/grid-probe.md"
+  run python3 -I "$VALIDATE" antigravity-agent "$probe"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  # Hand-written, so compose must never emit a file of the same name.
+  lacks '^name: grid-probe$' "$GOLDENS"/antigravity/*/_antigravity/agents/*.md
+  [ ! -e "$REPO_ROOT/agent-factory/roles/grid-probe" ]
+}
+
+@test "antigravity: the validator rejects model, color, mainAgent true, missing or bad tools, no description, no body" {
+  local ok=$'---\nname: a\ndescription: d\nsubagent: true\nmainAgent: false\ntools: [read_file]\n---\nbody\n'
+  printf '%s' "$ok" > "$TMP/ok.md"
+  run python3 -I "$VALIDATE" antigravity-agent "$TMP/ok.md"
+  [ "$status" -eq 0 ]
+  local bad=0 variant
+  for variant in 's/^tools:.*/&\nmodel: x/' 's/^tools:.*/&\ncolor: red/' 's/mainAgent: false/mainAgent: true/' \
+                 's/subagent: true/subagent: false/' '/^tools:/d' 's/\[read_file\]/[Read]/' 's/\[read_file\]/[]/' \
+                 's/\[read_file\]/[read_file, read_file]/' 's/^description: d/description:/'; do
+    sed "$variant" "$TMP/ok.md" > "$TMP/bad.md"
+    run python3 -I "$VALIDATE" antigravity-agent "$TMP/bad.md"
+    echo "$variant: $output"
+    [ "$status" -eq 1 ]
+  done
+  # A block list is not the form this repo writes.
+  printf -- '---\nname: a\ndescription: d\nsubagent: true\nmainAgent: false\ntools:\n- read_file\n---\nbody\n' > "$TMP/blk.md"
+  run python3 -I "$VALIDATE" antigravity-agent "$TMP/blk.md"
+  [ "$status" -eq 1 ]
+  printf -- '---\nname: a\ndescription: d\nsubagent: true\nmainAgent: false\ntools: [read_file]\n---\n' > "$TMP/nobody.md"
+  run python3 -I "$VALIDATE" antigravity-agent "$TMP/nobody.md"
+  [ "$status" -eq 1 ]
+}
+
+@test "antigravity: tools map in the role's order, de-duplicated; Skill is dropped" {
+  gemini_roles zz-all=Write,Read,WebSearch,Edit,Read,WebFetch,Glob,Grep,Bash,Glob zz-sk=Read,Skill
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target antigravity --out "$TMP/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  local d="$TMP/out/zz/_antigravity/agents"
+  grep -qxF 'tools: [write_file, read_file, search_web, edit_file, run_command, manage_task]' "$d/zz-zz-all.md"
+  grep -qxF 'tools: [read_file]' "$d/zz-zz-sk.md"
+}
+
+@test "antigravity: a name that clashes with an agy built-in agent exits E_NAME_RESERVED and writes nothing" {
+  gemini_roles research=Read
+  printf 'bare_names: true\n' >> "$TMP/zz.yaml"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target antigravity --out "$TMP/out"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"E_NAME_RESERVED"* ]]
+  [[ "$output" == *"research"* ]]
+  [ ! -e "$TMP/out/zz/_antigravity" ]
+}
+
+@test "antigravity: the body and description match the Claude Code subagent" {
+  gemini_env
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/tests/fixtures/compose/fixture.yaml" --target antigravity --out "$TMP/a"
+  [ "$status" -eq 0 ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/tests/fixtures/compose/fixture.yaml" --target claude-code --out "$TMP/c"
+  [ "$status" -eq 0 ]
+  local a="$TMP/a/fx/_antigravity/agents/fx-fx-readonly.md" c="$TMP/c/fx/_claude-code/agents/fx-fx-readonly.md"
+  # Body = everything after the closing fence; description line identical.
+  [ "$(awk 'f{print} /^---$/{n++; if(n==2) f=1}' "$a")" = "$(awk 'f{print} /^---$/{n++; if(n==2) f=1}' "$c")" ]
+  [ "$(grep -m1 '^description:' "$a")" = "$(grep -m1 '^description:' "$c")" ]
+}
+
+@test "antigravity: the real core roles compose and pass the validator" {
+  export GRID_PRIVATE_ROLES_DIR=""
+  export GRID_USER_CONFIG="$REPO_ROOT/agent-factory/user.public.yaml"
+  export GRID_MODELS_FILE="$REPO_ROOT/agent-factory/models.yaml"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/agent-factory/examples/core.yaml" \
+    --target antigravity --out "$TMP"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  files=(); while IFS= read -r _l; do files+=("$_l"); done < <(find "$TMP/core/_antigravity/agents" -name '*.md' -type f | LC_ALL=C sort)
+  # Guard against a vacuous pass: core has five specialists.
+  [ "${#files[@]}" -eq 5 ]
+  run python3 -I "$VALIDATE" antigravity-agent "${files[@]}"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
 # ================================================================ WP-050: writer safety ====
 # Every writer vets its target dir, renders before it touches disk, swaps atomically and (for
 # the legacy default target) wipes only its own output. Author's own checks, not independent
@@ -848,12 +956,12 @@ PYEOF
 }
 
 # The writers' symlink refusals (mutations M15 and M25 survived).
-@test "writers: a symlinked _codex, _opencode, _gemini-cli or _portable is refused and never written through" {
+@test "writers: a symlinked _codex, _opencode, _gemini-cli, _antigravity or _portable is refused and never written through" {
   gemini_env
   local cfg="$REPO_ROOT/tests/fixtures/compose/fixture.yaml" t
   mkdir -p "$TMP/real" "$TMP/out/fx"
   printf 'keep\n' > "$TMP/real/keep.txt"
-  for t in codex opencode gemini-cli portable; do
+  for t in codex opencode gemini-cli antigravity portable; do
     ln -s "$TMP/real" "$TMP/out/fx/_$t"
     run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$cfg" --target "$t" --out "$TMP/out"
     echo "$t: $output"
@@ -869,7 +977,7 @@ PYEOF
 @test "dry-run: a harness target lists specialists only, never an orchestrator" {
   gemini_env
   local t
-  for t in codex opencode gemini-cli; do
+  for t in codex opencode gemini-cli antigravity; do
     run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$REPO_ROOT/tests/fixtures/compose/fixture.yaml" \
       --target "$t" --dry-run --out "$TMP/out"
     echo "$t: $output"

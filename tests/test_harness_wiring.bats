@@ -153,6 +153,7 @@ stub_all_agents() {
   stub_agent codex a.toml
   stub_agent opencode a.md
   stub_agent gemini-cli a.md
+  stub_agent antigravity a.md
   stub_agent openclaw-native a.md
 }
 
@@ -549,7 +550,8 @@ only_shared_dir() {
   [ "$(harness_field codex agents_dir)" = "~/.codex/agents" ]
   [ "$(harness_field opencode rules_file)" = "~/.config/opencode/AGENTS.md" ]
   [ "$(harness_field gemini compose_target)" = "gemini-cli" ]
-  [ "$(harness_field antigravity agents_dir)" = "-" ]
+  [ "$(harness_field antigravity agents_dir)" = "~/.gemini/config/agents" ]
+  [ "$(harness_field antigravity compose_target)" = "antigravity" ]
   [ "$(harness_field pi rules_harness)" = "agents-md" ]
   harness_valid openclaw
   ! harness_valid nonesuch
@@ -704,7 +706,8 @@ description: >
 
 # ================================================================ Gemini / Antigravity (multi-harness group 5)
 # gemini links specialists into .gemini/agents and skills into the shared .agents/skills;
-# antigravity is skills-only, into its OWN skills dir (path unverified, see docs/harnesses.md).
+# antigravity links skills into its OWN skills dir and agents into ~/.gemini/config/agents
+# (paths from agy's bundled docs plus an operator probe, see docs/harnesses.md).
 
 @test "GRID_HARNESS=gemini links _gemini-cli agents into .gemini/agents and skills into the shared dir" {
   stub_all_agents
@@ -717,7 +720,7 @@ description: >
   # Only the gemini agent target was linked: nothing from the codex/opencode/openclaw stubs,
   # and no Antigravity dir (.gemini holds just agents/ and agents/a.md).
   [ "$(find "$GRID_HARNESS_HOME/.gemini" -mindepth 1 | wc -l | tr -d ' ')" -eq 2 ]
-  [ ! -e "$GRID_HARNESS_HOME/.gemini/antigravity-cli" ]
+  [ ! -e "$GRID_HARNESS_HOME/.gemini/config" ]
   [ ! -e "$GRID_HARNESS_HOME/.codex" ]
   [ ! -e "$GRID_HARNESS_HOME/.config" ]
   # Idempotent, and no drift afterwards.
@@ -729,18 +732,43 @@ description: >
   [ "$status" -eq 0 ]
 }
 
-@test "GRID_HARNESS=antigravity links skills into .gemini/antigravity-cli/skills and creates no agents dir" {
+@test "GRID_HARNESS=antigravity links skills into .gemini/config/skills and _antigravity agents into .gemini/config/agents" {
   stub_all_agents
   GRID_HARNESS=antigravity wire
   [ "$status" -eq 0 ]
-  [ -L "$GRID_HARNESS_HOME/.gemini/antigravity-cli/skills/skill-alpha" ]
-  [ -L "$GRID_HARNESS_HOME/.gemini/antigravity-cli/skills/skill-beta" ]
-  # Skills-only: no agents dir, no agent link, and the shared dir is not used.
+  [ -L "$GRID_HARNESS_HOME/.gemini/config/skills/skill-alpha" ]
+  [ -L "$GRID_HARNESS_HOME/.gemini/config/skills/skill-beta" ]
+  [ -L "$GRID_HARNESS_HOME/.gemini/config/agents/a.md" ]
+  [ "$(readlink "$GRID_HARNESS_HOME/.gemini/config/agents/a.md")" = "$MOCK_GRID/agent-factory/projects/p/_antigravity/agents/a.md" ]
+  # Not Gemini CLI's dir, not the shared skills dir, and no other harness's agent link.
   [ ! -e "$GRID_HARNESS_HOME/.gemini/agents" ]
   [ ! -e "$GRID_HARNESS_HOME/.agents" ]
-  [ "$(find "$GRID_HARNESS_HOME" \( -name 'a.md' -o -name 'a.toml' \) | wc -l | tr -d ' ')" -eq 0 ]
+  [ "$(find "$GRID_HARNESS_HOME" -name 'a.toml' | wc -l | tr -d ' ')" -eq 0 ]
+  [ "$(find "$GRID_HARNESS_HOME" -name 'a.md' | wc -l | tr -d ' ')" -eq 1 ]
   GRID_HARNESS=antigravity wire --check
   [ "$status" -eq 0 ]
+}
+
+@test "GRID_HARNESS=antigravity: a real file already in .gemini/config/agents survives and is reported skip (not managed)" {
+  stub_all_agents
+  # Same name as a composed agent (the clash case) plus an unrelated hand-written file.
+  # grid-probe is the tracked, hand-written fixture (a real, uncomposed agent file).
+  mkdir -p "$GRID_HARNESS_HOME/.gemini/config/agents"
+  printf 'hand-written a\n' > "$GRID_HARNESS_HOME/.gemini/config/agents/a.md"
+  cp "$REPO_ROOT/tests/fixtures/harness/antigravity/grid-probe.md" "$GRID_HARNESS_HOME/.gemini/config/agents/grid-probe.md"
+  GRID_HARNESS=antigravity wire
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skip (~/.gemini/config/agents: exists, not managed): a.md"* ]]
+  [ ! -L "$GRID_HARNESS_HOME/.gemini/config/agents/a.md" ]
+  [ "$(cat "$GRID_HARNESS_HOME/.gemini/config/agents/a.md")" = "hand-written a" ]
+  [ ! -L "$GRID_HARNESS_HOME/.gemini/config/agents/grid-probe.md" ]
+  cmp "$REPO_ROOT/tests/fixtures/harness/antigravity/grid-probe.md" "$GRID_HARNESS_HOME/.gemini/config/agents/grid-probe.md"
+  # wire.sh never deploys the probe: it only ever lands here if a human copies it.
+  # A second run still leaves both untouched.
+  GRID_HARNESS=antigravity wire
+  [ "$status" -eq 0 ]
+  cmp "$REPO_ROOT/tests/fixtures/harness/antigravity/grid-probe.md" "$GRID_HARNESS_HOME/.gemini/config/agents/grid-probe.md"
+  [ "$(cat "$GRID_HARNESS_HOME/.gemini/config/agents/a.md")" = "hand-written a" ]
 }
 
 # ---------------------------------------------------------------- WP-007: HOME unset
