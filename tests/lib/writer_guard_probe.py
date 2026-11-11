@@ -32,6 +32,7 @@ WRITERS = {
     "codex": lambda n: compose.write_harness_agents("codex", n, config, out),
     "opencode": lambda n: compose.write_harness_agents("opencode", n, config, out),
     "gemini-cli": lambda n: compose.write_harness_agents("gemini-cli", n, config, out),
+    "antigravity": lambda n: compose.write_harness_agents("antigravity", n, config, out),
     "portable": lambda n: compose.write_portable(n, config, out),
     "paperclip": lambda n: compose.write_paperclip(n, config, out),
     "openclaw-native": lambda n: compose.write_openclaw(n, config, out),

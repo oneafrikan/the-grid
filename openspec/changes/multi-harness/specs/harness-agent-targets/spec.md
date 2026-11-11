@@ -28,6 +28,26 @@ Generate native subagent files for the harnesses that support them, from the sam
 - **WHEN** the shared body is extracted for the new targets
 - **THEN** the committed `claude-code` golden still passes with no update
 
+### Requirement: Generated specialist subagents for Antigravity CLI
+
+`compose.py` SHALL provide a target `antigravity` that writes one `<name>.md` per specialist role for `~/.gemini/config/agents/`. Each file SHALL carry the same name, description and body as the Claude Code subagent, with frontmatter `subagent: true`, `mainAgent: false` and a `tools` list that is always written, and no `model` or `color`.
+
+#### Scenario: Role without an allowlist
+- **WHEN** `compose.py <config> --target antigravity` runs for a role with no `tools:` in `role.yaml`
+- **THEN** the frontmatter has `tools: [read_file, edit_file, write_file, run_command, manage_task, search_web]`
+
+#### Scenario: Allowlist mapping
+- **WHEN** it runs for a role with `tools: [Read, Grep, Glob, Bash]`
+- **THEN** `tools` is `[read_file, run_command, manage_task]` (mapped in order, de-duplicated; `Skill` is dropped)
+
+#### Scenario: Built-in name clash
+- **WHEN** a composed agent name is `self`, `browser`, `research`, `deepagent` or `review-agent`
+- **THEN** compose exits `E_NAME_RESERVED` and writes nothing
+
+#### Scenario: Hand-written file in the agents dir
+- **WHEN** `GRID_HARNESS=antigravity` wires and `~/.gemini/config/agents/` already holds a real file
+- **THEN** it is left untouched and reported `skip (... exists, not managed)`
+
 ### Requirement: Orchestrators reach every harness as skills
 
 The system SHALL deliver each orchestrator role to non-Claude harnesses as the same `SKILL.md` folder produced for Claude Code. The new agent targets MUST NOT emit a file for an orchestrator role.

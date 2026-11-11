@@ -1429,6 +1429,64 @@ def emit_gemini_agent(agent: dict, slug: str) -> tuple[str, str]:
 AGENT_TARGETS["gemini-cli"] = emit_gemini_agent
 
 
+# ── Antigravity CLI (agy) agent emitter ───────────────────────────────────────
+# agy scans the bare dir ~/.gemini/config/agents/<name>.md (no plugin.json needed). Path and
+# format come from agy's bundled docs (migrate-agent-settings, "agents/<name>.md") plus an
+# operator probe; not yet verified with a composed grid agent in a live agy session.
+# Frontmatter: name, description, `subagent: true`, `mainAgent: false` (so it never becomes a
+# main agent) and `tools` ALWAYS written: an omitted `tools` gets only a tiny read-only default.
+# Never `model` or `color`.
+ANTIGRAVITY_ALL_TOOLS = ["read_file", "edit_file", "write_file", "run_command", "manage_task", "search_web"]
+ANTIGRAVITY_TOOLS: dict[str, list[str]] = {
+    "Read": ["read_file"],
+    "Grep": ["read_file"],
+    "Glob": ["read_file"],
+    "Edit": ["edit_file"],
+    "MultiEdit": ["edit_file"],
+    "Write": ["write_file"],
+    "Bash": ["run_command", "manage_task"],
+    "WebSearch": ["search_web"],
+    "WebFetch": ["search_web"],
+    # "Skill" has no agy tool: skills are read through read_file, so it maps to nothing.
+    "Skill": [],
+}
+# Names agy ships as built-in agents; a composed agent with one of these would clash.
+ANTIGRAVITY_RESERVED = frozenset({"self", "browser", "research", "deepagent", "review-agent"})
+
+
+def antigravity_tools(role: str, tools) -> list[str]:
+    """A role's Claude allowlist → agy native tool names (deduped, order preserved). No
+    allowlist (None) means every tool, which agy needs spelled out. An unknown tool is a hard
+    error (E_TOOL_UNMAPPED), as on Gemini; `Skill` is knowingly dropped."""
+    if tools is None:
+        return list(ANTIGRAVITY_ALL_TOOLS)
+    mapped: list[str] = []
+    for tool in tools:
+        if tool not in ANTIGRAVITY_TOOLS:
+            sys.exit(f"E_TOOL_UNMAPPED: {role}: tool {tool!r} has no Antigravity mapping "
+                     f"(known: {', '.join(ANTIGRAVITY_TOOLS)})")
+        mapped += [a for a in ANTIGRAVITY_TOOLS[tool] if a not in mapped]
+    return mapped
+
+
+def emit_antigravity_agent(agent: dict, slug: str) -> tuple[str, str]:
+    """A specialist role → one agy subagent `<name>.md`. Returns (filename, contents)."""
+    role = agent["role"]
+    name = slugged(slug, role)
+    if name in ANTIGRAVITY_RESERVED:
+        sys.exit(f"E_NAME_RESERVED: {role}: agent name {name!r} clashes with an Antigravity built-in agent")
+    head = _frontmatter({"name": name, "description": subagent_description(role),
+                         "subagent": True, "mainAgent": False})
+    # `tools` as an inline list, the form agy's own docs and a working probe use; the dumper
+    # would emit a block list. Strip the closing fence from `head` and append the line.
+    tools = antigravity_tools(role, role_tools(role))
+    head = head.removesuffix("---\n") + f"tools: [{', '.join(tools)}]\n---\n"
+    return f"{name}.md", head + "\n" + render_subagent_body(agent, slug)
+
+
+AGENT_TARGETS["antigravity"] = emit_antigravity_agent
+
+
 # ── portable persona writer ──────────────────────────────────────────────────
 # One plain-Markdown file per role (orchestrators included) for pasting into a chat-UI
 # Project. Not a harness agent: no frontmatter, no tools, no permissions, so it does not

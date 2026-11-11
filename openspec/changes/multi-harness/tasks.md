@@ -152,6 +152,16 @@ Depends on: 1, 3, 4, 6, 7. Group 5 is optional. Needs the harnesses installed an
   - `grid-qa-engineer` spawns from a symlinked `~/.codex/agents/*.toml` and cannot write files.
 - [ ] 9.2 OpenCode: confirm that the `permission` mapping loads and that a symlinked agent file is found. Record whether a skill present in both `~/.claude/skills` and `~/.agents/skills` is listed twice.
 - [ ] 9.3 Pi and OpenClaw: confirm that shared-dir skills load (Pi `/skill:<name>`; OpenClaw symlink rule). Create an empty `~/.codex/AGENTS.md` with one `rules:` pack wired, and confirm that Codex reads the block.
-- [ ] 9.4 Optional, Gemini CLI or Antigravity: confirm the `tools` YAML list and a symlinked agent file on Gemini CLI. On `agy`, confirm the real global skills path.
+- [ ] 9.4 Optional, Gemini CLI or Antigravity: confirm the `tools` YAML list and a symlinked agent file on Gemini CLI. On `agy`, confirm the real global skills path (and see 10.4 for agents).
 - [ ] 9.5 Record each result with its date in a "Verified on a real install" table in `docs/harnesses.md`. Open a follow-up issue for any failure (stripped-copy skills, copy-with-marker agents, path correction). Close #3 and #30 as superseded and #35 as skipped (D11), linking this change.
 - Verify: none automated. The PR is the updated table.
+
+## 10. Antigravity agent target
+
+Added after the original groups. Path and format come from agy's bundled docs (`migrate-agent-settings`, `plugin`) and a probe run by the operator (agy scans the bare `~/.gemini/config/agents/` dir, no `plugin.json`).
+
+- [x] 10.1 `compose.py`: `emit_antigravity_agent` registered as `AGENT_TARGETS["antigravity"]`; frontmatter `name`, `description`, `subagent: true`, `mainAgent: false`, `tools` always (inline list), never `model` or `color`; no allowlist maps to all six native tools; reserved built-in names exit `E_NAME_RESERVED`.
+- [x] 10.2 Registry: `antigravity` row gets `agents_dir ~/.gemini/config/agents` and `compose_target antigravity`. `wire.sh` step 3e needed no change and never replaces a real file there.
+- [x] 10.3 Tests: `antigravity-agent` in `tests/lib/validate_harness.py`; bats in `tests/test_harness_formats.bats` and `tests/test_harness_wiring.bats` (incl. a real file in the agents dir surviving as `skip (not managed)`); `antigravity` golden tree.
+- [ ] 10.4 HUMAN: compose `--target antigravity`, `GRID_HARNESS=antigravity bash scripts/wire.sh`, then in a live `agy` session confirm a composed grid agent (one all-tools, one restricted) is listed and spawns from its symlink, and the inline `tools` list is honoured. Record the date in `docs/harnesses.md`.
+- Verify: `tests/lib/bats-core/bin/bats tests/test_harness_formats.bats tests/test_harness_wiring.bats` and `bash scripts/compose-goldens.sh --check`.

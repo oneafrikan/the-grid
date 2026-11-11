@@ -88,6 +88,7 @@ one 5-file source, a different artifact shape per `--target`:
 .venv/bin/python compose.py examples/grid.yaml --target codex        # _codex/agents/*.toml
 .venv/bin/python compose.py examples/grid.yaml --target opencode     # _opencode/agents/*.md
 .venv/bin/python compose.py examples/grid.yaml --target gemini-cli   # _gemini-cli/agents/*.md
+.venv/bin/python compose.py examples/grid.yaml --target antigravity   # _antigravity/agents/*.md (agy)
 ```
 
 Output is regenerable and idempotent: re-running with an unchanged config
