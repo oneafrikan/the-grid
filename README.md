@@ -6,7 +6,7 @@
 
 [![tests](https://github.com/oneafrikan/the-grid/actions/workflows/tests.yml/badge.svg)](https://github.com/oneafrikan/the-grid/actions/workflows/tests.yml) [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![site](https://img.shields.io/badge/site-oneafrikan.github.io%2Fthe--grid-informational)](https://oneafrikan.github.io/the-grid/)
 
-Running in daily use on Claude Code, Codex CLI and Antigravity CLI. Gemini CLI, OpenCode, Pi and OpenClaw are wired too: see [Works with](#works-with).
+Running in daily use on Claude Code, Codex CLI and Antigravity CLI. Gemini CLI, OpenCode, Pi and OpenClaw are wired too: see [Works with](#works-with). A skill is a slash command your AI tool loads, an agent is a role definition, and wired means symlinked into the tool's directory.
 
 <!-- langs --><!-- /langs -->
 
@@ -16,11 +16,11 @@ Running in daily use on Claude Code, Codex CLI and Antigravity CLI. Gemini CLI, 
 git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid && bash ~/.the-grid/scripts/bootstrap.sh --with-agents
 ```
 
-- Writes: symlinks into `~/.claude/skills` and `~/.claude/agents`, one auto-handoff SessionEnd hook entry in `~/.claude/settings.json` (opt out with `-hook:auto-handoff`), and `.wired.manifest` plus `SKILLS.md` inside the clone. Rule packs and other tools' directories only with opt-in entries. Full list: [INSTALL.md](INSTALL.md) ("What it touches").
-- Undo: `bash ~/.the-grid/scripts/uninstall.sh` prints what it would remove; add `--yes` to remove it. It removes only links that resolve into the clone and keeps `~/.grid` unless you add `--purge`.
-- Needs git, bash, python3 (to build the agent teams). Node >= 20.19 only for the `openspec-*` skills.
+- Writes: symlinks into `~/.claude/skills` and `~/.claude/agents`, and one auto-handoff hook entry in `~/.claude/settings.json` (opt out with `-hook:auto-handoff`). All inside the clone: shallow submodule clones, `baseline-submodules.txt` and `machines/<host>.txt` seeded from the `.example` files, `core.hooksPath` set to `.githooks`, `.wired.manifest`, `SKILLS.md` and, with `--with-agents`, `agent-factory/.venv` plus `agent-factory/projects/`. Rule packs and other tools' directories only with opt-in entries. Everything it writes: [INSTALL.md](INSTALL.md) ("What it touches").
+- Undo: `bash ~/.the-grid/scripts/uninstall.sh` prints what it would remove; add `--yes` to remove it. It removes only links that resolve into the clone and keeps the clone and `~/.grid`. Add `--purge` to delete both too (refused while the clone has uncommitted or unpushed work, unless `--force`). The seeded files, the venv and the `core.hooksPath` setting live inside the clone and go with it.
+- Needs git, bash, and python3 (with its `venv` module) plus network access for `pip`, both to build the agent teams. Node >= 20.19 only for the `openspec-*` skills.
 
-Just looking? Try the plugins first. Claude Code only, no clone and no symlinks; `grid-agents@the-grid` adds the dev team ([docs/PLUGINS.md](docs/PLUGINS.md) has the limits).
+To look first, try the plugins. Claude Code only, no clone and no symlinks; `grid-agents@the-grid` adds the dev team ([docs/PLUGINS.md](docs/PLUGINS.md) has the limits).
 
 ```bash
 claude plugin marketplace add oneafrikan/the-grid
@@ -48,11 +48,11 @@ Optional next steps:
 | Tool | What it gets | Status |
 |---|---|---|
 | Claude Code | skills, agents, plugins (`grid-core`, `grid-agents`), guard hooks, rule packs | running in daily use |
-| Codex CLI | skills, agents (compose `--target codex`) | running in daily use |
+| Codex CLI | skills, agents (compose `--target codex`), rule packs | running in daily use |
 | Antigravity CLI | skills | running in daily use |
-| Gemini CLI | skills, agents (compose `--target gemini-cli`) | wired, not yet smoke-tested on a real install |
-| OpenCode | skills, agents (compose `--target opencode`) | wired, not yet smoke-tested on a real install |
-| Pi | skills | wired, not yet smoke-tested on a real install |
+| Gemini CLI | skills, agents (compose `--target gemini-cli`), rule packs | wired, not yet smoke-tested on a real install |
+| OpenCode | skills, agents (compose `--target opencode`), rule packs | wired, not yet smoke-tested on a real install |
+| Pi | skills, rule packs | wired, not yet smoke-tested on a real install |
 | OpenClaw | skills | wired, not yet smoke-tested on a real install |
 | Cursor | rule packs only (`scripts/rules.py emit --harness cursor`) | generated, not yet smoke-tested |
 
@@ -62,7 +62,7 @@ Claude Code is on by default. The rest, Cursor aside, are opt-in with one `harne
 echo 'harness:codex' >> ~/.the-grid/machines/"$(hostname -s)".txt && bash ~/.the-grid/scripts/wire.sh
 ```
 
-Codex CLI, Gemini CLI, OpenCode, Pi and OpenClaw all read `~/.agents/skills`, so the skills are linked there once and reach every one of them. Agents need a compose for that tool's target first (`bootstrap.sh` composes Claude Code only). Paths, skip rules and what is unverified per tool: [docs/harnesses.md](docs/harnesses.md).
+Codex CLI, Gemini CLI, OpenCode, Pi and OpenClaw all read `~/.agents/skills`, so the skills are linked there once and reach every one of them. Agents need a compose for that tool's target first (`bootstrap.sh` composes Claude Code only). Rule packs reach a tool's instruction file (such as `~/.codex/AGENTS.md`) only if you create that file. Paths, skip rules and what is unverified per tool: [docs/harnesses.md](docs/harnesses.md).
 
 ## The problem
 
@@ -113,7 +113,7 @@ Terms:
 - <!--count:roles-->40<!--/count--> agent roles: a dev team, a finance desk, a Socratic tutor (`/morpheus`), and `/tron`, which tells you which one to use.
 - One `git pull` plus `wire.sh` makes every machine match.
 
-Lost? The help skills are the entry point:
+The help skills are the entry points:
 
 | Command | Answers |
 |---|---|
@@ -134,7 +134,7 @@ Lost? The help skills are the entry point:
 - It never replaces a real directory or a foreign symlink. It only replaces links that point into the clone.
 - Outside the clone, the one file it edits by default is `~/.claude/settings.json`: a single auto-handoff hook entry. Opt out with `-hook:auto-handoff` in your overlay. [SECURITY.md](SECURITY.md) and [INSTALL.md](INSTALL.md) list every write, opt-in ones included.
 - `bash scripts/uninstall.sh` is a dry run until you add `--yes`. Submodules clone shallow, at their pinned commit.
-- The bats suite and the gate run in CI on every push to `main` and every ready pull request (badge above). CI runs on Linux; the suite also runs on macOS's Bash 3.2 ([docs/portability.md](docs/portability.md)).
+- CI runs the full bats suite and the gate on every push to `main` and every ready pull request (badge above); a change that touches only documentation markdown runs a lighter docs job instead. CI runs on Linux only. The suite is written to run on macOS's Bash 3.2 too and was brought to near-green there (#301, [docs/portability.md](docs/portability.md)).
 
 ## Why "the grid"
 

@@ -121,7 +121,8 @@ def readme_hero_alt():
     return m.group(1)
 
 def readme_works_with():
-    # Rows of the README "## Works with" table: (tool, status), header and rule rows skipped.
+    # Rows of the README "## Works with" table: (tool, what it gets, status), header and rule
+    # rows skipped; backticks dropped so the cell compares with the HTML cell text.
     m = re.search(r"## Works with\n(.*?)\n\n", readme(), re.S)
     if not m:
         die("README Works with table not found")
@@ -129,7 +130,7 @@ def readme_works_with():
     for line in m.group(1).split("\n"):
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if len(cells) == 3 and cells[0] not in ("Tool", "---"):
-            rows.append((cells[0], cells[2]))
+            rows.append((cells[0], cells[1].replace("`", ""), cells[2]))
     return rows
 
 def readme_install():
@@ -384,15 +385,19 @@ if hits:
 
 # --- front-door rebuild: one primary action, a repeated command, the owner placeholder ---------
 
-@test "landing page: the hero has one button (Copy) and one link (GitHub); no CTA trio" {
+@test "landing page: the hero has one button (Copy) and one button-styled link (GitHub); no CTA trio" {
+  # Inline text links (INSTALL.md beside the command, the closed Quickstart extras) are allowed;
+  # what is pinned is a single primary action and a single secondary button.
   py '
 hero = [(t, a) for t, a, anc in p.tags if any(x[0] == "header" for x in anc)]
 buttons = [a for t, a in hero if t == "button"]
-links = [a.get("href") for t, a in hero if t == "a" and not a.get("href", "").startswith("#")]
+btn_links = [a.get("href") for t, a in hero if t == "a" and "btn" in a.get("class", "").split()]
 if len(buttons) != 1 or "copy-btn" not in buttons[0].get("class", ""):
     die("hero buttons: %r" % buttons)
-if links != ["https://github.com/oneafrikan/the-grid"]:
-    die("hero external links: %r" % links)
+if btn_links != ["https://github.com/oneafrikan/the-grid"]:
+    die("hero button-styled links: %r" % btn_links)
+if "https://github.com/oneafrikan/the-grid/blob/main/INSTALL.md#what-it-touches" not in [a.get("href") for t, a in hero]:
+    die("no INSTALL.md (What it touches) link beside the command")
 for gone in ("View on GitHub", "btn-primary", "href=\"#quickstart\""):
     if gone in HTML:
         die("leftover from the old CTA trio: " + gone)
@@ -437,7 +442,8 @@ if pos != sorted(pos):
 m = re.search(r"<table class=\"tbl\" id=\"works-with-table\">(.*?)</table>", HTML, re.S)
 if not m:
     die("no #works-with-table")
-rows = re.findall(r"<tr><th scope=\"row\">(.*?)</th>.*?<span class=\"chip [^\"]+\">(.*?)</span></td></tr>", m.group(1))
+rows = [(t, re.sub(r"<[^>]+>", "", g), st) for t, g, st in
+        re.findall(r"<tr><th scope=\"row\">(.*?)</th><td>(.*?)</td><td><span class=\"chip [^\"]+\">(.*?)</span></td></tr>", m.group(1))]
 if rows != readme_works_with():
     die("Works with differs from README:\n%r\n%r" % (rows, readme_works_with()))
 '

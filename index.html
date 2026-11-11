@@ -218,7 +218,12 @@
     .copy-btn:hover { background: #6ee9ff; }
     .copy-status { font-size: 0.85rem; color: var(--text-dim); min-height: 1.4em; margin-bottom: 0.4rem; }
 
-    .hero-note { font-size: 0.9rem; color: var(--text-dim); max-width: 74ch; margin-bottom: 1rem; }
+    .hero-note { font-size: 0.9rem; color: var(--text-dim); max-width: 74ch; margin-bottom: 0.75rem; padding-left: 1.1rem; }
+    .hero-note li { margin-bottom: 0.3rem; }
+    .hero details.start { margin: 0 0 1.25rem; background: #070d14; border-color: rgba(0, 217, 255, 0.2); max-width: 74ch; }
+    .hero .detail-body { border-top-color: rgba(0, 217, 255, 0.2); }
+    .hero .detail-body code { background: #0b1520; }
+    .hero .note { background: transparent; }
     .hero-note code { background: #0b1520; }
 
     .hero-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin-bottom: 1.5rem; }
@@ -399,7 +404,7 @@
     .story .story-label { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; letter-spacing: 0.08em; color: var(--hero-cyan); margin-bottom: 1.5rem; }
     .story .cmd { max-width: 720px; margin: 0 auto 0.4rem; }
     .story .copy-status { text-align: center; }
-    .story .star { display: flex; justify-content: center; margin-top: 0.75rem; }
+    .story .star { display: flex; justify-content: center; max-width: none; margin-top: 0.75rem; }
 
     /* ── Footer ── */
     footer { padding: 2rem 0 2.5rem; border-top: 1px solid var(--border); font-size: 0.92rem; color: var(--text-dim); }
@@ -448,15 +453,40 @@
       </div>
       <p class="copy-status" id="copy-status" role="status" aria-live="polite"></p>
 
-      <p class="hero-note">
-        Writes symlinks into <code>~/.claude/skills</code> and <code>~/.claude/agents</code> and one hook entry in <code>~/.claude/settings.json</code>.
-        Undo: <code>bash ~/.the-grid/scripts/uninstall.sh</code> shows what it would remove; add <code>--yes</code> to remove it.
-        Needs git, bash and python3.
-      </p>
+      <!-- What the command does, next to the command. Mirrors the three README Quickstart bullets. -->
+      <ul class="hero-note">
+        <li>Writes symlinks into <code>~/.claude/skills</code> and <code>~/.claude/agents</code>, and one auto-handoff hook entry in <code>~/.claude/settings.json</code> (opt out with <code>-hook:auto-handoff</code>). All inside the clone: shallow submodule clones, <code>baseline-submodules.txt</code> and <code>machines/&lt;host&gt;.txt</code> seeded from the <code>.example</code> files, <code>core.hooksPath</code> set to <code>.githooks</code>, <code>.wired.manifest</code>, <code>SKILLS.md</code> and, with <code>--with-agents</code>, <code>agent-factory/.venv</code> plus <code>agent-factory/projects/</code>. Rule packs and other tools&#8217; directories only with opt-in entries. <a href="https://github.com/oneafrikan/the-grid/blob/main/INSTALL.md#what-it-touches">Everything it writes: INSTALL.md</a>.</li>
+        <li>Undo: <code>bash ~/.the-grid/scripts/uninstall.sh</code> prints what it would remove; add <code>--yes</code> to remove it. It removes only links that resolve into the clone and keeps the clone and <code>~/.grid</code>. Add <code>--purge</code> to delete both too (refused while the clone has uncommitted or unpushed work, unless <code>--force</code>). The seeded files, the venv and the <code>core.hooksPath</code> setting live inside the clone and go with it.</li>
+        <li>Needs git, bash, and python3 (with its <code>venv</code> module) plus network access for <code>pip</code>, both to build the agent teams. Node &gt;= 20.19 only for the <code>openspec-*</code> skills.</li>
+      </ul>
+
+      <!-- The rest of the README Quickstart, closed so the command stays above the fold on a phone. -->
+      <details class="start">
+        <summary><span class="sum-t">Other ways in, and what you should see</span> <span class="dim">plugins, paste-a-prompt, checks, next steps</span></summary>
+        <div class="detail-body">
+          <p>To look first, try the plugins. Claude Code only, no clone and no symlinks; <code>grid-agents@the-grid</code> adds the dev team (<a href="https://github.com/oneafrikan/the-grid/blob/main/docs/PLUGINS.md">docs/PLUGINS.md</a> has the limits).</p>
+          <pre tabindex="0"><code>claude plugin marketplace add oneafrikan/the-grid
+claude plugin install grid-core@the-grid</code></pre>
+          <p>Or paste this into your coding agent:</p>
+          <p class="note">Clone https://github.com/oneafrikan/the-grid.git to ~/.the-grid, run bash ~/.the-grid/scripts/bootstrap.sh --with-agents and tell me what it printed. If you are not Claude Code, read ~/.the-grid/docs/harnesses.md and tell me which harness: line to add for you.</p>
+          <p>You should now see:</p>
+          <ul>
+            <li><code>bootstrap.sh</code> ends with <code>==&gt; Bootstrap complete. Open a fresh Claude session to pick up new skills/agents.</code></li>
+            <li><code>ls ~/.claude/skills | wc -l</code> prints a number near <!--count:wired-->133<!--/count--> (plus the orchestrator skills; duplicate names across repos collapse to one link, so it is not exact).</li>
+            <li>In a new Claude Code session <code>/tron</code> replies with a short question about what you want to do.</li>
+          </ul>
+          <p>Optional next steps:</p>
+          <ul>
+            <li>Tell the agents who you are (they say &ldquo;No operator set yet.&rdquo; until you do): <code>cp ~/.the-grid/agent-factory/user.yaml.example ~/.the-grid/agent-factory/user.yaml</code>, fill in your name and contact, re-run the bootstrap (safe to repeat).</li>
+            <li>gstack&#8217;s browser skills (<code>/browse</code>, <code>/qa</code>, <code>/scrape</code>) need <a href="https://bun.sh" rel="noopener">bun</a> and a browser download. Until you run <code>bash ~/.the-grid/scripts/runtime-setup.sh gstack</code> (add <code>--dry-run</code> to preview), bootstrap prints <code>runtime MISSING: gstack</code>. Detail in <a href="https://github.com/oneafrikan/the-grid/blob/main/BOOTSTRAP.md">BOOTSTRAP.md</a> step 8.</li>
+            <li>Fork first if you plan to customise; the clone URL above is read-only for you. Manual steps and the submodule-free install: <a href="https://github.com/oneafrikan/the-grid/blob/main/INSTALL.md">INSTALL.md</a>. After a <code>git pull</code>, re-run <code>bash ~/.the-grid/scripts/wire.sh</code> (recompose agents first: <a href="https://github.com/oneafrikan/the-grid/blob/main/BOOTSTRAP.md">BOOTSTRAP.md</a>, &ldquo;Updating an existing machine&rdquo;).</li>
+          </ul>
+        </div>
+      </details>
 
       <div class="hero-row">
         <a class="btn" href="https://github.com/oneafrikan/the-grid">GitHub</a>
-        <p>Running in daily use on Claude Code, Codex CLI and Antigravity CLI. Gemini CLI, OpenCode, Pi and OpenClaw are wired too: see <a href="#works-with">Works with</a>.</p>
+        <p>Running in daily use on Claude Code, Codex CLI and Antigravity CLI. Gemini CLI, OpenCode, Pi and OpenClaw are wired too: see <a href="#works-with">Works with</a>. A skill is a slash command your AI tool loads, an agent is a role definition, and wired means symlinked into the tool&#8217;s directory.</p>
       </div>
 
       <img class="hero-image" src="assets/hero.webp" width="1600" height="873" fetchpriority="high" alt="The words THE-GRID in glowing blue neon letters above a perspective grid floor and a distant city skyline.">
@@ -573,11 +603,11 @@
           <thead><tr><th scope="col">Tool</th><th scope="col">What it gets</th><th scope="col">Status</th></tr></thead>
           <tbody>
             <tr><th scope="row">Claude Code</th><td>skills, agents, plugins (<code>grid-core</code>, <code>grid-agents</code>), guard hooks, rule packs</td><td><span class="chip chip-ok">running in daily use</span></td></tr>
-            <tr><th scope="row">Codex CLI</th><td>skills, agents (compose <code>--target codex</code>)</td><td><span class="chip chip-ok">running in daily use</span></td></tr>
+            <tr><th scope="row">Codex CLI</th><td>skills, agents (compose <code>--target codex</code>), rule packs</td><td><span class="chip chip-ok">running in daily use</span></td></tr>
             <tr><th scope="row">Antigravity CLI</th><td>skills</td><td><span class="chip chip-ok">running in daily use</span></td></tr>
-            <tr><th scope="row">Gemini CLI</th><td>skills, agents (compose <code>--target gemini-cli</code>)</td><td><span class="chip chip-wip">wired, not yet smoke-tested on a real install</span></td></tr>
-            <tr><th scope="row">OpenCode</th><td>skills, agents (compose <code>--target opencode</code>)</td><td><span class="chip chip-wip">wired, not yet smoke-tested on a real install</span></td></tr>
-            <tr><th scope="row">Pi</th><td>skills</td><td><span class="chip chip-wip">wired, not yet smoke-tested on a real install</span></td></tr>
+            <tr><th scope="row">Gemini CLI</th><td>skills, agents (compose <code>--target gemini-cli</code>), rule packs</td><td><span class="chip chip-wip">wired, not yet smoke-tested on a real install</span></td></tr>
+            <tr><th scope="row">OpenCode</th><td>skills, agents (compose <code>--target opencode</code>), rule packs</td><td><span class="chip chip-wip">wired, not yet smoke-tested on a real install</span></td></tr>
+            <tr><th scope="row">Pi</th><td>skills, rule packs</td><td><span class="chip chip-wip">wired, not yet smoke-tested on a real install</span></td></tr>
             <tr><th scope="row">OpenClaw</th><td>skills</td><td><span class="chip chip-wip">wired, not yet smoke-tested on a real install</span></td></tr>
             <tr><th scope="row">Cursor</th><td>rule packs only (<code>scripts/rules.py emit --harness cursor</code>)</td><td><span class="chip chip-gen">generated, not yet smoke-tested</span></td></tr>
           </tbody>
@@ -588,6 +618,7 @@
         <p>
           Codex CLI, Gemini CLI, OpenCode, Pi and OpenClaw all read <code>~/.agents/skills</code>, so the skills are linked there once and reach every one of them.
           Agents need a compose for that tool&#8217;s target first (<code>bootstrap.sh</code> composes Claude Code only).
+          Rule packs reach a tool&#8217;s instruction file (such as <code>~/.codex/AGENTS.md</code>) only if you create that file.
           Paths, skip rules and what is unverified per tool:
           <a href="https://github.com/oneafrikan/the-grid/blob/main/docs/harnesses.md">docs/harnesses.md</a>.
         </p>
@@ -604,7 +635,7 @@
           <li>One <code>git pull</code> plus <code>wire.sh</code> makes every machine match.</li>
         </ul>
 
-        <p>Lost? The help skills are the entry point:</p>
+        <p>The help skills are the entry points:</p>
         <table class="tbl">
           <thead><tr><th scope="col">Command</th><th scope="col">Answers</th></tr></thead>
           <tbody>
@@ -834,7 +865,7 @@ cd .. && bash scripts/wire.sh
           <li>It never replaces a real directory or a foreign symlink. It only replaces links that point into the clone.</li>
           <li>Outside the clone, the one file it edits by default is <code>~/.claude/settings.json</code>: a single auto-handoff hook entry. Opt out with <code>-hook:auto-handoff</code> in your overlay. <a href="https://github.com/oneafrikan/the-grid/blob/main/SECURITY.md">SECURITY.md</a> and <a href="https://github.com/oneafrikan/the-grid/blob/main/INSTALL.md">INSTALL.md</a> list every write, opt-in ones included.</li>
           <li><code>bash scripts/uninstall.sh</code> is a dry run until you add <code>--yes</code>. Submodules clone shallow, at their pinned commit.</li>
-          <li>The bats suite and the gate run in <a href="https://github.com/oneafrikan/the-grid/actions/workflows/tests.yml">CI</a> on every push to <code>main</code> and every ready pull request. CI runs on Linux; the suite also runs on macOS&#8217;s Bash 3.2 (<a href="https://github.com/oneafrikan/the-grid/blob/main/docs/portability.md">docs/portability.md</a>).</li>
+          <li><a href="https://github.com/oneafrikan/the-grid/actions/workflows/tests.yml">CI</a> runs the full bats suite and the gate on every push to <code>main</code> and every ready pull request; a change that touches only documentation markdown runs a lighter docs job instead. CI runs on Linux only. The suite is written to run on macOS&#8217;s Bash 3.2 too and was brought to near-green there (#301, <a href="https://github.com/oneafrikan/the-grid/blob/main/docs/portability.md">docs/portability.md</a>).</li>
         </ul>
       </section>
 
