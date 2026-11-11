@@ -19,7 +19,7 @@ Pick from the request; ask if unclear.
 
 ## Core (all modes)
 
-1. **Context.** If `.grid/project.yaml` exists, read it for brand, audience, funnel and metrics. Never assume them; ask for the goal and audience if absent.
+1. **Context.** If the project has a grid project file (`project.yaml` in its `.grid` directory), read it for brand, audience, funnel and metrics. Never assume them; ask for the goal and audience if absent.
 2. **Visitor and job.** Who arrives, from where, wanting what; what the page or flow wants (lead sent, account created, payment made). Competing goals are a finding.
 3. **Finding = observation + principle + why + fix.** Quote the real copy or describe the real element. Name the principle with its one-line meaning. Say why it matters for this goal. Write the actual replacement copy, not "be more benefit-driven".
 4. **Balance.** Report principles used well, violated and missing. Depth over breadth: 8-15 findings.
