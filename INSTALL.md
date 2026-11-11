@@ -36,7 +36,7 @@ bash scripts/wire.sh
 ```
 
 After `--with-agents`, copy `~/.the-grid/agent-factory/user.yaml.example` to `~/.the-grid/agent-factory/user.yaml`, fill in your name and contact, and re-run it so agents pick it up.
-Skills are live immediately. Full sequence: [BOOTSTRAP.md](BOOTSTRAP.md). With no submodules: [Install without submodules](BOOTSTRAP.md#install-without-submodules) (`grid install`).
+Skills are live immediately. New unprivileged Linux user: [docs/install-new-user.md](docs/install-new-user.md). Full sequence: [BOOTSTRAP.md](BOOTSTRAP.md). With no submodules: [Install without submodules](BOOTSTRAP.md#install-without-submodules) (`grid install`).
 
 ## Claude Desktop (Code tab and Cowork)
 
