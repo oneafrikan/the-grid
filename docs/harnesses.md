@@ -85,7 +85,7 @@ skill@~/.agents/skills<TAB>claude-skill<TAB><target><TAB>skipped<TAB>claude-spec
 | `description-missing` | the description is empty or absent |
 | `description-long` | description over 1024 chars after YAML folding |
 | `claude-only-guard` | the frontmatter carries a Claude-only guard key: `disable-model-invocation`, `allowed-tools`, `hooks` or `context` (top-level keys only) |
-| `claude-specific` | a file in the skill mentions `.claude` (not `.claude-foo`), `.the-grid`, `.grid/`, `CLAUDE_` or `CLAUDE.md` (`.git` and `node_modules` are not read, binary files are skipped) |
+| `claude-specific` | a file in the skill mentions `.claude` (not `.claude-foo`), `CLAUDE_` or `CLAUDE.md`; the-grid's own `.the-grid` and `.grid/` do not count, they are not tied to one harness (`.git` and `node_modules` are not read, binary files are skipped) |
 | `symlink-escape` | a symlink inside the skill dir resolves outside it |
 | `runtime-root` | the link targets a submodule root (the `gstack` runtime-root link), which is not a skill |
 | `exists, not managed` | something is already at the destination (see below) |

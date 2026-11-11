@@ -1046,7 +1046,7 @@ disable-model-invocation: true'
   [ -z "$(tree "$GRID_HARNESS_HOME")" ]
 }
 
-@test "skill_portable: edge gaps (comment in name, bare .claude, CLAUDE.md, ~/.the-grid, symlink escape, newline dir name)" {
+@test "skill_portable: edge gaps (comment in name, bare .claude, CLAUDE.md, ~/.the-grid not flagged, symlink escape, newline dir name)" {
   . "$REPO_ROOT/scripts/lib/skill-portable.sh"
   local d="$BATS_TEST_TMPDIR/edge" nl=$'\n' s
   fm_skill "$d/foo" 'name: foo # a trailing comment'
@@ -1054,9 +1054,14 @@ disable-model-invocation: true'
   [ "$status" -eq 0 ]
   fm_skill "$d/m1" 'name: m1' 'see .claude config'
   fm_skill "$d/m2" 'name: m2' 'read CLAUDE.md first'
+  for s in m1 m2; do portable_fails "$d/$s" claude-specific; done
+  # The-grid's own names are not harness-specific: .the-grid and .grid/ must NOT cause a skip.
   fm_skill "$d/m3" 'name: m3' 'in ~/.the-grid/x'
   fm_skill "$d/m4" 'name: m4' 'state in ~/.grid/y'
-  for s in m1 m2 m3 m4; do portable_fails "$d/$s" claude-specific; done
+  for s in m3 m4; do
+    run skill_portable "$d/$s"
+    [ "$status" -eq 0 ]
+  done
   # Not flagged: a name that merely starts with .claude, and anything inside a .git dir.
   fm_skill "$d/ok2" 'name: ok2' 'a .claude-plugin dir'
   run skill_portable "$d/ok2"

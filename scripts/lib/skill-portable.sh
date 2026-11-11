@@ -18,8 +18,7 @@
 #   description-long    description is over 1024 chars (YAML-folded)
 #   claude-only-guard   frontmatter carries a Claude-only guard key (disable-model-invocation,
 #                       allowed-tools, hooks, context): another harness would drop the guard
-#   claude-specific     a file mentions .claude (not .claude-foo), .the-grid, .grid/,
-#                       CLAUDE_ or CLAUDE.md
+#   claude-specific     a file mentions .claude (not .claude-foo), CLAUDE_ or CLAUDE.md
 #   symlink-escape      a symlink inside the skill dir resolves outside it
 #
 # These are the Agent Skills spec limits (agentskills.io) plus what is certain to break
@@ -58,9 +57,10 @@ skill_portable() {
   if [ -n "$guard" ]; then echo "claude-only-guard"; return 1; fi
   # -I skips binary files (not read as instructions); -r follows the (command-line) dir even if
   # it is a symlink; .git and node_modules are never skill content. `.claude` counts unless it
-  # is the start of a longer name (.claude-plugin).
+  # is the start of a longer name (.claude-plugin). The-grid's own names (.the-grid, .grid/) are
+  # deliberately not matched: they are not tied to any one harness, so they cannot break one.
   if grep -rqIE --exclude-dir=.git --exclude-dir=node_modules \
-       '\.claude([^A-Za-z0-9_-]|$)|\.the-grid|\.grid/|CLAUDE_|CLAUDE\.md' "$dir" 2>/dev/null; then
+       '\.claude([^A-Za-z0-9_-]|$)|CLAUDE_|CLAUDE\.md' "$dir" 2>/dev/null; then
     echo "claude-specific"; return 1
   fi
   # A symlink that resolves outside the skill dir (python resolves it with realpath). Most skills
