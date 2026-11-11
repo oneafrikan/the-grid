@@ -116,6 +116,7 @@ fi
 # Harness registry helpers and the portability filter for non-Claude skills dirs.
 # shellcheck source=lib/harness.sh
 . "$(dirname "$0")/lib/harness.sh"
+CODEX_AGENTS_RAW="$(harness_field codex agents_dir)"
 # A registry error is refused before anything is wired (nothing is touched): a malformed row or
 # a path that could steer a link (rows_check), or two harnesses sharing one rules_file.
 harness_registry_rows_check && harness_registry_check || { echo "wire: the harness registry is invalid (see above); nothing was changed" >&2; exit 2; }
@@ -305,22 +306,33 @@ if [ "${1:-}" = "--check" ]; then
   # replaces such an entry (real dir/file, foreign or dangling symlink), so it can
   # never be drift. The fresh side lives under $tmp/home: GRID_DRY_HOME redirects every
   # registry path there, the live side resolves through harness_path as the real run does.
-  hlinks() { # $1 = dir to list, $2 = live dir for the shadow filter
+  hlinks() { # $1 = dir, $2 = live shadow filter, $3 = registry path
+    local l t n row
     [ -d "$1" ] || return 0
-    find -H "$1" -maxdepth 1 -type l -print0 | while IFS= read -r -d '' l; do
-      t="$(readlink "$l")" || continue; n="${l##*/}"
-      if [ -n "${2:-}" ] && { [ -e "$2/$n" ] || [ -L "$2/$n" ]; }; then
-        lt="$(readlink "$2/$n" 2>/dev/null || true)"
-        target_is_ours "$lt" || continue
+    find -H "$1" -maxdepth 1 \( -type l -o -type f \) -print0 | while IFS= read -r -d '' l; do
+      n="${l##*/}"
+      if [ -L "$l" ]; then
+        t="$(readlink "$l")" || continue
+        target_is_ours "$t" || continue
+        row="$n -> $t"
+      elif [ "$3" = "$CODEX_AGENTS_RAW" ] && harness_codex_copy_owned "$l"; then
+        row="$n -> $CODEX_COPY_INFO"
+      else
+        continue
       fi
-      if target_is_ours "$t"; then printf '%s -> %s\n' "$n" "$t"; fi
+      if [ -n "${2:-}" ] && { [ -e "$2/$n" ] || [ -L "$2/$n" ]; }; then
+        if ! link_is_ours "$2/$n"; then
+          if [ "$3" != "$CODEX_AGENTS_RAW" ] || ! harness_codex_copy_owned "$2/$n"; then continue; fi
+        fi
+      fi
+      printf '%s\n' "$row"
     done | LC_ALL=C sort
   }
   hd_i=0
   while [ "$hd_i" -lt "${#HD_RAW[@]}" ]; do
     raw="${HD_RAW[$hd_i]}"; live="${HD_DIR[$hd_i]}"; hd_i=$((hd_i + 1))
     fresh="$( GRID_DRY_HOME="$tmp/home"; harness_path "$raw" )"
-    if ! diff <(hlinks "$fresh" "$live") <(hlinks "$live") >"$tmp/harness.diff"; then
+    if ! diff <(hlinks "$fresh" "$live" "$raw") <(hlinks "$live" "" "$raw") >"$tmp/harness.diff"; then
       echo "wire --check: harness drift in $live ('<' = should exist, '>' = stale):" >&2
       cat "$tmp/harness.diff" >&2
       rc=1
@@ -689,6 +701,15 @@ owned_links() {
 }
 has_owned_links() { local _x; IFS= read -r -d '' _x < <(owned_links "$@"); }
 
+owned_codex_copies() {
+  local file
+  [ -d "$1" ] || return 0
+  while IFS= read -r -d '' file; do
+    harness_codex_copy_owned "$file" && printf '%s\0' "$file"
+  done < <(find -H "$1" -maxdepth 1 -type f -print0)
+}
+has_owned_codex_copies() { local _x; IFS= read -r -d '' _x < <(owned_codex_copies "$1"); }
+
 # Dirs that must be writable: the Claude dirs always (they are relinked), the others only when
 # they hold grid links that teardown has to remove.
 preflight_bad=""
@@ -697,7 +718,10 @@ for pf_dir in "$SKILLS_DIR" "$AGENTS_DIR"; do
 done
 for pf_dir in "${HD_DIR[@]:-}"; do
   [ -n "$pf_dir" ] && [ -d "$pf_dir" ] && [ ! -w "$pf_dir" ] || continue
-  ! has_owned_links "$pf_dir" -maxdepth 1 || preflight_bad="$preflight_bad $pf_dir"
+  if has_owned_links "$pf_dir" -maxdepth 1 ||
+     { [ "$pf_dir" = "$(harness_path "$CODEX_AGENTS_RAW")" ] && has_owned_codex_copies "$pf_dir"; }; then
+    preflight_bad="$preflight_bad $pf_dir"
+  fi
 done
 if [ -d "$RULES_DIR/grid" ] && [ ! -w "$RULES_DIR/grid" ] && has_owned_links "$RULES_DIR/grid"; then
   preflight_bad="$preflight_bad $RULES_DIR/grid"
@@ -709,11 +733,25 @@ if [ -n "$preflight_bad" ]; then
 fi
 
 UNDO_FILE="$(mktemp "${TMPDIR:-/tmp}/wire-undo.XXXXXX")"
+COPY_UNDO_DIR="$(mktemp -d "${TMPDIR:-/tmp}/wire-copies.XXXXXX")"
+: > "$COPY_UNDO_DIR/old"; : > "$COPY_UNDO_DIR/new"
+COPY_BACKUPS=0
 WIRE_COMPLETE=0
 TEARDOWN_FAILED=0
 wire_exit() {
-  local rc="$1" link target
+  local rc="$1" link target backup restore_failed=0
   trap - EXIT INT TERM HUP          # the restore below must not re-enter the trap
+  if [ "$WIRE_COMPLETE" != 1 ]; then
+    # Remove only unchanged copies made this run, then restore exact old bytes/modes.
+    while IFS= read -r -d '' link; do
+      if harness_codex_copy_owned "$link"; then rm -f -- "$link" || restore_failed=1; fi
+    done < "$COPY_UNDO_DIR/new"
+    while IFS= read -r -d '' link && IFS= read -r -d '' backup; do
+      # Exclusive publication also closes the absent-check/restore race: a new
+      # foreign destination wins, and the old bytes remain in the backup dir.
+      python3 -I "$HARNESS_CODEX_COPY_PY" restore "$backup" "$link" || restore_failed=1
+    done < "$COPY_UNDO_DIR/old"
+  fi
   if [ "$WIRE_COMPLETE" != 1 ] && [ -s "$UNDO_FILE" ]; then
     while IFS= read -r -d '' link && IFS= read -r -d '' target; do
       if [ ! -e "$link" ] && [ ! -L "$link" ]; then
@@ -724,6 +762,11 @@ wire_exit() {
     echo "wire: failed or interrupted; the links it had removed were restored" >&2
   fi
   rm -f "$UNDO_FILE"
+  if [ "$restore_failed" = 0 ]; then
+    rm -rf "$COPY_UNDO_DIR"
+  else
+    echo "wire: could not restore Codex agent copies; backups kept at $COPY_UNDO_DIR" >&2
+  fi
   exit "$rc"
 }
 trap 'wire_exit $?' EXIT
@@ -760,6 +803,18 @@ teardown_grid_links() {
     fi
   done < <(owned_links "$dir" -maxdepth 1)
 }
+teardown_codex_copies() {
+  local file backup
+  while IFS= read -r -d '' file; do
+    COPY_BACKUPS=$((COPY_BACKUPS + 1)); backup="$COPY_UNDO_DIR/$COPY_BACKUPS"
+    cp -p "$file" "$backup"
+    printf '%s\0%s\0' "$file" "$backup" >> "$COPY_UNDO_DIR/old"
+    if ! rm -- "$file"; then
+      echo "wire: cannot remove $file" >&2
+      TEARDOWN_FAILED=$((TEARDOWN_FAILED + 1))
+    fi
+  done < <(owned_codex_copies "$1")
+}
 teardown_grid_links "$SKILLS_DIR"
 teardown_grid_links "$AGENTS_DIR"
 # Every non-Claude registry dir too, active or not: a harness that was just deactivated
@@ -770,6 +825,7 @@ teardown_grid_links "$AGENTS_DIR"
 hd_i=0
 while [ "$hd_i" -lt "${#HD_DIR[@]}" ]; do
   teardown_grid_links "${HD_DIR[$hd_i]}" "${HD_KIND[$hd_i]}@${HD_RAW[$hd_i]}"
+  if [ "${HD_RAW[$hd_i]}" = "$CODEX_AGENTS_RAW" ]; then teardown_codex_copies "${HD_DIR[$hd_i]}"; fi
   hd_i=$((hd_i + 1))
 done
 
@@ -1144,13 +1200,15 @@ fi
 #           gstack runtime root) is not a skill at all: reason runtime-root, no stdout line.
 #   agents  agent-factory/projects/<p>/_<compose_target>/agents/* for wired projects. A
 #           compose target that was never run has no dir and simply links nothing.
-# wire_harness_link never replaces anything: ~/.agents/skills is also written by other
+# wire_harness_link preserves existing entries: ~/.agents/skills is also written by other
 # tools, so ANY entry already at the destination after teardown (real dir or file,
 # foreign or dangling symlink) is theirs and is skipped. Its stdout line is
 # `  skip (<disp>: exists, not managed)`, not the Claude-skills `skip (real dir, not
 # managed)` line. reconcile.sh does not parse wire.sh output: it dry-wires into a
 # throwaway home and only looks at the Claude skills dir, so a harness dir is never offered
 # for moving.
+# Codex agent copies were validated and backed up during teardown; only that native
+# agent destination uses physical files. Other harnesses and all skills remain links.
 # Manifest rows use kind skill@<~dir> / agent@<~dir> (home-independent), reason last.
 # $6 (optional) = the composed project the file comes from: a destination this run already
 # linked for ANOTHER project is a name clash between projects, not a foreign entry.
@@ -1185,7 +1243,12 @@ wire_harness_link() { # $1=src $2=dest dir $3=kind (skill|agent) $4=~/-form dir 
   # -n: never follow a directory symlink that appeared at the destination since the check above
   # (BSD and GNU safe; -T is GNU only). It then fails with "File exists" instead of writing
   # the link inside whatever that symlink points at.
-  ln -sn -- "$src" "$dest_dir/$name"
+  if [ "$kind" = agent ] && [ "$disp" = "$CODEX_AGENTS_RAW" ]; then
+    printf '%s\0' "$dest_dir/$name" >> "$COPY_UNDO_DIR/new"
+    python3 -I "$HARNESS_CODEX_COPY_PY" copy "$src" "$dest_dir/$name"
+  else
+    ln -sn -- "$src" "$dest_dir/$name"
+  fi
   HL_DEST+=("$dest_dir/$name"); HL_PROJ+=("$project")
   MANIFEST_ROWS+=("$kind@$disp	$name	$src	wired	")
   echo "  wired ($disp): $name"

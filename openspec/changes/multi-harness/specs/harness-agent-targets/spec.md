@@ -21,6 +21,13 @@ Generate native subagent files for the harnesses that support them, from the sam
 - **THEN** it generates `agents/_codex/<name>.toml` from each root Markdown agent's frontmatter identity and complete body, inherits the Codex model, rejects unsupported metadata and supports dry-run and drift checks
 - **AND** Codex wiring gives those root-owned adapters precedence over composed names while preserving foreign destinations
 
+#### Scenario: Native Codex files are physical managed copies
+- **WHEN** a Codex agent is wired
+- **THEN** its destination is a regular file with a source-path/body-hash comment and the exact generated TOML payload; skills and other harness agents remain symlinks
+- **AND** old grid-owned agent symlinks migrate to copies, while foreign and user-edited files are preserved
+- **AND** drift checks detect missing or stale copies; deactivation and uninstall remove only unchanged copies whose source is inside this grid
+- **AND** an interrupted or failed wire restores original agent bytes and permissions
+
 #### Scenario: OpenCode permissions
 - **WHEN** `compose.py <config> --target opencode` runs for a role whose allowlist lacks Edit, Write, WebFetch and WebSearch
 - **THEN** the file has `mode: subagent`, `permission.edit: deny` and `permission.webfetch: deny`

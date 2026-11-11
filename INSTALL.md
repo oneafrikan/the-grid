@@ -66,7 +66,8 @@ them they write:
 - **`~/.claude/rules/grid/`**: symlinks to coding-convention rule packs. Opt-in:
   nothing is written without a `rules:<pack>` entry ([docs/rules.md](docs/rules.md)).
 - **Other harness directories** (such as `~/.agents/skills`): opt-in via
-  `harness:<name>` entries, never replacing an entry that is already there
+  `harness:<name>` entries, preserving foreign entries. Native Codex agents are
+  physical managed copies; skills and other harness agents remain symlinks
   ([docs/harnesses.md](docs/harnesses.md)).
 - **Inside the clone**: `.wired.manifest`, `SKILLS.md`, and `baseline-submodules.txt`
   plus `machines/<host>.txt` (seeded from the examples when absent). `bootstrap.sh`
@@ -74,7 +75,8 @@ them they write:
   `agent-factory/.venv` and `agent-factory/projects/`.
 
 It never overwrites a real directory or a foreign symlink in those folders; it
-only replaces symlinks that point into this repo. Neither script writes `~/.grid/`
+only replaces symlinks that point into this repo and unchanged managed Codex agent
+copies. Edited copies are preserved. Neither script writes `~/.grid/`
 (only `grid install` does). To undo all of it: `bash scripts/uninstall.sh` (a dry run;
 `--yes` removes, see [BOOTSTRAP.md](BOOTSTRAP.md#uninstalling)).
 

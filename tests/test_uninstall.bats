@@ -76,6 +76,29 @@ add_foreign() {
   printf 'mine\n' > "$RULES_DIR/grid/mypack/my-own-rule.md"
 }
 
+@test "uninstall removes unchanged Codex copies and preserves edited or foreign files" {
+  local source="$MOCK_GRID/agent-factory/projects/p/_codex/agents" dir="$GRID_HARNESS_HOME/.codex/agents"
+  mkdir -p "$source"
+  printf 'developer_instructions = "owned"\n' > "$source/owned.toml"
+  printf 'developer_instructions = "edited"\n' > "$source/edited.toml"
+  wire_machine
+  [ -f "$dir/owned.toml" ] && [ ! -L "$dir/owned.toml" ]
+  printf '# user edit\n' >> "$dir/edited.toml"
+  cp "$dir/edited.toml" "$BATS_TEST_TMPDIR/edited-copy"
+  printf 'mine\n' > "$dir/foreign.toml"
+  run bash "$UNINSTALL"
+  [ "$status" -eq 0 ]
+  [ -f "$dir/owned.toml" ]
+  run bash "$UNINSTALL" --yes
+  [ "$status" -eq 0 ]
+  [ ! -e "$dir/owned.toml" ]
+  cmp "$dir/edited.toml" "$BATS_TEST_TMPDIR/edited-copy"
+  [ "$(cat "$dir/foreign.toml")" = mine ]
+  run bash "$UNINSTALL" --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing to remove"* ]]
+}
+
 # make_clone: turn the mock grid into a clean git clone: committed, with a bare remote that
 # has everything pushed.
 make_clone() {

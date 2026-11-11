@@ -168,6 +168,13 @@ Added after the original groups. Path and format come from agy's bundled docs (`
 
 ## Codex runtime parity repair
 
+Physical-file follow-up (symlink rejection confirmed by controlled probes):
+
+- [x] Reproduce the old installer's symlink output and verify physical-file A/B probes.
+- [x] Install managed physical Codex agents without changing skills, other harnesses or user config.
+- [x] Verify ownership, migration, drift, rollback, deactivation, uninstall and repeat-run regressions.
+- [ ] Verify the installed native specialist with no role-config override.
+
 - [x] Preserve the parallel session's shared role wording and portability policy unchanged.
 - [x] Generate native root-owned agents from their single Markdown source with safe repeat runs and root precedence.
 - [x] Replace ignored Codex sandbox overrides with supported no-shell capability restrictions; retain inherited models and permissions.

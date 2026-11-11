@@ -25,11 +25,20 @@
 # redirect them. The default sits next to this file, so a mock GRID_DIR never needs its own copy.
 
 _HARNESS_REGISTRY_DEFAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harnesses.txt"
+HARNESS_CODEX_COPY_PY="${_HARNESS_REGISTRY_DEFAULT%/*}/codex-agent-copy.py"
 if [ "${GRID_ALLOW_REGISTRY:-}" = 1 ]; then
   HARNESS_REGISTRY="${HARNESS_REGISTRY:-$_HARNESS_REGISTRY_DEFAULT}"
 else
   HARNESS_REGISTRY="$_HARNESS_REGISTRY_DEFAULT"
 fi
+
+# Both callers provide target_is_ours: ownership requires unchanged bytes AND a
+# source inside this grid, rather than just a marker someone copied from another clone.
+harness_codex_copy_owned() {
+  CODEX_COPY_INFO="$(python3 -I "$HARNESS_CODEX_COPY_PY" inspect "$1" 2>/dev/null)" || return 1
+  CODEX_COPY_SOURCE="${CODEX_COPY_INFO%%$'\t'*}"
+  target_is_ours "$CODEX_COPY_SOURCE"
+}
 
 # Registry rows with comments and blank lines removed. A plain awk (default field
 # split) is used on purpose: the file may be edited with spaces or tabs.

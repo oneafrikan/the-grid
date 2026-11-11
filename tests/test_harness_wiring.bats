@@ -57,6 +57,14 @@ stub_agent() {
   printf 'x\n' > "$MOCK_GRID/agent-factory/projects/p/_$1/agents/$2"
 }
 
+# Codex refuses symlinked role files even when discovery lists their names.
+assert_codex_copy() {
+  [ -f "$1" ] && [ ! -L "$1" ]
+  local info; info="$(python3 -I "$REPO_ROOT/scripts/lib/codex-agent-copy.py" inspect "$1")"
+  [ "${info%%$'\t'*}" = "$2" ]
+  cmp <(tail -n +2 "$1") "$2"
+}
+
 # ---------------------------------------------------------------- activation
 
 @test "no harness: entry: nothing is created under the harness home" {
@@ -208,19 +216,21 @@ only_shared_dir() {
 
 # ---------------------------------------------------------------- codex agents (group 3)
 
-@test "GRID_HARNESS=codex links a composed _codex agent into .codex/agents; a second run changes nothing" {
+@test "GRID_HARNESS=codex installs a physical native agent; a second run changes nothing" {
   stub_agent codex x.toml
   GRID_HARNESS=codex wire
   [ "$status" -eq 0 ]
-  [ -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
-  # The link resolves to the composed file inside the (mock) grid.
-  [ "$(readlink "$GRID_HARNESS_HOME/.codex/agents/x.toml")" = "$MOCK_GRID/agent-factory/projects/p/_codex/agents/x.toml" ]
+  [ -f "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
+  [ ! -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
+  assert_codex_copy "$GRID_HARNESS_HOME/.codex/agents/x.toml" "$MOCK_GRID/agent-factory/projects/p/_codex/agents/x.toml"
+  cp "$GRID_HARNESS_HOME/.codex/agents/x.toml" "$BATS_TEST_TMPDIR/first-copy"
   local t1 m1
   t1="$(tree "$GRID_HARNESS_HOME")"; m1="$(cat "$MANIFEST")"
   GRID_HARNESS=codex wire
   [ "$status" -eq 0 ]
   [ "$(tree "$GRID_HARNESS_HOME")" = "$t1" ]
   [ "$(cat "$MANIFEST")" = "$m1" ]
+  cmp "$BATS_TEST_TMPDIR/first-copy" "$GRID_HARNESS_HOME/.codex/agents/x.toml"
 }
 
 # ---------------------------------------------------------------- space / XDG
@@ -269,7 +279,8 @@ only_shared_dir() {
     run env -u GRID_HARNESS_HOME bash "$REPO_ROOT/scripts/wire.sh"
   [ "$status" -eq 0 ]
   [ -L "$dry/.agents/skills/skill-alpha" ]
-  [ -L "$dry/.codex/agents/x.toml" ]
+  [ -f "$dry/.codex/agents/x.toml" ]
+  [ ! -L "$dry/.codex/agents/x.toml" ]
   [ "$(tree "$rh")" = "$before" ]                       # nothing new under the real home
   cmp "$rh/.agents/skills/sentinel" "$BATS_TEST_TMPDIR/s1"
   cmp "$rh/.codex/agents/sentinel.toml" "$BATS_TEST_TMPDIR/s2"
@@ -288,7 +299,8 @@ only_shared_dir() {
   [ "$status" -eq 0 ]
   [ "$(tree "$GRID_HARNESS_HOME")" = "$t1" ]
   [ "$(cat "$MANIFEST")" = "$m1" ]
-  [ -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
+  [ -f "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
+  [ ! -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
 }
 
 @test "-harness: removes the grid links and keeps a foreign link" {
@@ -296,7 +308,8 @@ only_shared_dir() {
   stub_agent codex x.toml
   wire
   [ -L "$HS/skill-alpha" ]
-  [ -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
+  [ -f "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
+  [ ! -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
   mkdir -p "$OTHER_DIR/ext"
   ln -s "$OTHER_DIR/ext" "$HS/external"
   printf 'harness:codex\nharness:opencode\n-harness:codex\n-harness:opencode\n' > "$OVERLAY"
@@ -304,7 +317,7 @@ only_shared_dir() {
   [ "$status" -eq 0 ]
   [ ! -e "$HS/skill-alpha" ]
   [ ! -L "$HS/skill-alpha" ]
-  [ ! -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
+  [ ! -e "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
   [ "$(readlink "$HS/external")" = "$OTHER_DIR/ext" ]
 }
 
@@ -450,7 +463,8 @@ only_shared_dir() {
   printf 'y\n' > "$MOCK_GRID/agent-factory/projects/q/_codex/agents/y.toml"
   wire
   [ "$status" -eq 0 ]
-  [ -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
+  [ -f "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
+  [ ! -L "$GRID_HARNESS_HOME/.codex/agents/x.toml" ]
   [ ! -e "$GRID_HARNESS_HOME/.codex/agents/y.toml" ]
   grep -qF "agent@~/.codex/agents	x.toml	" "$MANIFEST"
 }
@@ -886,11 +900,12 @@ STUB
   # pass left openclaw deactivated, so look at the first two harnesses' dirs directly.)
   printf 'harness:codex\nharness:gemini\nharness:opencode\n' > "$OVERLAY"
   wire
-  [ -L "$GRID_HARNESS_HOME/.codex/agents/a.toml" ]
+  [ -f "$GRID_HARNESS_HOME/.codex/agents/a.toml" ]
+  [ ! -L "$GRID_HARNESS_HOME/.codex/agents/a.toml" ]
   [ -L "$GRID_HARNESS_HOME/.gemini/agents/a.md" ]
   printf 'harness:codex\nharness:gemini\nharness:opencode\n-harness:codex\n' > "$OVERLAY"
   wire
-  [ ! -L "$GRID_HARNESS_HOME/.codex/agents/a.toml" ]
+  [ ! -e "$GRID_HARNESS_HOME/.codex/agents/a.toml" ]
   [ -L "$GRID_HARNESS_HOME/.gemini/agents/a.md" ]
   [ -L "$HS/skill-alpha" ]
   printf 'harness:codex\nharness:gemini\nharness:opencode\n-harness:gemini\n' > "$OVERLAY"
@@ -963,7 +978,7 @@ write_registry() { # $@ = row lines
   [[ "$output" != *"skip (real dir, not managed)"* ]]
   grep -qF "agent@~/.codex/agents	a.toml	$MOCK_GRID/agent-factory/projects/q/_codex/agents/a.toml	skipped	name clash with p" "$MANIFEST"
   # The first project's agent is the one linked.
-  [ "$(readlink "$GRID_HARNESS_HOME/.codex/agents/a.toml")" = "$MOCK_GRID/agent-factory/projects/p/_codex/agents/a.toml" ]
+  assert_codex_copy "$GRID_HARNESS_HOME/.codex/agents/a.toml" "$MOCK_GRID/agent-factory/projects/p/_codex/agents/a.toml"
 }
 
 @test "a truly foreign entry keeps the 'exists, not managed' wording" {
@@ -1173,10 +1188,10 @@ metadata:
   wire
   [ "$status" -eq 0 ]
   local live="$GRID_HARNESS_HOME/.codex/agents/grid-ponytail.toml"
-  [ "$(readlink "$live")" = "$MOCK_GRID/agents/_codex/grid-ponytail.toml" ]
+  assert_codex_copy "$live" "$MOCK_GRID/agents/_codex/grid-ponytail.toml"
   wire
   [ "$status" -eq 0 ]
-  [ "$(readlink "$live")" = "$MOCK_GRID/agents/_codex/grid-ponytail.toml" ]
+  assert_codex_copy "$live" "$MOCK_GRID/agents/_codex/grid-ponytail.toml"
   wire --check
   [ "$status" -eq 0 ]
 }
@@ -1190,4 +1205,143 @@ metadata:
   [ "$status" -eq 0 ]
   [ "$(cat "$GRID_HARNESS_HOME/.codex/agents/grid-ponytail.toml")" = mine ]
   [[ "$output" == *"exists, not managed): grid-ponytail.toml"* ]]
+}
+
+@test "Codex copies migrate owned symlinks and check catches stale or missing payloads" {
+  stub_agent codex x.toml
+  local live="$GRID_HARNESS_HOME/.codex/agents/x.toml"
+  local source="$MOCK_GRID/agent-factory/projects/p/_codex/agents/x.toml"
+  mkdir -p "$(dirname "$live")"
+  ln -s "$source" "$live"
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire --check
+  [ "$status" -eq 1 ]
+  wire
+  [ "$status" -eq 0 ]
+  assert_codex_copy "$live" "$source"
+  printf 'updated source\n' > "$source"
+  wire --check
+  [ "$status" -eq 1 ]
+  wire
+  [ "$status" -eq 0 ]
+  assert_codex_copy "$live" "$source"
+  rm "$live"
+  wire --check
+  [ "$status" -eq 1 ]
+}
+
+@test "Codex copies preserve user edits, foreign files and FIFOs on rewire and deactivation" {
+  stub_agent codex edited.toml
+  stub_agent codex foreign.toml
+  stub_agent codex pipe.toml
+  local dir="$GRID_HARNESS_HOME/.codex/agents"
+  mkdir -p "$dir"
+  printf 'mine\n' > "$dir/foreign.toml"
+  mkfifo "$dir/pipe.toml"
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  printf '# user edit\n' >> "$dir/edited.toml"
+  cp "$dir/edited.toml" "$BATS_TEST_TMPDIR/edited"
+  wire
+  [ "$status" -eq 0 ]
+  cmp "$dir/edited.toml" "$BATS_TEST_TMPDIR/edited"
+  printf '%s\n' '-harness:codex' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  cmp "$dir/edited.toml" "$BATS_TEST_TMPDIR/edited"
+  [ "$(cat "$dir/foreign.toml")" = mine ]
+  [ -p "$dir/pipe.toml" ]
+}
+
+@test "Codex copy ownership handles spaces and refuses symlink and FIFO lookalikes" {
+  local source="$MOCK_GRID/source space.toml" copy="$OTHER_DIR/copied agent.toml"
+  printf 'developer_instructions = "body"\n' > "$source"
+  python3 -I "$REPO_ROOT/scripts/lib/codex-agent-copy.py" copy "$source" "$copy"
+  assert_codex_copy "$copy" "$source"
+  ln -s "$copy" "$OTHER_DIR/symlink"
+  mkfifo "$OTHER_DIR/fifo"
+  run python3 -I "$REPO_ROOT/scripts/lib/codex-agent-copy.py" inspect "$OTHER_DIR/symlink"
+  [ "$status" -eq 1 ]
+  run python3 -I "$REPO_ROOT/scripts/lib/codex-agent-copy.py" inspect "$OTHER_DIR/fifo"
+  [ "$status" -eq 1 ]
+}
+
+@test "Codex copy rollback restores original bytes, permissions and migrated symlinks" {
+  stub_agent codex a.toml
+  stub_agent codex legacy.toml
+  stub_agent codex z.toml
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  local dir="$GRID_HARNESS_HOME/.codex/agents" source="$MOCK_GRID/agent-factory/projects/p/_codex/agents"
+  chmod 600 "$dir/a.toml"
+  cp "$dir/a.toml" "$BATS_TEST_TMPDIR/old-a"
+  cp "$dir/z.toml" "$BATS_TEST_TMPDIR/old-z"
+  rm "$dir/legacy.toml"
+  ln -s "$source/legacy.toml" "$dir/legacy.toml"
+  printf 'new a\n' > "$source/a.toml"
+  printf 'new z\n' > "$source/z.toml"
+  local stubs="$BATS_TEST_TMPDIR/failing-copy" real_python
+  real_python="$(command -v python3)"
+  mkdir -p "$stubs"
+  cat > "$stubs/python3" <<'SH'
+#!/usr/bin/env bash
+case "$*" in *codex-agent-copy.py*copy*z.toml*) exit 9 ;; esac
+exec "$REAL_COPY_PYTHON" "$@"
+SH
+  chmod +x "$stubs/python3"
+  REAL_COPY_PYTHON="$real_python" PATH="$stubs:$PATH" wire
+  [ "$status" -ne 0 ]
+  cmp "$dir/a.toml" "$BATS_TEST_TMPDIR/old-a"
+  cmp "$dir/z.toml" "$BATS_TEST_TMPDIR/old-z"
+  "$real_python" -c 'import os,stat,sys; assert stat.S_IMODE(os.stat(sys.argv[1]).st_mode)==0o600' "$dir/a.toml"
+  [ -L "$dir/legacy.toml" ]
+  [ "$(readlink "$dir/legacy.toml")" = "$source/legacy.toml" ]
+}
+
+@test "Codex copy rollback preserves backup bytes when restoration fails" {
+  stub_agent codex a.toml
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  local live="$GRID_HARNESS_HOME/.codex/agents/a.toml"
+  cp "$live" "$BATS_TEST_TMPDIR/original"
+  local stubs="$BATS_TEST_TMPDIR/restore-failure" real_python real_cp backup
+  real_python="$(command -v python3)"; real_cp="$(command -v cp)"
+  mkdir -p "$stubs"
+  cat > "$stubs/python3" <<'SH'
+#!/usr/bin/env bash
+case "$*" in *codex-agent-copy.py*copy*a.toml*) exit 9 ;; esac
+exec "$REAL_COPY_PYTHON" "$@"
+SH
+  cat > "$stubs/cp" <<'SH'
+#!/usr/bin/env bash
+case "$2" in */wire-copies.*/*) exit 8 ;; esac
+exec "$REAL_COPY_CP" "$@"
+SH
+  chmod +x "$stubs/python3" "$stubs/cp"
+  REAL_COPY_CP="$real_cp" REAL_COPY_PYTHON="$real_python" PATH="$stubs:$PATH" wire
+  [ "$status" -ne 0 ]
+  backup="$(printf '%s\n' "$stderr" | sed -n 's/^wire:.*backups kept at //p')"
+  [ -n "$backup" ] && [ -d "$backup" ]
+  cmp "$backup/1" "$BATS_TEST_TMPDIR/original"
+  rm -rf "$backup"
+}
+
+@test "Codex physical files leave Claude and Antigravity agents and skills symlinked" {
+  stub_agent claude-code claude.md
+  stub_agent antigravity agy.md
+  stub_agent codex codex.toml
+  printf 'harness:codex\nharness:antigravity\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_AGENTS/claude.md" ]
+  cmp "$MOCK_AGENTS/claude.md" "$MOCK_GRID/agent-factory/projects/p/_claude-code/agents/claude.md"
+  [ -L "$GRID_HARNESS_HOME/.gemini/config/agents/agy.md" ]
+  cmp "$GRID_HARNESS_HOME/.gemini/config/agents/agy.md" "$MOCK_GRID/agent-factory/projects/p/_antigravity/agents/agy.md"
+  [ -L "$MOCK_SKILLS/skill-alpha" ]
+  [ -L "$GRID_HARNESS_HOME/.gemini/config/skills/skill-alpha" ]
+  cmp "$MOCK_SKILLS/skill-alpha/SKILL.md" "$GRID_HARNESS_HOME/.gemini/config/skills/skill-alpha/SKILL.md"
+  assert_codex_copy "$GRID_HARNESS_HOME/.codex/agents/codex.toml" "$MOCK_GRID/agent-factory/projects/p/_codex/agents/codex.toml"
 }

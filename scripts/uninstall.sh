@@ -7,6 +7,7 @@
 #   - links in SKILLS_DIR and AGENTS_DIR (the gstack runtime-root link included)
 #   - rule-pack links under RULES_DIR/grid/, then grid/ (and pack dirs) once empty
 #   - links in the other harness dirs listed in scripts/lib/harnesses.txt
+#   - unchanged managed physical files in Codex's native agents dir
 #   - the generated auto-handoff entry in CLAUDE_CONFIG_DIR/settings.json (via
 #     deploy_hooks.py --user --hooks "", the path `-hook:auto-handoff` takes); your own
 #     hooks and keys stay. Caveat: the writer reformats the file as 2-space JSON the first
@@ -226,8 +227,8 @@ runtime_link_names() {
   done < "$f"
 }
 
-step_links() { # <dir> <kind>
-  local dir="$1" kind="$2" phys entry name k foreign=0 rt
+step_links() { # <dir> <kind> [physical Codex agents: 1]
+  local dir="$1" kind="$2" copies="${3:-0}" phys entry name k foreign=0 rt
   [ -d "$dir" ] || return 0
   phys="$(cd -P "$dir" 2>/dev/null && pwd -P)" || return 0
   # Several harnesses share ~/.agents/skills: visit each physical dir once.
@@ -241,6 +242,12 @@ step_links() { # <dir> <kind>
       k="$kind"
       case "$rt" in *" $name "*) [ "$kind" = skill ] && k=runtime-link ;; esac
       drop_link "$k" "$entry"
+    elif [ "$copies" = 1 ] && harness_codex_copy_owned "$entry"; then
+      if [ "$YES" = 1 ] && ! rm -- "$entry" 2>/dev/null; then
+        say_failed "$kind $entry (cannot remove)"
+      else
+        say_remove "$kind $entry (managed copy from $CODEX_COPY_SOURCE)"
+      fi
     else
       foreign=$((foreign + 1))
     fi
@@ -288,7 +295,7 @@ EOF
 # Every distinct non-Claude dir in the registry, active or not (a deactivated harness
 # may still hold links), resolved the way wire.sh resolves them.
 step_harness_links() {
-  local h col raw dir seen="|"
+  local h col raw dir copies seen="|"
   while IFS= read -r h; do
     [ "$h" = claude ] && continue
     for col in skills_dir agents_dir; do
@@ -300,7 +307,9 @@ step_harness_links() {
         echo "uninstall: warning: cannot resolve harness dir $raw (is HOME set?); not checked" >&2
         continue
       fi
-      step_links "$dir" "harness"
+      copies=0
+      if [ "$h" = codex ] && [ "$col" = agents_dir ]; then copies=1; fi
+      step_links "$dir" "harness" "$copies"
     done
   done < <(harness_names)
 }

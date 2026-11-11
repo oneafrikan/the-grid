@@ -1,6 +1,6 @@
 # Harnesses
 
-the-grid wires its curated skills into Claude Code by default. With a harness opted in, `scripts/wire.sh` also fans the same wired set out to the other agent harnesses (Codex CLI, OpenCode, Gemini CLI, Pi, OpenClaw, Antigravity CLI). Nothing is hand-copied: the registry drives it, and the links are generated on every run.
+the-grid wires its curated skills into Claude Code by default. With a harness opted in, `scripts/wire.sh` also fans the same wired set out to the other agent harnesses (Codex CLI, OpenCode, Gemini CLI, Pi, OpenClaw, Antigravity CLI). The registry drives it: skills and other harness agents use symlinks; native Codex agents use managed physical files.
 
 This page covers the skill wiring (spec `harness-wiring`) and rules delivery (spec `harness-rules-delivery`). Agent formats are under "Agent targets" below. Apart from Antigravity (verified in a live `agy` session on 2026-11-11, see its section), no target has been smoke-tested on a real install yet; each target's section lists what is unverified.
 
@@ -112,9 +112,9 @@ Both rows have `-` for `agents_dir`, `compose_target` and (OpenClaw) `rules_file
 
 ## Ownership rules
 
-- Only symlinks whose target is inside the grid dir (`$GRID_DIR/...`) are ever removed. Real files and dirs, foreign symlinks, and links into a sibling such as `<grid>-private` are left alone.
+- Symlinks are removed only when their target is inside the grid dir (`$GRID_DIR/...`). Native Codex agents are the sole physical-file exception: a source/hash comment identifies an unchanged managed copy. Foreign files, edited copies, directories and foreign symlinks are preserved.
 - Teardown covers every non-Claude registry dir, active or not, so deactivating a harness removes its links.
-- **Existing entries in a non-Claude dir are never replaced.** `~/.agents/skills` is also written by other tools, so a real dir, a foreign symlink or a dangling symlink at the destination wins and the grid skips it (`exists, not managed`; stdout `  skip (~/.agents/skills: exists, not managed): <name>`). The Claude dirs follow the same rule for a foreign or dangling symlink and for a real file (`skip (not managed)`); only a link into the grid is replaced there. The line deliberately does not start `skip (real dir, not managed)`: that prefix is the marker for a shadowed Claude skill slot (`scripts/reconcile.sh` moves such dirs aside to a dated backup dir), so a harness skip must not reuse it.
+- **Foreign entries in a non-Claude dir are never replaced.** `~/.agents/skills` is also written by other tools, so a real dir, a foreign symlink or a dangling symlink at the destination wins and the grid skips it (`exists, not managed`; stdout `  skip (~/.agents/skills: exists, not managed): <name>`). The Claude dirs follow the same rule for a foreign or dangling symlink and for a real file (`skip (not managed)`); only a link into the grid is replaced there. Unchanged managed Codex copies are refreshed from source. The skip line deliberately does not start `skip (real dir, not managed)`: that prefix is reserved for `scripts/reconcile.sh`.
 - A skills dir that is itself a symlink is fine: it is followed, both when tearing down and when listing for `--check`.
 - Dirs are created only when a link is about to be made.
 
@@ -225,6 +225,15 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
 ```
 
 - Required keys are `name`, `description` and `developer_instructions`.
+- Codex role execution rejects symlinked user role files, even when discovery lists
+  their names ([upstream change](https://github.com/openai/codex/pull/39299)). Wiring
+  installs a physical TOML file with one source-path/body-SHA256 comment. Its native
+  payload remains byte-identical to the generated source. Skills stay symlinked.
+- Rewiring migrates grid-owned agent symlinks, updates unchanged copies and preserves
+  foreign or edited files. `--check` detects missing or stale copies; deactivation and
+  uninstall remove only unchanged owned copies. Failed runs restore original bytes
+  and permissions; if restoration is blocked, the backup directory is kept and
+  reported. No extra role mappings are added to the user's configuration.
 - Models inherit from the session; Claude model aliases are not copied into Codex.
 - An explicit allowlist without Bash adds `features.shell_tool = false`.
 - Agent files cannot override parent sandbox, approval policy or MCP configuration.
@@ -246,10 +255,11 @@ scratch repository with `workspace-write` and `on-request` approvals:
   A native typed Tron invocation loaded its skill from the canonical checkout.
 - Native registration verified: all 27 specialist names appeared in the actual
   `agent_type` selector schema after user-level installation.
-- Native execution pending: an actual `spawn_agent` call selected
-  `agent_type="grid-ponytail"` with `fork_turns="none"`, but the backend returned
+- Before the physical-file fix, an actual `spawn_agent` call selected
+  `agent_type="grid-ponytail"` with `fork_turns="none"`, but the role loader returned
   `agent type is currently not available`. No child was created. Registration and
-  discovery do not establish successful specialist execution.
+  discovery do not establish successful specialist execution. Physical-file A/B
+  probes then succeeded; final managed-install verification remains pending.
 
 ### OpenCode
 
