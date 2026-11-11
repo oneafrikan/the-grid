@@ -285,7 +285,7 @@ the-grid doesn't already provide, and what it moves stays recoverable in the bac
 
 wire.sh wires skills in two passes:
 
-1. **Repo skills first** (alphabetical, later wins on a name clash: anthropic, gstack, jeffallan, mattpocock, superpowers)
+1. **Repo skills first** (alphabetical, later wins on a name clash: anthropic, jeffallan, mattpocock, superpowers)
 2. **Skills in `skills/` second** — your own skills in `~/.the-grid/skills/`, which override any same-named repo skill
 
 So if you've modified mattpocock's `tdd` and put it in `~/.the-grid/skills/tdd/`, your version

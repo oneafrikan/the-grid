@@ -30,10 +30,7 @@
 #                          `hook:auto-handoff` re-enables it, a later file wins)
 #
 # Precedence: repos are wired alphabetically; later wins on name collision.
-# Intentional order: anthropic → gstack → jeffallan → mattpocock → superpowers.
-# gstack beats mattpocock by design — if both list the same skill name,
-# remove the mattpocock entry here so gstack's version is served.
-# Current gstack-wins resolutions: qa, review.
+# Intentional order: anthropic → jeffallan → mattpocock → superpowers.
 #
 # To apply changes: bash ~/.the-grid/scripts/wire.sh
 #
@@ -66,51 +63,7 @@ anthropic/skill-creator
 anthropic/template
 anthropic/xlsx
 
-# --- gstack — workflow, orchestration, and quality tools (42 skills) ---
-# OpenClaw-specific tools (gstack-openclaw-*, setup-gbrain, sync-gbrain, open-gstack-browser)
-# and benchmark-models live in machine overlays.
-gstack/autoplan
-gstack/benchmark
-gstack/browse
-gstack/canary
-gstack/careful
-gstack/codex
-gstack/context-restore
-gstack/context-save
-gstack/cso
-gstack/design-consultation
-gstack/design-html
-gstack/design-review
-gstack/design-shotgun
-gstack/devex-review
-gstack/document-generate
-gstack/document-release
-gstack/freeze
-gstack/guard
-gstack/health
-gstack/investigate
-gstack/land-and-deploy
-gstack/landing-report
-gstack/learn
-gstack/make-pdf
-gstack/office-hours
-gstack/pair-agent
-gstack/plan-ceo-review
-gstack/plan-design-review
-gstack/plan-devex-review
-gstack/plan-eng-review
-gstack/plan-tune
-gstack/qa
-gstack/qa-only
-gstack/retro
-gstack/review
-gstack/scrape
-gstack/setup-browser-cookies
-gstack/setup-deploy
-gstack/ship
-gstack/skillify
-gstack/spec
-gstack/unfreeze
+# gstack is library-only (submodule kept, never wired): it is not listed here.
 
 # --- hubspot — machine-overlay only; wired via machines/<hostname>.txt ---
 
