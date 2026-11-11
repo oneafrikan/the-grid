@@ -4,6 +4,8 @@ version: 1
 # Directories (relative to --root) whose content the-grid owns; everything else is upstream tier.
 owned_roots: [skills, agents, rules, hooks, agent-factory, plugins, dist]
 skip_dirs: ['.git']          # node_modules is NOT skipped: it is reported as builtin vendored-deps
+# File basenames never scanned, at any depth: macOS Finder litter (binary, regenerated on every browse).
+skip_files: ['.DS_Store']
 
 sources:
   allowed_hosts: [github.com]

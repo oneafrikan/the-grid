@@ -154,7 +154,7 @@ rules:
     downgrade: [negation, comment, test]
 ```
 
-- `owned_roots`: directories (relative to `--root`) whose content is the-grid's own. Anything else is `upstream` tier. `skip_dirs`: directory names never descended into.
+- `owned_roots`: directories (relative to `--root`) whose content is the-grid's own. Anything else is `upstream` tier. `skip_dirs`: directory names never descended into. `skip_files`: file basenames never scanned, at any depth (macOS `.DS_Store`).
 - `allowed_repos` above is the initial seed (the repos behind the tracked example baseline); group 4 finalises it.
 
 ### Rule semantics (how audit.py evaluates a line)

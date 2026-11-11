@@ -373,6 +373,15 @@ PY
   [ "$(q 'F')" = "[]" ]
 }
 
+@test "skip_files: a NUL-bearing .DS_Store in an owned dir is not scanned, at any depth" {
+  mkdir -p "$T/t/hooks/sub"
+  printf 'a\0b' > "$T/t/hooks/.DS_Store"
+  printf 'a\0b' > "$T/t/hooks/sub/.DS_Store"
+  audit_json "$T/t"
+  [ "$status" -eq 0 ]
+  [ "$(q 'F')" = "[]" ]
+}
+
 # --- 4. structure ---------------------------------------------------------------------
 
 @test "fenced blocks: indented fence, unclosed fence, line after the closing fence" {

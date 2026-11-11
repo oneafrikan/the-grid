@@ -628,7 +628,7 @@ class Rule:
 
 
 # Top-level keys policy.yaml may carry (`version` is the schema number, never read).
-POLICY_KEYS = frozenset(("version", "owned_roots", "skip_dirs", "sources", "limits",
+POLICY_KEYS = frozenset(("version", "owned_roots", "skip_dirs", "skip_files", "sources", "limits",
                          "negation", "builtin", "classes", "rules"))
 
 
@@ -655,6 +655,7 @@ class Policy:
             raise UsageError("%s: unknown top-level key %s" % (path, ", ".join(repr(k) for k in unknown)))
         self.owned_roots = [str(x) for x in (doc.get("owned_roots") or [])]
         self.skip_dirs = set(str(x) for x in (doc.get("skip_dirs") or []))
+        self.skip_files = set(str(x) for x in (doc.get("skip_files") or []))
         limits = doc.get("limits") or {}
         self.max_file_bytes = limits.get("max_file_bytes", 1048576)
         if not isinstance(self.max_file_bytes, int):
@@ -942,6 +943,10 @@ class Scan:
                     continue
                 self._walk(top, full, tier)
             elif e.is_file(follow_symlinks=False):
+                # skip_files: OS litter (macOS .DS_Store is binary and Finder
+                # recreates it, so it would trip unscannable-file) is never scanned.
+                if e.name in self.policy.skip_files:
+                    continue
                 self._scan_file(full, rel_target, tier)
 
     def _symlink_escape(self, full, rel_target, tier):
