@@ -206,12 +206,12 @@ base_section() { awk -v h="## $1" '$0 == h {on=1; next} /^## / {on=0} on' "$REPO
   base_section "Filing a Knowledge Signal" | grep -qF 'signals/→<agent>.md'
 }
 
-@test "AGENTS_base: the added block is exactly 1670 bytes and the file exactly 4578" {
+@test "AGENTS_base: the added block stays under 2000 bytes and the file under 5000" {
   n=$(sed -n '/^## Evidence and Stages/,/^## Signal Protocol (handoff)/p' "$REPO_ROOT/$BASE" | sed '$d' | sed '$d' | wc -c)
   echo "block=$n"
-  [ "$n" -eq 1670 ]
+  # Caps, not exact sizes: prose edits must not break this; it only guards base-prompt bloat.
   [ "$n" -le 2000 ]
-  [ "$(wc -c < "$REPO_ROOT/$BASE")" -eq 4578 ]
+  [ "$(wc -c < "$REPO_ROOT/$BASE")" -le 5000 ]
 }
 
 @test "AGENTS_base: the block sits between the OpenSpec section and the handoff section" {
