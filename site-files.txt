@@ -7,3 +7,4 @@ assets/hero.webp
 assets/og.jpg
 assets/favicon-48.png
 assets/apple-touch-icon.png
+assets/terminal-demo.svg

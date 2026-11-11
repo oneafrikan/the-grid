@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>the-grid: Claude Code skills and agents on every machine</title>
-  <meta name="description" content="Curated Claude Code skills and agent teams, wired identically onto every machine from one git repo. Free, MIT.">
+  <title>the-grid: skills and agents on every machine and AI tool</title>
+  <meta name="description" content="Dotfiles for your AI assistant: curated skills and agent teams, wired identically onto every machine and every AI tool you use. Free, MIT.">
   <link rel="canonical" href="https://oneafrikan.github.io/the-grid/">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#0d0d0f">
+  <meta name="theme-color" content="#02050a">
 
   <!-- Icons, in this order: SVG (modern browsers), 48px PNG (fallback), Apple touch icon. -->
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
@@ -15,11 +15,12 @@
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 
   <!-- Open Graph. og:image:width/height must equal the real pixel size of assets/og.jpg
-       (tests/test_landing_page.bats reads the JPEG header and checks). -->
+       (tests/test_landing_page.bats reads the JPEG header and checks). Title, description and
+       the JSON-LD description are the same strings (the test compares them). -->
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="the-grid">
-  <meta property="og:title" content="the-grid: Claude Code skills and agents on every machine">
-  <meta property="og:description" content="Curated Claude Code skills and agent teams, wired identically onto every machine from one git repo. Free, MIT.">
+  <meta property="og:title" content="the-grid: skills and agents on every machine and AI tool">
+  <meta property="og:description" content="Dotfiles for your AI assistant: curated skills and agent teams, wired identically onto every machine and every AI tool you use. Free, MIT.">
   <meta property="og:url" content="https://oneafrikan.github.io/the-grid/">
   <meta property="og:image" content="https://oneafrikan.github.io/the-grid/assets/og.jpg">
   <meta property="og:image:type" content="image/jpeg">
@@ -35,7 +36,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareSourceCode",
     "name": "the-grid",
-    "description": "Curated Claude Code skills and agent teams, wired identically onto every machine from one git repo. Free, MIT.",
+    "description": "Dotfiles for your AI assistant: curated skills and agent teams, wired identically onto every machine and every AI tool you use. Free, MIT.",
     "codeRepository": "https://github.com/oneafrikan/the-grid",
     "url": "https://oneafrikan.github.io/the-grid/",
     "license": "https://opensource.org/licenses/MIT",
@@ -45,12 +46,13 @@
   </script>
 
   <style>
-    /* One self-contained file: system fonts, inline CSS, no CDN. Dark-only (color-scheme meta). */
+    /* One self-contained file: system fonts, inline CSS, no CDN. Dark-only (color-scheme meta).
+       Contrast (WCAG, computed): --text-dim is >= 5.2:1 on every surface below (bg, surface,
+       code-bg, hero-bg); chip text is >= 7.9:1 on its chip. */
     :root {
       --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Menlo, Consolas, monospace;
       --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 
-      /* Colour tokens. --text-dim is #8a8ab0 so small text clears 4.5:1 on --surface. */
       --bg:         #0d0d0f;
       --surface:    #141418;
       --border:     #252530;
@@ -60,173 +62,185 @@
       --accent-dim: #2a3d6b;
       --code-bg:    #1a1a22;
 
-      /* Tron cyan, used by the hero and the Flynn band only */
+      /* Tron cyan: the hero and the closing Flynn band only. The page opens and closes
+         on the same command, in the same colour. */
       --hero-bg:    #02050a;
       --hero-cyan:  #00d9ff;
+      --cyan-line:  rgba(0, 217, 255, 0.35);
+
+      /* Status chips in the Works with table */
+      --ok-bg: #10241a;   --ok:   #6fd39a;   /* running in daily use */
+      --wip-bg: #2a2210;  --wip:  #e3b862;   /* wired, not yet smoke-tested */
+      --gen-bg: #1c2236;  --gen:  #9db8f7;   /* generated, not yet smoke-tested */
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    html { scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: no-preference) {
+      html { scroll-behavior: smooth; }
+    }
 
     body {
       background: var(--bg);
       color: var(--text);
       font-family: var(--font-sans);
-      font-size: 15px;
-      line-height: 1.65;
-      display: flex;
-      flex-direction: column;
-      min-height: 100vh;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-text-size-adjust: 100%;
     }
 
-    a { color: var(--accent); text-decoration: none; }
-    a:hover, a:focus { text-decoration: underline; }
-    a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+    a { color: var(--accent); text-underline-offset: 0.18em; }
+    a:hover { color: #7aa0f5; }
+    :focus-visible { outline: 2px solid var(--hero-cyan); outline-offset: 3px; border-radius: 3px; }
 
-    /* ── Layout shell ── */
-    .page-wrap {
-      width: 100%;
-      max-width: 820px;
-      margin: 0 auto;
-      padding: 0 1.25rem;
+    .skip {
+      position: absolute; left: 0.75rem; top: -4rem;
+      background: var(--hero-cyan); color: var(--hero-bg);
+      padding: 0.7rem 1rem; border-radius: 6px; font-weight: 700; z-index: 10;
     }
+    .skip:focus { top: 0.75rem; }
+    main:focus { outline: none; }
 
-    main { flex: 1; padding: 3rem 0; }
-    section { margin-bottom: 3.5rem; }
+    .wrap { width: 100%; max-width: 820px; margin: 0 auto; padding: 0 1rem; }
+
+    main section { padding: 3rem 0 0; }
+    main { padding-bottom: 3rem; }
 
     h2 {
-      font-family: var(--font-sans);
-      font-size: 1rem;
-      font-weight: 600;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      margin-bottom: 1.25rem;
+      font-size: 1.5rem;
+      line-height: 1.25;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: #f2f2f6;
+      margin-bottom: 1rem;
     }
+    h3 { font-size: 1.05rem; font-weight: 650; color: #f2f2f6; margin: 1.5rem 0 0.5rem; }
 
-    p { max-width: 70ch; margin-bottom: 0.9rem; }
-    p:last-child { margin-bottom: 0; }
-
-    ul { margin: 0 0 0.9rem 1.25rem; max-width: 70ch; }
-    li { margin-bottom: 0.45rem; }
+    p, ul, ol, dl, table, pre, figure { margin-bottom: 1rem; }
+    p { max-width: 68ch; }
+    ul { padding-left: 1.25rem; max-width: 68ch; }
+    li { margin-bottom: 0.4rem; }
+    .dim { color: var(--text-dim); }
 
     code {
       font-family: var(--font-mono);
-      font-size: 0.88em;
-      color: var(--text);
+      font-size: 0.86em;
       background: var(--code-bg);
       padding: 0.1em 0.35em;
       border-radius: 3px;
+      white-space: nowrap;
     }
-
     pre {
       background: var(--code-bg);
       border: 1px solid var(--border);
       border-radius: 6px;
-      padding: 1rem 1.25rem;
+      padding: 0.8rem 1rem;
       overflow-x: auto;
-      white-space: pre;
     }
-
-    pre code {
-      font-size: 0.85rem;
-      background: none;
-      padding: 0;
-    }
+    pre code { background: none; padding: 0; font-size: 0.85rem; white-space: inherit; }
 
     /* ═══════════════ HERO ═══════════════
-       Order in the DOM: h1, install command + Copy, links, hero image.
-       No min-height: the install command must sit above the fold on a phone. */
+       DOM order is a test contract: h1, #install-cmd, the GitHub link, then the hero image.
+       No min-height: the command must sit above the fold on a 375x667 phone. */
     .hero {
       min-height: 0;
-      width: 100%;
       background: var(--hero-bg);
-      border-bottom: 1px solid var(--border);
+      border-bottom: 1px solid var(--cyan-line);
     }
-
-    .hero-content {
-      max-width: 820px;
-      margin: 0 auto;
-      padding: clamp(1.25rem, 4vw, 2.5rem) 1.25rem clamp(1.5rem, 4vw, 2.5rem);
-    }
+    .hero .wrap { padding-top: clamp(1rem, 4vw, 3rem); padding-bottom: clamp(1.5rem, 4vw, 3rem); }
 
     .eyebrow {
       font-family: var(--font-mono);
-      font-size: 0.9rem;
-      letter-spacing: 0.06em;
+      font-size: 0.85rem;
+      letter-spacing: 0.08em;
       color: var(--hero-cyan);
       margin-bottom: 0.5rem;
     }
 
     .hero h1 {
-      font-size: clamp(1.3rem, 4.2vw, 2rem);
-      line-height: 1.3;
+      font-size: clamp(1.3rem, 3.6vw, 2.1rem);
+      line-height: 1.28;
       font-weight: 700;
+      letter-spacing: -0.015em;
       color: #fff;
-      max-width: 34ch;
-      margin-bottom: 1.25rem;
+      max-width: 36ch;
+      margin-bottom: 1.1rem;
+    }
+    .hero h1 .lead {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 0.62em;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--hero-cyan);
+      margin-bottom: 0.3rem;
     }
 
-    /* Install command: the whole string is one click/tap to select. pre-wrap so a phone
-       shows the full command instead of scrolling it sideways. */
-    .install {
+    /* The command bar: the one primary action. pre-wrap so a phone shows the whole command. */
+    .cmd {
       display: flex;
-      align-items: flex-start;
-      gap: 0.6rem;
-      margin-bottom: 1rem;
+      align-items: stretch;
+      gap: 0.5rem;
+      margin-bottom: 0.4rem;
     }
-
-    .install pre {
+    .cmd pre {
       flex: 1;
       min-width: 0;
+      display: flex;
+      gap: 0.6rem;
+      margin: 0;
+      background: #050b12;
+      border: 1px solid var(--cyan-line);
+      padding: 0.75rem 0.9rem;
       white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      padding: 0.7rem 0.9rem;
     }
+    .cmd pre code { overflow-wrap: anywhere; user-select: all; color: #eafcff; font-size: 0.88rem; line-height: 1.55; }
+    .nw { white-space: nowrap; }
+    .prompt { color: var(--hero-cyan); font-family: var(--font-mono); font-size: 0.88rem; line-height: 1.55; user-select: none; }
 
-    .install code { user-select: all; }
-
-    /* Copy button sits in normal flow. visibility (not display) keeps its box, so nothing
-       shifts when the script reveals it; stays hidden where the clipboard API is missing. */
+    /* Copy: hidden (visibility, so its box is kept and nothing shifts) until the script finds
+       the clipboard API. Without it the command is still one click to select. */
     .copy-btn {
       visibility: hidden;
       flex: none;
+      min-height: 44px;
+      min-width: 88px;
       font: inherit;
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: var(--text);
-      background: var(--surface);
-      border: 1px solid var(--accent-dim);
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--hero-bg);
+      background: var(--hero-cyan);
+      border: 0;
       border-radius: 6px;
-      padding: 0.7rem 1rem;
+      padding: 0 1.1rem;
       cursor: pointer;
     }
-    .copy-btn:hover { border-color: var(--accent); }
+    .copy-btn:hover { background: #6ee9ff; }
+    .copy-status { font-size: 0.85rem; color: var(--text-dim); min-height: 1.4em; margin-bottom: 0.4rem; }
 
-    .copy-status { font-size: 0.85rem; color: var(--text-dim); min-height: 1.4em; margin: 0 0 0.75rem; }
+    .hero-note { font-size: 0.9rem; color: var(--text-dim); max-width: 74ch; margin-bottom: 0.75rem; padding-left: 1.1rem; }
+    .hero-note li { margin-bottom: 0.3rem; }
+    .hero details.start { margin: 0 0 1.25rem; background: #070d14; border-color: rgba(0, 217, 255, 0.2); max-width: 74ch; }
+    .hero .detail-body { border-top-color: rgba(0, 217, 255, 0.2); }
+    .hero .detail-body code { background: #0b1520; }
+    .hero .note { background: transparent; }
+    .hero-note code { background: #0b1520; }
 
-    .hero-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.6rem;
-      margin-bottom: 1rem;
-    }
+    .hero-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin-bottom: 1.5rem; }
+    .hero-row p { margin: 0; font-size: 0.95rem; color: var(--text); }
 
     .btn {
-      display: inline-block;
-      font-size: 0.9rem;
-      font-weight: 600;
-      padding: 0.55rem 1rem;
-      border: 1px solid var(--accent);
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 0 1.1rem;
+      border: 1px solid var(--cyan-line);
       border-radius: 6px;
-      color: var(--accent);
+      color: #eafcff;
+      font-weight: 600;
+      text-decoration: none;
     }
-    .btn:hover, .btn:focus { text-decoration: none; background: var(--accent-dim); }
-    .btn-primary { background: var(--accent); color: #0d0d0f; }
-    .btn-primary:hover, .btn-primary:focus { background: #7aa0f5; }
-
-    .hero-note { font-size: 0.9rem; color: var(--text-dim); max-width: none; margin-bottom: 1.5rem; }
+    .btn:hover { color: #fff; border-color: var(--hero-cyan); }
 
     .hero-image {
       display: block;
@@ -236,275 +250,632 @@
       box-shadow: 0 0 40px rgba(0, 217, 255, 0.14);
     }
 
-    /* ── Cards ── */
-    .tier-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 1rem;
-    }
+    /* ── Demo: the SVG is 78 columns wide; below ~640px it would shrink the text to ~6px, so
+       it keeps a readable minimum width and scrolls sideways inside its own box. ── */
+    .demo { margin: 0; }
+    .demo-scroll { overflow-x: auto; border-radius: 8px; -webkit-overflow-scrolling: touch; }
+    .demo-scroll img { display: block; width: 100%; min-width: 640px; height: auto; }
+    .demo figcaption { font-size: 0.9rem; color: var(--text-dim); margin-top: 0.6rem; }
+    .scroll-hint { display: none; }
+    @media (max-width: 680px) { .scroll-hint { display: inline; } }
 
-    .tier-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1.25rem 1.5rem;
+    /* ── Problem quotes ── */
+    .symptoms { list-style: none; padding: 0; }
+    .symptoms li {
+      border-left: 2px solid var(--accent-dim);
+      padding: 0.15rem 0 0.15rem 0.9rem;
+      margin-bottom: 0.7rem;
+      font-size: 1.05rem;
     }
-
-    .tier-card h3 {
-      font-size: 0.9rem;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      margin-bottom: 0.75rem;
-    }
-
-    .tier-card p { font-size: 0.92rem; color: var(--text-dim); margin-bottom: 0; }
 
     /* ── Tables ── */
-    .files-table {
-      width: 100%;
-      border-collapse: collapse;
+    .tbl { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+    .tbl th, .tbl td { text-align: left; vertical-align: top; padding: 0.6rem 0.9rem 0.6rem 0; border-bottom: 1px solid var(--border); }
+    .tbl thead th { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
+    .tbl tbody th { font-weight: 600; color: #f2f2f6; }
+    .tbl tr:last-child > * { border-bottom: 0; }
+
+    .chip {
+      display: inline-block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      line-height: 1.3;
+      padding: 0.2em 0.6em;
+      border-radius: 6px;
+    }
+    .chip::before { content: ""; display: inline-block; width: 0.5em; height: 0.5em; border-radius: 50%; background: currentColor; margin-right: 0.45em; vertical-align: 0.08em; }
+    .chip-ok  { background: var(--ok-bg);  color: var(--ok); }
+    .chip-wip { background: var(--wip-bg); color: var(--wip); }
+    .chip-gen { background: var(--gen-bg); color: var(--gen); }
+
+    /* ── Diagram (inline SVG; same five nodes as the README mermaid) ── */
+    .diagram { margin: 1.5rem 0; }
+    .diagram svg { display: block; width: 100%; max-width: 540px; height: auto; margin: 0 auto; }
+    .diagram .box { fill: var(--surface); stroke: var(--accent-dim); stroke-width: 1.5; }
+    .diagram .key { fill: var(--code-bg); stroke: var(--accent); stroke-width: 2; }
+    .diagram .t { fill: #f2f2f6; font-family: var(--font-sans); font-size: 20px; font-weight: 600; }
+    .diagram .s { fill: #a6a6c8; font-family: var(--font-sans); font-size: 16px; }
+    .diagram .m { font-family: var(--font-mono); font-size: 15px; }
+    .diagram .t.m { font-size: 20px; }
+    .diagram .edge { fill: none; stroke: var(--accent); stroke-width: 2; }
+
+    .terms dt { font-weight: 650; color: #f2f2f6; }
+    .terms dd { margin: 0 0 0.6rem; color: var(--text); }
+
+    /* ── Layers: a real sequence (each level needs the one before), so it is numbered ── */
+    .ladder { list-style: none; padding: 0; counter-reset: step; max-width: none; }
+    .ladder > li {
+      counter-increment: step;
+      position: relative;
+      padding: 0 0 1.5rem 3rem;
+      margin: 0;
+    }
+    .ladder > li::before {
+      content: counter(step);
+      position: absolute; left: 0; top: 0;
+      width: 2rem; height: 2rem;
+      border: 1px solid var(--accent);
+      border-radius: 50%;
+      display: grid; place-items: center;
+      font-family: var(--font-mono); font-weight: 700; color: #f2f2f6;
+    }
+    .ladder > li:not(:last-child)::after {
+      content: ""; position: absolute; left: calc(1rem - 0.5px); top: 2.25rem; bottom: 0.25rem;
+      border-left: 1px solid var(--border);
+    }
+    .ladder h3 { margin: 0.2rem 0 0.4rem; }
+
+    /* ── Disclosure blocks: native details/summary, keyboard-operable with no script ── */
+    details {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      margin: 0.6rem 0;
+    }
+    summary {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.6rem;
+      min-height: 44px;
+      padding: 0.55rem 0.9rem;
+      cursor: pointer;
+      flex-wrap: wrap;
+      list-style: none;
+      font-weight: 600;
+      color: #f2f2f6;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::before {
+      content: ""; flex: none;
+      width: 0.45rem; height: 0.45rem;
+      border-right: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
+      margin-top: 0.5em;
+      transform: rotate(-45deg);
+    }
+    details[open] > summary::before { transform: rotate(45deg); }
+    summary .dim { font-weight: 400; font-size: 0.9rem; }
+    .detail-body { padding: 0.25rem 0.9rem 0.9rem; border-top: 1px solid var(--border); }
+    .detail-body > :first-child { margin-top: 0.75rem; }
+    .detail-body p, .detail-body li { font-size: 0.95rem; }
+
+    .note {
+      border-left: 3px solid var(--accent-dim);
+      padding: 0.5rem 0.9rem;
+      background: var(--bg);
+      color: var(--text-dim);
       font-size: 0.92rem;
     }
 
-    .files-table th {
-      text-align: left;
-      font-size: 0.78rem;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      padding: 0.5rem 1rem 0.5rem 0;
-      border-bottom: 1px solid var(--border);
-    }
+    /* ── Agent roster ── */
+    .roster { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0.6rem; max-width: none; }
+    .roster li { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.7rem 0.85rem; margin: 0; font-size: 0.9rem; line-height: 1.5; }
+    .roster code { display: block; background: none; padding: 0; color: #9db8f7; font-size: 0.85rem; }
+    .roster b { display: block; color: #f2f2f6; font-weight: 600; margin: 0.15rem 0 0.25rem; }
+    .roster b small { font-weight: 400; font-size: 0.78rem; color: var(--text-dim); margin-left: 0.3rem; }
+    .roster-head { font-family: var(--font-mono); font-size: 0.85rem; color: var(--text-dim); margin: 1.25rem 0 0.5rem; }
 
-    .files-table td {
-      padding: 0.65rem 1rem 0.65rem 0;
-      border-bottom: 1px solid var(--border);
-      vertical-align: top;
-    }
-
-    .files-table tr:last-child td { border-bottom: none; }
-    .files-table td:last-child { color: var(--text-dim); line-height: 1.5; }
-
-    .command-block { margin-bottom: 1.75rem; }
-    .command-block h3 { font-size: 0.88rem; font-weight: 600; color: var(--text-dim); margin-bottom: 0.5rem; }
-
-    .ownership-note {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-left: 3px solid var(--accent-dim);
-      border-radius: 0 6px 6px 0;
-      padding: 1rem 1.25rem;
-      font-size: 0.9rem;
-      color: var(--text-dim);
-    }
-
-    /* ── Flynn pull-quote band (after Quickstart) ── */
-    .flynn {
+    /* ── Story ending: the Flynn band and the second command ── */
+    .story {
       background: var(--hero-bg);
-      border-top: 1px solid rgba(0, 217, 255, 0.25);
-      border-bottom: 1px solid rgba(0, 217, 255, 0.25);
-      padding: 2rem 1.25rem;
-      margin-bottom: 3.5rem;
+      border-top: 1px solid var(--cyan-line);
+      border-bottom: 1px solid var(--cyan-line);
+      margin-top: 3.5rem;
+      padding: 3rem 0;
+    }
+    .story blockquote {
+      font-family: var(--font-mono);
+      font-size: clamp(0.85rem, 2.4vw, 1rem);
+      line-height: 1.9;
+      color: rgba(110, 229, 255, 0.8);
+      letter-spacing: 0.02em;
       text-align: center;
     }
-
-    .flynn blockquote {
-      font-family: var(--font-mono);
-      font-size: clamp(0.8rem, 2.4vw, 0.95rem);
-      line-height: 1.9;
-      color: rgba(110, 229, 255, 0.78);
-      letter-spacing: 0.03em;
-    }
-
-    .flynn blockquote p { max-width: none; margin: 0; }
-    .flynn .line { display: block; }
-
-    /* "I got in." is the punchline: brighter, a beat apart. */
-    .flynn .line-punchline {
+    .story blockquote p { max-width: none; margin: 0; }
+    .story .line { display: block; }
+    .story .punch {
       color: var(--hero-cyan);
       text-shadow: 0 0 4px rgba(0, 217, 255, 0.8), 0 0 16px rgba(0, 217, 255, 0.35);
       margin-top: 0.5em;
     }
-
-    .flynn .attrib { margin: 1.25rem auto 0; font-size: 0.8rem; letter-spacing: 0.08em; color: rgba(110, 229, 255, 0.85); }
-    .flynn cite { font-style: normal; }
-
-    .flynn-after { max-width: none; margin: 0.9rem auto 0; font-size: 0.9rem; color: var(--text-dim); }
-
-    /* ── Architecture diagram (inline SVG) ── */
-    .diagram { margin: 0 0 1.5rem; text-align: center; }
-    .diagram svg { width: 100%; max-width: 600px; height: auto; }
-    .diagram .box { fill: var(--surface); stroke: var(--accent-dim); stroke-width: 1.5; }
-    .diagram .box-key { fill: var(--code-bg); stroke: var(--accent); stroke-width: 1.5; }
-    .diagram .t { fill: var(--text); font-family: var(--font-sans); font-size: 16px; }
-    .diagram .t-dim { fill: var(--text-dim); font-family: var(--font-sans); font-size: 14px; }
-    .diagram .t-mono { font-family: var(--font-mono); }
-    .diagram .edge { fill: none; stroke: var(--accent); stroke-width: 1.5; }
-    .diagram .edge-dash { fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-dasharray: 5 4; }
-    .diagram .group { fill: none; stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 4; }
-
-    /* ── Agent cards ── */
-    .agent-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-      gap: 0.85rem;
-    }
-
-    .agent-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem 1.25rem;
-    }
-
-    .agent-card-name {
-      display: flex;
-      align-items: baseline;
-      gap: 0.5rem;
-      margin-bottom: 0.35rem;
-      flex-wrap: wrap;
-    }
-
-    .agent-card-name code {
-      font-size: 0.85rem;
-      color: var(--accent);
-      background: none;
-      padding: 0;
-    }
-
-    .agent-card-title { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.5rem; }
-    .agent-card-summary { font-size: 0.85rem; color: var(--text); line-height: 1.5; margin-bottom: 0; }
-
-    .badge {
-      display: inline-block;
-      font-family: var(--font-mono);
-      font-size: 0.7rem;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      padding: 0.15em 0.55em;
-      border-radius: 4px;
-      vertical-align: middle;
-    }
-    .badge-orchestrator { background: #0d2a33; color: #4dd9f5; }  /* becomes a /slash command */
-    .badge-specialist   { background: #1e1e28; color: var(--text-dim); }  /* subagent */
-
-    .agent-group-heading {
-      font-size: 0.78rem;
-      font-weight: 600;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      margin: 1.5rem 0 0.85rem;
-      padding-bottom: 0.4rem;
-      border-bottom: 1px solid var(--border);
-    }
-    .agent-group-heading:first-child { margin-top: 0; }
+    .story .attrib { text-align: center; margin: 1.1rem auto 2.5rem; font-size: 0.85rem; letter-spacing: 0.06em; color: rgba(110, 229, 255, 0.85); }
+    .story cite { font-style: normal; }
+    .story .after { margin: 0 auto 1.5rem; text-align: center; color: var(--text); }
+    .story h2 { text-align: center; color: #fff; }
+    .story .story-label { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; letter-spacing: 0.08em; color: var(--hero-cyan); margin-bottom: 1.5rem; }
+    .story .cmd { max-width: 720px; margin: 0 auto 0.4rem; }
+    .story .copy-status { text-align: center; }
+    .story .star { display: flex; justify-content: center; max-width: none; margin-top: 0.75rem; }
 
     /* ── Footer ── */
-    footer { border-top: 1px solid var(--border); padding: 2rem 0; }
-    .footer-inner { font-size: 0.88rem; color: var(--text-dim); }
+    footer { padding: 2rem 0 2.5rem; border-top: 1px solid var(--border); font-size: 0.92rem; color: var(--text-dim); }
+    footer p { display: flex; flex-wrap: wrap; align-items: center; gap: 0 1rem; max-width: none; margin: 0; }
+    footer a { display: inline-flex; align-items: center; min-height: 44px; }
 
     /* ── Phones ── */
     @media (max-width: 600px) {
-      main { padding: 2rem 0; }
-      section { margin-bottom: 2.5rem; }
-      .agent-grid { grid-template-columns: 1fr; }
-      /* Stack the Copy button under the command so the command gets the full width. */
-      .install { flex-direction: column; align-items: stretch; }
-      .copy-btn { align-self: flex-start; padding: 0.5rem 1rem; }
-    }
-
-    @media (max-width: 480px) {
-      /* Stack tables on very small screens */
-      .files-table thead { display: none; }
-      .files-table td { display: block; padding: 0.4rem 0; border-bottom: none; }
-      .files-table tr { display: block; border-bottom: 1px solid var(--border); padding: 0.75rem 0; }
-      .files-table tr:last-child { border-bottom: none; }
+      main section { padding-top: 2.5rem; }
+      h2 { font-size: 1.3rem; }
+      /* Copy goes under the command so the command gets the full width. */
+      .cmd { flex-direction: column; }
+      .copy-btn { align-self: flex-start; }
+      .tbl thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+      .tbl tr { display: block; padding: 0.6rem 0; border-bottom: 1px solid var(--border); }
+      .tbl tr:last-child { border-bottom: 0; }
+      .tbl th, .tbl td { display: block; padding: 0.1rem 0; border: 0; white-space: normal; }
+      .tbl td + td { margin-top: 0.3rem; }
+      /* Long paths would overflow a phone: let inline code wrap here (and only here). */
+      code { white-space: normal; overflow-wrap: anywhere; }
+      .ladder > li { padding-left: 2.6rem; }
+      summary { gap: 0 0.6rem; }
+      summary .dim { flex-basis: 100%; padding-left: 1.05rem; }
+      summary .sum-t { flex: 1; min-width: 0; }
+      .story .copy-btn { align-self: center; }
     }
   </style>
 </head>
 
 <body>
 
-  <!-- HERO. Lives outside .page-wrap so the dark band bleeds edge to edge.
-       DOM order is part of the contract (tests/test_landing_page.bats):
-       h1, #install-cmd, the GitHub link, then the hero image. -->
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- HERO. Edge-to-edge dark band. The hero sentence and the command are byte-identical
+       to README.md (tests compare them). -->
   <header class="hero">
-    <div class="hero-content">
+    <div class="wrap">
 
       <p class="eyebrow">the-grid</p>
 
-      <!-- The hero sentence is byte-identical to README.md (the test compares them). -->
-      <h1>Inspired by Tron. Dotfiles for your AI assistant: curated skills and agent teams, wired identically onto every machine and every AI tool you use.</h1>
+      <h1><span class="lead">Inspired by Tron.</span> Dotfiles for your AI assistant: curated skills and agent teams, wired identically onto every machine and every AI tool you use.</h1>
 
-      <!-- Quickstart command, byte-identical to the README one. user-select: all is on the
-           <code> (CSS above); the Copy button is revealed by the script at the foot of the page. -->
-      <div class="install">
-        <pre><code id="install-cmd">git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid && bash ~/.the-grid/scripts/bootstrap.sh --with-agents</code></pre>
-        <button type="button" class="copy-btn" id="copy-btn" aria-describedby="copy-status">Copy</button>
+      <div class="cmd">
+        <pre><span class="prompt" aria-hidden="true">$</span><code id="install-cmd">git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid && bash ~/.the-grid/scripts/bootstrap.sh <span class="nw">--with-agents</span></code></pre>
+        <button type="button" class="copy-btn" aria-describedby="copy-status">Copy</button>
       </div>
       <p class="copy-status" id="copy-status" role="status" aria-live="polite"></p>
 
-      <div class="hero-links">
-        <a class="btn btn-primary" href="https://github.com/oneafrikan/the-grid">View on GitHub</a>
-        <a class="btn" href="https://github.com/oneafrikan/the-grid">Star on GitHub</a>
-        <a class="btn" href="#quickstart">Quickstart</a>
+      <!-- What the command does, next to the command. Mirrors the three README Quickstart bullets. -->
+      <ul class="hero-note">
+        <li>Writes symlinks into <code>~/.claude/skills</code> and <code>~/.claude/agents</code>, and one auto-handoff hook entry in <code>~/.claude/settings.json</code> (opt out with <code>-hook:auto-handoff</code>). All inside the clone: shallow submodule clones, <code>baseline-submodules.txt</code> and <code>machines/&lt;host&gt;.txt</code> seeded from the <code>.example</code> files, <code>core.hooksPath</code> set to <code>.githooks</code>, <code>.wired.manifest</code>, <code>SKILLS.md</code> and, with <code>--with-agents</code>, <code>agent-factory/.venv</code> plus <code>agent-factory/projects/</code>. Rule packs and other tools&#8217; directories only with opt-in entries. <a href="https://github.com/oneafrikan/the-grid/blob/main/INSTALL.md#what-it-touches">Everything it writes: INSTALL.md</a>.</li>
+        <li>Undo: <code>bash ~/.the-grid/scripts/uninstall.sh</code> prints what it would remove; add <code>--yes</code> to remove it. It removes only links that resolve into the clone and keeps the clone and <code>~/.grid</code>. Add <code>--purge</code> to delete both too (refused while the clone has uncommitted or unpushed work, unless <code>--force</code>). The seeded files, the venv and the <code>core.hooksPath</code> setting live inside the clone and go with it.</li>
+        <li>Needs git, bash, and python3 (with its <code>venv</code> module) plus network access for <code>pip</code>, both to build the agent teams. Node &gt;= 20.19 only for the <code>openspec-*</code> skills.</li>
+      </ul>
+
+      <!-- The rest of the README Quickstart, closed so the command stays above the fold on a phone. -->
+      <details class="start">
+        <summary><span class="sum-t">Other ways in, and what you should see</span> <span class="dim">plugins, paste-a-prompt, checks, next steps</span></summary>
+        <div class="detail-body">
+          <p>To look first, try the plugins. Claude Code only, no clone and no symlinks; <code>grid-agents@the-grid</code> adds the dev team (<a href="https://github.com/oneafrikan/the-grid/blob/main/docs/PLUGINS.md">docs/PLUGINS.md</a> has the limits).</p>
+          <pre tabindex="0"><code>claude plugin marketplace add oneafrikan/the-grid
+claude plugin install grid-core@the-grid</code></pre>
+          <p>Or paste this into your coding agent:</p>
+          <p class="note">Clone https://github.com/oneafrikan/the-grid.git to ~/.the-grid, run bash ~/.the-grid/scripts/bootstrap.sh --with-agents and tell me what it printed. If you are not Claude Code, read ~/.the-grid/docs/harnesses.md and tell me which harness: line to add for you.</p>
+          <p>You should now see:</p>
+          <ul>
+            <li><code>bootstrap.sh</code> ends with <code>==&gt; Bootstrap complete. Open a fresh Claude session to pick up new skills/agents.</code></li>
+            <li><code>ls ~/.claude/skills | wc -l</code> prints a number near <!--count:wired-->133<!--/count--> (plus the orchestrator skills; duplicate names across repos collapse to one link, so it is not exact).</li>
+            <li>In a new Claude Code session <code>/tron</code> replies with a short question about what you want to do.</li>
+          </ul>
+          <p>Optional next steps:</p>
+          <ul>
+            <li>Tell the agents who you are (they say &ldquo;No operator set yet.&rdquo; until you do): <code>cp ~/.the-grid/agent-factory/user.yaml.example ~/.the-grid/agent-factory/user.yaml</code>, fill in your name and contact, re-run the bootstrap (safe to repeat).</li>
+            <li>gstack&#8217;s browser skills (<code>/browse</code>, <code>/qa</code>, <code>/scrape</code>) need <a href="https://bun.sh" rel="noopener">bun</a> and a browser download. Until you run <code>bash ~/.the-grid/scripts/runtime-setup.sh gstack</code> (add <code>--dry-run</code> to preview), bootstrap prints <code>runtime MISSING: gstack</code>. Detail in <a href="https://github.com/oneafrikan/the-grid/blob/main/BOOTSTRAP.md">BOOTSTRAP.md</a> step 8.</li>
+            <li>Fork first if you plan to customise; the clone URL above is read-only for you. Manual steps and the submodule-free install: <a href="https://github.com/oneafrikan/the-grid/blob/main/INSTALL.md">INSTALL.md</a>. After a <code>git pull</code>, re-run <code>bash ~/.the-grid/scripts/wire.sh</code> (recompose agents first: <a href="https://github.com/oneafrikan/the-grid/blob/main/BOOTSTRAP.md">BOOTSTRAP.md</a>, &ldquo;Updating an existing machine&rdquo;).</li>
+          </ul>
+        </div>
+      </details>
+
+      <div class="hero-row">
+        <a class="btn" href="https://github.com/oneafrikan/the-grid">GitHub</a>
+        <p>Running in daily use on Claude Code, Codex CLI and Antigravity CLI. Gemini CLI, OpenCode, Pi and OpenClaw are wired too: see <a href="#works-with">Works with</a>. A skill is a slash command your AI tool loads, an agent is a role definition, and wired means symlinked into the tool&#8217;s directory.</p>
       </div>
 
-      <p class="hero-note">Works today with Claude Code. Other AI tools: see <a href="https://github.com/oneafrikan/the-grid/blob/main/docs/roadmap.md">docs/roadmap.md</a>.</p>
-
-      <img class="hero-image" src="assets/hero.webp" width="1600" height="873" fetchpriority="high" alt="the-grid">
+      <img class="hero-image" src="assets/hero.webp" width="1600" height="873" fetchpriority="high" alt="The words THE-GRID in glowing blue neon letters above a perspective grid floor and a distant city skyline.">
 
     </div>
   </header>
 
-  <div class="page-wrap">
+  <main id="main" tabindex="-1">
+    <div class="wrap">
 
-    <main>
-
-      <!-- 1. Who it's for (copy mirrors README) -->
-      <section aria-labelledby="who-heading">
-        <h2 id="who-heading">Who it's for</h2>
-        <ul>
-          <li>You use more than one machine (laptop, server, work, home) and your Claude Code setup keeps drifting between them.</li>
-          <li>You collect skills from many repos and installing everything buries your session. You want a short live list and a searchable shelf.</li>
-          <li>You build agent teams (tech lead, QA, security reviewer) and want each role defined once and wired the same everywhere.</li>
-          <li>Not for you if you want a supported product, a GUI or a one-click installer. I built this for my own machines and share it because the mechanics are reusable.</li>
-        </ul>
+      <!-- Demo: real captured output (assets/terminal-demo.svg header says how it was made). -->
+      <section aria-labelledby="demo-heading">
+        <h2 id="demo-heading">What a wire looks like</h2>
+        <figure class="demo">
+          <div class="demo-scroll" tabindex="0" role="region" aria-label="Terminal demo, scrolls sideways">
+            <img src="assets/terminal-demo.svg" width="796" height="492" loading="lazy" alt="Terminal output: wire.sh links skills and agents, ls counts the links, uninstall.sh dry run lists what it would remove">
+          </div>
+          <figcaption>Real output captured in a throwaway home: <code>wire.sh</code>, a link count, then an <code>uninstall.sh</code> dry run. The long wire listing is trimmed.<span class="scroll-hint"> Scroll sideways to see the full width.</span></figcaption>
+        </figure>
       </section>
 
-      <!-- 2. Quickstart. The command itself is the one in the header (single copy on the page). -->
-      <section id="quickstart" aria-labelledby="quickstart-heading">
-        <h2 id="quickstart-heading">Quickstart</h2>
+      <section aria-labelledby="problem-heading">
+        <h2 id="problem-heading">The problem</h2>
+        <ul class="symptoms">
+          <li>&ldquo;My laptop has the skill. The server does not.&rdquo;</li>
+          <li>&ldquo;I installed every skill pack I liked, and now each session starts buried in descriptions it never uses.&rdquo;</li>
+          <li>&ldquo;Claude Code, Codex and Antigravity each want their own copy of the same skills.&rdquo;</li>
+        </ul>
+        <p class="dim">Not for you if you want a supported product, a GUI or a one-click installer.</p>
+      </section>
+
+      <!-- How it works. The SVG has the same five nodes as the README mermaid
+           (docs/architecture.md "Hand-synced copies" lists them as joint edits). -->
+      <section aria-labelledby="how-heading">
+        <h2 id="how-heading">How it works</h2>
+        <p>It is a dotfiles repo with one new part.</p>
+
+        <table class="tbl">
+          <thead><tr><th scope="col">You know it from dotfiles</th><th scope="col">In the-grid</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">A repo you clone to <code>~</code></th><td><code>~/.the-grid</code></td></tr>
+            <tr><th scope="row">Symlinks into <code>$HOME</code></th><td>symlinks into <code>~/.claude/skills</code>, <code>~/.claude/agents</code> and each opted-in tool&#8217;s directories</td></tr>
+            <tr><th scope="row">A package list</th><td>the allowlist, <code>baseline-submodules.txt</code></td></tr>
+            <tr><th scope="row">Per-host config</th><td>the overlay, <code>machines/&lt;host&gt;.txt</code></td></tr>
+            <tr><th scope="row">(new)</th><td>agent roles written once and compiled per tool by <code>agent-factory/compose.py</code></td></tr>
+          </tbody>
+        </table>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 500 420" role="img" aria-labelledby="dg-title dg-desc">
+            <title id="dg-title">How the-grid wires skills and agents</title>
+            <desc id="dg-desc">Sources (skills/, repos/* submodules and agent roles) pass through the allowlist, baseline-submodules.txt, into wire.sh. The host overlay, machines/HOST.txt, also feeds wire.sh. wire.sh writes symlinks into the tool directories: ~/.claude, ~/.agents/skills and others.</desc>
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="#5b8af0"/>
+              </marker>
+            </defs>
+
+            <rect class="box" x="4" y="4" width="236" height="84" rx="8"/>
+            <text class="t" x="122" y="34" text-anchor="middle">Sources</text>
+            <text class="s m" x="122" y="58" text-anchor="middle">skills/, repos/*</text>
+            <text class="s" x="122" y="78" text-anchor="middle">agent roles</text>
+
+            <rect class="box" x="260" y="4" width="236" height="84" rx="8"/>
+            <text class="t" x="378" y="34" text-anchor="middle">Host overlay</text>
+            <text class="s m" x="378" y="64" text-anchor="middle">machines/HOST.txt</text>
+
+            <rect class="box" x="4" y="126" width="236" height="84" rx="8"/>
+            <text class="t" x="122" y="156" text-anchor="middle">Allowlist</text>
+            <text class="s m" x="122" y="186" text-anchor="middle">baseline-submodules.txt</text>
+
+            <rect class="key" x="160" y="240" width="180" height="56" rx="8"/>
+            <text class="t m" x="250" y="275" text-anchor="middle">wire.sh</text>
+
+            <rect class="box" x="70" y="332" width="360" height="84" rx="8"/>
+            <text class="t" x="250" y="362" text-anchor="middle">Tool dirs</text>
+            <text class="s m" x="250" y="392" text-anchor="middle">~/.claude, ~/.agents/skills, ...</text>
+
+            <path class="edge" d="M122 88 V124" marker-end="url(#arrow)"/>
+            <path class="edge" d="M122 210 V268 H158" marker-end="url(#arrow)"/>
+            <path class="edge" d="M378 88 V268 H342" marker-end="url(#arrow)"/>
+            <path class="edge" d="M250 296 V330" marker-end="url(#arrow)"/>
+            <text class="s" x="260" y="320">symlinks</text>
+          </svg>
+        </figure>
+
         <p>
-          Run the command in the header (the Copy button, or click it to select it all).
-          It needs git, bash, python3 (for the agent teams) and Claude Code.
-          Node &gt;= 20.19 only if you use the <code>openspec-*</code> skills
-          (see <a href="https://github.com/oneafrikan/the-grid/blob/main/INSTALL.md">INSTALL.md</a>).
+          Edit a skill once and every wired copy changes, because they are links.
+          A skill in <code>skills/</code> overrides a same-named upstream one.
+          The full diagram, the repo layout and every step <code>wire.sh</code> takes are in
+          <a href="https://github.com/oneafrikan/the-grid/blob/main/docs/architecture.md">docs/architecture.md</a>.
         </p>
-        <p>You should now see:</p>
-        <ul>
-          <li><code>bootstrap.sh</code> ends with <code>==&gt; Bootstrap complete. Open a fresh Claude session to pick up new skills/agents.</code></li>
-          <li><code>ls ~/.claude/skills | wc -l</code> prints a number near <!--count:wired-->133<!--/count--> (plus the orchestrator skills; duplicate skill names across repos collapse to one link, so it is not exact), and <code>ls ~/.claude/skills/tron</code> lists a <code>SKILL.md</code>.</li>
-          <li>In a new Claude Code session <code>/tron</code> replies with a short question about what you want to do.</li>
-        </ul>
-        <p>Fork first if you plan to customise: the clone URL in the header is read-only for you.</p>
-        <p>Or paste this into Claude:</p>
-        <div class="ownership-note">
-          Clone https://github.com/oneafrikan/the-grid.git to ~/.the-grid, run bash ~/.the-grid/scripts/bootstrap.sh --with-agents, tell me what it printed, then tell me to open a fresh session and run /tron.
-        </div>
-        <p style="margin-top: 0.9rem;">
-          Stop there. If it felt useful, read
-          <a href="https://github.com/oneafrikan/the-grid/blob/main/USAGE.md">USAGE.md</a>.
-          Prefer the manual steps, or a machine without submodules? See
-          <a href="https://github.com/oneafrikan/the-grid/blob/main/INSTALL.md">INSTALL.md</a>.
+
+        <h3>Terms</h3>
+        <dl class="terms">
+          <dt>Skill</dt>
+          <dd>A folder with a <code>SKILL.md</code>. Your tool loads it as a slash command or an instruction set.</dd>
+          <dt>Agent (role)</dt>
+          <dd>Defined once as <code>role x stack x skills</code>. In Claude Code an orchestrator becomes a slash command and a specialist becomes a subagent.</dd>
+          <dt>Wired or library</dt>
+          <dd>Wired skills are symlinked live. Library skills are indexed in <a href="https://github.com/oneafrikan/the-grid/blob/main/SKILLS.md">SKILLS.md</a>, found with <code>/skill-scout</code> and not loaded.</dd>
+          <dt>Overlay</dt>
+          <dd><code>machines/&lt;host&gt;.txt</code>, which adds or removes allowlist entries for one machine.</dd>
+          <dt>Harness</dt>
+          <dd>An AI coding tool the-grid wires into, switched on with <code>harness:&lt;name&gt;</code>.</dd>
+        </dl>
+      </section>
+
+      <!-- Works with: rows and status text mirror the README table (a test compares them). -->
+      <section id="works-with" aria-labelledby="works-heading">
+        <h2 id="works-heading">Works with</h2>
+
+        <table class="tbl" id="works-with-table">
+          <thead><tr><th scope="col">Tool</th><th scope="col">What it gets</th><th scope="col">Status</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Claude Code</th><td>skills, agents, plugins (<code>grid-core</code>, <code>grid-agents</code>), guard hooks, rule packs</td><td><span class="chip chip-ok">running in daily use</span></td></tr>
+            <tr><th scope="row">Codex CLI</th><td>skills, agents (compose <code>--target codex</code>), rule packs</td><td><span class="chip chip-ok">running in daily use</span></td></tr>
+            <tr><th scope="row">Antigravity CLI</th><td>skills</td><td><span class="chip chip-ok">running in daily use</span></td></tr>
+            <tr><th scope="row">Gemini CLI</th><td>skills, agents (compose <code>--target gemini-cli</code>), rule packs</td><td><span class="chip chip-wip">wired, not yet smoke-tested on a real install</span></td></tr>
+            <tr><th scope="row">OpenCode</th><td>skills, agents (compose <code>--target opencode</code>), rule packs</td><td><span class="chip chip-wip">wired, not yet smoke-tested on a real install</span></td></tr>
+            <tr><th scope="row">Pi</th><td>skills, rule packs</td><td><span class="chip chip-wip">wired, not yet smoke-tested on a real install</span></td></tr>
+            <tr><th scope="row">OpenClaw</th><td>skills</td><td><span class="chip chip-wip">wired, not yet smoke-tested on a real install</span></td></tr>
+            <tr><th scope="row">Cursor</th><td>rule packs only (<code>scripts/rules.py emit --harness cursor</code>)</td><td><span class="chip chip-gen">generated, not yet smoke-tested</span></td></tr>
+          </tbody>
+        </table>
+
+        <p>Claude Code is on by default. The rest, Cursor aside, are opt-in with one <code>harness:&lt;name&gt;</code> line in your machine overlay, then a re-wire:</p>
+        <pre tabindex="0"><code>echo 'harness:codex' >> ~/.the-grid/machines/"$(hostname -s)".txt && bash ~/.the-grid/scripts/wire.sh</code></pre>
+        <p>
+          Codex CLI, Gemini CLI, OpenCode, Pi and OpenClaw all read <code>~/.agents/skills</code>, so the skills are linked there once and reach every one of them.
+          Agents need a compose for that tool&#8217;s target first (<code>bootstrap.sh</code> composes Claude Code only).
+          Rule packs reach a tool&#8217;s instruction file (such as <code>~/.codex/AGENTS.md</code>) only if you create that file.
+          Paths, skip rules and what is unverified per tool:
+          <a href="https://github.com/oneafrikan/the-grid/blob/main/docs/harnesses.md">docs/harnesses.md</a>.
         </p>
       </section>
 
-      <!-- 3. Flynn pull-quote band: the name of the project, kept in full -->
-      <section class="flynn" aria-label="Why &ldquo;the grid&rdquo;">
+      <!-- What you get (copy mirrors README; counts come from SKILLS.md and the team configs via
+           scripts/stamp-counts.py, never typed). -->
+      <section aria-labelledby="what-heading">
+        <h2 id="what-heading">What you get</h2>
+        <ul>
+          <li>You choose what is live. The allowlist plus your machine&#8217;s overlay decides which skills load; the rest stays on the shelf.</li>
+          <li><!--count:wired-->133<!--/count--> curated skills wired as slash commands (<code>/standup</code>, <code>/review</code>, <code>/ship</code>, <code>/skill-scout</code>), and <!--count:library-->100<!--/count--> more indexed and switched off.</li>
+          <li><!--count:roles-->40<!--/count--> agent roles: a dev team, a finance desk, a Socratic tutor (<code>/morpheus</code>), and <code>/tron</code>, which tells you which one to use.</li>
+          <li>One <code>git pull</code> plus <code>wire.sh</code> makes every machine match.</li>
+        </ul>
+
+        <p>The help skills are the entry points:</p>
+        <table class="tbl">
+          <thead><tr><th scope="col">Command</th><th scope="col">Answers</th></tr></thead>
+          <tbody>
+            <tr><th scope="row"><code>/tron</code></th><td>I have a goal: which skill or agent should I use?</td></tr>
+            <tr><th scope="row"><code>/grid-help</code></th><td>Which slash command or subagent do I want?</td></tr>
+            <tr><th scope="row"><code>/openspec-help</code></th><td>How do I add specs to a repo?</td></tr>
+            <tr><th scope="row"><code>/ponytail-help</code></th><td>Which ponytail (minimum-diff) mode do I want?</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Layers: three steps from the README. The long write-ups sit in closed <details>
+           blocks so the main path stays short. -->
+      <section aria-labelledby="layers-heading">
+        <h2 id="layers-heading">Layers</h2>
+        <p>Start at the first step. Each level works without the next.</p>
+
+        <ol class="ladder">
+          <li>
+            <h3>Wire skills</h3>
+            <p><code>bash ~/.the-grid/scripts/bootstrap.sh</code> without <code>--with-agents</code> syncs the submodules and links the allowlisted skills. The full generated index is <a href="https://github.com/oneafrikan/the-grid/blob/main/SKILLS.md">SKILLS.md</a>.</p>
+          </li>
+
+          <li>
+            <h3>Agent teams</h3>
+            <p><code>--with-agents</code> also composes the roles and links them. <a href="https://github.com/oneafrikan/the-grid/blob/main/USAGE.md">USAGE.md</a> covers orchestrators and specialists.</p>
+
+            <details>
+              <summary><span class="sum-t">How agent-factory builds a role</span> <span class="dim">role x stack x skills</span></summary>
+              <div class="detail-body">
+                <p><code>agent-factory/</code> composes each agent from three independent inputs, so you can swap a stack without touching the role, or add a skill without rewriting anything else.</p>
+                <ul>
+                  <li>Role: who the agent is (Tech Lead, Backend Dev, QA). Stack-agnostic identity, behaviour and an operating skill, in <code>roles/&lt;role&gt;/</code>.</li>
+                  <li>Stack: what it builds on (<code>lamp</code>, <code>modern-frontend</code>, <code>data-engineering</code>, <code>astro</code>, <code>wordpress</code>). An overlay appended to the role&#8217;s operating rules, in <code>stacks/&lt;stack&gt;/</code>.</li>
+                  <li>Skills: capabilities from the ecosystem, referenced by name and not copied into the output.</li>
+                </ul>
+                <p>
+                  A compose config names a project and lists its agents, each as <code>role + stacks[] + skills[] + model</code>.
+                  <code>compose.py</code> emits one folder per agent under <code>agent-factory/projects/&lt;name&gt;/</code> in a five-file identity model:
+                  <code>SOUL.md</code> (how it behaves), <code>IDENTITY.md</code> (who it is, which model), <code>AGENTS.md</code> (boot sequence, handoff),
+                  <code>USER.md</code> (who it serves) and <code>MEMORY.md</code> (what it carries).
+                </p>
+                <p><code>compose.py</code> is a multi-target compiler: one source, a different artefact per <code>--target</code>. The <code>claude-code</code> target splits on <code>role.yaml orchestrator</code>:</p>
+                <table class="tbl">
+                  <thead><tr><th scope="col">Form</th><th scope="col">Roles</th><th scope="col">How to invoke</th></tr></thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">Skill (orchestrator)</th>
+                      <td><code>grid-ceo-orchestrator</code>, <code>grid-tech-lead</code>, <code>grid-growth-hacker</code>, <code>gsd</code>, <code>finance-desk-finance-manager</code>, <code>tron</code>, <code>morpheus</code>, <code>oracle</code></td>
+                      <td>A slash command, such as <code>/grid-tech-lead</code>. The session takes on that role.</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Subagent (specialist)</th>
+                      <td>the other roles</td>
+                      <td>Delegate (&ldquo;Use the grid-backend-dev subagent to&#8230;&rdquo;), or let an orchestrator hand off.</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p>Compose the four public projects and wire them by hand (<code>bootstrap.sh --with-agents</code> does this for you):</p>
+                <pre tabindex="0"><code>cd ~/.the-grid/agent-factory
+.venv/bin/python compose.py examples/core.yaml --target claude-code
+.venv/bin/python compose.py examples/grid.yaml --target claude-code
+.venv/bin/python compose.py examples/finance-desk.yaml --target claude-code
+.venv/bin/python compose.py examples/learning-desk.yaml --target claude-code
+cd .. && bash scripts/wire.sh
+# then, in a fresh Claude Code session: /grid-tech-lead</code></pre>
+                <p class="note">The agents that maintain the-grid, this page included, are agent-factory output: <code>grid-tech-lead</code> coordinates, and <code>grid-frontend-dev</code>, <code>grid-backend-dev</code> and <code>grid-qa-engineer</code> build and verify.</p>
+              </div>
+            </details>
+
+            <details>
+              <summary><span class="sum-t">All <!--count:roles-->40<!--/count--> roles, by project</span> <span class="dim">orchestrators and specialists</span></summary>
+              <div class="detail-body">
+                <p>
+                  Four public projects, composed and gated on their own. A private desk composes the same way from roles kept outside this repo
+                  (<a href="https://github.com/oneafrikan/the-grid/blob/main/docs/private-projects.md">docs/private-projects.md</a>).
+                  Orchestrators become slash commands; specialists are subagents.
+                </p>
+
+                <p class="roster-head">core: cross-desk infra, stays wired on every machine</p>
+                <ul class="roster">
+                  <li class="agent-card"><code>tron</code><b>Tron, the front door <small>orchestrator</small></b>Run <code>/tron</code> first. Asks what you want to do, checks what is wired on this machine, and recommends a skill or agent with a reason and a next step. Never launches anything without your yes.</li>
+                  <li class="agent-card"><code>core-gh-triage</code><b>GitHub Triage Agent <small>specialist</small></b>Scheduled issue triage: classifies severity, applies labels, writes agent briefs for machine-doable issues and triage notes for the rest.</li>
+                  <li class="agent-card"><code>core-librarian</code><b>Librarian <small>specialist</small></b>Keeps cross-linked markdown wikis compiled from other agents&#8217; research, one per domain, with each page&#8217;s evidence tier and provenance.</li>
+                  <li class="agent-card"><code>core-researcher</code><b>Researcher <small>specialist</small></b>General-purpose investigation turned into source-grounded, fact-checked synthesis with citations. Investigates; does not decide.</li>
+                  <li class="agent-card"><code>core-platform-engineer</code><b>Platform Engineer <small>specialist</small></b>Makes dotfiles, shell functions and bootstrap scripts work on macOS, Ubuntu and Arch from one repo, with dry-run-verified changes on a branch.</li>
+                  <li class="agent-card"><code>core-context-engineer</code><b>Context Engineer <small>specialist</small></b>Designs and measures what loads into a session and when: size and split, cache-friendly ordering, retrieval, compaction and handoff.</li>
+                </ul>
+
+                <p class="roster-head">grid: the dev team (engineering, product, marketing)</p>
+                <ul class="roster">
+                  <li class="agent-card"><code>grid-ceo-orchestrator</code><b>CEO <small>orchestrator</small></b>Turns a business goal into sequenced initiatives, makes the build-vs-not call, sets budgets, delegates to Tech Lead and Product Manager, gates releases.</li>
+                  <li class="agent-card"><code>grid-tech-lead</code><b>Tech Lead <small>orchestrator</small></b>PRDs, architecture decisions, hands off to specialists, reviews their output.</li>
+                  <li class="agent-card"><code>grid-growth-hacker</code><b>Growth Hacker <small>orchestrator</small></b>Hypothesis-first acquisition and funnel experiments, one variable at a time. Also leads the marketing specialists.</li>
+                  <li class="agent-card"><code>gsd</code><b>GSD <small>orchestrator</small></b>Splits a request into independent small fixes, fans out one specialist per fix, merges, runs independent QA. Invoked as <code>/gsd</code>.</li>
+                  <li class="agent-card"><code>grid-product-manager</code><b>Product Manager <small>specialist</small></b>Owns scope, acceptance criteria, PRDs and tracer-bullet tickets. Does not architect or implement.</li>
+                  <li class="agent-card"><code>grid-project-manager</code><b>Project Manager <small>specialist</small></b>Turns a plan into tracked tasks with owners, estimates and dependencies; runs standups and reports status.</li>
+                  <li class="agent-card"><code>grid-backend-dev</code><b>Backend Dev <small>specialist</small></b>Server-side logic, APIs, database, auth and business rules, implemented to a PRD.</li>
+                  <li class="agent-card"><code>grid-frontend-dev</code><b>Frontend Dev <small>specialist</small></b>UI templates, components, client state, forms and accessibility, built to a PRD and the backend API contract.</li>
+                  <li class="agent-card"><code>grid-fullstack-engineer</code><b>Fullstack Engineer <small>specialist</small></b>Vertical slices across client and server in one pass, keeping the shared contract in sync.</li>
+                  <li class="agent-card"><code>grid-designer</code><b>Designer <small>specialist</small></b>User flows, layout, design systems, component specs and accessibility by design, handed to frontend-dev.</li>
+                  <li class="agent-card"><code>grid-prompt-engineer</code><b>Prompt Engineer <small>specialist</small></b>System prompts, rubrics, few-shot examples, output schemas and their versioning. Defines what good output is.</li>
+                  <li class="agent-card"><code>grid-ai-engineer</code><b>AI Engineer <small>specialist</small></b>The runtime around model calls: caching, model choice, structured output, failure handling, agent loops, tools and MCP, cost tracking.</li>
+                  <li class="agent-card"><code>grid-qa-engineer</code><b>QA Engineer <small>specialist</small></b>The release gate: test plans, verification against acceptance criteria, edge-case review. Blocks release on critical issues.</li>
+                  <li class="agent-card"><code>grid-sdet</code><b>SDET <small>specialist</small></b>Test infrastructure: suites, fixtures, isolation, contract tests, mocks for external and LLM calls, the eval harness. Does not decide pass or block.</li>
+                  <li class="agent-card"><code>grid-technical-writer</code><b>Technical Writer <small>specialist</small></b>Keeps a repo&#8217;s docs true to its code: README, agent guidance, references, onboarding, changelogs.</li>
+                  <li class="agent-card"><code>grid-security-reviewer</code><b>Security Reviewer <small>specialist</small></b>Threat models, audits code, dependencies and secrets, rates findings by severity. Advises; does not implement fixes.</li>
+                  <li class="agent-card"><code>grid-devops</code><b>DevOps <small>specialist</small></b>CI/CD, environments, secrets, deploy and rollback, monitoring. Proposes deploys; the human approves production.</li>
+                  <li class="agent-card"><code>grid-data-engineer</code><b>Data Engineer <small>specialist</small></b>Pipelines, warehousing, transforms and data quality, built to a pipeline spec.</li>
+                  <li class="agent-card"><code>grid-data-analyst</code><b>Data Analyst <small>specialist</small></b>Queries, dashboards and reports that turn a question into a defensible answer, with assumptions stated.</li>
+                  <li class="agent-card"><code>grid-data-scientist</code><b>Data Scientist <small>specialist</small></b>A/B tests, causal inference, feature engineering and ML models, delivered as validated models and readouts.</li>
+                  <li class="agent-card"><code>grid-copywriter</code><b>Copywriter <small>specialist</small></b>Long-form and product copy written to a brief for voice, clarity and structure.</li>
+                  <li class="agent-card"><code>grid-ad-copy</code><b>Ad Copy <small>specialist</small></b>Hooks, headlines and channel-fit variants written to be A/B tested.</li>
+                  <li class="agent-card"><code>grid-seo</code><b>SEO Specialist <small>specialist</small></b>Technical, on-page and content SEO: audits, JSON-LD, sitemaps, Core Web Vitals, keyword strategy. Recommends only.</li>
+                  <li class="agent-card"><code>grid-paid-search</code><b>Paid Search Specialist <small>specialist</small></b>Google and Microsoft Ads structure, keywords, bidding, pacing and conversion tracking. The human approves the budget.</li>
+                  <li class="agent-card"><code>grid-paid-social</code><b>Paid Social Specialist <small>specialist</small></b>Meta, Instagram, LinkedIn and TikTok campaigns, audiences and creative testing. The human approves the budget.</li>
+                </ul>
+
+                <p class="roster-head">finance-desk: standalone, outside the CEO&#8217;s chain</p>
+                <ul class="roster">
+                  <li class="agent-card"><code>finance-desk-finance-manager</code><b>Finance Manager <small>orchestrator</small></b>Runs the pipeline (sentinel, analyst, strategist, risk officer, approval, scribe). Never sizes a trade, never overrides the Risk Officer, never auto-approves.</li>
+                  <li class="agent-card"><code>finance-desk-finance-sentinel</code><b>Finance Sentinel <small>specialist</small></b>Polls prices, portfolio state, filings and FX against threshold rules. Mostly deterministic; the model only classifies and flags.</li>
+                  <li class="agent-card"><code>finance-desk-finance-analyst</code><b>Finance Analyst <small>specialist</small></b>Turns a flag into an evidence pack with primary sources, base rates, and the bull and bear case argued with equal effort. Never recommends.</li>
+                  <li class="agent-card"><code>finance-desk-finance-strategist</code><b>Finance Strategist <small>specialist</small></b>Proposes hold, trim, add or rebalance with a size, a confidence level and the strongest argument against itself.</li>
+                  <li class="agent-card"><code>finance-desk-finance-risk-officer</code><b>Finance Risk Officer <small>specialist</small></b>Checks the Strategist&#8217;s arithmetic and the proposal against the Investment Policy. Hard limits are enforced in code elsewhere.</li>
+                  <li class="agent-card"><code>finance-desk-finance-scribe</code><b>Finance Scribe <small>specialist</small></b>Logs every flag, proposal, decision and outcome with its rationale, and runs the monthly post-mortem. Records only.</li>
+                </ul>
+
+                <p class="roster-head">learning-desk: you start every session; data stays private</p>
+                <ul class="roster">
+                  <li class="agent-card"><code>morpheus</code><b>Morpheus, Socratic tutor <small>orchestrator</small></b>Teaches any topic as a course: one lesson at a time, questions before answers, exercises and quizzes. Moves on when you show you understand.</li>
+                  <li class="agent-card"><code>oracle</code><b>Oracle, learns about you <small>orchestrator</small></b>Interviews you and reads only files you approve, then keeps a private profile you can edit or delete. Every entry is tagged stated, observed or inferred.</li>
+                  <li class="agent-card"><code>tank</code><b>Tank, agent-to-agent lessons <small>specialist</small></b>Reads the run log and transcripts you name, finds what an agent got right or wrong, and proposes a change to that role. You apply it.</li>
+                </ul>
+              </div>
+            </details>
+          </li>
+
+          <li>
+            <h3>Build your own</h3>
+            <p>
+              <a href="https://github.com/oneafrikan/the-grid/blob/main/agent-factory/README.md">agent-factory</a> composes your own roles,
+              <a href="https://github.com/oneafrikan/the-grid/blob/main/automation-factory/patterns/issue-loop/README.md">automation-factory</a> cuts the issue-loop into a repo,
+              <a href="https://github.com/oneafrikan/the-grid/blob/main/project-factory/README.md">project-factory</a> seeds or retrofits a project,
+              and the <code>openspec-*</code> skills add spec-driven planning through OpenSpec
+              (<a href="https://github.com/oneafrikan/the-grid/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>).
+            </p>
+
+            <details>
+              <summary><span class="sum-t">automation-factory: the issue-loop</span> <span class="dim">labelled issues to verified PRs</span></summary>
+              <div class="detail-body">
+                <p>A pattern is a versioned template that is cut into a target repo&#8217;s tracked <code>loop/</code> folder (not <code>.claude/</code>, which is often gitignored and would not survive a clone). The template lives here; the instance lives in the project it serves.</p>
+                <p>The first pattern, <code>issue-loop</code>, works a repo&#8217;s labelled GitHub issues one per run and hands a verified pull request to a human. With <code>MODE=direct</code> it lands the verified commit on the base branch itself. It never classifies issues.</p>
+                <pre tabindex="0"><code>bash scripts/instantiate.sh issue-loop &lt;target-repo&gt; --profile &lt;personal|work|mac-mini&gt;</code></pre>
+                <p>The cut copies the pattern verbatim, renders <code>loop/loop.conf</code> once and creates the labels. The <code>work</code> and <code>mac-mini</code> profiles add the headless runner, which runs your verify command itself before it pushes, plus a push guard and a worktree helper. It writes no scheduler file; activating a schedule is a human step.</p>
+              </div>
+            </details>
+
+            <details>
+              <summary><span class="sum-t">project-factory: seed or retrofit a project</span> <span class="dim">templates with specs and agents wired in</span></summary>
+              <div class="detail-body">
+                <p>Scaffolds a project from a template. A template has no logic of its own and does not depend on the-grid once cut.</p>
+                <pre tabindex="0"><code>project-factory/scripts/cut-project.sh &lt;template&gt; &lt;target-dir&gt;</code></pre>
+                <p>An empty target is seeded; a non-empty one is retrofitted. Either way it never overwrites a file that exists and differs from the template, and it reports every skipped file for review. Choosing personas, skills and automation patterns happens after the cut, as a normal step in the new repo.</p>
+              </div>
+            </details>
+
+            <details>
+              <summary><span class="sum-t">OpenSpec: spec-driven planning</span> <span class="dim">propose before you build</span></summary>
+              <div class="detail-body">
+                <p>
+                  the-grid wires <a href="https://openspec.dev" rel="noopener">OpenSpec</a>
+                  (<a href="https://github.com/Fission-AI/openspec" rel="noopener">Fission-AI/openspec</a>, MIT) on every machine: the <code>openspec-*</code> skills cover
+                  <code>explore &rarr; propose &rarr; apply &rarr; verify &rarr; archive</code>. Specs are plain markdown in the repo, so a plan outlives the session that made it and a proposal is reviewed before any code exists.
+                </p>
+                <p>There is no spec factory here, because OpenSpec already is one. the-grid adds two thin layers:</p>
+                <ul>
+                  <li><code>project-factory/templates/_common/SPECS.md</code>: the convention and agent instructions, laid down on every cut project, seed or retrofit.</li>
+                  <li><code>agent-factory/_core/AGENTS_base.md</code>: a boot-sequence check for <code>SPECS.md</code> or <code>openspec/</code> that reaches every composed agent. Repos without those markers are untouched.</li>
+                </ul>
+                <p><code>/openspec-help</code> is the reference card. <code>/spec-scout</code> reports drift between the specs and the code; it never writes a spec.</p>
+                <p class="note">The skills shell out to a CLI that is not vendored and dead-end without it: <code>npm install -g @fission-ai/openspec@1.12.0</code> (Node &gt;= 20.19.0). <code>openspec new change</code> creates the <code>openspec/</code> tree, so <code>openspec init</code> is optional.</p>
+              </div>
+            </details>
+          </li>
+        </ol>
+
+        <!-- Roadmap: wording mirrors docs/roadmap.md. Keep each harness name off any line that says
+             "not built" (tests/test_docs_accuracy.bats F9 greps line by line). -->
+        <details>
+          <summary><span class="sum-t">Roadmap: what is built and what is not</span> <span class="dim">mirrors docs/roadmap.md</span></summary>
+          <div class="detail-body">
+            <p>
+              Shipped: the Claude Code target is built and wired live.
+              <code>compose.py --target</code> also accepts <code>openclaw</code>, <code>openclaw-native</code>, <code>paperclip</code>,
+              <code>codex</code>, <code>gemini-cli</code>, <code>opencode</code> and <code>portable</code> (single-file personas under <code>dist/personas/</code>).
+              Skills, subagents and rule packs reach Codex CLI, OpenCode and Gemini CLI, and skills reach Antigravity CLI, Pi and OpenClaw,
+              through opt-in <code>harness:&lt;name&gt;</code> entries.
+              Codex CLI and Antigravity CLI are in daily use alongside Claude Code.
+              Cursor gets rule packs only, not an agent target.
+            </p>
+            <p>
+              Not built, or not yet verified, tracked in
+              <a href="https://github.com/oneafrikan/the-grid/issues">Issues</a>:
+            </p>
+            <table class="tbl">
+              <thead><tr><th scope="col">Direction</th><th scope="col">Status</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">Real-install smoke tests of the Gemini CLI, OpenCode, Pi and OpenClaw targets</th><td>Planned; the vendor docs were read, not exercised</td></tr>
+                <tr><th scope="row">Amp</th><td>Blocked: the custom-agent mechanism needs verifying first</td></tr>
+                <tr><th scope="row">OpenSpec stores (cross-repo planning)</th><td>Open decision, deliberately not adopted</td></tr>
+              </tbody>
+            </table>
+            <p>
+              Model routing across providers (OpenRouter and similar) is an open question, not a built feature.
+              <a href="https://github.com/oneafrikan/the-grid/blob/main/docs/model-selection.md">docs/model-selection.md</a> has the current price and capability picture and its evidence gaps.
+            </p>
+          </div>
+        </details>
+      </section>
+
+      <!-- Safe to run: the README's five bullets. -->
+      <section aria-labelledby="safe-heading">
+        <h2 id="safe-heading">Safe to run</h2>
+        <ul>
+          <li>Audit before wiring. <code>wire.sh</code> runs <code>scripts/audit.sh</code> against <code>policy.yaml</code> before it touches a link. A high-severity finding blocks the run with nothing changed. <a href="https://github.com/oneafrikan/the-grid/blob/main/CURATION.md">CURATION.md</a> records why each wired repo is trusted.</li>
+          <li>It never replaces a real directory or a foreign symlink. It only replaces links that point into the clone.</li>
+          <li>Outside the clone, the one file it edits by default is <code>~/.claude/settings.json</code>: a single auto-handoff hook entry. Opt out with <code>-hook:auto-handoff</code> in your overlay. <a href="https://github.com/oneafrikan/the-grid/blob/main/SECURITY.md">SECURITY.md</a> and <a href="https://github.com/oneafrikan/the-grid/blob/main/INSTALL.md">INSTALL.md</a> list every write, opt-in ones included.</li>
+          <li><code>bash scripts/uninstall.sh</code> is a dry run until you add <code>--yes</code>. Submodules clone shallow, at their pinned commit.</li>
+          <li><a href="https://github.com/oneafrikan/the-grid/actions/workflows/tests.yml">CI</a> runs the full bats suite and the gate on every push to <code>main</code> and every ready pull request; a change that touches only documentation markdown runs a lighter docs job instead. CI runs on Linux only. The suite is written to run on macOS&#8217;s Bash 3.2 too and was brought to near-green there (#301, <a href="https://github.com/oneafrikan/the-grid/blob/main/docs/portability.md">docs/portability.md</a>).</li>
+        </ul>
+      </section>
+
+    </div>
+
+    <!-- Story ending: the name of the project. The monologue is kept verbatim (tests check it),
+         then the second, class-only copy of the command (#install-cmd stays unique). -->
+    <section class="story" aria-labelledby="story-heading">
+      <div class="wrap">
+        <h2 id="story-heading" class="story-label">Why &ldquo;the grid&rdquo;</h2>
         <blockquote cite="https://en.wikipedia.org/wiki/Tron:_Legacy">
           <p>
             <span class="line">The Grid.</span>
@@ -515,847 +886,72 @@
             <span class="line">Were the circuits like freeways?</span>
             <span class="line">I kept dreaming of a world I thought I&#8217;d never see.</span>
             <span class="line">And then, one day&#8230;</span>
-            <span class="line line-punchline">I got in.</span>
+            <span class="line punch">I got in.</span>
           </p>
         </blockquote>
-        <p class="attrib">&mdash; Kevin Flynn, <cite>TRON: Legacy</cite> (2010)</p>
-        <p class="flynn-after">Same idea, smaller scale: a shared place where your skills and agents live, and one command to get in.</p>
-      </section>
+        <p class="attrib">Kevin Flynn, <cite>TRON: Legacy</cite> (2010)</p>
 
-      <!-- 4. What you get (copy mirrors README; counts come from SKILLS.md via stamp-counts.py) -->
-      <section aria-labelledby="what-heading">
-        <h2 id="what-heading">What you get</h2>
-        <ul>
-          <li><!--count:wired-->133<!--/count--> curated skills as slash commands (<code>/standup</code>, <code>/review</code>, <code>/ship</code>, <code>/skill-scout</code>). <!--count:library-->100<!--/count--> more sit on a searchable shelf, switched off.</li>
-          <li><!--count:roles-->40<!--/count--> ready-made agent roles: a dev team, a finance desk, a Socratic tutor (<code>/morpheus</code>), and <code>/tron</code>, which tells you which one to use.</li>
-          <li>One git pull plus <code>wire.sh</code> makes every machine identical; a per-machine overlay handles the differences.</li>
-          <li>Project templates with specs and agents already wired in.</li>
-        </ul>
+        <p class="after">Same idea, smaller scale: a shared place where your skills and agents live, and one command to get in.</p>
 
-        <p>Lost? The help skills are the entry point:</p>
-        <table class="files-table">
-          <thead>
-            <tr><th scope="col">Command</th><th scope="col">Answers</th></tr>
-          </thead>
-          <tbody>
-            <tr><td><code>/tron</code></td><td>I have a goal: which skill or agent should I use?</td></tr>
-            <tr><td><code>/grid-help</code></td><td>Which slash command or subagent do I want?</td></tr>
-            <tr><td><code>/openspec-help</code></td><td>How do I add specs to a repo?</td></tr>
-            <tr><td><code>/ponytail-help</code></td><td>Which ponytail (minimum-diff) mode do I want?</td></tr>
-          </tbody>
-        </table>
-      </section>
+        <!-- OWNER: one sentence on why Tron (personal) goes here, after the quote -->
 
-      <!-- 5. How it works. The SVG has the same nodes and edges as the README mermaid
-           (docs/architecture.md lists the two as needing joint edits). -->
-      <section aria-labelledby="how-heading">
-        <h2 id="how-heading">How it works</h2>
-
-        <figure class="diagram">
-          <svg viewBox="0 0 600 470" role="img" aria-labelledby="diagram-title diagram-desc">
-            <title id="diagram-title">How the-grid wires skills and agents</title>
-            <desc id="diagram-desc">Three sources feed wire.sh. Upstream skill repos pass through an allowlist; my own skills go straight in; agent-factory roles go through compose.py. wire.sh symlinks the result into ~/.claude/skills and ~/.claude/agents. Upstream repos not on the allowlist go to the library: SKILLS.md and /skill-scout.</desc>
-            <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M0 0 L10 5 L0 10 z" fill="#5b8af0"/>
-              </marker>
-              <marker id="arrow-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M0 0 L10 5 L0 10 z" fill="#8a8ab0"/>
-              </marker>
-            </defs>
-
-            <!-- Sources group -->
-            <rect class="group" x="12" y="4" width="576" height="104" rx="10"/>
-            <text class="t-dim" x="24" y="22">Sources</text>
-
-            <rect class="box" x="24" y="32" width="170" height="64" rx="8"/>
-            <text class="t t-mono" x="109" y="60" text-anchor="middle">repos/*</text>
-            <text class="t-dim" x="109" y="80" text-anchor="middle">upstream skill repos</text>
-
-            <rect class="box" x="215" y="32" width="170" height="64" rx="8"/>
-            <text class="t t-mono" x="300" y="53" text-anchor="middle">skills/</text>
-            <text class="t-dim" x="300" y="71" text-anchor="middle">my own skills</text>
-            <text class="t-dim" x="300" y="88" text-anchor="middle">+ edited forks</text>
-
-            <rect class="box" x="406" y="32" width="170" height="64" rx="8"/>
-            <text class="t t-mono" x="491" y="53" text-anchor="middle">agent-factory</text>
-            <text class="t-dim" x="491" y="71" text-anchor="middle">roles</text>
-            <text class="t-dim" x="491" y="88" text-anchor="middle">role x stack x skills</text>
-
-            <!-- allowlist and compose.py -->
-            <rect class="box" x="24" y="160" width="170" height="64" rx="8"/>
-            <text class="t" x="109" y="182" text-anchor="middle">allowlist</text>
-            <text class="t-dim" x="109" y="199" text-anchor="middle">baseline +</text>
-            <text class="t-dim" x="109" y="216" text-anchor="middle">machines/HOST.txt</text>
-
-            <rect class="box" x="406" y="160" width="170" height="64" rx="8"/>
-            <text class="t t-mono" x="491" y="198" text-anchor="middle">compose.py</text>
-
-            <!-- wire.sh -->
-            <rect class="box-key" x="215" y="272" width="170" height="64" rx="8"/>
-            <text class="t t-mono" x="300" y="310" text-anchor="middle">wire.sh</text>
-
-            <!-- outputs -->
-            <rect class="box" x="215" y="384" width="170" height="64" rx="8"/>
-            <text class="t t-mono" x="300" y="412" text-anchor="middle">~/.claude/skills</text>
-            <text class="t t-mono" x="300" y="434" text-anchor="middle">~/.claude/agents</text>
-
-            <rect class="box" x="24" y="384" width="170" height="64" rx="8"/>
-            <text class="t" x="109" y="406" text-anchor="middle">Library</text>
-            <text class="t-dim" x="109" y="423" text-anchor="middle">SKILLS.md +</text>
-            <text class="t-dim" x="109" y="440" text-anchor="middle">/skill-scout</text>
-
-            <!-- edges -->
-            <path class="edge" d="M109 96 V160" marker-end="url(#arrow)"/>
-            <path class="edge" d="M491 96 V160" marker-end="url(#arrow)"/>
-            <path class="edge" d="M300 96 V272" marker-end="url(#arrow)"/>
-            <path class="edge" d="M109 224 V304 H215" marker-end="url(#arrow)"/>
-            <path class="edge" d="M491 224 V304 H385" marker-end="url(#arrow)"/>
-            <path class="edge" d="M300 336 V384" marker-end="url(#arrow)"/>
-            <text class="t-dim" x="310" y="364">symlinks</text>
-            <!-- repos/* not on the allowlist go to the library: dashed, along the left margin -->
-            <path class="edge-dash" d="M24 64 H8 V416 H24" marker-end="url(#arrow-dim)"/>
-            <text class="t-dim" x="20" y="358">not on allowlist</text>
-          </svg>
-        </figure>
-
-        <ul>
-          <li><strong>Wired vs library.</strong> Only repos on the allowlist are symlinked live. Everything else is indexed in <a href="https://github.com/oneafrikan/the-grid/blob/main/SKILLS.md">SKILLS.md</a> and found with <code>/skill-scout</code>.</li>
-          <li><strong>Per-machine overlay.</strong> A shared baseline plus an optional <code>machines/&lt;host&gt;.txt</code> adds or removes entries for one machine.</li>
-          <li><strong>Symlinks, not copies.</strong> Edit a skill once and every wired copy changes. A skill in <code>skills/</code> overrides a same-named upstream one.</li>
-          <li><strong>Agents compiled from one source.</strong> <code>compose.py</code> builds each role from <code>role x stack x skills</code>; <code>wire.sh</code> links the result.</li>
-        </ul>
-
-        <p>
-          Four sibling pieces produce the assets: <code>agent-factory/</code> (agent teams), <code>automation-factory/</code> (reusable automation patterns), <code>project-factory/</code> (project templates) and the skill wiring itself.
-          The layout, every script and the full <code>wire.sh</code> sequence are in
-          <a href="https://github.com/oneafrikan/the-grid/blob/main/docs/architecture.md">docs/architecture.md</a>.
-        </p>
-      </section>
-
-      <!-- 3. agent-factory — composed agents -->
-      <section aria-labelledby="agent-factory-heading">
-        <h2 id="agent-factory-heading">agent-factory — composed agents</h2>
-
-        <p>
-          <code>agent-factory/</code> composes AI dev-team agents from three
-          orthogonal inputs: <strong>role × stack × skills</strong>. Each input
-          is independent — swap a stack overlay without touching the role's
-          identity, or bolt on a skill without rewriting anything else.
-        </p>
-
-        <div class="tier-grid" style="margin: 1.25rem 0;">
-
-          <article class="tier-card">
-            <h3>role</h3>
-            <p>
-              <em>Who</em> the agent is — Tech Lead, Backend Dev, QA, and so on.
-              Stack-agnostic identity, personality, and an operating skill.
-              Lives in <code>roles/&lt;role&gt;/</code>.
-            </p>
-          </article>
-
-          <article class="tier-card">
-            <h3>stack</h3>
-            <p>
-              <em>What</em> it builds on — LAMP, modern-frontend,
-              data-engineering…. An overlay appended to the role's operating
-              rules. Lives in <code>stacks/&lt;stack&gt;/</code>.
-            </p>
-          </article>
-
-          <article class="tier-card">
-            <h3>skills</h3>
-            <p>
-              Bolt-on capabilities pulled from the ecosystem (Paperclip, php,
-              mysql…). Referenced by name — not copied into the agent output.
-            </p>
-          </article>
-
+        <h2 id="get-in">Get in.</h2>
+        <div class="cmd">
+          <pre><span class="prompt" aria-hidden="true">$</span><code class="cmd-repeat">git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid && bash ~/.the-grid/scripts/bootstrap.sh <span class="nw">--with-agents</span></code></pre>
+          <button type="button" class="copy-btn" aria-describedby="copy-status-2">Copy</button>
         </div>
-
-        <p>
-          A <strong>compose config</strong> names a project and lists agents, each
-          as <code>role + stacks[] + skills[] + model</code>. <code>compose.py</code>
-          reads it and emits one folder per agent under
-          <code>agent-factory/projects/&lt;name&gt;/</code>, rendered to the live
-          OpenClaw <strong>5-file identity model</strong>: <code>SOUL.md</code> (how
-          it behaves), <code>IDENTITY.md</code> (who it is + model),
-          <code>AGENTS.md</code> (boot sequence + async handoff), <code>USER.md</code>
-          (who it serves), <code>MEMORY.md</code> (what it carries).
-        </p>
-
-        <p>
-          <code>compose.py</code> is a <strong>multi-target compiler</strong> — one
-          5-file source, a different artefact shape per <code>--target</code>. The
-          <code>claude-code</code> target splits on <code>role.yaml orchestrator</code>:
-        </p>
-
-        <table class="files-table" style="margin: 1rem 0 1.25rem;">
-          <thead>
-            <tr>
-              <th scope="col">Form</th>
-              <th scope="col">Roles</th>
-              <th scope="col">How to invoke</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>Skill</strong> (orchestrator)</td>
-              <td><code>grid-ceo-orchestrator</code>, <code>grid-tech-lead</code>, <code>grid-growth-hacker</code>, <code>finance-desk-finance-manager</code>, <code>tron</code>, <code>morpheus</code>, <code>oracle</code></td>
-              <td>Slash command — <code>/grid-tech-lead</code>. Transforms the session into that role.</td>
-            </tr>
-            <tr>
-              <td><strong>Subagent</strong> (specialist)</td>
-              <td>the other roles</td>
-              <td>Not a slash command. Delegate: <em>"Use the grid-backend-dev subagent to…"</em>, or let an orchestrator hand off automatically.</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div class="command-block">
-          <h3>Compose a team and wire it into Claude Code</h3>
-          <pre><code># Compose each public project for the Claude Code target
-.venv/bin/python agent-factory/compose.py agent-factory/examples/core.yaml --target claude-code
-.venv/bin/python agent-factory/compose.py agent-factory/examples/grid.yaml --target claude-code
-.venv/bin/python agent-factory/compose.py agent-factory/examples/finance-desk.yaml --target claude-code
-.venv/bin/python agent-factory/compose.py agent-factory/examples/learning-desk.yaml --target claude-code
-
-# Wire the output — orchestrators → ~/.claude/skills/, specialists → ~/.claude/agents/
-bash scripts/wire.sh
-
-# Open a fresh Claude Code session to pick up the new agents, then:
-# /grid-tech-lead    ← invoke the orchestrator
-</code></pre>
-        </div>
-
-        <div class="ownership-note">
-          The very agents that maintain the-grid — the Tech Lead orchestrator and
-          the Frontend, Backend, and QA specialists — are themselves output of
-          agent-factory. The Claude Code target is the one built and wired
-          live; the other <code>--target</code> values are listed under Roadmap.
-        </div>
-
-      </section>
-
-      <!-- 3b. automation-factory — reusable automation patterns -->
-      <section aria-labelledby="automation-factory-heading">
-        <h2 id="automation-factory-heading">automation-factory — reusable patterns</h2>
-
-        <p>
-          A sibling factory to <code>agent-factory/</code>, one tier down: not composed
-          agents, but <strong>reusable automation patterns</strong> — the orchestration
-          layer that wires an agent into a recurring, unattended workflow. A tailor
-          doesn't sew each suit from scratch — they cut from a pattern. Each pattern is a
-          generic, version-controlled template, <em>instantiated</em> (cut + placeholder-filled)
-          into a target repo's tracked <code>loop/</code> folder — not <code>.claude/</code>,
-          which is commonly gitignored and wouldn't survive a clone or repo move.
-        </p>
-
-        <p>
-          First pattern: <code>issue-loop</code> — an agent that works a repo's labelled
-          GitHub issues and hands a verified pull request to a human, one issue per run.
-          Composes a headless runner with a <code>/loop</code> prompt and a post-commit review hook.
-        </p>
-
-        <div class="ownership-note">
-          The template is what the-grid owns; the instance lives in the project it serves.
-          <code>scripts/instantiate.sh &lt;pattern&gt; &lt;target-repo&gt; --profile &lt;personal|work|mac-mini&gt;</code>
-          does the profiled cut: a verbatim copy into <code>loop/</code>, a <code>loop.conf</code>
-          rendered once, and on the <code>work</code> and <code>mac-mini</code> profiles the
-          headless runner (one issue per run; it runs your verify command itself and opens a PR,
-          never a merge) with a push guard and a worktree helper.
-        </div>
-      </section><!-- /#automation-factory-heading -->
-
-      <!-- 3c. project-factory — project bootstrapping -->
-      <section aria-labelledby="project-factory-heading">
-        <h2 id="project-factory-heading">project-factory — project bootstrapping</h2>
-
-        <p>
-          Scaffolds whole new projects from a template — a different job from
-          <code>skills/</code> (wired), <code>agent-factory/</code> (composes personas), and
-          <code>automation-factory/</code> (cuts a pattern into an existing repo). A template
-          is standalone: no logic of its own, doesn't run, doesn't depend on the-grid once cut.
-        </p>
-
-        <p>
-          <code>project-factory/scripts/cut-project.sh &lt;template&gt; &lt;target-dir&gt;</code> either
-          <strong>seeds</strong> a brand-new project (empty target) or <strong>retrofits</strong>
-          an existing one (non-empty target) — same script, same rule either way: never
-          overwrite a file that already exists and differs from the template; anything
-          skipped is reported for manual review. Composition (which agent-factory persona,
-          which skills, which automation-factory pattern) happens <em>after</em> seeding, as a
-          normal step in the resulting repo.
-        </p>
-      </section><!-- /#project-factory-heading -->
-
-
-      <!-- 4. Agents — who the factory produces -->
-      <section aria-labelledby="agents-heading">
-        <h2 id="agents-heading">Agents</h2>
-
-        <p>
-          agent-factory produces <!--count:roles-->40<!--/count--> roles across four independently composed
-          and gated public projects (plus any private desk composed the same
-          way, sourcing roles from outside this repo — see <a href="https://github.com/oneafrikan/the-grid/blob/main/docs/private-projects.md">docs/private-projects.md</a>). Some
-          roles are <strong>orchestrators</strong> — they become Claude Code
-          skills invoked as slash commands; some coordinate a team (one,
-          <code>gsd</code>, is the light fan-out for small fixes), and three
-          (<code>tron</code>, <code>morpheus</code>, <code>oracle</code>) talk to you directly.
-          The rest are <strong>specialists</strong> —
-          subagents delegated to by an orchestrator or called directly.
-        </p>
-
-        <!-- ── core: cross-desk shared infra ── -->
-        <h3 class="agent-group-heading">
-          core
-          <span class="badge badge-specialist" aria-hidden="true">cross-desk infra — stays wired everywhere</span>
-        </h3>
-
-        <div class="agent-grid">
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>core-gh-triage</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">GitHub Triage Agent</div>
-            <p class="agent-card-summary">Scheduled GitHub issue triage — classifies severity, applies mattpocock labels, writes agent briefs for machine-doable issues and triage notes for human-required ones. Cron-driven, no delegation chain.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>core-librarian</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Librarian</div>
-            <p class="agent-card-summary">Maintains persistent, cross-linked markdown wikis compiled from other agents' research — one wiki per domain. Runs the ingest / query / lint cycle, preserving every page's evidence tier and provenance. Never asserts a claim itself.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>core-context-engineer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Context Engineer</div>
-            <p class="agent-card-summary">Designs and measures what loads into a session and when: size and split, cache-friendly ordering, retrieval design, compaction and handoff. Measures before and after; shows the diff before touching a human's CLAUDE.md or memory.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>core-platform-engineer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Platform Engineer</div>
-            <p class="agent-card-summary">Makes a personal developer environment — dotfiles, shell functions, bootstrap scripts, per-machine overlays — work on macOS, Ubuntu and Arch from one repo. Small, dry-run-verified changes on a branch; the human tests the other OSes and decides on merge.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>core-researcher</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Researcher</div>
-            <p class="agent-card-summary">Desk, web, market, competitive and technical research. Source-grounded, fact-checked synthesis with citations. Investigates a question; does not decide.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>tron</code>
-              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
-            </div>
-            <div class="agent-card-title">Tron — the front door</div>
-            <p class="agent-card-summary">Run <code>/tron</code> first. Asks what you are trying to do, checks which skills and agents are actually wired on this machine, and recommends the right one with a reason and a next step. Recommends and hands off; never does the work or launches anything without your yes.</p>
-          </article>
-
-        </div>
-
-        <!-- ── grid: the dev team ── -->
-        <h3 class="agent-group-heading">
-          grid
-          <span class="badge badge-orchestrator" aria-hidden="true">dev team — engineering, product, marketing</span>
-        </h3>
-
-        <div class="agent-grid">
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-ceo-orchestrator</code>
-              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
-            </div>
-            <div class="agent-card-title">CEO</div>
-            <p class="agent-card-summary">Top-level orchestrator above the team. Turns a business goal into sequenced initiatives and bets, makes the build-vs-not call, sets guardrails and budgets, delegates to Tech Lead + Product Manager, gates releases, reviews outcomes against the goal.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-tech-lead</code>
-              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
-            </div>
-            <div class="agent-card-title">Tech Lead</div>
-            <p class="agent-card-summary">PRDs, architecture decisions, hands off to specialists, reviews output.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-growth-hacker</code>
-              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
-            </div>
-            <div class="agent-card-title">Growth Hacker</div>
-            <p class="agent-card-summary">Acquisition and funnel experiments, analytics-driven growth. Runs disciplined, hypothesis-first experiments — one variable at a time, lets the data decide. Player-coach: also leads the marketing specialists below.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-ad-copy</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Ad Copy</div>
-            <p class="agent-card-summary">Short-form ad creative. Hooks, headlines, and channel-fit copy variants written to be A/B tested, not admired. Works from a brief.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-backend-dev</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Backend Dev</div>
-            <p class="agent-card-summary">Server-side logic, APIs, database, auth, business rules. Implements to a PRD.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-copywriter</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Copywriter</div>
-            <p class="agent-card-summary">Long-form and product copy. Writes to a brief: voice, clarity, structure.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-data-analyst</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Data Analyst</div>
-            <p class="agent-card-summary">Queries, dashboards, analysis, reporting. Turns a question into a defensible answer, with assumptions and caveats stated.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-data-engineer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Data Engineer</div>
-            <p class="agent-card-summary">Pipelines, warehousing, transforms, data quality. Builds to a pipeline spec.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-data-scientist</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Data Scientist</div>
-            <p class="agent-card-summary">Statistical modeling and experiments — A/B testing, causal inference, feature engineering, ML models. Turns data into validated models and experiment readouts.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-designer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Designer</div>
-            <p class="agent-card-summary">UI/UX design: user flows, layout, design systems, component specs, accessibility-by-design. Hands a design spec to frontend-dev.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-devops</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">DevOps</div>
-            <p class="agent-card-summary">CI/CD, environments, secrets, deploy and rollback, monitoring. Proposes deploys; the human approves production.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-frontend-dev</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Frontend Dev</div>
-            <p class="agent-card-summary">Client side: UI templates, components, client state, forms, accessibility. Implements to a PRD against the API contract from backend-dev.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-paid-search</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Paid Search Specialist</div>
-            <p class="agent-card-summary">Google Ads + Microsoft Ads: account/campaign structure, keyword + match-type + negative strategy, Quality Score, bidding and budget pacing, conversion tracking. Plans and optimises spend; the human approves the budget.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-paid-social</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Paid Social Specialist</div>
-            <p class="agent-card-summary">Meta, Instagram, LinkedIn, TikTok: campaign objective + structure, audience strategy, creative testing and fatigue management, pixel/CAPI tracking. Plans and optimises spend; the human approves the budget.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-product-manager</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Product Manager</div>
-            <p class="agent-card-summary">Converts intent into precise specs. Owns scope, acceptance criteria, PRDs, and tracer-bullet tickets. Does not architect or implement.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-project-manager</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Project Manager</div>
-            <p class="agent-card-summary">Delivery management. Turns a plan or PRD into tracked tasks with owners, estimates, and dependencies; runs standups, surfaces blockers, reports status against the timeline.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-qa-engineer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">QA Engineer</div>
-            <p class="agent-card-summary">The release gate. Builds test plans, verifies work against PRD acceptance criteria, reviews for correctness and edge cases, blocks release on critical issues.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-security-reviewer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Security Reviewer</div>
-            <p class="agent-card-summary">Threat models, audits code + dependencies + secrets, rates findings by severity, and gives remediation guidance. Advisory security gate — does not implement fixes.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-seo</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">SEO Specialist</div>
-            <p class="agent-card-summary">Technical, on-page, and content SEO: audits, schema/JSON-LD, sitemaps, Core Web Vitals, GSC, keyword/intent strategy. Recommends; does not deploy.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-ai-engineer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">AI Engineer</div>
-            <p class="agent-card-summary">The LLM runtime around the prompts: token budgets, caching, model choice, structured-output plumbing, failure handling, agent loops, tools/MCP, async execution, retrieval, cost tracking.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-fullstack-engineer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Fullstack Engineer</div>
-            <p class="agent-card-summary">Builds vertical slices across client and server in one pass (UI, API endpoint, application-level data access) and keeps the shared contract in sync.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-prompt-engineer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Prompt Engineer</div>
-            <p class="agent-card-summary">The text that drives an LLM: system prompts, rubrics, instructions, few-shot examples, output schemas, and their versioning. Defines what good output is.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-sdet</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">SDET</div>
-            <p class="agent-card-summary">Test infrastructure and strategy: suites, fixtures, isolation, contract tests, mocks for external and LLM calls, flaky-test diagnosis, and the eval harness for LLM features. Builds the machinery; does not decide pass/block.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>grid-technical-writer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Technical Writer</div>
-            <p class="agent-card-summary">Keeps a repo's documentation true to its code: README, agent guidance files, references, onboarding, changelogs, agent briefs.</p>
-          </article>
-
-        </div>
-
-        <!-- ── finance-desk: the personal finance pipeline ── -->
-        <h3 class="agent-group-heading">
-          finance-desk
-          <span class="badge badge-orchestrator" aria-hidden="true">standalone — not part of the CEO's chain</span>
-        </h3>
-
-        <div class="agent-grid">
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-desk-finance-manager</code>
-              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
-            </div>
-            <div class="agent-card-title">Finance Manager</div>
-            <p class="agent-card-summary">Orchestrates the finance desk pipeline (sentinel → analyst → strategist → risk-officer → approval → scribe). Routes and grades escalation; never sizes a trade, never overrides the Risk Officer, never auto-approves. Standalone — deliberately outside the CEO's delegation chain.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-desk-finance-sentinel</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Finance Sentinel</div>
-            <p class="agent-card-summary">Polls prices, portfolio state, RSS/filings, and FX against threshold rules. 95% deterministic; the model only classifies and flags. Never analyses, never recommends.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-desk-finance-analyst</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Finance Analyst</div>
-            <p class="agent-card-summary">Turns a Sentinel flag (or scheduled review) into an evidence pack: what happened, primary sources, base rates, and the bull AND bear case argued with equal effort. Never recommends — output is evidence, not a proposal.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-desk-finance-strategist</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Finance Strategist</div>
-            <p class="agent-card-summary">Reads an evidence pack + the Investment Policy + portfolio state and produces a proposal (hold/trim/add/rebalance) with position size, an explicit confidence level, and the strongest argument against its own proposal.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-desk-finance-risk-officer</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Finance Risk Officer</div>
-            <p class="agent-card-summary">Layer-2 sanity check: verifies the Strategist's arithmetic and checks the proposal against the Investment Policy's text. The hard-limit veto (position caps, drawdown circuit breaker, no leverage) is Layer-1 pure code elsewhere, not this agent.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>finance-desk-finance-scribe</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Finance Scribe</div>
-            <p class="agent-card-summary">Logs every flag, brief, proposal, approval/rejection, and outcome to the vault with full rationale. Runs the monthly post-mortem. Never proposes or judges — records only.</p>
-          </article>
-
-        </div>
-
-        <!-- ── learning-desk: the learning agents ── -->
-        <h3 class="agent-group-heading">
-          learning-desk
-          <span class="badge badge-orchestrator" aria-hidden="true">manual — you start every session; data stays private</span>
-        </h3>
-
-        <div class="agent-grid">
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>morpheus</code>
-              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
-            </div>
-            <div class="agent-card-title">Morpheus — Socratic tutor</div>
-            <p class="agent-card-summary">Teaches any topic you choose as an interactive course: syllabus, one lesson at a time, questions before answers, one exercise per lesson, section quizzes, a final challenge. Moves on only when you have shown you understand. Teaches only; logs what you learned.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>oracle</code>
-              <span class="badge badge-orchestrator" aria-hidden="true">orchestrator</span>
-            </div>
-            <div class="agent-card-title">Oracle — learns about you</div>
-            <p class="agent-card-summary">Interviews you and reads only the files you approve, then keeps a private profile you can edit or delete: how you work, your goals, strengths and gaps, and the name, role and avatar you pick for yourself. Every entry is tagged stated, observed or inferred.</p>
-          </article>
-
-          <article class="agent-card">
-            <div class="agent-card-name">
-              <code>tank</code>
-              <span class="badge badge-specialist" aria-hidden="true">specialist</span>
-            </div>
-            <div class="agent-card-title">Tank — agent-to-agent learning</div>
-            <p class="agent-card-summary">On request, reads the run log and transcripts you name, finds what an agent got right or wrong, and writes a lesson plus a proposed change to that role's guidance. Proposes only; you review and apply it.</p>
-          </article>
-
-        </div>
-
-        <div class="ownership-note" style="margin-top: 1.25rem;">
-          <strong>Self-referential note:</strong> the agents that maintain this repo, including this page —
-          <code>grid-tech-lead</code> (orchestrator) and <code>grid-frontend-dev</code> (specialist)
-          — are in this list. <code>grid-backend-dev</code>, <code>grid-qa-engineer</code>, and the
-          rest are wired the same way and ready to work any project.
-        </div>
-
-      </section><!-- /#agents-heading -->
-
-      <!-- Skills: one paragraph with count markers; the full list is the generated SKILLS.md -->
-      <section aria-labelledby="skills-heading">
-        <h2 id="skills-heading">Skills</h2>
-        <p>
-          <!--count:wired-->133<!--/count--> skills are wired live and active in every Claude session.
-          Another <!--count:library-->100<!--/count--> are indexed but switched off, searchable with <code>/skill-scout</code>.
-          The full, generated list is
-          <a href="https://github.com/oneafrikan/the-grid/blob/main/SKILLS.md">SKILLS.md</a>.
-        </p>
-      </section>
-
-      <!-- 3b. Specs — OpenSpec, deliberately not a fifth factory -->
-      <section aria-labelledby="openspec-heading">
-        <h2 id="openspec-heading">Specs — spec-driven development</h2>
-
-        <p>
-          the-grid wires
-          <a href="https://openspec.dev" rel="noopener">OpenSpec</a>
-          (<a href="https://github.com/Fission-AI/openspec" rel="noopener">Fission-AI/openspec</a>, MIT)
-          on every machine — the <code>openspec-*</code> skills covering
-          <code>explore → propose → apply → verify → archive</code>. Specs live in
-          the repo as plain markdown, so a plan outlives the session that produced
-          it, and a proposal gets reviewed <em>before</em> any code exists.
-        </p>
-
-        <p>
-          There is deliberately <strong>no fifth factory</strong> here. OpenSpec
-          already is the spec factory; rebuilding propose/apply/archive would be
-          reimplementing it badly. the-grid adds two thin layers instead:
-        </p>
-
-        <ul>
-          <li>
-            <code>project-factory/templates/_common/SPECS.md</code> — the
-            convention plus agent instructions, laid down on <strong>every</strong>
-            cut project, seed or retrofit. Spec-driven becomes the default rather
-            than a per-project decision someone has to remember to make.
-          </li>
-          <li>
-            <code>agent-factory/_core/AGENTS_base.md</code> — a boot-sequence check
-            for <code>SPECS.md</code> / <code>openspec/</code>. One edit reaches
-            every composed agent. Conditional: repos without those markers are
-            untouched.
-          </li>
-        </ul>
-
-        <p>
-          <code>/openspec-help</code> is the reference card.
-          <code>/spec-scout</code> audits adoption and reports drift between the
-          specs and what the code actually does — survey-only, it never writes a
-          spec.
-        </p>
-
-        <p>
-          <strong>External dependency.</strong> These skills shell out to a CLI
-          that isn't vendored, and pull their real instructions from it at
-          runtime — without it they load and dead-end immediately:
-          <code>npm install -g @fission-ai/openspec@1.12.0</code> (needs Node
-          ≥&nbsp;20.19.0). <code>openspec init</code> is optional —
-          <code>openspec new change</code> bootstraps the
-          <code>openspec/</code> tree on its own.
-        </p>
-      </section><!-- /#openspec-heading -->
-
-
-      <!-- Roadmap: wording mirrors docs/roadmap.md -->
-      <section aria-labelledby="roadmap-heading">
-        <h2 id="roadmap-heading">Roadmap</h2>
-
-        <p>
-          <strong>Shipped:</strong> the Claude Code target is built and wired
-          live. <code>compose.py --target</code> also accepts <code>openclaw</code>,
-          <code>openclaw-native</code>, <code>paperclip</code>, <code>codex</code>,
-          <code>gemini-cli</code>, <code>opencode</code> and <code>portable</code>
-          (single-file personas committed under <code>dist/personas/</code>). Skills, subagents and
-          rule packs reach Codex CLI, OpenCode and Gemini CLI through opt-in
-          <code>harness:&lt;name&gt;</code> manifest entries
-          (<a href="https://github.com/oneafrikan/the-grid/blob/main/docs/harnesses.md">docs/harnesses.md</a>);
-          Cursor gets rule packs only (<code>scripts/rules.py emit --harness cursor</code>), not an agent target.
-        </p>
-
-        <p><strong>Not built, or not yet verified</strong>, tracked in
-          <a href="https://github.com/oneafrikan/the-grid/issues">Issues</a>:</p>
-
-        <table class="files-table">
-          <thead>
-            <tr><th scope="col">Direction</th><th scope="col">Status</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>Real-install smoke tests of the Codex, OpenCode and Gemini CLI targets</td><td>Planned; the vendor docs were read, not exercised</td></tr>
-            <tr><td>Amp</td><td>Blocked: custom-agent mechanism needs verifying first</td></tr>
-            <tr><td>OpenSpec <em>stores</em> (cross-repo planning)</td><td>Open decision, deliberately not adopted</td></tr>
-          </tbody>
-        </table>
-
-        <p style="margin-top: 0.9rem;">
-          Model routing across providers (OpenRouter and friends) is a live
-          question, not a built feature.
-          <a href="https://github.com/oneafrikan/the-grid/blob/main/docs/model-selection.md">docs/model-selection.md</a>
-          carries the current price and capability picture, plus the evidence gaps in it.
-        </p>
-      </section>
-
-      <!-- Status: wording mirrors README "Status" -->
-      <section aria-labelledby="status-heading">
-        <h2 id="status-heading">Status &amp; expectations</h2>
-
-        <p>This is one person's working system, shared because the mechanics are reusable, not a supported product.</p>
-
-        <ul>
-          <li><strong>It will change under you.</strong> Versioned from v0.1.0; v0.x may still break between tags.</li>
-          <li><strong>It is opinionated.</strong> The wiring model, the factories and the compose format are my choices, not a consensus design.</li>
-          <li><strong>Personal config is gitignored, not mixed in.</strong> <code>baseline-submodules.txt</code>, <code>machines/&lt;host&gt;.txt</code> and the dev-journal <code>LOGS/</code> convention are personal and untracked. You get a generic <code>.example</code> starting point for the first two and owe nothing for the third. A fork never inherits my machine names, account routing or notes.</li>
-          <li><strong>Fork rather than depend.</strong> The wiring model (manifest, symlinks, compose-then-wire) is the transferable part. Copy it and point it at your own skills.</li>
-          <li><strong><code>wire.sh</code> mostly writes symlinks that point into this repo, but not only.</strong> It never clobbers a real directory or a foreign symlink in <code>~/.claude/skills/</code>. It also keeps one auto-handoff hook entry in <code>~/.claude/settings.json</code> (on by default; opt out with <code>-hook:auto-handoff</code>). With opt-in entries it links rule packs under <code>~/.claude/rules/grid/</code> and other harness directories. Inside the clone it writes <code>.wired.manifest</code> and <code>SKILLS.md</code>. The full list is in <a href="https://github.com/oneafrikan/the-grid/blob/main/INSTALL.md">INSTALL.md</a> ("What it touches"). Read the script before running it; it writes to your home directory.</li>
-        </ul>
-      </section>
-
-    </main>
-
-    <footer>
-      <div class="footer-inner">
-        <p>
-          Built by Gareth Knight. MIT.
-          <a href="https://github.com/oneafrikan/the-grid">GitHub</a>.
-          <a href="https://github.com/oneafrikan/the-grid/issues">Issues</a>.
-        </p>
+        <p class="copy-status" id="copy-status-2" role="status" aria-live="polite"></p>
+        <p class="star"><a class="btn" href="https://github.com/oneafrikan/the-grid">Star on GitHub</a></p>
       </div>
-    </footer>
+    </section>
 
-  </div><!-- /.page-wrap -->
+    <div class="wrap">
+      <!-- Status: mirrors README "Status" -->
+      <section aria-labelledby="status-heading">
+        <h2 id="status-heading">Status</h2>
+        <p>One person&#8217;s working system, shared because the mechanics are reusable. Not a supported product, and opinionated: the wiring model, the factories and the compose format are my choices.</p>
+        <ul>
+          <li>Versioned from v0.1.0 (tagged 2026-11-04). v0.x may still break between tags.</li>
+          <li>Personal config is gitignored. <code>baseline-submodules.txt</code>, <code>machines/&lt;host&gt;.txt</code> and <code>LOGS/</code> stay untracked, and the first two ship as <code>.example</code> starting points, so a fork inherits none of my machine names or notes.</li>
+          <li>Fork rather than depend. The transferable part is the wiring model: manifest, symlinks, compose then wire.</li>
+        </ul>
+      </section>
+    </div>
 
-  <!-- Copy button: reveal it only if the clipboard API exists, and never let a failure
-       break the page (it throws in insecure contexts and some embedded browsers). -->
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>
+        <span>Built by Gareth Knight.</span>
+        <a href="https://github.com/oneafrikan/the-grid/blob/main/LICENSE">MIT</a>
+        <a href="https://github.com/oneafrikan/the-grid">GitHub</a>
+        <a href="https://github.com/oneafrikan/the-grid/issues">Issues</a>
+      </p>
+    </div>
+  </footer>
+
+  <!-- Copy buttons: each copies the <code> in its own .cmd block. Revealed only when the
+       clipboard API exists; a failure never breaks the page (it throws in insecure contexts and
+       some embedded browsers), and the command stays one click to select. -->
   <script>
     (function () {
       try {
-        var btn = document.getElementById('copy-btn');
-        var cmd = document.getElementById('install-cmd');
-        var status = document.getElementById('copy-status');
-        if (!btn || !cmd || !status || !navigator.clipboard || !navigator.clipboard.writeText) return;
-        btn.style.visibility = 'visible';
-        btn.addEventListener('click', function () {
-          navigator.clipboard.writeText(cmd.textContent).then(
-            function () { status.textContent = 'Copied to the clipboard.'; },
-            function () { status.textContent = 'Copy failed. Click the command to select it, then copy.'; }
-          );
+        if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+        Array.prototype.forEach.call(document.querySelectorAll('.cmd'), function (box) {
+          var btn = box.querySelector('.copy-btn');
+          var cmd = box.querySelector('code');
+          var status = document.getElementById(btn && btn.getAttribute('aria-describedby'));
+          if (!btn || !cmd || !status) return;
+          btn.style.visibility = 'visible';
+          btn.addEventListener('click', function () {
+            navigator.clipboard.writeText(cmd.textContent).then(
+              function () { status.textContent = 'Copied to the clipboard.'; btn.textContent = 'Copied'; },
+              function () { status.textContent = 'Copy failed. Click the command to select it, then copy.'; }
+            );
+          });
         });
-      } catch (e) { /* leave the button hidden; the command is still selectable */ }
+      } catch (e) { /* leave the buttons hidden; the commands are still selectable */ }
     }());
   </script>
 

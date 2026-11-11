@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d" viewBox="0 0 796 492" width="100%">
+<!--
+  Terminal demo for the-grid. Every output line below was captured from a real run;
+  nothing is hand-typed. Captured on macOS in a throwaway home (a fresh temp dir),
+  never the real home. Setup used (GRID_DIR = a clone of the-grid with submodules):
+    wire:      env -i PATH=$PATH GRID_DRY_HOME=$TMPH GRID_BASELINE=baseline-submodules.example.txt
+                    GRID_HOST=demo bash scripts/wire.sh
+               (dry-home mode: every home-derived target is forced under $TMPH)
+    ls/links:  env -i PATH=$PATH HOME=$TMPH bash -c '<the commands shown>'
+    uninstall: env -i PATH=$PATH HOME=$TMPH GRID_STATE_DIR=$TMPH/.grid bash scripts/uninstall.sh
+               (a dry run: it only prints what it would remove)
+  Edits to the captured text, all by exact string substitution or a visible command:
+    - $TMPH is shown as ~ and the clone path as ~/.the-grid
+    - the wire.sh listing is trimmed to its first 2 and last 2 lines (177 in all);
+      the line count in the dim note is computed from the capture
+    - the uninstall output is cut with sed and wrapped with fold, as printed
+  Sample (the wire.sh and uninstall.sh listings show different links on each run;
+  uninstall.sh prints in hash order). The 141 skills are the example baseline's set.
+-->
+<title id="t">Terminal demo: wiring the-grid, then a dry-run uninstall</title>
+<desc id="d">A dark terminal window titled ~/.the-grid, captured from real command output in a throwaway home. First, bash scripts/wire.sh prints one wired line per skill and agent and ends with Done. Then ls shows 141 skills in ~/.claude/skills, and readlink shows that they are symlinks into the ~/.the-grid clone. Last, scripts/uninstall.sh runs as a dry run and reports that it would remove 174 items and that nothing changed.</desc>
+<rect width="796" height="492" rx="10" fill="#0d0d0f"/>
+<rect x="8" y="8" width="780" height="476" rx="8" fill="#141418" stroke="#2a2a35"/>
+<circle cx="28" cy="30" r="6" fill="#ff5f57" aria-hidden="true"/>
+<circle cx="48" cy="30" r="6" fill="#febc2e" aria-hidden="true"/>
+<circle cx="68" cy="30" r="6" fill="#28c840" aria-hidden="true"/>
+<text x="398" y="35" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#8a8ab0" text-anchor="middle">~/.the-grid</text>
+<g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve" style="white-space:pre" fill="#d8d8e0">
+<text x="24" y="74"><tspan fill="#00d9ff">$ </tspan>bash ~/.the-grid/scripts/wire.sh</text>
+<text x="24" y="98" fill="#d8d8e0">  wired: claude-api</text>
+<text x="24" y="122" fill="#d8d8e0">  wired: docx</text>
+<text x="24" y="146" fill="#8a8ab0">  ... (173 more lines)</text>
+<text x="24" y="170" fill="#d8d8e0">  wired agent: grid-ponytail.md</text>
+<text x="24" y="194" fill="#5b8af0">Done.</text>
+<text x="24" y="218"><tspan fill="#00d9ff">$ </tspan>ls ~/.claude/skills | wc -l</text>
+<text x="24" y="242" fill="#d8d8e0">     141</text>
+<text x="24" y="266"><tspan fill="#00d9ff">$ </tspan>for s in autoplan browse; do readlink ~/.claude/skills/$s; done</text>
+<text x="24" y="290" fill="#d8d8e0">~/.the-grid/repos/gstack/autoplan</text>
+<text x="24" y="314" fill="#d8d8e0">~/.the-grid/repos/gstack/browse</text>
+<text x="24" y="338"><tspan fill="#00d9ff">$ </tspan>bash ~/.the-grid/scripts/uninstall.sh | sed -n '1,2p;$p' | fold -s -w 78</text>
+<text x="24" y="362" fill="#d8d8e0">uninstall: DRY RUN, nothing changes; pass --yes to remove (clone: ~/.the-grid)</text>
+<text x="24" y="386" fill="#d8d8e0">would remove  skill ~/.claude/skills/pair-agent -&gt; </text>
+<text x="24" y="410" fill="#d8d8e0">~/.the-grid/repos/gstack/pair-agent</text>
+<text x="24" y="434" fill="#5b8af0">uninstall: dry run: would remove 174 item(s), keep 0; nothing changed. Re-run </text>
+<text x="24" y="458" fill="#5b8af0">with --yes to remove.</text>
+</g>
+</svg>

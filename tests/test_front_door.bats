@@ -291,7 +291,8 @@ CLONE_CMD='git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid && b
 
 @test "front door: README.md '##' headings follow the skeleton order" {
   prev=0
-  for h in "Who it's for" "Quickstart" "What you get" "How it works" 'Why "the grid"' "Status" "Docs"; do
+  for h in "Quickstart" "Works with" "The problem" "How it works" "What you get" "Layers" "Safe to run" \
+           'Why "the grid"' "Status" "Docs" "Credits and license"; do
     n="$(grep -nxF -- "## $h" "$GRID_ROOT/README.md" | head -n 1 | cut -d: -f1)"
     [ -n "$n" ] || { echo "README.md: missing heading: $h" >&2; return 1; }
     [ "$n" -gt "$prev" ] || { echo "README.md: heading out of order: $h" >&2; return 1; }
@@ -311,8 +312,11 @@ CLONE_CMD='git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid && b
   done
 }
 
-@test "front door: README.md has the status line and the empty langs marker" {
-  phrase_in README.md 'Works today with Claude Code. Other AI tools: see [docs/roadmap.md](docs/roadmap.md).'
+@test "front door: README.md has the multi-tool status line and the empty langs marker" {
+  # the support line links the Works with table; the old Claude-only line must not come back
+  phrase_in README.md 'Running in daily use on Claude Code, Codex CLI and Antigravity CLI.'
+  phrase_in README.md '[Works with](#works-with)'
+  ! grep -qF -- 'Works today with Claude Code.' "$GRID_ROOT/README.md" || false
   grep -qxF -- '<!-- langs --><!-- /langs -->' "$GRID_ROOT/README.md"
 }
 
@@ -333,9 +337,10 @@ CLONE_CMD='git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid && b
   phrase_in INSTALL.md 'bash ~/.the-grid/scripts/bootstrap.sh --with-agents'
 }
 
-@test "front door: README.md has a mermaid diagram, the banner and the Flynn attribution" {
+@test "front door: README.md has a mermaid diagram, the hero image and the Flynn attribution" {
   grep -qxF -- '```mermaid' "$GRID_ROOT/README.md"
-  phrase_in README.md '████████╗'
+  # the hero image replaced the ASCII banner (the banner text stays in the-grid.txt)
+  phrase_in README.md '](assets/hero.webp)'
   phrase_in README.md 'Kevin Flynn'
 }
 
@@ -367,10 +372,11 @@ CLONE_CMD='git clone https://github.com/oneafrikan/the-grid.git ~/.the-grid && b
   done <<< "$links"
 }
 
-@test "front door: README.md Status line does not claim wire.sh touches only symlinks" {
+@test "front door: README.md Safe to run names settings.json and Status keeps the version line" {
   # wire.sh also writes settings.json (hook) and, opt-in, rules and harness dirs; INSTALL.md has the list
   ! grep -qF -- 'only ever touches symlinks' "$GRID_ROOT/README.md" || false
+  safe="$(awk '/^## Safe to run/{f=1;next} /^## /{f=0} f' "$GRID_ROOT/README.md")"
+  [[ "$safe" == *settings.json* ]]
   status="$(awk '/^## Status/{f=1;next} /^## /{f=0} f' "$GRID_ROOT/README.md")"
-  [[ "$status" == *settings.json* ]]
   [[ "$status" == *"Versioned from v0.1.0"* ]]
 }

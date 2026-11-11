@@ -35,15 +35,16 @@ teardown() {
 
 # --- F3: wire.sh writes ~/.claude/settings.json (the auto-handoff SessionEnd hook) ---
 
-@test "F3: the architecture doc's wire.sh section and the README Status safety line mention settings.json" {
+@test "F3: the architecture doc's wire.sh section and the README Safe to run section mention settings.json" {
   # the wire.sh walkthrough moved from README.md to docs/architecture.md (front-door change)
   sec="$(awk '/^## How wire.sh works/{f=1;next} /^## /{f=0} f' docs/architecture.md)"
   [[ "$sec" == *settings.json* ]]
   [[ "$sec" == *-hook:auto-handoff* ]]
-  # the README safety bullet must name settings.json and the opt-out, and not claim "only symlinks"
-  status="$(awk '/^## Status/{f=1;next} /^## /{f=0} f' README.md)"
-  [[ "$status" == *settings.json* ]]
-  [[ "$status" == *-hook:auto-handoff* ]]
+  # the README safety bullet (moved from Status to Safe to run) must name settings.json and the
+  # opt-out, and not claim "only symlinks"
+  safe="$(awk '/^## Safe to run/{f=1;next} /^## /{f=0} f' README.md)"
+  [[ "$safe" == *settings.json* ]]
+  [[ "$safe" == *-hook:auto-handoff* ]]
   ! grep -n 'wire.sh` only ever touches symlinks' README.md || false
   # the code does write it (guards the doc against a removed feature)
   grep -q 'deploy_hooks.py' scripts/wire.sh

@@ -22,9 +22,29 @@ different asset type:
 There is deliberately **no factory for specs**: OpenSpec already fills that role; see
 the "Spec-driven development (OpenSpec)" section of [CONTRIBUTING.md](../CONTRIBUTING.md).
 
-The README architecture diagram (mermaid) and the inline SVG in `index.html` show the
-same nodes. Edit them together, or one will drift from the other (see
+## Diagram
+
+The full picture: every source, the compose step and the library tier. The README carries
+a five-node version of this (sources, allowlist, host overlay, `wire.sh`, tool dirs) that
+the inline SVG in `index.html` mirrors; edit those two together (see
 [Hand-synced copies](#hand-synced-copies)).
+
+```mermaid
+flowchart LR
+  subgraph Sources
+    R["repos/* submodules<br/>upstream skill repos"]
+    S["skills/<br/>my own skills + edited forks"]
+    A["agent-factory roles<br/>role x stack x skills"]
+  end
+  M["allowlist<br/>baseline + machines/HOST.txt"]
+  C[compose.py]
+  W[wire.sh]
+  R --> M --> W
+  S --> W
+  A --> C --> W
+  W -->|symlinks| K["~/.claude/skills<br/>~/.claude/agents"]
+  R -. not on allowlist .-> L["Library<br/>SKILLS.md + /skill-scout"]
+```
 
 ## Wired vs library tiers
 
@@ -243,14 +263,15 @@ Every `docs/*.md` file in the repo, so a reader can reach each from here:
 - [uplift-runbook.md](uplift-runbook.md) — uplift runbook
 - [usage.md](usage.md) — the weekly usage job
 
-Planned in this change, plain text until the files exist: [docs/roadmap.md](roadmap.md) (the roadmap
-and model-routing note) and [docs/private-projects.md](private-projects.md) (composing a private desk).
+Also: [roadmap.md](roadmap.md) (the roadmap and model-routing note) and
+[private-projects.md](private-projects.md) (composing a private desk).
 
 ## Hand-synced copies
 
 Some text exists in more than one place and is kept in step by hand. Change one, change
 them all:
 
-- **Quickstart command:** `README.md`, `INSTALL.md`, `index.html` (`#install-cmd`) and `docs/demo/demo.tape`.
+- **Quickstart command:** `README.md` (twice: Quickstart and the end of "Why the grid"), `INSTALL.md`, `index.html` (twice: `#install-cmd` in the hero and `code.cmd-repeat` under "Get in.") and `docs/demo/demo.tape`.
 - **Hero sentence:** `README.md` and `index.html`.
-- **Architecture diagram:** the mermaid block in `README.md` and the inline SVG in `index.html` (Pages cannot render mermaid without a CDN script, so the SVG is hand-authored with the same nodes).
+- **Architecture diagram:** the five-node mermaid block in `README.md` and the inline SVG in `index.html` (Pages cannot render mermaid without a CDN script, so the SVG is hand-authored with the same nodes). The full diagram above is not mirrored.
+- **Works with table, Safe to run list, Terms and the story ending:** `README.md` is the copy source; `index.html` mirrors them.
