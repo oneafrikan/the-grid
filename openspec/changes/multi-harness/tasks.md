@@ -181,4 +181,4 @@ Physical-file follow-up (symlink rejection confirmed by controlled probes):
 - [x] Run targeted harness regression tests and compose golden checks.
 - [x] Recheck fresh Codex skill discovery and typed imported-skill invocation: a global-only probe on CLI 0.167.1 found 81 user skills plus five system skills without errors; native typed Tron invocation loaded the canonical skill.
 - [x] Verify native registration: all 27 specialist names appeared in the actual global `agent_type` selector schema.
-- [x] Exercise native named specialists: managed physical files fixed symlink rejection; actual `agent_type` selections for `grid-ponytail` and `grid-ad-copy` with `fork_turns="none"` completed with expected answers. Child metadata/mailbox events were not exposed; all 27 workflows and QA write restrictions were not tested.
+- [x] Exercise native named specialists: managed physical files fixed symlink rejection; actual `agent_type` selections for `grid-ponytail` and `grid-ad-copy` with `fork_turns="none"` completed with expected answers. Direct child metadata/mailbox events were not captured by the checker; all 27 workflows and QA write restrictions were not tested.

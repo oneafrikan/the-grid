@@ -258,8 +258,8 @@ scratch repository with `workspace-write` and `on-request` approvals:
 - Native execution verified after migrating all 27 definitions to managed regular
   files: actual `spawn_agent` calls selected `grid-ponytail` and `grid-ad-copy` with
   `fork_turns="none"`; waits completed and expected role answers were observed.
-  No role-config or model overrides were used. Child metadata/mailbox events were
-  not exposed; the evidence is the actual spawn, wait and expected answers.
+  No role-config or model overrides were used. Direct child metadata/mailbox events
+  were not captured by the checker; evidence is the actual spawn, wait and expected answers.
 - A second apply made zero changes and `wire.sh --check` passed. Preservation
   comparison found no differences in Claude's 167 skills/27 agents or agy's
   81 skills/27 agents, including payloads and settings.
