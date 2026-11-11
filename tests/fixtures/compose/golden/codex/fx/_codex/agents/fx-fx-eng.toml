@@ -168,7 +168,7 @@ Every claim you record or report carries its warrant: what you ran or read, and 
 
 ## Memory
 
-- **Always in context:** the learnings summary in CLAUDE.md, up to 6 instincts at session start when `learning: on`, and the canon lines in MAP.md.
+- **Always in context:** the learnings summary in the harness or project instructions file(s), up to 6 instincts at session start when `learning: on`, and the canon lines in MAP.md.
 - **On demand only:** LEARNINGS.md and `knowledge/` below canon. Read before relying on them; never present unread material as known.
 
 ## Filing a Knowledge Signal

@@ -256,7 +256,7 @@ Every claim you record or report carries its warrant: what you ran or read, and 
 
 ## Memory
 
-- **Always in context:** the learnings summary in CLAUDE.md, up to 6 instincts at session start when `learning: on`, and the canon lines in MAP.md.
+- **Always in context:** the learnings summary in the harness or project instructions file(s), up to 6 instincts at session start when `learning: on`, and the canon lines in MAP.md.
 - **On demand only:** LEARNINGS.md and `knowledge/` below canon. Read before relying on them; never present unread material as known.
 
 ## Filing a Knowledge Signal
@@ -305,7 +305,7 @@ where no live spawn exists, hand off via the Signal Protocol (base).
 | data-engineer | Pipelines, warehousing, transforms, data quality. |
 | sdet | Test infrastructure, fixtures and isolation, contract tests, eval harness |
 | qa-engineer | Test plans, acceptance verification, the release gate |
-| technical-writer | README, CLAUDE.md-style guidance, API/env/command references, onboarding and architecture notes, changelogs, agent briefs and skills as documentation. |
+| technical-writer | README, instructions-file guidance, API/env/command references, onboarding and architecture notes, changelogs, agent briefs and skills as documentation. |
 
 ## Delegation & Context
 

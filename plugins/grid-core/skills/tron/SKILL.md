@@ -243,7 +243,7 @@ Every claim you record or report carries its warrant: what you ran or read, and 
 
 ## Memory
 
-- **Always in context:** the learnings summary in CLAUDE.md, up to 6 instincts at session start when `learning: on`, and the canon lines in MAP.md.
+- **Always in context:** the learnings summary in the harness or project instructions file(s), up to 6 instincts at session start when `learning: on`, and the canon lines in MAP.md.
 - **On demand only:** LEARNINGS.md and `knowledge/` below canon. Read before relying on them; never present unread material as known.
 
 ## Filing a Knowledge Signal
@@ -280,7 +280,7 @@ agent unasked, and does not take over from `/grid-help` (static reference) or fr
 an orchestrator that already owns the goal. Its procedure lives in its `tron` skill.
 
 What it can route to is read at run time from the installed skills and agents
-(`~/.claude/skills/`, `~/.claude/agents/`) and the descriptions in their files, so a
+(the lists your harness already shows you) and their names and descriptions, so a
 desk that is not wired on this machine is never recommended.
 
 | Need | Route to |
@@ -353,12 +353,12 @@ If the goal is ambiguous, ask **one** clarifying question. Then route.
 
 ## Step 2 — See what is wired
 
-Read what is installed on this machine:
+Read what is installed on this machine from the skill and agent lists your harness already shows you in this session:
 
-- Skills: `~/.claude/skills/` (each directory's `SKILL.md` frontmatter `name` and `description`).
-- Agents: `~/.claude/agents/` (each file's frontmatter `name` and `description`).
+- Skills: each entry's `name` and `description`.
+- Agents: each entry's `name` and `description`.
 
-Do not rely on a remembered list. If a skill or agent is not in these directories, it is not wired here.
+Do not rely on a remembered list. If a skill or agent is not in those lists, it is not wired here.
 
 ## Step 3 — Pick the route
 

@@ -272,7 +272,7 @@ Every claim you record or report carries its warrant: what you ran or read, and 
 
 ## Memory
 
-- **Always in context:** the learnings summary in CLAUDE.md, up to 6 instincts at session start when `learning: on`, and the canon lines in MAP.md.
+- **Always in context:** the learnings summary in the harness or project instructions file(s), up to 6 instincts at session start when `learning: on`, and the canon lines in MAP.md.
 - **On demand only:** LEARNINGS.md and `knowledge/` below canon. Read before relying on them; never present unread material as known.
 
 ## Filing a Knowledge Signal
@@ -322,7 +322,7 @@ below; where no live spawn exists, hand off via the Signal Protocol (base).
 | grid-ai-engineer | API prompt-caching mechanics, model/effort selection, retries and failure codes, agent loops, tool/MCP integration, async model calls, retrieval plumbing (clients, indexes, calls), observability and per-call cost tracking. |
 | grid-qa-engineer | Test plans, acceptance verification, the release gate |
 | grid-sdet | Test infrastructure, fixtures and isolation, contract tests, eval harness |
-| grid-technical-writer | README, CLAUDE.md-style guidance, API/env/command references, onboarding and architecture notes, changelogs, agent briefs and skills as documentation. |
+| grid-technical-writer | README, instructions-file guidance, API/env/command references, onboarding and architecture notes, changelogs, agent briefs and skills as documentation. |
 | grid-security-reviewer | Threat models, audits code + dependencies + secrets, rates findings by severity, and gives remediation guidance. |
 | grid-devops | CI/CD, environments, secrets, deploy and rollback, monitoring. |
 | grid-data-engineer | Pipelines, warehousing, transforms, data quality. |
@@ -347,8 +347,8 @@ below; where no live spawn exists, hand off via the Signal Protocol (base).
 - **External / desk research is off-team.** `researcher` is core infra, not on
   the roster, so no signal handoff. Route to `core-researcher` directly, with
   the question *and* the decision it informs, or its scoping gate stalls.
-- **Context design is off-team.** What loads into a session, `CLAUDE.md` /
-  memory / skill layout and context budget go to `core-context-engineer`,
+- **Context design is off-team.** What loads into a session (instructions files,
+  memory, skill layout) and context budget go to `core-context-engineer`,
   with the question *and* the decision it informs.
 - **One-off prompt tuning is self-serve.** Use the wired `prompt-engineer`
   skill (jeffallan) for a prompt, output schema or eval rubric; no signal.
