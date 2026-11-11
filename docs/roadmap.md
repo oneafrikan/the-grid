@@ -4,15 +4,16 @@ Shipped today: the **Claude Code** target is built and wired live.
 `compose.py --target` also accepts `openclaw`, `openclaw-native`, `paperclip`,
 `codex`, `gemini-cli`, `opencode` and `portable` (single-file personas, committed
 under `dist/personas/`). Skills, subagents and rule packs reach Codex CLI, OpenCode
-and Gemini CLI through opt-in `harness:<name>` manifest entries
-([harnesses.md](harnesses.md)); Cursor gets rule packs only
+and Gemini CLI, and skills reach Antigravity CLI, Pi and OpenClaw, through opt-in
+`harness:<name>` manifest entries ([harnesses.md](harnesses.md)). Codex CLI and
+Antigravity CLI are in daily use alongside Claude Code. Cursor gets rule packs only
 (`scripts/rules.py emit --harness cursor`), not an agent target.
 
 Not built, or not yet verified — tracked in [Issues](https://github.com/oneafrikan/the-grid/issues):
 
 | Direction | Status |
 |---|---|
-| Real-install smoke tests of the Codex, OpenCode and Gemini CLI targets | Planned; the vendor docs were read, not exercised ([harnesses.md](harnesses.md)) |
+| Real-install smoke tests of the Gemini CLI, OpenCode, Pi and OpenClaw targets | Planned; the vendor docs were read, not exercised ([harnesses.md](harnesses.md)) |
 | Amp | Blocked — custom-agent mechanism needs verifying first |
 | OpenSpec **stores** (cross-repo planning) | Open decision, deliberately not adopted |
 
