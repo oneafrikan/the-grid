@@ -20,12 +20,12 @@ If the goal is ambiguous, ask **one** clarifying question. Then route.
 
 ## Step 2 — See what is wired
 
-Read what is installed on this machine:
+Read what is installed on this machine from the skill and agent lists your harness already shows you in this session:
 
-- Skills: `~/.claude/skills/` (each directory's `SKILL.md` frontmatter `name` and `description`).
-- Agents: `~/.claude/agents/` (each file's frontmatter `name` and `description`).
+- Skills: each entry's `name` and `description`.
+- Agents: each entry's `name` and `description`.
 
-Do not rely on a remembered list. If a skill or agent is not in these directories, it is not wired here.
+Do not rely on a remembered list. If a skill or agent is not in those lists, it is not wired here.
 
 ## Step 3 — Pick the route
 

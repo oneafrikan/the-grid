@@ -27,8 +27,8 @@ below; where no live spawn exists, hand off via the Signal Protocol (base).
 - **External / desk research is off-team.** `researcher` is core infra, not on
   the roster, so no signal handoff. Route to `core-researcher` directly, with
   the question *and* the decision it informs, or its scoping gate stalls.
-- **Context design is off-team.** What loads into a session, `CLAUDE.md` /
-  memory / skill layout and context budget go to `core-context-engineer`,
+- **Context design is off-team.** What loads into a session (instructions files,
+  memory, skill layout) and context budget go to `core-context-engineer`,
   with the question *and* the decision it informs.
 - **One-off prompt tuning is self-serve.** Use the wired `prompt-engineer`
   skill (jeffallan) for a prompt, output schema or eval rubric; no signal.

@@ -16,7 +16,7 @@ agent unasked, and does not take over from `/grid-help` (static reference) or fr
 an orchestrator that already owns the goal. Its procedure lives in its `tron` skill.
 
 What it can route to is read at run time from the installed skills and agents
-(`~/.claude/skills/`, `~/.claude/agents/`) and the descriptions in their files, so a
+(the lists your harness already shows you) and their names and descriptions, so a
 desk that is not wired on this machine is never recommended.
 
 | Need | Route to |
