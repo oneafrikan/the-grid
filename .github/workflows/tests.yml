@@ -20,14 +20,17 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Decides whether this change is docs-only, so `checks` and `bats` can be skipped.
+  # The ONE classifier: decides which route this change takes, so `checks` and `bats` can be skipped.
+  #   docs_only  markdown outside the executable-content dirs      -> light `docs` job
+  #   md_fast    markdown-only diff that touches skills/, agents/ or agent-factory/roles/
+  #              (rule: scripts/lib/md-fast.sh, also read by `gate.sh --fast`) -> `fast` job
+  #   neither    everything else                                    -> `checks` + `bats`
+  # Both rules live in scripts/lib/md-fast.sh (md_fast_class); there is no second classifier.
   # Why a job and NOT `paths-ignore`/`paths` on the trigger: a workflow that never starts never
   # reports `gate`, and the main ruleset requires `gate`, so the PR would sit on "expected"
   # forever and could not merge. Here the workflow always runs and `gate` always reports.
-  # Docs-only = at least one changed file, every changed file ends in `.md`, and none is under a
-  # directory whose markdown is executable content (skill bodies, role prompts, rule packs,
-  # plugin bundles, templates, hooks, eval cases, test fixtures and goldens, workflows). Anything else, an unusable base
-  # (new branch, force push) or a failed diff is NOT docs-only: when unsure, run the full gate.
+  # An unusable base (new branch, force push), a failed diff or an empty diff is neither route:
+  # when unsure, run the full gate.
   changes:
     # Drafts run nothing (see the `gate` job); skipping here skips every dependent job too.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
@@ -35,6 +38,9 @@ jobs:
     timeout-minutes: 5
     outputs:
       docs_only: ${{ steps.docs.outputs.docs_only }}
+      md_fast: ${{ steps.docs.outputs.md_fast }}
+      # the diff range, so the `fast` job's gate.sh --fast looks at exactly what was classified
+      range: ${{ steps.docs.outputs.range }}
     steps:
       # Full history, no submodules: only a diff between two commits is needed. Full depth
       # because a PR's base and a push's `before` can be arbitrarily far behind the head.
@@ -61,30 +67,29 @@ jobs:
           files=""
           if [ -z "${base//0/}" ]; then
             # all-zero before: new branch or force push, there is nothing to diff against
-            echo "no usable base commit: treating as NOT docs-only"
+            echo "no usable base commit: treating as a full-gate change"
           # --no-renames lists both sides of a move, so skills/x/SKILL.md -> docs/x.md still counts
           # the skills/ path. -z keeps odd file names intact; they are turned into lines below.
           elif ! files="$(git diff --no-renames --name-only -z "$range" | tr '\0' '\n')"; then
             files=""
-            echo "diff of $range failed: treating as NOT docs-only"
+            echo "diff of $range failed: treating as a full-gate change"
           fi
 
-          docs_only=false
-          if [ -n "$files" ]; then
-            docs_only=true
-            while IFS= read -r f; do
-              case "$f" in
-                skills/*|agents/*|agent-factory/*|rules/*|plugins/*|project-factory/*|automation-factory/*|hooks/*|evals/*|tests/*|.github/*) docs_only=false ;;
-                *.md) ;;
-                *) docs_only=false ;;
-              esac
-            done <<< "$files"
-          fi
+          # md_fast_class prints docs | md_fast | full; an empty list is full.
+          . scripts/lib/md-fast.sh
+          class="$(printf '%s\n' "$files" | md_fast_class)"
+          docs_only=false; md_fast=false
+          [ "$class" != docs ] || docs_only=true
+          [ "$class" != md_fast ] || md_fast=true
 
           echo "changed files ($range):"
           printf '%s\n' "${files:-<none>}" | sed 's/^/  /'
-          echo "docs_only=$docs_only"
-          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "class=$class docs_only=$docs_only md_fast=$md_fast"
+          {
+            echo "docs_only=$docs_only"
+            echo "md_fast=$md_fast"
+            echo "range=$range"
+          } >> "$GITHUB_OUTPUT"
 
   # The light job a docs-only change runs INSTEAD of `checks`/`bats` (about a minute, not tens).
   # Skipping everything would let a markdown edit break checks that read markdown: the personal-
@@ -121,13 +126,46 @@ jobs:
       - name: Front-door docs tests
         run: tests/lib/bats-core/bin/bats tests/test_front_door.bats
 
+  # The route a markdown-only change under skills/, agents/ or agent-factory/roles/ takes INSTEAD of
+  # `checks`/`bats`: `gate.sh --fast` (personal, budget owned scope, audit --owned, map, counts, rules,
+  # portable, role lint, plugins, personas). No submodules, no bats: the change cannot reach what they
+  # test, and the baseline submodules are what make `checks` slow. The venv is built every time (not
+  # only for role files): build-plugins.py and build-personas.sh compose from it, and a skill or agent
+  # edit can make their committed output stale. The checkout has full history because gate.sh --fast
+  # diffs the range `changes` classified (GRID_FAST_RANGE).
+  # Skipped here on purpose, all named in GRID_GATE_EXPECT_SKIPPED so any OTHER skip fails the job:
+  # catalog (SKILLS.md needs the baseline submodules; the full gate on main checks it),
+  # budget-baseline (same reason), personal-denylist (no private denylist on CI).
+  fast:
+    needs: changes
+    if: needs.changes.outputs.md_fast == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build agent-factory venv
+        run: |
+          python3 -m venv agent-factory/.venv
+          agent-factory/.venv/bin/pip install -r agent-factory/requirements.txt
+
+      - name: Gate (--fast, markdown-only)
+        env:
+          GRID_FAST_RANGE: ${{ needs.changes.outputs.range }}
+          GRID_GATE_EXPECT_SKIPPED: >-
+            catalog budget-baseline personal-denylist
+        run: bash scripts/gate.sh --strict --fast
+
   # Every gate check except bats, run once. The bats suite is split into the shard jobs
   # below (about 21 of the 24 minutes a single job took); the `gate` job at the end
   # aggregates both.
   checks:
-    # Skipped for docs-only changes (see `changes`). A draft PR skips `changes`, so it skips here too.
+    # Skipped for docs-only and md_fast changes (see `changes`). A draft PR skips `changes`, so it skips here too.
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.md_fast != 'true'
     # Pinned image: ubuntu-latest moves to a new LTS without notice and the
     # loop treats this job as its truth signal.
     runs-on: ubuntu-24.04
@@ -175,7 +213,7 @@ jobs:
   # and the per-run TMPDIR leak check, so leak detection still runs per shard.
   bats:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.md_fast != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -202,13 +240,14 @@ jobs:
 
   # The ONE check the main ruleset requires: keep the job id and name `gate`.
   # It needs every other job. A docs-only change skips `checks` and `bats` on purpose and runs the
-  # light `docs` job instead: gate then passes only if `changes` and `docs` both succeeded.
+  # light `docs` job instead: gate then passes only if `changes` and `docs` both succeeded. An md_fast
+  # change likewise runs `fast` instead: gate passes only if `changes` and `fast` both succeeded.
   # Otherwise it passes only if each of `checks` and `bats` finished `success`. `if: always()` makes it run (and fail) when a
   # needed job failed, was cancelled or was skipped; without it a skipped gate would count as
   # passing. A draft PR skips every job, gate included, as before.
   gate:
     if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
-    needs: [changes, docs, checks, bats]
+    needs: [changes, docs, fast, checks, bats]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -217,10 +256,12 @@ jobs:
           CHANGES: ${{ needs.changes.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           DOCS: ${{ needs.docs.result }}
+          MD_FAST: ${{ needs.changes.outputs.md_fast }}
+          FAST: ${{ needs.fast.result }}
           # `bats` is the matrix as a whole: its result is success only if every shard was.
           RESULTS: "checks=${{ needs.checks.result }} bats=${{ needs.bats.result }}"
         run: |
-          echo "changes=$CHANGES docs_only=$DOCS_ONLY docs=$DOCS"
+          echo "changes=$CHANGES docs_only=$DOCS_ONLY docs=$DOCS md_fast=$MD_FAST fast=$FAST"
           echo "$RESULTS"
           if [ "$CHANGES" != "success" ]; then
             echo "gate: FAIL — the changes job was not success ($CHANGES)" >&2; exit 1
@@ -230,6 +271,12 @@ jobs:
               echo "gate: FAIL — docs-only change, but the docs job was not success ($DOCS)" >&2; exit 1
             fi
             echo "gate: docs-only change, light docs checks passed"; exit 0
+          fi
+          if [ "$MD_FAST" = "true" ]; then
+            if [ "$FAST" != "success" ]; then
+              echo "gate: FAIL — markdown-only change, but the fast job was not success ($FAST)" >&2; exit 1
+            fi
+            echo "gate: markdown-only change, gate.sh --fast passed"; exit 0
           fi
           case "$RESULTS" in
             "checks=success bats=success") ;;

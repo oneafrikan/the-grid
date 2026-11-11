@@ -60,6 +60,18 @@
 #                         explicit flag, not CI=true detection, so a local run under a
 #                         CI-like environment behaves as before.
 #   gate.sh --no-bats     every check EXCEPT bats. CI's `checks` job; the suite runs in the shard jobs.
+#   gate.sh --fast        a MARKDOWN-ONLY change (rule: scripts/lib/md-fast.sh, also read by CI's
+#                         `changes` job): no submodules, no bats, under a minute. Refuses a change set
+#                         that is not markdown-only (exit 1: run the full gate). plugins/** and dist/**
+#                         (regenerated output) are allowed in the diff: the plugins and personas checks
+#                         below verify them against their sources. Changed files = the
+#                         diff against $GRID_FAST_RANGE (a git range, CI sets it) or, by default,
+#                         against the merge-base with origin/main plus uncommitted and untracked files.
+#                         Runs: personal, budget (owned scope), audit (--owned), map, counts, rules,
+#                         portable (skill_portable over changed skills/), lint-roles (when agent-factory/
+#                         roles or _core changed), plugins, personas. SKIPS catalog (SKILLS.md needs the
+#                         baseline submodules; recorded as `catalog`, the full gate checks it).
+#                         Not combinable with --pre-commit, --no-bats or --shard; --strict applies.
 #   gate.sh --shard <n>   ONLY the bats files listed for shard <n> in tests/shards.txt (same version
 #                         pin, GRID_REQUIRE_VENV and per-run TMPDIR leak check as the full suite).
 #                         CI runs one per matrix entry; tests/test_gate.bats proves the shards
@@ -83,13 +95,15 @@ cd "$GRID_DIR" || exit 2
 PRE_COMMIT=0
 STRICT=0
 NO_BATS=0
+FAST=0
 SHARD=""
-GATE_USAGE="usage: gate.sh [--pre-commit] [--strict] [--no-bats | --shard <name>]"
+GATE_USAGE="usage: gate.sh [--pre-commit] [--strict] [--no-bats | --shard <name> | --fast]"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --pre-commit) PRE_COMMIT=1 ;;
     --strict)     STRICT=1 ;;
     --no-bats)    NO_BATS=1 ;;
+    --fast)       FAST=1 ;;
     --shard)      [ "$#" -ge 2 ] || { echo "$GATE_USAGE" >&2; exit 2; }; SHARD="$2"; shift ;;
     *) echo "$GATE_USAGE" >&2; exit 2 ;;
   esac
@@ -97,6 +111,10 @@ while [ "$#" -gt 0 ]; do
 done
 # A shard is the bats stage alone: it excludes the other modes.
 if [ -n "$SHARD" ] && { [ "$PRE_COMMIT" = 1 ] || [ "$NO_BATS" = 1 ]; }; then
+  echo "$GATE_USAGE" >&2; exit 2
+fi
+# --fast is its own scope: it is not a variant of the commit hook, the no-bats gate or a shard.
+if [ "$FAST" = 1 ] && { [ "$PRE_COMMIT" = 1 ] || [ "$NO_BATS" = 1 ] || [ -n "$SHARD" ]; }; then
   echo "$GATE_USAGE" >&2; exit 2
 fi
 
@@ -167,6 +185,10 @@ SKIPPED=()
 # check <name> <cmd...> — run, print status, remember failures.
 check() {
   local name="$1"; shift
+  # --fast: the full gate's `check` lines below run as no-ops (the functions they name are defined
+  # further down than one block could reach); the fast block at the bottom sets FAST_RUN=1 and
+  # runs its own selection through this same function.
+  if [ "$FAST" = 1 ] && [ "${FAST_RUN:-0}" != 1 ]; then return 0; fi
   echo "==> $name"
   if "$@"; then echo "    PASS"; else echo "    FAIL"; FAILED+=("$name"); fi
 }
@@ -494,6 +516,8 @@ run_audit() {
   # as skipped. CI (CI set) stays strict: an unscanned wired set is a failure there.
   local args=(--gate --quiet) out rc=0
   [ -n "${CI:-}" ] || args+=(--allow-partial)
+  # --fast has no submodules: the wired half cannot be scanned, so scan the owned assets only.
+  [ "$FAST" = 0 ] || args=(--owned --quiet)
   out="$(bash scripts/audit.sh "${args[@]}" 2>&1)" || rc=$?
   printf '%s\n' "$out"
   # audit.sh says so in its output when the wired half was not scanned. Record that as a skip too
@@ -576,5 +600,117 @@ EOF
   return 0
 }
 check translations run_translations_check
+
+# --- fast: markdown-only changes ------------------------------------------------------
+# Same check functions as the full gate (defined above), run over a markdown-only change set.
+# NOT covered here (full gate / CI): catalog (needs submodules), sources, lock, lint, pysyntax,
+# compose --check, plugins-validate, bats. None of those read a markdown-only change except the
+# catalog: a skill description edit can drift SKILLS.md, so with the submodules initialised run
+# `bash scripts/gate.sh` (or scripts/catalog.sh --check) before relying on --fast for one.
+FAST_FILES=()
+FAST_BASE=""
+# fast_collect — fill FAST_FILES with the changed paths.
+fast_collect() {
+  local out range="${GRID_FAST_RANGE:-}" ref f
+  if [ -n "$range" ]; then
+    FAST_BASE="$range"
+  else
+    # merge-base with origin/main (else main, else HEAD): diffing against it covers commits not
+    # yet pushed AND uncommitted tracked changes; untracked files are added below.
+    for ref in origin/main main; do
+      FAST_BASE="$(git merge-base HEAD "$ref" 2>/dev/null)" && [ -n "$FAST_BASE" ] && break
+      FAST_BASE=""
+    done
+    [ -n "$FAST_BASE" ] || FAST_BASE=HEAD
+    range="$FAST_BASE"
+  fi
+  # --no-renames lists both sides of a move. A failed diff must not read as "no changes".
+  out="$(git -c core.quotepath=off diff --no-renames --name-only "$range")" \
+    || { echo "    git diff $range failed" >&2; return 1; }
+  [ -n "${GRID_FAST_RANGE:-}" ] || out="$out"$'\n'"$(git -c core.quotepath=off ls-files --others --exclude-standard)"
+  while IFS= read -r f; do [ -z "$f" ] || FAST_FILES+=("$f"); done < <(printf '%s\n' "$out")
+}
+
+# fast_scope — the change set must be markdown-only by scripts/lib/md-fast.sh (shared with CI).
+fast_scope() {
+  local f
+  if [ ! -f scripts/lib/md-fast.sh ]; then echo "    scripts/lib/md-fast.sh missing" >&2; return 1; fi
+  # shellcheck source=lib/md-fast.sh
+  . scripts/lib/md-fast.sh
+  fast_collect || return 1
+  if [ "${#FAST_FILES[@]}" -eq 0 ]; then
+    echo "    no changed files against $FAST_BASE: nothing for --fast to check" >&2; return 1
+  fi
+  echo "    ${#FAST_FILES[@]} changed file(s) against $FAST_BASE"
+  if ! printf '%s\n' "${FAST_FILES[@]}" | md_fast_markdown_only; then
+    echo "    not a markdown-only change; --fast does not apply. Offending paths:" >&2
+    for f in "${FAST_FILES[@]}"; do md_fast_path_ok "$f" || echo "      $f" >&2; done
+    echo "    run the full gate: bash scripts/gate.sh" >&2
+    return 1
+  fi
+}
+
+# fast_portable — skill_portable (the wire.sh filter for non-Claude harnesses) over each changed
+# skills/<name>/. Spec-limit failures (bad frontmatter, name, description, symlink) FAIL. The two
+# Claude-specific reasons only WARN: they are by design (wire.sh just does not link such a skill
+# into other harnesses) and several owned skills already carry them.
+fast_portable() {
+  command -v python3 >/dev/null || { echo "    python3 absent — skipped"; SKIPPED+=(portable); return 0; }
+  [ -f scripts/lib/skill-portable.sh ] || { echo "    scripts/lib/skill-portable.sh absent — skipped"; SKIPPED+=(portable); return 0; }
+  # shellcheck source=lib/skill-portable.sh
+  . scripts/lib/skill-portable.sh
+  local f name d seen=" " reason rc=0 n=0
+  for f in "${FAST_FILES[@]}"; do
+    case "$f" in skills/*/*) ;; *) continue ;; esac
+    name="${f#skills/}"; name="${name%%/*}"; d="skills/$name"
+    case "$seen" in *" $name "*) continue ;; esac
+    seen="$seen$name "
+    [ -f "$d/SKILL.md" ] || continue     # deleted or moved away: nothing to check
+    n=$((n + 1))
+    if reason="$(skill_portable "$d")"; then continue; fi
+    case "$reason" in
+      claude-specific|claude-only-guard) echo "    WARN: $d is Claude-specific ($reason); not linked into other harnesses" ;;
+      *) echo "    FAIL: $d: $reason" >&2; rc=1 ;;
+    esac
+  done
+  [ "$n" -gt 0 ] || echo "    no changed skills"
+  return "$rc"
+}
+
+# fast_lint_roles — compose.py --lint-roles, only when a role file (or the shared _core base every
+# role is composed from) changed. Needs the agent-factory venv; absent = skipped loudly.
+fast_lint_roles() {
+  local f hit=0
+  for f in "${FAST_FILES[@]}"; do
+    case "$f" in agent-factory/roles/*|agent-factory/_core/*) hit=1; break ;; esac
+  done
+  [ "$hit" = 1 ] || { echo "    no role files changed"; return 0; }
+  [ -x agent-factory/.venv/bin/python ] || { echo "    agent-factory venv absent — skipped"; SKIPPED+=(compose); return 0; }
+  agent-factory/.venv/bin/python agent-factory/compose.py --lint-roles
+}
+
+# catalog: SKILLS.md is rendered from the baseline's submodules, which --fast does not fetch.
+fast_catalog() {
+  echo "    needs the baseline submodules — skipped in --fast (the full gate checks it)"
+  SKIPPED+=(catalog)
+}
+
+if [ "$FAST" = 1 ]; then
+  FAST_RUN=1
+  check scope fast_scope
+  # No scope, no point: the rest would judge a change --fast does not cover.
+  [ "${#FAILED[@]}" -eq 0 ] || summarise
+  check personal   run_personal_check
+  check budget     run_budget_check
+  check audit      run_audit
+  check map        run_map_check
+  check counts     run_counts_check
+  check rules      run_rules_check
+  check portable   fast_portable
+  check lint-roles fast_lint_roles
+  check plugins    run_plugins_check
+  check personas   run_personas_check
+  check catalog    fast_catalog
+fi
 
 summarise
