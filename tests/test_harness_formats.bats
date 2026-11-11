@@ -58,9 +58,9 @@ need_tomllib() {
   [ "$status" -eq 0 ]
 }
 
-@test "codex: goldens map the allowlist to sandbox_mode and never write model" {
+@test "codex: goldens inherit parent permissions and never write model" {
   local d; d=$(dirname "$(golden_files codex toml | head -1)")
-  grep -qx 'sandbox_mode = "read-only"' "$d/fx-fx-readonly.toml"
+  lacks '^sandbox_mode' "$d/fx-fx-readonly.toml"
   lacks '^sandbox_mode' "$d/fx-fx-eng.toml"
   lacks '^sandbox_mode' "$d/fx-product-manager.toml"
   lacks '^model' "$d"/*.toml
@@ -137,7 +137,7 @@ PYEOF
   [ "$(ls "$TMP/fx/_codex/agents" | wc -l)" -eq 3 ]
 }
 
-@test "codex: an allowlist containing Edit or Write gets no sandbox_mode; one without both does" {
+@test "codex: allowlists disable absent Bash without claiming a sandbox override" {
   # The shared fixture has no allowlisted role that can edit, so build the cases here:
   # a private roles tree (copy of the fixtures) plus three extra roles and a tiny config.
   local roles="$TMP/roles" r
@@ -159,10 +159,83 @@ PYEOF
   local d="$TMP/out/zz/_codex/agents"
   lacks '^sandbox_mode' "$d/zz-zz-edit.toml"
   lacks '^sandbox_mode' "$d/zz-zz-write.toml"
-  grep -qx 'sandbox_mode = "read-only"' "$d/zz-zz-ro.toml"
+  lacks '^sandbox_mode' "$d/zz-zz-ro.toml"
+  grep -qx 'features.shell_tool = false' "$d/zz-zz-write.toml" "$d/zz-zz-ro.toml"
+  lacks '^features.shell_tool' "$d/zz-zz-edit.toml"
 }
 
 # ================================================================ opencode (group 4) ====
+
+@test "codex: root adapter takes its identity and complete body from Markdown frontmatter" {
+  need_tomllib
+  mkdir -p "$TMP/root"
+  printf -- '---\nname: native-name\ndescription: Root agent\nmodel: sonnet\n---\n\nKeep this complete prompt.\n' > "$TMP/root/different-file.md"
+  run "$PY" - "$REPO_ROOT/agent-factory" "$TMP/root" <<'PYEOF'
+import pathlib,sys,tomllib
+sys.path.insert(0,sys.argv[1])
+import compose
+files=compose.root_codex_agents(pathlib.Path(sys.argv[2]))
+assert set(files)=={'native-name.toml'}
+agent=tomllib.loads(files['native-name.toml'])
+assert agent['name']=='native-name'
+assert agent['developer_instructions']=='\nKeep this complete prompt.\n'
+assert 'model' not in agent
+PYEOF
+  [ "$status" -eq 0 ]
+}
+
+@test "codex: root adapter dry-run writes nothing and repeat output passes check" {
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" --root-agents --target codex --out "$TMP/root" --dry-run
+  [ "$status" -eq 0 ]
+  [ ! -e "$TMP/root" ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" --root-agents --target codex --out "$TMP/root"
+  [ "$status" -eq 0 ]
+  [ -f "$TMP/root/_codex/grid-ponytail.toml" ]
+  local before; before="$(cat "$TMP/root/_codex/grid-ponytail.toml")"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" --root-agents --target codex --out "$TMP/root"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TMP/root/_codex/grid-ponytail.toml")" = "$before" ]
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" --root-agents --target codex --out "$TMP/root" --check
+  [ "$status" -eq 0 ]
+  printf 'stale\n' >> "$TMP/root/_codex/grid-ponytail.toml"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" --root-agents --target codex --out "$TMP/root" --check
+  [ "$status" -eq 1 ]
+}
+
+@test "codex: root adapter refuses metadata it cannot preserve" {
+  mkdir -p "$TMP/root"
+  printf -- '---\nname: guarded\ndescription: d\nhooks: something\n---\nbody\n' > "$TMP/root/guarded.md"
+  run "$PY" - "$REPO_ROOT/agent-factory" "$TMP/root" <<'PYEOF'
+import pathlib,sys
+sys.path.insert(0,sys.argv[1])
+import compose
+compose.root_codex_agents(pathlib.Path(sys.argv[2]))
+PYEOF
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unsupported root agent metadata"* ]]
+}
+
+@test "codex: root adapter refuses unowned output and malformed tool allowlists" {
+  mkdir -p "$TMP/root/_codex"
+  printf 'mine\n' > "$TMP/root/_codex/keep.toml"
+  run "$PY" "$REPO_ROOT/agent-factory/compose.py" --root-agents --target codex --out "$TMP/root"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$TMP/root/_codex/keep.toml")" = mine ]
+  local tools
+  for tools in '[]' '[Teleport]' 'null'; do
+    mkdir -p "$TMP/source"
+    printf -- '---\nname: guarded\ndescription: d\ntools: %s\n---\nbody\n' "$tools" > "$TMP/source/guarded.md"
+    run "$PY" - "$REPO_ROOT/agent-factory" "$TMP/source" <<'PYEOF'
+import pathlib,sys
+sys.path.insert(0,sys.argv[1])
+import compose
+compose.root_codex_agents(pathlib.Path(sys.argv[2]))
+PYEOF
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"E_TOOL_UNMAPPED"* ]]
+  done
+}
+
 # OpenCode subagents are <name>.md with YAML frontmatter (`description`, `mode`, optional
 # `permission`) and the prompt as the body. The skill checks below apply to every harness that
 # reads the shared skills dir. Author's own checks, not independent verification.
@@ -833,15 +906,15 @@ PYEOF
   [ "$status" -eq 0 ]
 }
 
-@test "codex: a role that can edit or write but has no Bash prints a shell warning; others do not" {
+@test "codex: no-Bash allowlists disable the shell instead of printing an obsolete warning" {
   gemini_roles zz-write=Read,Write zz-edit=Read,Edit,Bash zz-ro=Read,Grep
   run "$PY" "$REPO_ROOT/agent-factory/compose.py" "$TMP/zz.yaml" --target codex --out "$TMP/out"
   echo "$output"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"role zz-write gets a shell on Codex"* ]]
+  [[ "$output" != *"gets a shell on Codex"* ]]
   [[ "$output" != *"role zz-edit gets a shell"* ]]
   [[ "$output" != *"role zz-ro gets a shell"* ]]
-  # Files are unchanged by the warning: no sandbox_mode for the editing roles.
+  grep -qx 'features.shell_tool = false' "$TMP/out/zz/_codex/agents/zz-zz-write.toml"
   lacks '^sandbox_mode' "$TMP/out/zz/_codex/agents/zz-zz-write.toml"
 }
 
@@ -851,17 +924,17 @@ PYEOF
     "$REPO_ROOT/openspec/changes/multi-harness/design.md"
   echo "$output"
   [ "$status" -eq 1 ]
-  grep -qi "best-effort" "$REPO_ROOT/docs/harnesses.md"
+  grep -qi "Parent sandbox and permissions are inherited" "$REPO_ROOT/docs/harnesses.md"
   grep -q "^### What each harness enforces" "$REPO_ROOT/docs/harnesses.md"
 }
 
-@test "validator: codex rejects an unknown sandbox_mode" {
+@test "validator: codex rejects ignored parent settings and invalid capability overrides" {
   need_tomllib
   local m
   for m in read-only workspace-write danger-full-access; do
     printf 'name = "x"\ndescription = "d"\nsandbox_mode = "%s"\ndeveloper_instructions = "b"\n' "$m" > "$TMP/ok.toml"
     run python3 -I "$VALIDATE" codex-agent "$TMP/ok.toml"
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
   done
   for m in yolo READ-ONLY ""; do
     printf 'name = "x"\ndescription = "d"\nsandbox_mode = "%s"\ndeveloper_instructions = "b"\n' "$m" > "$TMP/bad.toml"
@@ -872,6 +945,11 @@ PYEOF
   printf 'name = "x"\ndescription = "d"\nsandbox_mode = 3\ndeveloper_instructions = "b"\n' > "$TMP/bad.toml"
   run python3 -I "$VALIDATE" codex-agent "$TMP/bad.toml"
   [ "$status" -eq 1 ]
+  for m in true '"false"'; do
+    printf 'name = "x"\ndescription = "d"\nfeatures.shell_tool = %s\ndeveloper_instructions = "b"\n' "$m" > "$TMP/bad.toml"
+    run python3 -I "$VALIDATE" codex-agent "$TMP/bad.toml"
+    [ "$status" -eq 1 ]
+  done
 }
 
 @test "validator: opencode rejects flow-style permission, an unknown permission key and an unknown frontmatter key" {
@@ -1498,7 +1576,7 @@ time.sleep(30)' "$out/fx" "$TMP/locked" &
 
 # ---------------------------------------------------------------- H-21 compose fidelity ----
 
-@test "H-21 codex: roles that write through the shell get no read-only sandbox; other read-only roles keep it" {
+@test "H-21 codex: every role inherits the parent's sandbox" {
   # Real roles, private tree disabled (empty var), so the shipped role.yaml files decide.
   printf 'project: zz\nslug: zz\nagents:\n  - role: finance-sentinel\n  - role: data-analyst\n  - role: qa-engineer\n  - role: finance-strategist\n' > "$TMP/zz.yaml"
   export GRID_PRIVATE_ROLES_DIR=""
@@ -1509,8 +1587,7 @@ time.sleep(30)' "$out/fx" "$TMP/locked" &
   [ "$status" -eq 0 ]
   local d="$TMP/out/zz/_codex/agents"
   lacks '^sandbox_mode' "$d/zz-finance-sentinel.toml" "$d/zz-data-analyst.toml"
-  grep -qx 'sandbox_mode = "read-only"' "$d/zz-qa-engineer.toml"
-  grep -qx 'sandbox_mode = "read-only"' "$d/zz-finance-strategist.toml"
+  lacks '^sandbox_mode' "$d/zz-qa-engineer.toml" "$d/zz-finance-strategist.toml"
 }
 
 @test "H-21 gemini: a Skill allowlist entry maps to activate_skill" {

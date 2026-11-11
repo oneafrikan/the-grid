@@ -165,3 +165,13 @@ Added after the original groups. Path and format come from agy's bundled docs (`
 - [x] 10.3 Tests: `antigravity-agent` in `tests/lib/validate_harness.py`; bats in `tests/test_harness_formats.bats` and `tests/test_harness_wiring.bats` (incl. a real file in the agents dir surviving as `skip (not managed)`); `antigravity` golden tree.
 - [ ] 10.4 HUMAN: compose `--target antigravity`, `GRID_HARNESS=antigravity bash scripts/wire.sh`, then in a live `agy` session confirm a composed grid agent (one all-tools, one restricted) is listed and spawns from its symlink, and the inline `tools` list is honoured. Record the date in `docs/harnesses.md`.
 - Verify: `tests/lib/bats-core/bin/bats tests/test_harness_formats.bats tests/test_harness_wiring.bats` and `bash scripts/compose-goldens.sh --check`.
+
+## Codex runtime parity repair
+
+- [x] Correct false-positive portability rejection of grid metadata and repo guidance while retaining Claude runtime and guard exclusions.
+- [x] Make Tron discover assets for the current host and use native Codex names and invocation.
+- [x] Generate native root-owned agents from their single Markdown source with safe repeat runs and root precedence.
+- [x] Replace ignored Codex sandbox overrides with supported no-shell capability restrictions; retain inherited models and permissions.
+- [x] Run targeted harness regression tests and compose golden checks.
+- [x] Verify fresh Codex skill discovery and typed imported-skill invocation (81 grid skills plus five system skills; Tron invoked).
+- [ ] Exercise a native named specialist: CLI 0.167.1 exposes task labels without a named-agent selector; generated definitions alone do not satisfy this check.

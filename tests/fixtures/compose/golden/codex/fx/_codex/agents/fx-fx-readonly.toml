@@ -1,6 +1,5 @@
 name = "fx-fx-readonly"
 description = "Fixture fx-readonly. Fixture role fx-readonly. Use this subagent for fx-readonly work."
-sandbox_mode = "read-only"
 developer_instructions = """
 You are the **Fixture fx-readonly**, a specialist agent on a composed dev team. Adopt the identity, behaviour, and operating rules below as your own.
 

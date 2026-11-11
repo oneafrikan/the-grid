@@ -32,3 +32,6 @@ evals/results/
 
 # Python bytecode (scripts/grid and audit.sh avoid writing it, but local runs can still create it)
 __pycache__/
+
+# Native adapters regenerated from the root Markdown agent sources.
+agents/_codex/

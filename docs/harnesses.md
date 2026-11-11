@@ -16,7 +16,7 @@ Codex, Gemini CLI, OpenCode, Pi and OpenClaw all read `~/.agents/skills` (Cursor
 
 | Harness | Skills (user scope) | Subagents | Global instructions | Sources |
 |---|---|---|---|---|
-| Codex CLI | `~/.agents/skills` (also repo `.agents/skills`, admin `/etc/codex/skills`). Symlinked skill folders are followed. `~/.codex/skills` is not documented. Skills list capped at 2% of context or 8,000 chars. | `~/.codex/agents/*.toml`; required `name`, `description`, `developer_instructions`; optional `model`, `model_reasoning_effort`, `sandbox_mode`, `mcp_servers`, `skills.config`. | `~/.codex/AGENTS.md` (or `AGENTS.override.md`); project docs capped by `project_doc_max_bytes` = 32 KiB | learn.chatgpt.com/docs/build-skills, /docs/agent-configuration/subagents, /docs/agent-configuration/agents-md |
+| Codex CLI | `~/.agents/skills` (also repo `.agents/skills`, admin `/etc/codex/skills`). Symlinked skill folders are followed. `~/.codex/skills` is not documented. Skills list capped at 2% of context or 8,000 chars. | `~/.codex/agents/*.toml`; required `name`, `description`, `developer_instructions`; optional `model`, `model_reasoning_effort`, capability restrictions and `skills.config`; sandbox and MCP configuration inherit from the parent. | `~/.codex/AGENTS.md` (or `AGENTS.override.md`); project docs capped by `project_doc_max_bytes` = 32 KiB | learn.chatgpt.com/docs/build-skills, /docs/agent-configuration/subagents, /docs/agent-configuration/agents-md |
 | Gemini CLI | `~/.gemini/skills/` or alias `~/.agents/skills/`; `.agents` wins over `.gemini`. Symlinks not mentioned. | `~/.gemini/agents/*.md`; frontmatter `name`, `description`, optional `tools`, `model`, `temperature`, `max_turns`, `timeout_mins`, `kind`, `mcpServers`. | `~/.gemini/GEMINI.md`; `@file.md` imports | geminicli.com/docs/cli/skills/, /docs/core/subagents/, /docs/cli/gemini-md/ |
 | Antigravity CLI (`agy`; Gemini CLI's successor for individual-tier users since 2026-06-18) | global `~/.gemini/config/skills/`; workspace `.agents/skills/` | global `~/.gemini/config/agents/<name>.md` (bare dir, no `plugin.json`) | workspace `GEMINI.md` / `AGENTS.md`; global `~/.gemini/GEMINI.md`; global AGENTS.md undocumented | Global skills path from agy's bundled docs (`~/.gemini/antigravity-cli/builtin/skills/agy-customizations`: global discovery root `~/.gemini/config/`); not yet smoke-tested end to end. Agents path and format from agy's bundled `migrate-agent-settings` doc (`agents/<name>.md`) plus an operator probe showing agy scans the bare `~/.gemini/config/agents/` dir; not yet verified with a composed grid agent in a live agy session. The earlier skills dir under `~/.gemini/antigravity-cli/` is not read by agy. |
 | OpenCode | `~/.config/opencode/skills/<n>/SKILL.md`; also reads `~/.agents/skills` and `~/.claude/skills`. `name` must match `^[a-z0-9]+(-[a-z0-9]+)*$` and equal the dir; `description` 1-1024; unknown fields ignored. | `~/.config/opencode/agents/<name>.md`; frontmatter `description` (required), `mode`, `model`, `temperature`, `permission`. | `~/.config/opencode/AGENTS.md`, falling back to `~/.claude/CLAUDE.md` | opencode.ai/docs/skills/, /docs/agents/, /docs/rules/ |
@@ -85,7 +85,7 @@ skill@~/.agents/skills<TAB>claude-skill<TAB><target><TAB>skipped<TAB>claude-spec
 | `description-missing` | the description is empty or absent |
 | `description-long` | description over 1024 chars after YAML folding |
 | `claude-only-guard` | the frontmatter carries a Claude-only guard key: `disable-model-invocation`, `allowed-tools`, `hooks` or `context` (top-level keys only) |
-| `claude-specific` | a file in the skill mentions `.claude` (not `.claude-foo`), `.the-grid`, `.grid/`, `CLAUDE_` or `CLAUDE.md` (`.git` and `node_modules` are not read, binary files are skipped) |
+| `claude-specific` | a file in the skill mentions `.claude` (not `.claude-foo`) or `CLAUDE_` (`.git` and `node_modules` are not read, binary files are skipped) |
 | `symlink-escape` | a symlink inside the skill dir resolves outside it |
 | `runtime-root` | the link targets a submodule root (the `gstack` runtime-root link), which is not a skill |
 | `exists, not managed` | something is already at the destination (see below) |
@@ -176,7 +176,7 @@ A role's `tools:` allowlist is translated, not enforced identically. What a harn
 | Harness | What the allowlist becomes | What it does not give you |
 |---|---|---|
 | Claude Code | `tools:` on the subagent | A role that lists `Bash` can still write through the shell |
-| Codex CLI | `sandbox_mode = "read-only"` only when neither `Edit` nor `Write` is listed (not for the two roles that write through the shell, see "Codex CLI") | A best-effort default: a subagent inherits the parent session's sandbox, and `--yolo` or `/permissions` override the agent file. Codex cannot express "no Bash" |
+| Codex CLI | `features.shell_tool = false` when an explicit allowlist omits `Bash` | Parent sandbox and permissions are inherited; an agent file cannot enforce a separate read-only sandbox |
 | OpenCode | `permission` keys `edit`, `bash`, `webfetch` set to `deny` where the allowlist lacks the tool | A partial denylist: every other tool (`task`, MCP servers) keeps OpenCode's default |
 | Gemini CLI | `tools:` in Gemini's own tool names | A role that lists `Bash` keeps `run_shell_command` |
 
@@ -186,39 +186,67 @@ after a decision to (for OpenCode that means `task: deny`, an MCP deny and a `ba
 
 ### Codex CLI
 
-Compose, then wire (Codex only reads the files once wire.sh has linked them into `~/.codex/agents/`):
+Agent schema refreshed against the [official subagent documentation](https://learn.chatgpt.com/docs/agent-configuration/subagents)
+on 2026-11-11; runtime verification is separate from the vendor contract.
 
-```
-agent-factory/.venv/bin/python agent-factory/compose.py agent-factory/examples/grid.yaml --target codex
-GRID_HARNESS=codex bash scripts/wire.sh        # or put harness:codex in machines/<host>.txt
+Compose the active projects and root-owned agents, then wire. The example below
+uses the public core and grid projects; use the same project selection as Claude.
+Commands are REAL-RUN-ONLY until exercised on the target installation.
+
+```bash
+for project in core grid; do
+  agent-factory/.venv/bin/python agent-factory/compose.py "agent-factory/examples/$project.yaml" --target claude-code
+  agent-factory/.venv/bin/python agent-factory/compose.py "agent-factory/examples/$project.yaml" --target codex
+done
+agent-factory/.venv/bin/python agent-factory/compose.py --root-agents --target codex
+# Add harness:codex once to your existing machine overlay; retain other harness entries.
+bash scripts/wire.sh
+bash scripts/wire.sh --check
 ```
 
-Output: `agent-factory/projects/<project>/_codex/agents/<name>.toml`, one per specialist, where `<name>` is `<slug>-<role>` (`grid-qa-engineer`).
+For an isolated preview, run wire with `GRID_DRY_HOME` set to a throwaway directory.
+Do not use `GRID_HARNESS=codex` on a live installation with other active harnesses:
+that override replaces the complete active set.
+
+Output: `agent-factory/projects/<project>/_codex/agents/<name>.toml`, one per specialist.
+The explicit `--root-agents` mode generates `agents/_codex/<name>.toml` from the
+root Markdown agent's frontmatter identity and complete body. Its filename can
+differ from the Markdown source filename; the frontmatter `name` owns identity.
+Root adapters win composed-name collisions; foreign destination files remain untouched.
+The generated root tree carries an ownership marker; unmarked existing output is refused.
+Use `--dry-run` for a report, `--check` for drift, and `--out <root>` for isolated generation.
 
 ```toml
 name = "grid-qa-engineer"
 description = "QA Engineer. The release gate. ... Use this subagent for qa-engineer work."
-sandbox_mode = "read-only"
 developer_instructions = """
 You are the **QA Engineer**, a specialist agent on a composed dev team. ...
 """
 ```
 
-- Required keys are `name`, `description` and `developer_instructions`. `name` is the agent's identity, not the filename.
-- Key order is fixed: `name`, `description`, `sandbox_mode`, `developer_instructions`.
-- Sandbox mapping: `sandbox_mode = "read-only"` is written only when the role's `role.yaml` has a `tools:` allowlist containing neither `Edit` nor `Write`, except for the two roles in the table below (`CODEX_SHELL_WRITERS` in `compose.py`). A role with no allowlist, or one that can edit, gets no `sandbox_mode` and inherits Codex's default.
+- Required keys are `name`, `description` and `developer_instructions`.
+- Models inherit from the session; Claude model aliases are not copied into Codex.
+- An explicit allowlist without Bash adds `features.shell_tool = false`.
+- Agent files cannot override parent sandbox, approval policy or MCP configuration.
+  Omitted Edit/Write tools therefore do not enforce read-only access in Codex; preserve
+  role instructions and set the parent permissions appropriately for the work.
+- Strings round-trip through `tomllib`; `tests/lib/validate_harness.py codex-agent FILE...`
+  rejects ignored parent settings as well as invalid TOML.
+- Orchestrators remain skills. Tron reads the current host's discovered inventory,
+  uses native Codex agent TOML and `$skill` invocation, and falls back to the harness
+  registry for local inventory. It distinguishes disk installation from runtime discovery.
+- Shared skill wiring continues withholding Claude-only guards and runtime dependencies.
+  Grid metadata and repository `CLAUDE.md` references alone do not make a skill incompatible.
+- Open a fresh Codex session after wiring. Confirm discovered names, select a native named
+  specialist and invoke an imported skill. Successful file generation is not runtime verification.
 
-  | Role | Documented write need | Codex sandbox |
-  |---|---|---|
-  | `finance-sentinel` | writes one run-record line per run through `scripts/run-record.sh` (shell) | none (inherits) |
-  | `data-analyst` | saves each query and its result (shell) | none (inherits) |
-  | `qa-engineer`, `security-reviewer`, `finance-risk-officer`, `finance-strategist` | none (report only) | `read-only` |
-  | every role with `Edit` or `Write` | writes files | none (inherits) |
-- `sandbox_mode = "read-only"` is a best-effort default, not an enforced control (see "What each harness enforces"). While it applies it also blocks writes through Bash, which is stricter than Claude, where an allowlisted Bash can still write.
-- A role whose allowlist has `Edit` or `Write` but no `Bash` gets no `sandbox_mode`, so it runs with a shell on Codex; compose prints one `warning: role <name> gets a shell on Codex` line to stderr for each (the files are unchanged).
-- `model` and the other optional keys (`model_reasoning_effort`, `mcp_servers`, `skills.config`) are never written.
-- Strings are escaped by hand (the stdlib has no TOML writer) and verified by round-tripping through `tomllib`; `tests/lib/validate_harness.py codex-agent FILE...` checks any generated file against the format above.
-- Not verified on a real Codex yet (the real-install smoke test is a later, human step).
+Read-only local smoke test (2026-11-11, Codex CLI 0.167.1): discovery reported
+81 grid skills plus five system skills without errors, and typed `$tron` skill
+invocation loaded successfully. All 27 generated agent definitions parsed, but
+the runtime spawn tool exposed only task labels and no named-agent selector.
+Process-local multi-agent feature overrides did not expose one. Native specialist
+execution remains unverified on this client surface; a `task_name` is not a role
+selector. Tron must report this limitation and prefer a discovered matching skill.
 
 ### OpenCode
 

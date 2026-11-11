@@ -193,3 +193,10 @@ PY
 @test "skill-scout names the wiring script by its real path (bash scripts/wire.sh)" {
   if grep -n 'bash wire\.sh' "$REPO_ROOT/skills/skill-scout/SKILL.md"; then false; fi
 }
+
+@test "Tron requires native role selection before recommending an installed agent" {
+  local source="$REPO_ROOT/agent-factory/roles/tron/SKILL.md"
+  grep -q 'inspect the host.s actual spawn tool' "$source"
+  grep -q 'A `task_name` label is not a named-agent selector' "$source"
+  grep -q 'Prefer a discovered skill that covers the goal' "$source"
+}

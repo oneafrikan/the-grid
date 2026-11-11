@@ -251,3 +251,13 @@ python3 scripts/rules.py emit --harness <rules_harness> --packs <p1,p2,...> --ou
 - Vendor drift. Mitigation: the dated facts table in `docs/harnesses.md`, encoded in the validators.
 - The Antigravity global skills path is disputed between sources. Mitigation: smoke-test it before trusting the row.
 - The Antigravity agents path and format are from agy's bundled docs plus an operator probe, not a composed grid agent in a live session. Mitigation: task 10.4 (human smoke test); the path is one registry row.
+
+## Codex runtime correction
+
+The native agent schema inherits sandbox, approval policy and MCP configuration from
+the parent. Earlier sandbox_mode mapping examples in this design are superseded:
+Codex output now disables features.shell_tool when Bash is explicitly absent and
+otherwise inherits permissions. Root-owned Markdown agents get generated TOML
+adapters through compose.py --root-agents --target codex; wire gives these adapters
+precedence without replacing foreign files. Grid metadata and repo guidance are
+portable; actual Claude runtime dependencies and guard keys remain excluded.

@@ -47,9 +47,6 @@ def _needs_tomllib() -> str | None:
     return None
 
 
-CODEX_SANDBOX_MODES = {"read-only", "workspace-write", "danger-full-access"}
-
-
 @command("codex-agent", requires=_needs_tomllib)
 def check_codex_agent(path: Path) -> list[str]:
     """A Codex subagent file: valid TOML whose `name`, `description` and
@@ -65,10 +62,15 @@ def check_codex_agent(path: Path) -> list[str]:
         value = data.get(key)
         if not isinstance(value, str) or not value.strip():
             problems.append(f"missing or non-string required key: {key}")
-    # The three values Codex documents; anything else (a typo, "yolo") is not a sandbox.
-    if "sandbox_mode" in data and data["sandbox_mode"] not in CODEX_SANDBOX_MODES:
-        problems.append(f"sandbox_mode {data['sandbox_mode']!r} must be one of "
-                        f"{', '.join(sorted(CODEX_SANDBOX_MODES))}")
+    # Parent-only settings are ignored in agent files; reject them rather than
+    # treating parseable TOML as proof that a permission restriction takes effect.
+    for key in ("sandbox_mode", "approval_policy", "mcp_servers", "model_provider"):
+        if key in data:
+            problems.append(f"{key} is inherited from the parent, not set by an agent file")
+    features = data.get("features", {})
+    if not isinstance(features, dict) or any(
+            key != "shell_tool" or value is not False for key, value in features.items()):
+        problems.append("features must only disable shell_tool")
     return problems
 
 

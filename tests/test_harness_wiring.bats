@@ -106,6 +106,46 @@ stub_agent() {
   grep -qF "skill	skill-alpha	$MOCK_GRID/skills/skill-alpha/	wired	" "$MANIFEST"
 }
 
+@test "repo metadata references are portable while Claude runtime dependencies remain excluded" {
+  make_skill "$MOCK_GRID/skills/grid-metadata" grid-metadata
+  printf 'Read .grid/project.yaml, ~/.the-grid and CLAUDE.md.\n' >> "$MOCK_GRID/skills/grid-metadata/SKILL.md"
+  make_skill "$MOCK_GRID/skills/claude-env" claude-env
+  printf 'Read CLAUDE_PROJECT_DIR.\n' >> "$MOCK_GRID/skills/claude-env/SKILL.md"
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  [ -L "$HS/grid-metadata" ]
+  [ ! -e "$HS/claude-env" ]
+  [ ! -e "$HS/claude-skill" ]
+}
+
+@test "Codex root agents win over composed names and survive repeat wiring" {
+  mkdir -p "$MOCK_GRID/agents/_codex"
+  printf 'root\n' > "$MOCK_GRID/agents/_codex/grid-ponytail.toml"
+  stub_agent codex grid-ponytail.toml
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  local live="$GRID_HARNESS_HOME/.codex/agents/grid-ponytail.toml"
+  [ "$(readlink "$live")" = "$MOCK_GRID/agents/_codex/grid-ponytail.toml" ]
+  wire
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$live")" = "$MOCK_GRID/agents/_codex/grid-ponytail.toml" ]
+  wire --check
+  [ "$status" -eq 0 ]
+}
+
+@test "Codex root adapters preserve a foreign destination" {
+  mkdir -p "$MOCK_GRID/agents/_codex" "$GRID_HARNESS_HOME/.codex/agents"
+  printf 'generated\n' > "$MOCK_GRID/agents/_codex/grid-ponytail.toml"
+  printf 'mine\n' > "$GRID_HARNESS_HOME/.codex/agents/grid-ponytail.toml"
+  printf 'harness:codex\n' > "$OVERLAY"
+  wire
+  [ "$status" -eq 0 ]
+  [ "$(cat "$GRID_HARNESS_HOME/.codex/agents/grid-ponytail.toml")" = mine ]
+  [[ "$output" == *"exists, not managed): grid-ponytail.toml"* ]]
+}
+
 @test "GRID_HARNESS replaces the manifest set for the run" {
   printf 'harness:antigravity\n' > "$OVERLAY"
   GRID_HARNESS=pi wire
@@ -1056,7 +1096,11 @@ disable-model-invocation: true'
   fm_skill "$d/m2" 'name: m2' 'read CLAUDE.md first'
   fm_skill "$d/m3" 'name: m3' 'in ~/.the-grid/x'
   fm_skill "$d/m4" 'name: m4' 'state in ~/.grid/y'
-  for s in m1 m2 m3 m4; do portable_fails "$d/$s" claude-specific; done
+  portable_fails "$d/m1" claude-specific
+  for s in m2 m3 m4; do
+    run skill_portable "$d/$s"
+    [ "$status" -eq 0 ]
+  done
   # Not flagged: a name that merely starts with .claude, and anything inside a .git dir.
   fm_skill "$d/ok2" 'name: ok2' 'a .claude-plugin dir'
   run skill_portable "$d/ok2"

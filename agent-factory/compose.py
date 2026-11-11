@@ -1265,42 +1265,62 @@ def toml_multiline(s: str) -> str:
     return '"""\n' + out + '"""'
 
 
-# Roles whose documented work writes files THROUGH THE SHELL (allowlist has Bash but no
-# Edit/Write). A Codex read-only sandbox also blocks those shell writes and would break them,
-# so they get no sandbox_mode. Every other role without Edit/Write stays read-only.
-# See the mapping table in docs/harnesses.md.
-CODEX_SHELL_WRITERS = frozenset({"finance-sentinel", "data-analyst"})
+def codex_agent_contents(name: str, description: str, body: str, tools=None) -> str:
+    """Shared native envelope for composed and root-owned agents; models inherit.
+
+    Agent files cannot override the parent's sandbox. Only disable capabilities Codex
+    supports here; a Claude Edit/Write allowlist cannot enforce read-only access.
+    """
+    lines = [f"name = {toml_basic(name)}", f"description = {toml_basic(description)}"]
+    if tools and "Bash" not in tools:
+        lines.append("features.shell_tool = false")
+    lines.append(f"developer_instructions = {toml_multiline(body)}")
+    return "\n".join(lines) + "\n"
 
 
 def emit_codex_agent(agent: dict, slug: str) -> tuple[str, str]:
     """A specialist role → one Codex subagent `<name>.toml`. Returns (filename, contents).
 
-    Key order is name, description, sandbox_mode (only when the role has a `tools:` allowlist
-    with neither Edit nor Write and is not in CODEX_SHELL_WRITERS), developer_instructions. `model` is never written, so Codex
-    uses the session's model.
-
-    `sandbox_mode = "read-only"` is a best-effort default, NOT an enforced least-privilege
-    control: a Codex subagent inherits the parent session's sandbox, and `--yolo` or
-    `/permissions` override the agent file. Codex also cannot express "no Bash" (see the
-    warning below). While a read-only sandbox does apply it blocks writes through Bash too,
-    which Claude's allowlist does not.
+    The parent's model and sandbox are inherited. An explicit no-Bash allowlist
+    disables the shell capability, but cannot restrict other file-writing tools.
     """
     role = agent["role"]
     name = slugged(slug, role)
-    lines = [f"name = {toml_basic(name)}", f"description = {toml_basic(subagent_description(role))}"]
-    tools = role_tools(role)
-    if tools and not {"Edit", "Write"} & set(tools):
-        if role not in CODEX_SHELL_WRITERS:
-            lines.append('sandbox_mode = "read-only"')
-    elif tools and "Bash" not in tools:
-        # Edit or Write but no Bash: Claude gives this role no shell, Codex cannot say so.
-        print(f"warning: role {role} gets a shell on Codex (its allowlist has no Bash, "
-              "but Codex cannot express that)", file=sys.stderr)
-    lines.append(f"developer_instructions = {toml_multiline(render_subagent_body(agent, slug))}")
-    return f"{name}.toml", "\n".join(lines) + "\n"
+    return f"{name}.toml", codex_agent_contents(
+        name, subagent_description(role), render_subagent_body(agent, slug), role_tools(role))
 
 
 AGENT_TARGETS["codex"] = emit_codex_agent
+
+
+def root_codex_agents(source: Path) -> dict[str, str]:
+    """Compile the hand-authored Markdown agents without maintaining a second prompt."""
+    rendered = {}
+    for path in sorted(source.glob("*.md")):
+        if path.is_symlink():
+            sys.exit(f"error: root agent source is a symlink: {path}")
+        text = path.read_text(encoding="utf-8")
+        match = re.match(r"\A---[ \t]*\n(.*?)\n---[ \t]*\n(.*)\Z", text, re.S)
+        if not match:
+            sys.exit(f"error: root agent has no frontmatter: {path}")
+        fields = yaml.safe_load(match[1])
+        if not isinstance(fields, dict) or set(fields) - {"name", "description", "model", "tools"}:
+            sys.exit(f"error: unsupported root agent metadata: {path}")
+        name, description = fields.get("name"), fields.get("description")
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name):
+            sys.exit(f"error: invalid root agent name: {path}")
+        if not isinstance(description, str) or not description.strip() or not match[2].strip():
+            sys.exit(f"error: empty root agent description or body: {path}")
+        tools = fields.get("tools")
+        if isinstance(tools, str):
+            tools = [tool.strip() for tool in tools.split(",")]
+        if "tools" in fields:
+            check_tools(name, tools)
+        filename = f"{name}.toml"  # Frontmatter, not a differently named source file, owns identity.
+        if filename in rendered:
+            sys.exit(f"error: duplicate root agent name {name}")
+        rendered[filename] = codex_agent_contents(name, description, match[2], tools)
+    return rendered
 
 
 # ── OpenCode agent emitter ────────────────────────────────────────────────────
@@ -2057,7 +2077,9 @@ def diff_trees(expected: Path, actual: Path, skip_top: str = "") -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compose an AI dev-team agent.")
     parser.add_argument("config", type=Path, nargs="?", help="path to the compose config yaml")
-    parser.add_argument("--out", type=Path, default=PROJECTS_DIR, help="output dir")
+    parser.add_argument("--out", type=Path, help="output root (default: projects/, or agents/ with --root-agents)")
+    parser.add_argument("--root-agents", action="store_true",
+                        help="compile agents/*.md to agents/_codex/; requires --target codex, no config")
     parser.add_argument(
         "--target",
         choices=["openclaw", "claude-code", "paperclip", "openclaw-native", "portable", *sorted(AGENT_TARGETS)],
@@ -2084,6 +2106,39 @@ def main() -> None:
         help="render + report what would be written, but write nothing",
     )
     args = parser.parse_args()
+
+    if args.root_agents:
+        if args.target != "codex" or args.config is not None or args.lint_roles:
+            parser.error("--root-agents requires --target codex and no config or --lint-roles")
+        source = HERE.parent / "agents"
+        output = args.out or source
+        target = output / "_codex"
+        # Match the normal writer's no-symlink policy before checks or writes.
+        if output.is_symlink() or target.is_symlink():
+            sys.exit(f"error: refusing symlinked root agent output: {target}")
+        rendered = root_codex_agents(source)
+        marker = ".root-agents-owned"
+        ownership = "Generated by compose.py --root-agents; do not edit.\n"
+        # A dedicated marker distinguishes our regenerable tree from user files.
+        if target.exists() and (not (target / marker).is_file() or
+                                (target / marker).is_symlink() or
+                                (target / marker).read_text() != ownership):
+            sys.exit(f"error: refusing unowned root agent output: {target}")
+        rendered[marker] = ownership
+        if args.check:
+            expected = {name: body.encode() for name, body in rendered.items()}
+            if expected != _tree(target):
+                sys.exit(f"STALE root agents (codex): {target}; re-run without --check")
+            print(f"up to date root agents (codex): {target}")
+        elif args.dry_run:
+            print(f"[dry-run] {len(rendered) - 1} root agents (codex) -> {target}")
+        else:
+            output.mkdir(parents=True, exist_ok=True)
+            install_tree(target, rendered)
+            print(f"composed {len(rendered) - 1} root agents (codex) -> {target}")
+        return
+
+    args.out = args.out or PROJECTS_DIR
 
     if args.lint_roles:
         problems = [p for r in all_roles() for p in lint_role(r)]

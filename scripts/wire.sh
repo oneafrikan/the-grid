@@ -1254,6 +1254,15 @@ if [ "${#ACTIVE_HARNESSES[@]}" -gt 0 ]; then
     ! in_list "$h_raw" "${hl_done[@]:-}" || continue
     hl_done+=("$h_raw")
     h_dir="$(harness_path "$h_raw")" || { echo "wire: cannot resolve harness dir $h_raw" >&2; exit 2; }
+    # Root-owned agents win over composed names, as they do in Claude. The adapter
+    # is generated explicitly by compose.py --root-agents; wiring only links it.
+    if [ "$h_target" = codex ]; then
+      for agent_file in "$GRID_DIR/agents/_codex"/*.toml; do
+        [ -f "$agent_file" ] || continue
+        under_physical "${agent_file%/*}" "$GRID_DIR/agents" || continue
+        wire_harness_link "$agent_file" "$h_dir" agent "$h_raw" "$(basename "$agent_file")" "root-owned"
+      done
+    fi
     for proj_dir in "$CC_OUT"/*/; do
       [ -d "$proj_dir" ] || continue
       proj_dir="${proj_dir%/}"

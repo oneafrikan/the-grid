@@ -8,9 +8,18 @@ Generate native subagent files for the harnesses that support them, from the sam
 
 `compose.py` SHALL provide targets `codex`, `opencode` and `gemini-cli` that each write one subagent file per specialist role, in the harness's native format. Each file SHALL carry the same name, description and body as the Claude Code subagent, map the role's tool allowlist to the harness's own restriction mechanism, and have no model field.
 
-#### Scenario: Codex file shape
+#### Scenario: Codex file shape and parent permissions
 - **WHEN** `compose.py <config> --target codex` runs for a role with `tools: [Read, Grep, Glob, Bash]`
-- **THEN** it writes `<name>.toml` with `name`, `description`, `sandbox_mode = "read-only"` and `developer_instructions`, and no `model`
+- **THEN** it writes `<name>.toml` with `name`, `description` and `developer_instructions`, with neither `model` nor an ignored `sandbox_mode` override; permissions inherit from the parent
+
+#### Scenario: Codex role without shell access
+- **WHEN** a specialist's explicit allowlist omits Bash
+- **THEN** its native Codex file contains `features.shell_tool = false`
+
+#### Scenario: Root-owned Codex agents
+- **WHEN** `compose.py --root-agents --target codex` runs
+- **THEN** it generates `agents/_codex/<name>.toml` from each root Markdown agent's frontmatter identity and complete body, inherits the Codex model, rejects unsupported metadata and supports dry-run and drift checks
+- **AND** Codex wiring gives those root-owned adapters precedence over composed names while preserving foreign destinations
 
 #### Scenario: OpenCode permissions
 - **WHEN** `compose.py <config> --target opencode` runs for a role whose allowlist lacks Edit, Write, WebFetch and WebSearch

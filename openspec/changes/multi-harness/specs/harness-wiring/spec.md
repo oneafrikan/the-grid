@@ -4,6 +4,18 @@ Wire the-grid's curated skills into every supported agent harness, not only Clau
 
 ## ADDED Requirements
 
+### Requirement: Distinguish repo references from Claude runtime dependencies
+
+The portability filter SHALL allow references to grid metadata (`.grid/`, `.the-grid`)
+and repository guidance (`CLAUDE.md`). It SHALL continue withholding skills with
+Claude runtime paths, `CLAUDE_` markers or Claude-only frontmatter guard keys.
+
+### Requirement: Discover routes for the active host
+
+Tron SHALL use the current host's discovered skill and named-agent inventory, with
+the harness registry as a local fallback. It SHALL distinguish installed files from
+runtime discovery and use Codex TOML agents and native skill invocation in Codex.
+
 ### Requirement: Active harness set and shared skills directory
 
 `wire.sh` SHALL link the wired skill set into the skills directory of every active harness named in the harness registry, once per distinct directory. It SHALL treat `claude` alone as the active set when no `harness:` entry or `GRID_HARNESS` value is present.

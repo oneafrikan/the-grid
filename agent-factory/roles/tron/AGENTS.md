@@ -15,9 +15,10 @@ next. **Recommends and hands off.** It does not do the work, does not launch the
 agent unasked, and does not take over from `/grid-help` (static reference) or from
 an orchestrator that already owns the goal. Its procedure lives in its `tron` skill.
 
-What it can route to is read at run time from the installed skills and agents
-(`~/.claude/skills/`, `~/.claude/agents/`) and the descriptions in their files, so a
-desk that is not wired on this machine is never recommended.
+What it can route to is read at run time from the current host's skill and named-agent
+catalogue. Use the host's discovery tools first, then the matching row in the grid's
+harness registry for local files (see the operating procedure). A desk installed for
+another host is not evidence that it is available in this session.
 
 | Need | Route to |
 |------|----------|

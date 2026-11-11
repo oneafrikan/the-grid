@@ -86,6 +86,7 @@ one 5-file source, a different artifact shape per `--target`:
 # wire.sh links this output into a harness's agents dir for `harness:<name>` entries
 # (docs/harnesses.md); each target writes only its own _<target>/ dir.
 .venv/bin/python compose.py examples/grid.yaml --target codex        # _codex/agents/*.toml
+.venv/bin/python compose.py --root-agents --target codex             # ../agents/_codex/*.toml
 .venv/bin/python compose.py examples/grid.yaml --target opencode     # _opencode/agents/*.md
 .venv/bin/python compose.py examples/grid.yaml --target gemini-cli   # _gemini-cli/agents/*.md
 .venv/bin/python compose.py examples/grid.yaml --target antigravity   # _antigravity/agents/*.md (agy)
