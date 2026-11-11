@@ -38,6 +38,16 @@ bash scripts/wire.sh
 After `--with-agents`, copy `~/.the-grid/agent-factory/user.yaml.example` to `~/.the-grid/agent-factory/user.yaml`, fill in your name and contact, and re-run it so agents pick it up.
 Skills are live immediately. Full sequence: [BOOTSTRAP.md](BOOTSTRAP.md). With no submodules: [Install without submodules](BOOTSTRAP.md#install-without-submodules) (`grid install`).
 
+## New user on a shared Linux box
+
+[`scripts/bootstrap-user.sh`](scripts/bootstrap-user.sh) sets up one unprivileged account for LLM work (uv and a data-science venv, Node via nvm, Claude Code, herdr, `gh`, the openspec CLI, then this repo). It needs no sudo, but the machine operator must first install the system packages it lists in step 1 (`sudo apt-get install -y ...`). Dry-run first:
+
+```bash
+bash -s -- --name "Full Name" --machine "Laptop" --channels "Telegram" --dry-run < scripts/bootstrap-user.sh
+```
+
+Drop `--dry-run` to run it for real (REAL-RUN-ONLY, not yet run end to end). It is safe to re-run. Afterwards the user runs `claude` and `gh auth login`.
+
 ## Claude Desktop (Code tab and Cowork)
 
 The Code tab shares `~/.claude` with the terminal, so the install above covers it. Cowork does not read `~/.claude`: add the marketplace `oneafrikan/the-grid` in Cowork, then install `grid-core` and `grid-agents`. Step by step: [docs/install-desktop.md](docs/install-desktop.md).

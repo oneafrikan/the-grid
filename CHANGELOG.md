@@ -5,6 +5,8 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+- Added: `scripts/bootstrap-user.sh`, a no-sudo per-user LLM workstation setup (uv, nvm/Node, Claude Code, herdr, gh, claude-rules, openspec, then this repo). Supports `--dry-run` and piped use.
+
 ## [0.1.0] - 2026-11-04
 
 First tagged release. Versioned from here; v0.x may still break between tags.
