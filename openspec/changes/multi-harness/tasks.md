@@ -149,7 +149,7 @@ Depends on: 1, 3, 4, 6, 7. Group 5 is optional. Needs the harnesses installed an
   - A session starts without a skills error.
   - A wired skill carrying `allowed-tools`, `triggers` and `version` frontmatter is listed.
   - The count of skills Codex lists matches the count of links in `~/.agents/skills` (records the 8,000-char cap's effect).
-  - `grid-qa-engineer` spawns from a symlinked `~/.codex/agents/*.toml` and cannot write files.
+  - `grid-qa-engineer` spawns from a managed physical `~/.codex/agents/*.toml` and cannot write files (permission test remains untested).
 - [ ] 9.2 OpenCode: confirm that the `permission` mapping loads and that a symlinked agent file is found. Record whether a skill present in both `~/.claude/skills` and `~/.agents/skills` is listed twice.
 - [ ] 9.3 Pi and OpenClaw: confirm that shared-dir skills load (Pi `/skill:<name>`; OpenClaw symlink rule). Create an empty `~/.codex/AGENTS.md` with one `rules:` pack wired, and confirm that Codex reads the block.
 - [ ] 9.4 Optional, Gemini CLI or Antigravity: confirm the `tools` YAML list and a symlinked agent file on Gemini CLI. On `agy`, confirm the real global skills path (and see 10.4 for agents). The agy part (skills path `~/.gemini/config/skills` and symlinked agent files) was confirmed 2026-11-11 by the operator's live agy smoke test; the box stays unticked because the Gemini CLI part is not confirmed.
@@ -173,7 +173,7 @@ Physical-file follow-up (symlink rejection confirmed by controlled probes):
 - [x] Reproduce the old installer's symlink output and verify physical-file A/B probes.
 - [x] Install managed physical Codex agents without changing skills, other harnesses or user config.
 - [x] Verify ownership, migration, drift, rollback, deactivation, uninstall and repeat-run regressions.
-- [ ] Verify the installed native specialist with no role-config override.
+- [x] Verify installed native specialists with no role-config override: `grid-ponytail` and `grid-ad-copy` completed read-only probes through actual spawn/wait calls and expected answers.
 
 - [x] Preserve the parallel session's shared role wording and portability policy unchanged.
 - [x] Generate native root-owned agents from their single Markdown source with safe repeat runs and root precedence.
@@ -181,4 +181,4 @@ Physical-file follow-up (symlink rejection confirmed by controlled probes):
 - [x] Run targeted harness regression tests and compose golden checks.
 - [x] Recheck fresh Codex skill discovery and typed imported-skill invocation: a global-only probe on CLI 0.167.1 found 81 user skills plus five system skills without errors; native typed Tron invocation loaded the canonical skill.
 - [x] Verify native registration: all 27 specialist names appeared in the actual global `agent_type` selector schema.
-- [ ] Exercise a native named specialist: an actual `spawn_agent` call with `agent_type="grid-ponytail"` and `fork_turns="none"` returned `agent type is currently not available`; no child was created. Execution remains pending despite verified registration and discovery.
+- [x] Exercise native named specialists: managed physical files fixed symlink rejection; actual `agent_type` selections for `grid-ponytail` and `grid-ad-copy` with `fork_turns="none"` completed with expected answers. Child metadata/mailbox events were not exposed; all 27 workflows and QA write restrictions were not tested.

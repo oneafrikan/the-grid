@@ -255,11 +255,17 @@ scratch repository with `workspace-write` and `on-request` approvals:
   A native typed Tron invocation loaded its skill from the canonical checkout.
 - Native registration verified: all 27 specialist names appeared in the actual
   `agent_type` selector schema after user-level installation.
-- Before the physical-file fix, an actual `spawn_agent` call selected
-  `agent_type="grid-ponytail"` with `fork_turns="none"`, but the role loader returned
-  `agent type is currently not available`. No child was created. Registration and
-  discovery do not establish successful specialist execution. Physical-file A/B
-  probes then succeeded; final managed-install verification remains pending.
+- Native execution verified after migrating all 27 definitions to managed regular
+  files: actual `spawn_agent` calls selected `grid-ponytail` and `grid-ad-copy` with
+  `fork_turns="none"`; waits completed and expected role answers were observed.
+  No role-config or model overrides were used. Child metadata/mailbox events were
+  not exposed; the evidence is the actual spawn, wait and expected answers.
+- A second apply made zero changes and `wire.sh --check` passed. Preservation
+  comparison found no differences in Claude's 167 skills/27 agents or agy's
+  81 skills/27 agents, including payloads and settings.
+- These two representative probes do not verify all 27 workflows or QA write
+  restrictions. They do not certify the full gate; the unrelated
+  `hooks/.DS_Store` audit failure remains recorded.
 
 ### OpenCode
 
