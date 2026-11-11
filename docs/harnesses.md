@@ -239,13 +239,17 @@ You are the **QA Engineer**, a specialist agent on a composed dev team. ...
 - Open a fresh Codex session after wiring. Confirm discovered names, select a native named
   specialist and invoke an imported skill. Successful file generation is not runtime verification.
 
-Read-only local schema probe (2026-11-11, Codex CLI 0.167.1): all 27 generated
-agent definitions parsed, but the runtime spawn tool exposed task labels without a
-named-agent selector. Process-local multi-agent feature overrides and
-`workspace-write` with `on-request` approvals did not expose one. Native specialist
-execution remains unverified on this client surface; a `task_name` is not a role
-selector. Skill discovery counts and typed invocation must be rechecked after
-reconciling the parallel session's shared wording and portability changes.
+Global user-level verification (2026-11-11, Codex CLI 0.167.1), from an empty
+scratch repository with `workspace-write` and `on-request` approvals:
+
+- Skill discovery verified: 81 user skills plus five system skills, with no errors.
+  A native typed Tron invocation loaded its skill from the canonical checkout.
+- Native registration verified: all 27 specialist names appeared in the actual
+  `agent_type` selector schema after user-level installation.
+- Native execution pending: an actual `spawn_agent` call selected
+  `agent_type="grid-ponytail"` with `fork_turns="none"`, but the backend returned
+  `agent type is currently not available`. No child was created. Registration and
+  discovery do not establish successful specialist execution.
 
 ### OpenCode
 

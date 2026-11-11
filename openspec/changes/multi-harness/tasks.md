@@ -172,5 +172,6 @@ Added after the original groups. Path and format come from agy's bundled docs (`
 - [x] Generate native root-owned agents from their single Markdown source with safe repeat runs and root precedence.
 - [x] Replace ignored Codex sandbox overrides with supported no-shell capability restrictions; retain inherited models and permissions.
 - [x] Run targeted harness regression tests and compose golden checks.
-- [ ] Recheck fresh Codex skill discovery and typed imported-skill invocation after reconciling shared wording and portability policy.
-- [ ] Exercise a native named specialist: CLI 0.167.1 exposes task labels without a named-agent selector; generated definitions alone do not satisfy this check.
+- [x] Recheck fresh Codex skill discovery and typed imported-skill invocation: a global-only probe on CLI 0.167.1 found 81 user skills plus five system skills without errors; native typed Tron invocation loaded the canonical skill.
+- [x] Verify native registration: all 27 specialist names appeared in the actual global `agent_type` selector schema.
+- [ ] Exercise a native named specialist: an actual `spawn_agent` call with `agent_type="grid-ponytail"` and `fork_turns="none"` returned `agent type is currently not available`; no child was created. Execution remains pending despite verified registration and discovery.
