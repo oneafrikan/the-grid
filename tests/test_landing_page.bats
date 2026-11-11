@@ -114,6 +114,24 @@ def readme_hero():
             return line[2:-2]
     die("README hero line not found")
 
+def readme_hero_alt():
+    m = re.search(r"^!\[([^\]]+)\]\(assets/hero\.webp\)", readme(), re.M)
+    if not m:
+        die("README hero image line not found")
+    return m.group(1)
+
+def readme_works_with():
+    # Rows of the README "## Works with" table: (tool, status), header and rule rows skipped.
+    m = re.search(r"## Works with\n(.*?)\n\n", readme(), re.S)
+    if not m:
+        die("README Works with table not found")
+    rows = []
+    for line in m.group(1).split("\n"):
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) == 3 and cells[0] not in ("Tool", "---"):
+            rows.append((cells[0], cells[2]))
+    return rows
+
 def readme_install():
     m = re.search(r"## Quickstart\s+```bash\n(.*?)\n```", readme(), re.S)
     if not m:
@@ -184,7 +202,7 @@ for x in order:
 if first != ["h1", "install", "gh", "img"]:
     die("DOM order is %r" % first)
 img = [a for tag, a, _ in p.tags if tag == "img" and a.get("src") == "assets/hero.webp"][0]
-if (img.get("width"), img.get("height")) != ("1600", "873") or img.get("alt") != "the-grid":
+if (img.get("width"), img.get("height")) != ("1600", "873") or img.get("alt") != readme_hero_alt():
     die("hero img attributes: %r" % img)
 '
 }
@@ -204,7 +222,7 @@ if p.install != readme_install():
 
 @test "landing page: title, description, canonical, og and twitter metadata agree" {
   py '
-TITLE = "the-grid: Claude Code skills and agents on every machine"
+TITLE = "the-grid: skills and agents on every machine and AI tool"
 m = metas("name"); pr = metas("property")
 desc = m.get("description")
 if not desc or len(desc) > 160:
@@ -213,12 +231,16 @@ if p.title.strip() != TITLE or pr.get("og:title") != TITLE:
     die("title/og:title mismatch: %r / %r" % (p.title, pr.get("og:title")))
 if pr.get("og:description") != desc:
     die("og:description differs from meta description")
+if len(TITLE) > 60:
+    die("title is over 60 characters")
 canon = links("canonical")
 if len(canon) != 1:
     die("expected one canonical link")
 ld = json.loads(p.ld)
 if not (canon[0]["href"] == pr.get("og:url") == ld.get("url")):
     die("canonical, og:url and JSON-LD url differ")
+if ld.get("description") != desc:
+    die("JSON-LD description differs from meta description")
 for k in ("og:title", "og:description", "og:image", "og:image:type", "og:image:width",
           "og:image:height", "og:image:alt", "og:url"):
     if not pr.get(k):
@@ -358,4 +380,98 @@ if hits:
 @test "landing page: stamp-counts.py --check passes" {
   run python3 -I "$GRID_ROOT/scripts/stamp-counts.py" --check
   [ "$status" -eq 0 ]
+}
+
+# --- front-door rebuild: one primary action, a repeated command, the owner placeholder ---------
+
+@test "landing page: the hero has one button (Copy) and one link (GitHub); no CTA trio" {
+  py '
+hero = [(t, a) for t, a, anc in p.tags if any(x[0] == "header" for x in anc)]
+buttons = [a for t, a in hero if t == "button"]
+links = [a.get("href") for t, a in hero if t == "a" and not a.get("href", "").startswith("#")]
+if len(buttons) != 1 or "copy-btn" not in buttons[0].get("class", ""):
+    die("hero buttons: %r" % buttons)
+if links != ["https://github.com/oneafrikan/the-grid"]:
+    die("hero external links: %r" % links)
+for gone in ("View on GitHub", "btn-primary", "href=\"#quickstart\""):
+    if gone in HTML:
+        die("leftover from the old CTA trio: " + gone)
+'
+}
+
+@test "landing page: id install-cmd is unique; the repeat uses a class and equals the README command" {
+  py '
+ids = [a for t, a, _ in p.tags if a.get("id") == "install-cmd"]
+if len(ids) != 1:
+    die("expected one id=install-cmd, found %d" % len(ids))
+m = re.findall(r"<code class=\"cmd-repeat\">(.*?)</code>", HTML, re.S)
+if len(m) != 1:
+    die("expected one <code class=\"cmd-repeat\">")
+text = re.sub(r"<[^>]+>", "", m[0]).replace("&amp;", "&")
+if text != readme_install():
+    die("repeated command differs from README:\n%r" % text)
+copies = [a for t, a, _ in p.tags if t == "button" and "copy-btn" in a.get("class", "")]
+if len(copies) != 2:
+    die("expected two Copy buttons, found %d" % len(copies))
+'
+}
+
+@test "landing page: story ending order is Safe to run, Flynn quote, owner placeholder, Get in, Star, then Status" {
+  py '
+marks = ["id=\"safe-heading\"", "A digital frontier.", "Kevin Flynn, <cite>TRON: Legacy</cite> (2010)",
+         "Same idea, smaller scale: a shared place where your skills and agents live, and one command to get in.",
+         "<!-- OWNER: one sentence on why Tron (personal) goes here, after the quote -->",
+         ">Get in.<", "class=\"cmd-repeat\"", ">Star on GitHub<", "id=\"status-heading\"", "<footer"]
+pos = []
+for m in marks:
+    if HTML.count(m) != 1:
+        die("expected exactly one %r, found %d" % (m, HTML.count(m)))
+    pos.append(HTML.index(m))
+if pos != sorted(pos):
+    die("story ending out of order: %r" % [m for _, m in sorted(zip(pos, marks))])
+'
+}
+
+@test "landing page: Works with table rows and statuses equal the README table" {
+  py '
+m = re.search(r"<table class=\"tbl\" id=\"works-with-table\">(.*?)</table>", HTML, re.S)
+if not m:
+    die("no #works-with-table")
+rows = re.findall(r"<tr><th scope=\"row\">(.*?)</th>.*?<span class=\"chip [^\"]+\">(.*?)</span></td></tr>", m.group(1))
+if rows != readme_works_with():
+    die("Works with differs from README:\n%r\n%r" % (rows, readme_works_with()))
+'
+}
+
+@test "landing page: reference write-ups are closed <details> blocks, each with a summary" {
+  py '
+details = [a for t, a, _ in p.tags if t == "details"]
+if len(details) < 6:
+    die("expected at least 6 <details>, found %d" % len(details))
+if any("open" in a for a in details):
+    die("a <details> block is open by default")
+if HTML.count("<summary>") != len(details):
+    die("every <details> needs one <summary>")
+'
+}
+
+@test "landing page: one agent card per role in agent-factory/examples/*.yaml" {
+  py '
+import glob
+roles = sum(len(re.findall(r"^[ \t]*- role:", open(f, encoding="utf-8").read(), re.M))
+            for f in glob.glob(os.path.join(ROOT, "agent-factory", "examples", "*.yaml")))
+cards = HTML.count("class=\"agent-card\"")
+if cards != roles:
+    die("%d agent cards but %d roles" % (cards, roles))
+'
+}
+
+@test "landing page: the terminal demo SVG is referenced, listed and published by stage-site.sh" {
+  grep -q 'src="assets/terminal-demo.svg"' "$GRID_ROOT/index.html"
+  grep -qx 'assets/terminal-demo.svg' "$GRID_ROOT/site-files.txt"
+  out="$BATS_TEST_TMPDIR/site"
+  run bash "$GRID_ROOT/scripts/stage-site.sh" "$out"
+  [ "$status" -eq 0 ]
+  [ -f "$out/assets/terminal-demo.svg" ]
+  [ -f "$out/index.html" ]
 }

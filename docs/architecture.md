@@ -271,7 +271,7 @@ Also: [roadmap.md](roadmap.md) (the roadmap and model-routing note) and
 Some text exists in more than one place and is kept in step by hand. Change one, change
 them all:
 
-- **Quickstart command:** `README.md` (twice: Quickstart and the end of "Why the grid"), `INSTALL.md`, `index.html` (`#install-cmd`) and `docs/demo/demo.tape`.
+- **Quickstart command:** `README.md` (twice: Quickstart and the end of "Why the grid"), `INSTALL.md`, `index.html` (twice: `#install-cmd` in the hero and `code.cmd-repeat` under "Get in.") and `docs/demo/demo.tape`.
 - **Hero sentence:** `README.md` and `index.html`.
 - **Architecture diagram:** the five-node mermaid block in `README.md` and the inline SVG in `index.html` (Pages cannot render mermaid without a CDN script, so the SVG is hand-authored with the same nodes). The full diagram above is not mirrored.
 - **Works with table, Safe to run list, Terms and the story ending:** `README.md` is the copy source; `index.html` mirrors them.
