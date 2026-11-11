@@ -7,6 +7,8 @@
 - Run `bash scripts/gate.sh` before a change is considered ready. It is the full
   commit gate (shellcheck, catalog, role lint, composed output, tests) and takes a
   long time; run it once, not per edit.
+  Exception: a markdown-only change runs `bash scripts/gate.sh --fast` and goes
+  straight to `main`; see "Markdown-only changes" in `BEHAVIOUR.md`.
 - Non-trivial changes are spec-driven; see "Spec-driven development (OpenSpec)" below.
 
 ## Rules
@@ -52,8 +54,8 @@ bash scripts/check-grid.sh
 Runs the full bats suite (one-line PASS/FAIL — full output only on failure; it takes
 many minutes; the CI `gate` job that includes it ran 18 to 30 minutes in recent Actions runs) and scans for broken grid-owned symlinks. Exits
 non-zero if anything's wrong, so it works as a CI / pre-push gate. A `pre-commit`
-hook (in `.githooks/`, activated by `bootstrap.sh`) runs `scripts/gate.sh` before
-every commit; bypass with
+hook (in `.githooks/`, activated by `bootstrap.sh`) runs `scripts/gate.sh --pre-commit`
+(the fast staged-files check, not the full suite) before every commit; bypass with
 `git commit --no-verify` or `GRID_SKIP_HOOK=1`.
 
 Link rot is checked separately — upstream repos get renamed, deleted, or made

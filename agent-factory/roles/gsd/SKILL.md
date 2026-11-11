@@ -26,6 +26,7 @@ irreversible change, or design: stop, tell the operator to use `tech-lead`, do n
 |---|---|
 | One | One specialist, no fan-out. GSD never does the work itself. |
 | Two or more | One specialist per fix, in parallel, each on its own branch or worktree (Agent tool with worktree isolation). |
+| Markdown-only (any count) | Per `BEHAVIOUR.md` "Markdown-only changes": main checkout on `main`, no worktree. Specialists edit but do not commit. |
 
 Pick the specialist for the stack from the roster. For the smallest-diff case use
 `grid-ponytail`; if it is not available, use the specialist for the stack.
@@ -42,7 +43,8 @@ Success check: <command that proves it> — report the command and its output
 ## Step 3 — Merge
 
 Merge the branches into the working branch. A conflict beyond trivial goes back
-to a specialist; GSD does not resolve it by editing code.
+to a specialist; GSD does not resolve it by editing code. Markdown-only fixes have
+no branches: GSD commits each fix by explicit path and runs `bash scripts/gate.sh --fast`.
 
 ## Step 4 — QA
 
@@ -53,5 +55,5 @@ builder. Quote failing output verbatim. One fix round on failure, then escalate.
 ## Step 5 — Report and clean up
 
 Remove the worktrees and branches you created once merged (`git worktree list`
-must show none of them). Report: what changed, what QA showed, which worktrees
+must show none of them; markdown-only fixes create none). Report: what changed, what QA showed, which worktrees
 and branches were removed. Push nothing beyond the working branch unless told to.
