@@ -25,7 +25,7 @@ bibliography (not maintained, kept for provenance) see [`reference-resources.md`
 | `repos/clawhub` | library | <https://github.com/openclaw/clawhub> |
 | `repos/deanpeters` | library | <https://github.com/deanpeters/Product-Manager-Skills> |
 | `repos/ecc` | library | <https://github.com/affaan-m/ECC> |
-| `repos/gstack` | partial | <https://github.com/garrytan/gstack> |
+| `repos/gstack` | library | <https://github.com/garrytan/gstack> |
 | `repos/hesamsheikh` | library | <https://github.com/hesamsheikh/awesome-openclaw-usecases> |
 | `repos/hubspot` | library | <https://github.com/HubSpot/agent-cli-skills> |
 | `repos/humanize-writing` | library | <https://github.com/jpeggdev/humanize-writing> |
