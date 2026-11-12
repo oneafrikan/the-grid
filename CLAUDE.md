@@ -213,15 +213,15 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 
 ## Drift checks, the commit gate, and per-project agents
 
-- `scripts/gate.sh` — the gate. A plain run (and `--strict` in CI) is the heavy merge-time gate;
+- `scripts/gate.sh` — the gate. A plain run is the heavy local gate (every drift check plus bats);
   `.githooks/pre-commit` runs only `gate.sh --pre-commit`, a FAST check of staged files (shellcheck on
   staged `.sh`/`.bash`, python syntax on staged `.py`, bats for staged `tests/*.bats` only; it aborts
   only if a staged `.bats` file also has unstaged edits). The script self-installs `core.hooksPath`
-  on first run. Run `bash scripts/gate.sh` before readying a branch (a markdown-only change runs `bash scripts/gate.sh --fast` instead, see `BEHAVIOUR.md`). `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
-  `--strict` (CI) fails on any skip not named in `GRID_GATE_EXPECT_SKIPPED` (see `.github/workflows/tests.yml`).
-  CI splits the gate: a `checks` job (`gate.sh --strict --no-bats`) and a `bats` matrix of four shards
-  (`gate.sh --strict --shard <name>`, files listed in `tests/shards.txt`), aggregated by the one job named `gate`,
-  which passes only if every needed job is `success` (cancelled and skipped fail). A markdown-only diff under `skills/`, `agents/` or `agent-factory/roles/` takes the `md_fast` route: one job runs `gate.sh --fast` instead of `checks`/`bats`. A docs-only change (markdown outside `skills/`, `agents/`, `agent-factory/`, `rules/`, `plugins/`, `project-factory/`, `automation-factory/`, `hooks/`, `evals/`, `tests/`, `.github/`) runs the light `docs` job (personal, map, counts, front-door bats) instead of `checks`/`bats`, and `gate` passes on it. A new `tests/test_*.bats` file
+  on first run. Run `bash scripts/gate.sh` before readying code, script or test changes; markdown, text and config-only edits run just the one relevant `--check` (see `BEHAVIOUR.md`). `GRID_SKIP_HOOK=1` / `--no-verify` bypass it. Merges/rebases skip it.
+  `--strict` fails on any skip not named in `GRID_GATE_EXPECT_SKIPPED`; `--lint` runs the shellcheck stage alone.
+  CI (`.github/workflows/tests.yml`) is deliberately minimal. The one required job, `gate` (pull requests that are not drafts, and pushes to `main`), runs `check-personal.sh` and `gate.sh --strict --lint`: no submodules, no venv.
+  The `bats` job (four shards, `gate.sh --strict --shard <name>`, files listed in `tests/shards.txt`) runs only nightly, on `v*` tags, on published releases and on demand; it is not part of `gate` and never runs per PR or per push to `main`.
+  Drift checks (catalog, sources, map, counts, lock, budget, rules, plugins, compose) are not in CI: run their `--check` commands or a local full `bash scripts/gate.sh`. A new `tests/test_*.bats` file
   must be added to `tests/shards.txt`; `tests/test_gate.bats` fails otherwise.
   `catalog`, `sources` (`sources.sh --check-drift`) and `budget` run against the TRACKED `baseline-submodules.example.txt` (`GRID_BASELINE` pin; `wire.sh` pins it for SKILLS.md too), so SKILLS.md, docs/SOURCES.md and the ratchet are machine-independent; a personal baseline is never gated.
   It runs `check-personal.sh` as the `personal` check; with no private denylist on the

@@ -44,7 +44,7 @@ Success check: <command that proves it> — report the command and its output
 
 Merge the branches into the working branch. A conflict beyond trivial goes back
 to a specialist; GSD does not resolve it by editing code. Markdown-only fixes have
-no branches: GSD commits each fix by explicit path and runs `bash scripts/gate.sh --fast`.
+no branches: GSD commits each fix by explicit path and runs the one relevant `--check`.
 
 ## Step 4 — QA
 

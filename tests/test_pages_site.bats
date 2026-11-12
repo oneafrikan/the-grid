@@ -365,15 +365,15 @@ nested_fixture() {
   [ "$(grep -h 'persist-credentials: false' "$REPO_ROOT"/.github/workflows/*.yml | wc -l)" -ge 2 ]
 }
 
-@test "tests.yml: only pull_request runs are cancelled, and the job has 45 minutes" {
-  grep -qE '^[[:space:]]*cancel-in-progress:.*pull_request' "$REPO_ROOT/.github/workflows/tests.yml"
+@test "tests.yml: only PR and tag/release runs are cancelled, and the bats job has 45 minutes" {
+  grep -qE "^[[:space:]]*cancel-in-progress:.*pull_request.*refs/tags/" "$REPO_ROOT/.github/workflows/tests.yml"
   grep -qE '^[[:space:]]*timeout-minutes:[[:space:]]*45[[:space:]]*$' "$REPO_ROOT/.github/workflows/tests.yml"
 }
 
 @test "tests.yml: draft PRs skip the gate, ready_for_review runs it, the job is still named gate, pushes to main still run" {
   local f="$REPO_ROOT/.github/workflows/tests.yml"
   grep -qE '^[[:space:]]*types:[[:space:]]*\[opened, synchronize, reopened, ready_for_review\]' "$f"
-  grep -qF "if: github.event_name != 'pull_request' || github.event.pull_request.draft == false" "$f"
+  grep -qF "github.event.pull_request.draft == false" "$f"
   # the main ruleset requires a check called `gate`: the job id must not change
   grep -qE '^  gate:[[:space:]]*$' "$f"
   grep -qE '^[[:space:]]*branches:[[:space:]]*\[main\]' "$f"

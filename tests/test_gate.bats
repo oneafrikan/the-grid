@@ -167,7 +167,7 @@ stub_shellcheck_logging() {
   stub_bats_logging
   run run_gate --pre-commit
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pre-commit: fast check; the full gate runs in CI and via 'bash scripts/gate.sh'"* ]] || false
+  [[ "$output" == *"pre-commit: fast check; the full gate runs via 'bash scripts/gate.sh'"* ]] || false
   [[ "$output" != *"==> catalog"* ]] || false
   [[ "$output" != *"==> compose"* ]] || false
   [[ "$output" != *"==> audit"* ]] || false
@@ -803,17 +803,6 @@ arm_checks() {
   [[ "$output" == *"gate: FAIL — map"* ]] || false
 }
 
-@test "map lint: CI does not allow map to be skipped" {
-  # the value of GRID_GATE_EXPECT_SKIPPED: from its key line to the `run:` line, one token per line
-  local tokens
-  tokens="$(sed -n '/GRID_GATE_EXPECT_SKIPPED:/,/^ *run:/p' "$REPO_ROOT/.github/workflows/tests.yml" \
-    | grep -v 'run:' | tr -s ' \t' '\n\n')"
-  # the parse found the allowlist (a known entry is there) ...
-  printf '%s\n' "$tokens" | grep -qx 'personal-denylist'
-  # ... and `map` is not one of its whole-word entries
-  ! printf '%s\n' "$tokens" | grep -qx 'map' || false
-}
-
 @test "a failing catalog check fails the gate and names catalog" {
   arm_checks
   echo 1 > "$G/rc/catalog"
@@ -1084,14 +1073,22 @@ stub_git_with_bats_restore() {
   [ "$in_file" = "$in_matrix" ]
 }
 
-@test "shards: the aggregate job is still named gate, needs every other job and fails on anything but success" {
+@test "workflow: gate is the tiny per-change job (personal + shellcheck only); bats shards never run per PR or per push to main" {
   local wf="$REPO_ROOT/.github/workflows/tests.yml"
+  # the main ruleset requires a check called `gate`: the job id must not change
   grep -qE '^  gate:[[:space:]]*$' "$wf"
-  grep -qE '^    needs:[[:space:]]*\[changes, docs, fast, checks, bats\]' "$wf"
-  # always(): without it a failed/cancelled/skipped dependency skips gate, which reads as green
-  grep -qE '^    if:.*always\(\)' "$wf"
-  grep -qF '"checks=success bats=success"' "$wf"
-  # a red shard must not cancel its siblings
+  # the removed routes and the aggregator must not come back
+  ! grep -qE '^  (changes|docs|fast|checks):' "$wf" || false
+  ! grep -qE '^    needs:' "$wf" || false
+  # gate runs exactly the two checks, with no submodules and no venv
+  grep -qF 'bash scripts/check-personal.sh' "$wf"
+  grep -qF 'bash scripts/gate.sh --strict --lint' "$wf"
+  ! grep -qE 'submodules:|venv' <(sed -n '/^  gate:/,/^  bats:/p' "$wf") || false
+  # bats: nightly, release tag, published release, on demand; a red shard must not cancel its siblings
+  grep -qE '^  schedule:' "$wf"
+  grep -qE '^  workflow_dispatch:' "$wf"
+  grep -qE "^    if: .*github.event_name == 'release'" "$wf"
+  grep -qE "refs/tags/v" "$wf"
   grep -qE '^[[:space:]]*fail-fast:[[:space:]]*false' "$wf"
 }
 
@@ -1139,6 +1136,26 @@ stub_shards() {
   [ "$status" -eq 2 ]
 }
 
+@test "--lint runs the shellcheck stage alone and is exclusive" {
+  run run_gate --lint
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"==> shellcheck"* ]] || false
+  [[ "$output" != *"==> catalog"* ]] || false
+  [[ "$output" != *"==> bats"* ]] || false
+  run run_gate --lint --shard s1
+  [ "$status" -eq 2 ]
+  run run_gate --lint --no-bats
+  [ "$status" -eq 2 ]
+  run run_gate --lint --pre-commit
+  [ "$status" -eq 2 ]
+}
+
+@test "--lint --strict fails when shellcheck is missing (an unexpected skip)" {
+  run run_gate --strict --lint
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected skip: shellcheck"* ]] || false
+}
+
 @test "--no-bats runs the other checks and never calls bats" {
   stub_shards
   run run_gate --no-bats
@@ -1146,170 +1163,4 @@ stub_shards() {
   [ ! -e "$G/bats.args" ]
   [[ "$output" == *"--no-bats"* ]] || false
   [[ "$output" == *"==> catalog"* ]] || false
-}
-
-# --- --fast: markdown-only changes ---------------------------------------------------------------
-# The rule lives in scripts/lib/md-fast.sh and is read by BOTH gate.sh --fast and the workflow's
-# `changes` job, so these tests pin the rule once and the wiring on each side.
-
-# md_class <path>... — what md_fast_class says for exactly these changed paths.
-md_class() {
-  printf '%s\n' "$@" | bash -c '. "$1/scripts/lib/md-fast.sh"; md_fast_class' _ "$REPO_ROOT"
-}
-
-@test "md-fast: markdown under skills/, agents/ and agent-factory/roles/ is md_fast, frontmatter edits included" {
-  [ "$(md_class skills/standup/SKILL.md)" = md_fast ]
-  [ "$(md_class agents/grid-ponytail.md)" = md_fast ]
-  [ "$(md_class agent-factory/roles/devops/AGENTS.md)" = md_fast ]
-  # a mixed markdown diff is still md_fast when one path touches the three trigger dirs
-  [ "$(md_class skills/standup/SKILL.md README.md BEHAVIOUR.md)" = md_fast ]
-}
-
-@test "md-fast: regenerated plugins/** and dist/** ride along with their source edit (--fast verifies them)" {
-  [ "$(md_class skills/standup/SKILL.md plugins/grid-core/skills/standup/SKILL.md)" = md_fast ]
-  [ "$(md_class agent-factory/roles/devops/AGENTS.md dist/personas/devops.md plugins/grid-agents/agents/grid-devops.md)" = md_fast ]
-  # any extension: a bundle also holds non-markdown files
-  [ "$(md_class skills/standup/SKILL.md plugins/grid-core/.claude-plugin/plugin.json)" = md_fast ]
-  # but they never make a fast route on their own, and a source change outside the markdown rule still fails
-  [ "$(md_class plugins/grid-core/.claude-plugin/plugin.json)" = full ]
-  # (a diff of dist/*.md alone is still the pre-existing docs-only route)
-  [ "$(md_class dist/personas/devops.md)" = docs ]
-  [ "$(md_class plugins/grid-core/skills/standup/SKILL.md scripts/gate.sh)" = full ]
-}
-
-@test "md-fast: other generated output, canon, tests and non-markdown force the full gate" {
-  [ "$(md_class skills/standup/SKILL.md SKILLS.md)" = full ]
-  [ "$(md_class skills/standup/SKILL.md MAP.md)" = full ]
-  [ "$(md_class skills/standup/SKILL.md docs/SOURCES.md)" = full ]
-  [ "$(md_class skills/standup/SKILL.md README.fr.md)" = full ]
-  [ "$(md_class skills/standup/SKILL.md knowledge/canon/x.md)" = full ]
-  [ "$(md_class skills/standup/SKILL.md tests/fixtures/x.md)" = full ]
-  [ "$(md_class skills/standup/SKILL.md scripts/gate.sh)" = full ]
-  [ "$(md_class skills/standup/SKILL.md skills/standup/helper.py)" = full ]
-  # markdown with executable meaning that --fast has no check for
-  [ "$(md_class skills/standup/SKILL.md rules/grid/x.md)" = full ]
-  [ "$(md_class skills/standup/SKILL.md .github/PULL_REQUEST_TEMPLATE.md)" = full ]
-  # nothing to classify is never a fast route
-  [ "$(md_class)" = full ]
-}
-
-@test "md-fast: the pre-existing docs-only route is unchanged" {
-  [ "$(md_class README.md docs/guide.md)" = docs ]
-  # README translations and MAP.md stay docs-only (the light docs job checks them)
-  [ "$(md_class README.fr.md MAP.md)" = docs ]
-  [ "$(md_class docs/guide.md skills/x/SKILL.md)" = md_fast ]
-  [ "$(md_class docs/guide.md scripts/gate.sh)" = full ]
-}
-
-@test "workflow: one classifier (the shared lib), an md_fast output, a fast job, and checks/bats skip on md_fast" {
-  local wf="$REPO_ROOT/.github/workflows/tests.yml"
-  grep -qF '. scripts/lib/md-fast.sh' "$wf"
-  grep -qE '^      md_fast:' "$wf"
-  grep -qE '^  fast:[[:space:]]*$' "$wf"
-  grep -qF 'bash scripts/gate.sh --strict --fast' "$wf"
-  # the old inline docs-only case loop is gone: the rule is not written twice
-  ! grep -qF 'skills/*|agents/*|agent-factory/*' "$wf" || false
-  # fast job: no recursive submodules
-  ! sed -n '/^  fast:/,/^  checks:/p' "$wf" | grep -q 'submodules:' || false
-  # checks and bats both skip on md_fast (and still on docs-only)
-  [ "$(grep -c "needs.changes.outputs.md_fast != 'true'" "$wf")" -eq 2 ]
-  # gate fails when the md_fast route's job did not succeed
-  grep -qF 'needs.fast.result' "$wf"
-}
-
-@test "workflow: the fast job's expected skips are exactly what --fast cannot run on CI" {
-  local wf="$REPO_ROOT/.github/workflows/tests.yml" tokens
-  tokens="$(sed -n '/^  fast:/,/^  checks:/p' "$wf" | sed -n '/GRID_GATE_EXPECT_SKIPPED:/,/^ *run:/p' \
-    | grep -v 'run:' | sed -e 's/GRID_GATE_EXPECT_SKIPPED://' -e 's/>-//' | tr -s ' \t' '\n\n' | grep -v '^$')"
-  [ "$(printf '%s\n' "$tokens" | LC_ALL=C sort | tr '\n' ' ')" = "budget-baseline catalog personal-denylist " ]
-}
-
-# fast_gate_setup — a stub grid with the real lib, so gate.sh --fast can classify.
-fast_gate_setup() {
-  mkdir -p "$G/scripts/lib"
-  cp "$REPO_ROOT/scripts/lib/md-fast.sh" "$G/scripts/lib/md-fast.sh"
-  ( cd "$G" && git add -A && git commit -q -m lib )
-}
-
-@test "--fast on a markdown-only change runs its checks and never the heavy ones" {
-  fast_gate_setup
-  mkdir -p "$G/skills/x" && printf -- '---\nname: x\n---\n' > "$G/skills/x/SKILL.md"
-  run run_gate --fast
-  echo "$output"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"==> scope"* ]] || false
-  [[ "$output" == *"==> personal"* ]] || false
-  [[ "$output" == *"==> catalog"* ]] || false
-  [[ "$output" == *"skipped in --fast"* ]] || false
-  [[ "$output" == *"gate: PASS (skipped:"* ]] || false
-  # nothing of the full gate ran: no shellcheck/pysyntax/bats/lock/sources
-  [[ "$output" != *"==> shellcheck"* ]] || false
-  [[ "$output" != *"==> bats"* ]] || false
-  [[ "$output" != *"==> lock"* ]] || false
-}
-
-@test "--fast refuses a change set that is not markdown-only and names the offending path" {
-  fast_gate_setup
-  mkdir -p "$G/skills/x" && echo hi > "$G/skills/x/SKILL.md"
-  echo 'echo hi' > "$G/scripts/new.sh"
-  run run_gate --fast
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"not a markdown-only change"* ]] || false
-  [[ "$output" == *"scripts/new.sh"* ]] || false
-  [[ "$output" == *"gate: FAIL — scope"* ]] || false
-  # the other checks did not run on a change --fast does not cover
-  [[ "$output" != *"==> personal"* ]] || false
-}
-
-@test "--fast with no changes fails instead of passing vacuously" {
-  fast_gate_setup
-  run run_gate --fast
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"nothing for --fast to check"* ]] || false
-}
-
-@test "--fast reads the diff range in GRID_FAST_RANGE (what CI classified) and ignores untracked files" {
-  fast_gate_setup
-  echo hi > "$G/notes.md"; ( cd "$G" && git add -A && git commit -q -m notes )
-  echo 'echo hi' > "$G/scripts/untracked.sh"
-  GATE_ENV=(GRID_FAST_RANGE=HEAD~1..HEAD)
-  run run_gate --fast
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"1 changed file(s) against HEAD~1..HEAD"* ]] || false
-}
-
-@test "--fast runs compose.py --lint-roles only when a role file changed" {
-  fast_gate_setup
-  mkdir -p "$G/agent-factory/.venv/bin" "$G/agent-factory/roles/r"
-  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/lint.args"\nexit 0\n' "$G" > "$G/agent-factory/.venv/bin/python"
-  chmod +x "$G/agent-factory/.venv/bin/python"
-  echo one > "$G/agent-factory/roles/r/AGENTS.md"
-  ( cd "$G" && git add -A && git commit -q -m role )
-  echo hi > "$G/notes.md"
-  run run_gate --fast
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"no role files changed"* ]] || false
-  [ ! -e "$G/lint.args" ]
-  echo two >> "$G/agent-factory/roles/r/AGENTS.md"
-  run run_gate --fast
-  [ "$status" -eq 0 ]
-  [ "$(cat "$G/lint.args")" = "$(printf 'agent-factory/compose.py\n--lint-roles')" ]
-}
-
-@test "--fast is exclusive: --pre-commit, --no-bats and --shard are usage errors with it" {
-  run run_gate --fast --pre-commit
-  [ "$status" -eq 2 ]
-  run run_gate --fast --no-bats
-  [ "$status" -eq 2 ]
-  run run_gate --fast --shard s1
-  [ "$status" -eq 2 ]
-}
-
-@test "--fast --strict fails on a skip that is not expected" {
-  fast_gate_setup
-  echo hi > "$G/notes.md"
-  run run_gate --fast --strict
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"unexpected skip"* ]] || false
-  [[ "$output" == *"catalog"* ]] || false
 }

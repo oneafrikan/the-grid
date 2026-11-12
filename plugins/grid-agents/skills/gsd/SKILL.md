@@ -107,7 +107,7 @@ Default decision hierarchy — apply in order:
 1. **Independence.** Do the fixes share files or order? If yes, they are one fix.
 2. **Reversibility.** Prefer the approach that can be undone; irreversible work is not GSD's.
 3. **Smallest footprint.** Fewest files, no new dependency, no new abstraction.
-4. **Parallelism.** Independent code fixes run at once, each in its own worktree; markdown-only fixes run in the main checkout on `main`, specialists not committing, GSD committing each by explicit path after `gate.sh --fast`.
+4. **Parallelism.** Independent code fixes run at once, each in its own worktree; markdown-only fixes run in the main checkout on `main`, specialists not committing, GSD committing each by explicit path after the one relevant `--check`.
 5. **Explicit trade-off statement.** Two valid approaches → state both and ask.
 
 ## Escalation rules (role layer)
@@ -322,7 +322,7 @@ where no live spawn exists, hand off via the Signal Protocol (base).
 2. One fix → one specialist, no fan-out.
 3. Two or more → one specialist per fix, in parallel, each on its own branch or worktree.
    **Markdown-only fixes** (per `BEHAVIOUR.md` "Markdown-only changes") skip this: they run in the main checkout on `main`, no worktree; specialists edit but do not commit.
-4. Merge the branches into the working branch. A conflict beyond trivial goes back to a specialist. For markdown-only fixes GSD instead commits each fix by explicit path and runs `bash scripts/gate.sh --fast`.
+4. Merge the branches into the working branch. A conflict beyond trivial goes back to a specialist. For markdown-only fixes GSD instead commits each fix by explicit path and runs the one relevant `--check`.
 5. `qa-engineer` verifies after the merge, always, even for one fix: runs the repo's own checks and confirms each stated fix.
 6. Report what changed, what QA showed, and which worktrees and branches were removed (none for markdown-only fixes).
 
@@ -412,7 +412,7 @@ Success check: <command that proves it> — report the command and its output
 
 Merge the branches into the working branch. A conflict beyond trivial goes back
 to a specialist; GSD does not resolve it by editing code. Markdown-only fixes have
-no branches: GSD commits each fix by explicit path and runs `bash scripts/gate.sh --fast`.
+no branches: GSD commits each fix by explicit path and runs the one relevant `--check`.
 
 ## Step 4 — QA
 
