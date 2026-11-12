@@ -34,7 +34,7 @@ Or paste this into your coding agent:
 You should now see:
 
 - `bootstrap.sh` ends with `==> Bootstrap complete. Open a fresh Claude session to pick up new skills/agents.`
-- `ls ~/.claude/skills | wc -l` prints a number near <!--count:wired-->133<!--/count--> (plus the orchestrator skills; duplicate names across repos collapse to one link, so it is not exact).
+- `ls ~/.claude/skills | wc -l` prints a number near <!--count:wired-->91<!--/count--> (plus the orchestrator skills; duplicate names across repos collapse to one link, so it is not exact).
 - In a new Claude Code session `/tron` replies with a short question about what you want to do.
 
 Optional next steps:
@@ -109,7 +109,7 @@ Terms:
 ## What you get
 
 - You choose what is live. The allowlist plus your machine's overlay decides which skills load; the rest stays on the shelf.
-- <!--count:wired-->133<!--/count--> curated skills wired as slash commands (`/standup`, `/review`, `/ship`, `/skill-scout`), and <!--count:library-->100<!--/count--> more indexed and switched off.
+- <!--count:wired-->91<!--/count--> curated skills wired as slash commands (`/standup`, `/review`, `/ship`, `/skill-scout`), and <!--count:library-->80<!--/count--> more indexed and switched off.
 - <!--count:roles-->40<!--/count--> agent roles: a dev team, a finance desk, a Socratic tutor (`/morpheus`), and `/tron`, which tells you which one to use.
 - One `git pull` plus `wire.sh` makes every machine match.
 
