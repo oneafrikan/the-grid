@@ -1,6 +1,6 @@
 # Portability: Linux and macOS
 
-Both platforms are supported. The Linux gate (GNU userland, bash 4/5, `.github/workflows/tests.yml`) is authoritative. macOS (`/bin/bash` 3.2.57, BSD userland, python 3.9, case-insensitive APFS) is expected near-green. A regression on either side is a bug.
+Both platforms are supported. The Linux suite (GNU userland, bash 4/5, run nightly and on release tags by `.github/workflows/tests.yml`) is authoritative. macOS (`/bin/bash` 3.2.57, BSD userland, python 3.9, case-insensitive APFS) is expected near-green. A regression on either side is a bug.
 
 - Work done on one platform must follow these rules so the other does not break.
 - Applies to `tests/`, `scripts/`, `hooks/`, and any python they call.

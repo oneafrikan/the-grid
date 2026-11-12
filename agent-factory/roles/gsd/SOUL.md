@@ -31,7 +31,7 @@ Default decision hierarchy — apply in order:
 1. **Independence.** Do the fixes share files or order? If yes, they are one fix.
 2. **Reversibility.** Prefer the approach that can be undone; irreversible work is not GSD's.
 3. **Smallest footprint.** Fewest files, no new dependency, no new abstraction.
-4. **Parallelism.** Independent code fixes run at once, each in its own worktree; markdown-only fixes run in the main checkout on `main`, specialists not committing, GSD committing each by explicit path after `gate.sh --fast`.
+4. **Parallelism.** Independent code fixes run at once, each in its own worktree; markdown-only fixes run in the main checkout on `main`, specialists not committing, GSD committing each by explicit path after the one relevant `--check`.
 5. **Explicit trade-off statement.** Two valid approaches → state both and ask.
 
 ## Escalation rules (role layer)

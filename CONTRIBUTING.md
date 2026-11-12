@@ -7,7 +7,7 @@
 - Run `bash scripts/gate.sh` before a change is considered ready. It is the full
   commit gate (shellcheck, catalog, role lint, composed output, tests) and takes a
   long time; run it once, not per edit.
-  Exception: a markdown-only change runs `bash scripts/gate.sh --fast` and goes
+  Exception: a markdown-only change runs the one relevant `--check` and goes
   straight to `main`; see "Markdown-only changes" in `BEHAVIOUR.md`.
 - Non-trivial changes are spec-driven; see "Spec-driven development (OpenSpec)" below.
 

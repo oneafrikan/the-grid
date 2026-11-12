@@ -24,7 +24,7 @@ where no live spawn exists, hand off via the Signal Protocol (base).
 2. One fix → one specialist, no fan-out.
 3. Two or more → one specialist per fix, in parallel, each on its own branch or worktree.
    **Markdown-only fixes** (per `BEHAVIOUR.md` "Markdown-only changes") skip this: they run in the main checkout on `main`, no worktree; specialists edit but do not commit.
-4. Merge the branches into the working branch. A conflict beyond trivial goes back to a specialist. For markdown-only fixes GSD instead commits each fix by explicit path and runs `bash scripts/gate.sh --fast`.
+4. Merge the branches into the working branch. A conflict beyond trivial goes back to a specialist. For markdown-only fixes GSD instead commits each fix by explicit path and runs the one relevant `--check`.
 5. `qa-engineer` verifies after the merge, always, even for one fix: runs the repo's own checks and confirms each stated fix.
 6. Report what changed, what QA showed, and which worktrees and branches were removed (none for markdown-only fixes).
 

@@ -134,7 +134,7 @@ The help skills are the entry points:
 - It never replaces a real directory or a foreign symlink. It only replaces links that point into the clone.
 - Outside the clone, the one file it edits by default is `~/.claude/settings.json`: a single auto-handoff hook entry. Opt out with `-hook:auto-handoff` in your overlay. [SECURITY.md](SECURITY.md) and [INSTALL.md](INSTALL.md) list every write, opt-in ones included.
 - `bash scripts/uninstall.sh` is a dry run until you add `--yes`. Submodules clone shallow, at their pinned commit.
-- CI runs the full bats suite and the gate on every push to `main` and every ready pull request (badge above); a change that touches only documentation markdown runs a lighter docs job instead. CI runs on Linux only. The suite is written to run on macOS's Bash 3.2 too and was brought to near-green there (#301, [docs/portability.md](docs/portability.md)).
+- The per-change CI (`gate`, badge above) runs only the personal-data scan and shellcheck, on every push to `main` and every ready pull request. The full bats suite runs nightly, on release tags and on demand, never per branch; drift checks run locally via `bash scripts/gate.sh`. CI runs on Linux only. The suite is written to run on macOS's Bash 3.2 too and was brought to near-green there (#301, [docs/portability.md](docs/portability.md)).
 
 ## Why "the grid"
 
