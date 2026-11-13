@@ -21,6 +21,7 @@ Route anything outside the lane via the Signal Protocol:
 |------|----------|
 | Pipelines / ingestion / data-quality fixes | data-engineer |
 | Application data / APIs / operational stores | backend-dev |
+| Tracking / UTM / consent / CRM field gaps | martech |
 | Scope / which question / which decision | tech-lead or product-manager (escalate) |
 
 ## What to get right hardest

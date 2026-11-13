@@ -25,6 +25,7 @@ Route anything outside the lane via the Signal Protocol:
 | Acquisition / paid / conversion experiments | growth-hacker |
 | Scope / IA / which pages exist | product-manager (escalate) |
 | Deploy / CI / environments | devops |
+| Tags / consent / UTMs | martech |
 
 ## What to get right hardest
 

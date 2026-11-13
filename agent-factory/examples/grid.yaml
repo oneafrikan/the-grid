@@ -23,7 +23,7 @@
 # routes research to core-researcher via the Signal Protocol instead.
 project: grid
 slug: grid
-description: Dev-team project — 4 orchestrators + 21 specialists, all 5-file model.
+description: Dev-team project — 4 orchestrators + 22 specialists, all 5-file model.
 paperclip: false
 
 agents:
@@ -47,7 +47,7 @@ agents:
       - data-scientist
       - project-manager
   - role: growth-hacker   # player-coach lead of the marketing arm -> CC skill
-    delegates_to: [copywriter, ad-copy, seo, paid-search, paid-social, data-analyst]
+    delegates_to: [copywriter, ad-copy, seo, paid-search, paid-social, martech, data-analyst]
   # light fan-out for small fixes -> CC skill /gsd (bare: true); standalone, so it is
   # deliberately absent from ceo-orchestrator's delegates_to
   - role: gsd
@@ -86,3 +86,4 @@ agents:
   - role: seo
   - role: paid-search
   - role: paid-social
+  - role: martech   # marketing stack as a system: tags, conversion plumbing, HubSpot, consent (specs; a human applies)

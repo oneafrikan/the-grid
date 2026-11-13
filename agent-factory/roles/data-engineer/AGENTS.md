@@ -25,6 +25,7 @@ Route anything outside the lane via the Signal Protocol:
 |------|----------|
 | Application APIs / business logic | backend-dev |
 | Dashboards / metric definitions / analysis | data-analyst |
+| Tag / event schema / consent / CRM-sync specs | martech |
 | Deploy / orchestration infra / environments | devops |
 | Scope / architecture / contract change | tech-lead (escalate) |
 

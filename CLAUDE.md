@@ -485,7 +485,7 @@ with the team. grid topology: `ceo → tech-lead, product-manager, growth-hacker
 orchestrator). `gsd` is the light fan-out for small fixes (one specialist per
 independent fix, merge, independent QA; `/gsd`, `bare: true`): standalone, not under
 the CEO, and `tech-lead` keeps PRDs and the release gate. `examples/grid.yaml` is the
-**dev-team project** — 25 roles: 4 orchestrators → CC skills, 21 specialists → CC subagents.
+**dev-team project** — 26 roles: 4 orchestrators → CC skills, 22 specialists → CC subagents.
 
 Four public projects (`grid` above; `finance-desk`, `core` and `learning-desk` below), same repo, composed and gated independently:
 `examples/finance-desk.yaml` — `finance-manager → the finance desk pipeline`
@@ -542,7 +542,7 @@ factory; what the-grid adds is two thin layers:
   per-project decision someone has to remember. It documents only; the CLI owns
   the `openspec/` tree it creates.
 - `agent-factory/_core/AGENTS_base.md` — a boot-sequence check for `SPECS.md` /
-  `openspec/`. One edit reaches all 40 composed public roles across the four projects.
+  `openspec/`. One edit reaches all 41 composed public roles across the four projects.
   Conditional: repos without the markers are untouched.
 
 `skills/spec-scout/` audits adoption and reports spec↔code drift (survey-only,

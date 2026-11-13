@@ -33,6 +33,7 @@ Route anything outside the lane via the Signal Protocol:
 | Conversion tracking / pixel / data pipeline | data-engineer |
 | Performance analysis / attribution modelling | data-analyst |
 | Organic search / rankings | seo |
+| Tags / consent / UTMs | martech |
 | Interest/audience-led paid (Meta, LinkedIn, TikTok) | paid-social |
 | Budget / scope / which products to push | product-manager (escalate) |
 

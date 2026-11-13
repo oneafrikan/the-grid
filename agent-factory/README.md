@@ -264,6 +264,7 @@ narrowing aid, not a sandbox.
 | seo | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Audits from web data; Bash is there to open PRs (intent only, the shell is unscoped) |
 | paid-search | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Same as seo; reopen if an ads API is wired as an MCP tool |
 | paid-social | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Same as seo; reopen if an ads API is wired as an MCP tool |
+| martech | Read, Grep, Glob, WebFetch, WebSearch, Write, Bash | Added after H-04. Same as seo; reopen if a HubSpot, GTM, GA4 or ad-platform API is wired as an MCP tool |
 | finance-analyst | Read, Grep, Glob, WebFetch, WebSearch, Write | Reads the web, writes the evidence pack; no PR step, so no Bash |
 | gh-triage | Read, Grep, Glob, Bash, Write | Bash for `gh`; Write for the message and last-run files named in the scope file |
 | librarian | Read, Grep, Glob, Write, Edit, Bash | Edit for page updates; Bash for the idempotent inbox-to-sources move |
@@ -292,7 +293,7 @@ PR-capable web roles have it; `finance-analyst` has no PR step and stays without
 5. `Write` is unscoped on all seven roles: it can overwrite shell rc files, hook scripts and similar.
 6. `tools:` is not applied on every runtime (OpenCode, Codex; see above). On those targets the lists
    give no protection beyond the few OpenCode denials named above.
-7. Roles outside this list. 18 of the 40 public roles (implementers and orchestrators) carry no
+7. Roles outside this list. 18 of the 41 public roles (implementers and orchestrators) carry no
    `tools:` and inherit every tool. Roles outside this repo (private desks) that read untrusted web
    content may also lack `tools:`; this repo does not track them. `security-reviewer` already has
    `Bash` plus the web tools, so these residuals are wider than the seven-role table.
@@ -375,7 +376,7 @@ independently and are gated independently:
 
 | Config | Roles | Shape |
 |---|---|---|
-| `examples/grid.yaml` | 25 | 4 orchestrators (`ceo-orchestrator`, `tech-lead`, `growth-hacker`, `gsd`) + 21 specialists — the dev team. `gsd` is the light fan-out for small fixes (`/gsd`, standalone, not under the CEO) |
+| `examples/grid.yaml` | 26 | 4 orchestrators (`ceo-orchestrator`, `tech-lead`, `growth-hacker`, `gsd`) + 22 specialists — the dev team. `gsd` is the light fan-out for small fixes (`/gsd`, standalone, not under the CEO) |
 | `examples/finance-desk.yaml` | 6 | `finance-manager` → sentinel/analyst/strategist/risk-officer/scribe. Standalone: deliberately not in anyone's `delegates_to` |
 | `examples/core.yaml` | 6 | `gh-triage`, `librarian`, `researcher`, `platform-engineer`, `context-engineer`, `tron` (the front door, `/tron`) — cross-desk infra, no delegation chain, meant to stay wired everywhere |
 | `examples/learning-desk.yaml` | 3 | `morpheus` (Socratic tutor), `oracle` (learns about the operator), `tank` (agent-to-agent lessons). All manual. `bare_names: true` so they are `/morpheus`, `/oracle`, `tank`. Data is private: `~/.the-grid-private/learning/` |

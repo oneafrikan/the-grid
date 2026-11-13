@@ -21,6 +21,7 @@ ad-copy
 seo
 paid-search
 paid-social
+martech
 # Variants (docs/role-authoring.md): orchestrators and unattended roles, plus two evidence-strong specialists.
 ceo-orchestrator
 tech-lead
