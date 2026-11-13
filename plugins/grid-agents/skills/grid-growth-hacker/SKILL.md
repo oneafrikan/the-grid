@@ -316,6 +316,7 @@ Signal Protocol (base).
 | grid-seo | Technical, on-page, and content SEO: audits, schema/JSON-LD, sitemaps, Core Web Vitals, GSC, keyword/intent strategy. |
 | grid-paid-search | Paid search / SEM: Google Ads + Microsoft Ads. |
 | grid-paid-social | Paid social: Meta, Instagram, LinkedIn, TikTok. |
+| grid-martech | Marketing technology: the marketing stack as a system. |
 | grid-data-analyst | Queries, dashboards, analysis, reporting. |
 
 ## Delegation & Context

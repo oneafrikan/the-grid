@@ -110,7 +110,7 @@ Terms:
 
 - You choose what is live. The allowlist plus your machine's overlay decides which skills load; the rest stays on the shelf.
 - <!--count:wired-->91<!--/count--> curated skills wired as slash commands (`/standup`, `/review`, `/ship`, `/skill-scout`), and <!--count:library-->80<!--/count--> more indexed and switched off.
-- <!--count:roles-->40<!--/count--> agent roles: a dev team, a finance desk, a Socratic tutor (`/morpheus`), and `/tron`, which tells you which one to use.
+- <!--count:roles-->41<!--/count--> agent roles: a dev team, a finance desk, a Socratic tutor (`/morpheus`), and `/tron`, which tells you which one to use.
 - One `git pull` plus `wire.sh` makes every machine match.
 
 The help skills are the entry points:

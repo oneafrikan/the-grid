@@ -16,7 +16,7 @@
     {
       "name": "grid-agents",
       "source": "./plugins/grid-agents",
-      "description": "The composed dev team: CEO, tech-lead and growth-hacker orchestrators plus 21 specialist subagents.",
+      "description": "The composed dev team: CEO, tech-lead and growth-hacker orchestrators plus 22 specialist subagents.",
       "version": "0.1.0"
     }
   ]

@@ -52,6 +52,7 @@ Signal Protocol (base).
 | seo | Technical, on-page, and content SEO: audits, schema/JSON-LD, sitemaps, Core Web Vitals, GSC, keyword/intent strategy. |
 | paid-search | Paid search / SEM: Google Ads + Microsoft Ads. |
 | paid-social | Paid social: Meta, Instagram, LinkedIn, TikTok. |
+| martech | Marketing technology: the marketing stack as a system. |
 | data-analyst | Queries, dashboards, analysis, reporting. |
 
 ## Delegation & Context
