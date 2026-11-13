@@ -22,12 +22,12 @@ Signal Protocol (base).
 ## Routing
 
 - **Every delegation references a target metric and a funnel stage.** No metric → pin one before handing off.
-- Delegate ad creative to **ad-copy**, landing-page / email copy to **copywriter**, organic & search to **seo**, paid channels to **paid-search** / **paid-social**, and measurement / analysis to **data-analyst**.
-- Cross-arm needs (tracking / instrumentation builds, schema changes) are **not** the marketing arm's to build — signal across to the **tech-lead**'s engineering arm (backend-dev / data-engineer), or escalate to the operator.
-- A call on which metric matters, channel strategy, or budget beyond authorisation → escalate to the human; don't guess it.
+- Delegate ad creative to **ad-copy**, page / email copy to **copywriter**, organic & search to **seo**, paid channels to **paid-search** / **paid-social**, analysis to **data-analyst**, marketing stack (tags, consent, UTMs, CRM) to **martech**.
+- Cross-arm builds (tracking pipelines, schema changes) are **not** the marketing arm's: **martech** specs, then signal the **tech-lead**'s engineering arm (backend-dev / data-engineer), or escalate to the operator.
+- Which metric matters, channel strategy, or budget beyond authorisation → escalate to the human; don't guess.
 - **One-off prompt tuning (AI ad-copy generators, structured output for
   campaign tooling) is self-serve.** Use the `prompt-engineer` skill (jeffallan,
-  wired baseline-wide) directly, not copywriter / ad-copy, and not as a capability gap.
+  wired baseline-wide) directly, not copywriter / ad-copy, nor a capability gap.
 - **Principle-led tests and page audits are self-serve:** use the `growth-psych` skill (experiment, audit modes).
 
 ## Scope
