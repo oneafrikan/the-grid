@@ -23,7 +23,7 @@ teardown() {
 
 @test "F2: BOOTSTRAP and CLAUDE do not tell the reader to add a skill at the repo root" {
   # a root-level dir is silently not wired (wire.sh wires skills/<name> only)
-  ! grep -n -E 'directory at the repo root|~/\.the-grid/my-skill' BOOTSTRAP.md CLAUDE.md || false
+  ! grep -n -E 'directory at the repo root|~/\.the-grid/my-skill' BOOTSTRAP.md CLAUDE.md DESIGN.md CONVENTIONS.md || false
   ! grep -n -E '~/\.the-grid/(caveman|tdd)/?' BOOTSTRAP.md || false
 }
 
@@ -92,7 +92,7 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
 
 @test "F10: every bash/python3 script path in README, BOOTSTRAP and CLAUDE exists" {
   # first word after bash|python3, with an optional ~/.the-grid/ prefix; flags (-m, --version) skipped
-  paths="$(grep -ohE '(bash|python3) +(~/\.the-grid/)?[A-Za-z0-9_./-]+' README.md BOOTSTRAP.md CLAUDE.md \
+  paths="$(grep -ohE '(bash|python3) +(~/\.the-grid/)?[A-Za-z0-9_./-]+' README.md BOOTSTRAP.md CLAUDE.md DESIGN.md CONVENTIONS.md \
     | sed -E 's/^(bash|python3) +//; s#^~/\.the-grid/##' | grep -v '^-' | sort -u)"
   [ -n "$paths" ]
   missing=""
@@ -105,7 +105,7 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
 @test "F10: cut-project.sh is only named by its real path (project-factory/scripts/)" {
   [ -f project-factory/scripts/cut-project.sh ]
   [ ! -e scripts/cut-project.sh ]
-  ! grep -n -E '(^|[^/])scripts/cut-project\.sh' README.md CLAUDE.md BOOTSTRAP.md USAGE.md index.html project-factory/README.md || false
+  ! grep -n -E '(^|[^/])scripts/cut-project\.sh' README.md CLAUDE.md DESIGN.md CONVENTIONS.md BOOTSTRAP.md USAGE.md index.html project-factory/README.md || false
 }
 
 @test "F10: the catalogue header (generator text and SKILLS.md) names scripts/catalog.sh" {
@@ -164,8 +164,8 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
   # the README role count is a generated marker; it must equal compose.py's total
   grep -qF "<!--count:roles-->$total<!--/count-->" README.md
   grep -q "the other $spec roles" USAGE.md
-  # CLAUDE.md's hand-typed counts: the grid project's split and the all-public-roles total
-  flatc="$(tr '\n' ' ' < CLAUDE.md | tr -s ' ')"
+  # DESIGN.md's hand-typed counts (moved from CLAUDE.md by the retrofit): the grid project's split and the all-public-roles total
+  flatc="$(tr '\n' ' ' < DESIGN.md | tr -s ' ')"
   [[ "$flatc" == *"$gt roles: $go orchestrators → CC skills, $gs specialists → CC subagents"* ]]
   [[ "$flatc" == *"all $total composed public roles"* ]]
 }
@@ -185,28 +185,28 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
 @test "F12: no 'three' project wording while four example configs exist" {
   [ "$(ls agent-factory/examples/*.yaml | wc -l)" -eq 4 ]
   ! grep -n -i -E 'three (sibling|public|composed)|the three projects|three public' \
-      CLAUDE.md BOOTSTRAP.md USAGE.md agent-factory/README.md || false
+      CLAUDE.md DESIGN.md CONVENTIONS.md BOOTSTRAP.md USAGE.md agent-factory/README.md || false
 }
 
-@test "F12: CLAUDE.md gates learning-desk and names tron in the core roster" {
-  grep -q 'project:learning-desk' CLAUDE.md
+@test "F12: DESIGN.md gates learning-desk and names tron in the core roster" {
+  grep -q 'project:learning-desk' DESIGN.md
   # both core roster mentions list tron (examples/core.yaml is where it is composed)
   grep -q '^    - role: tron\|role: tron' agent-factory/examples/core.yaml
-  ! grep -n 'project:core` (gh-triage, librarian, researcher, platform-engineer)' CLAUDE.md || false
-  awk '/`examples\/core.yaml`/,/regardless of which/' CLAUDE.md | grep -q 'tron'
+  ! grep -n 'project:core` (gh-triage, librarian, researcher, platform-engineer)' CLAUDE.md DESIGN.md || false
+  awk '/`examples\/core.yaml`/,/regardless of which/' DESIGN.md | grep -q 'tron'
   # context-engineer is a core role, so the same roster paragraph names it
   grep -q '^    - role: context-engineer\|role: context-engineer' agent-factory/examples/core.yaml
-  awk '/`examples\/core.yaml`/,/regardless of which/' CLAUDE.md | grep -q 'context-engineer'
+  awk '/`examples\/core.yaml`/,/regardless of which/' DESIGN.md | grep -q 'context-engineer'
 }
 
 @test "F12: the golden-output note does not give a stale target count" {
   # compose-goldens.sh covers every compose target (8 today), not four
-  ! grep -n 'all four targets' CLAUDE.md agent-factory/README.md || false
+  ! grep -n 'all four targets' CLAUDE.md DESIGN.md CONVENTIONS.md agent-factory/README.md || false
   [ "$(sed -n -E 's/^TARGETS=\((.*)\)$/\1/p' scripts/compose-goldens.sh | wc -w | tr -d ' ')" -ge 8 ]
 }
 
 @test "F12: the rollout note points at the real BOOTSTRAP step" {
-  ! grep -n 'BOOTSTRAP step 4' CLAUDE.md || false
+  ! grep -n 'BOOTSTRAP step 4' CLAUDE.md DESIGN.md CONVENTIONS.md || false
 }
 
 # --- F14: layout lists and residual stale wording ---
@@ -255,9 +255,9 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
 
 # --- F16: maintainer mode ---
 
-@test "F16: CLAUDE.md does not say grid doctor has nothing to check in maintainer mode" {
-  ! grep -n 'doctor` and `grid repair` have nothing to check' CLAUDE.md || false
-  grep -q '`grid repair` has nothing to repair; `grid doctor` still checks the links' CLAUDE.md
+@test "F16: DESIGN.md does not say grid doctor has nothing to check in maintainer mode" {
+  ! grep -n 'doctor` and `grid repair` have nothing to check' CLAUDE.md DESIGN.md || false
+  grep -q '`grid repair` has nothing to repair; `grid doctor` still checks the links' DESIGN.md
 }
 
 # --- F17: the dry-run claim is true for the repo tree (the code side is in test_grid_install.bats) ---
@@ -280,6 +280,6 @@ for t in ("codex", "gemini-cli", "opencode", "portable"):
   # the code: GRID_DRY_HOME wire for the names, `mv` into .grid-reconcile-backup-<stamp>
   grep -q "GRID_DRY_HOME" scripts/reconcile.sh
   grep -q "grid-reconcile-backup" scripts/reconcile.sh
-  ! grep -n -E "removes them so the-grid|parses wire.sh.s own|remove those shadows|only ever removes a path" BOOTSTRAP.md CLAUDE.md README.md || false
-  grep -q "dry wire" CLAUDE.md
+  ! grep -n -E "removes them so the-grid|parses wire.sh.s own|remove those shadows|only ever removes a path" BOOTSTRAP.md CLAUDE.md CONVENTIONS.md README.md || false
+  grep -q "dry wire" CONVENTIONS.md
 }

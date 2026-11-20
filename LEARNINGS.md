@@ -115,3 +115,68 @@ rewrite altered early commits. The reliable check was
 Apply going forward: after an upstream history rewrite, do not trust patch-id
 tools to say what is merged. Count commits against the old main from the reflog,
 match subjects against the new main, then reset the branch to the new main.
+
+## Moved from CLAUDE.md
+
+<!-- moved from CLAUDE.md B153-a15c..B166-248b -->
+## Learnings
+
+Durable lessons mined from project history — full context and sources in
+`LEARNINGS.md` (generated/maintained by the `mine-learnings` skill).
+
+- Scripts whose output is committed/diffed across machines (like `catalog.sh`)
+  must pin locale (`LC_ALL=C`) and compute counts from a controlled pre-pass,
+  not a raw `find`/`wc` sweep — see LEARNINGS.md ("Cross-machine scripts must
+  pin locale...").
+- Skills that write files from multiple machines (like `handoff`) must scope
+  filenames by hostname and verify target directory names rather than assume
+  them — see LEARNINGS.md ("Handoff output paths...").
+- Library-tier submodules churn independently and can inflate curated counts;
+  keep headline skill totals derived only from wired/root-owned skills, and
+  don't casually `--remote` update noisy library repos — see LEARNINGS.md
+  ("Library submodules can churn...").
+- When writing role/`SKILL.md` instructions for a rule that must never be
+  violated (e.g. gh-triage skip logic), state it as an explicit imperative
+  block — don't rely on step ordering to imply it — see LEARNINGS.md ("Agent
+  instructions that must never be skipped...").
+- Don't write bash-style unquoted-`$var` word-splitting in ad-hoc shell
+  commands — Gareth's machines may run zsh, which doesn't word-split by
+  default — see LEARNINGS.md ("zsh doesn't word-split...").
+- A cron-driven, non-delegating role (e.g. `gh-triage`) doesn't need a project
+  of its **own** — but a shared `core` project for cross-desk infra (roles no
+  single desk owns, meant to survive that desk being subtracted on a
+  task-specific machine) is a real category, not project-proliferation for
+  its own sake. `gh-triage`, `librarian`, `researcher`, `platform-engineer`, `context-engineer` and `tron` all live there now.
+- A role only looks team-owned until you ask what happens when that team is
+  gated off. `researcher`'s method was always domain-agnostic — only its
+  membership in `grid.yaml` made it look like a dev-team role. Moving it to
+  `core` cost one `delegates_to` edit and a routing note in the orphaned
+  orchestrator; the role content didn't change at all.
+- Splitting a desk (e.g. `finance-desk`) out of a larger composed project is
+  free when that desk's orchestrator was already standalone (not in anyone's
+  `delegates_to`) — the delegation topology doesn't change, only which
+  compose config file it's read from.
+- A composed role's own bundled `SKILL.md` ("its operating procedure") can
+  share a bare name with an unrelated wired ecosystem skill (e.g. the
+  `security-reviewer` role's procedure vs. jeffallan's wired `security-reviewer`
+  skill) — that's a naming coincidence, not a relationship, and reads as one
+  in prose ("lives in its `security-reviewer` skill") unless a role's AGENTS.md
+  says explicitly which one it means. Check for this collision whenever a role
+  name and a wired skill name match.
+- Before pointing a role at a wired skill for some capability, check whether
+  another wired skill already covers the same ground — `jeffallan/debugging-wizard`
+  and `superpowers/systematic-debugging` both do hypothesis-driven root-cause
+  debugging, but they're not duplicates: `debugging-wizard` explicitly credits
+  and incorporates `systematic-debugging`'s phase methodology as one of its own
+  reference docs, adding stack-trace/log-correlation tooling and per-language
+  debugger commands on top, while `systematic-debugging` is already the
+  universal default everywhere via `superpowers`' `using-superpowers` skill —
+  so neither needs a role-specific routing note on its own.
+- Claude Desktop's two surfaces wire differently: the Code tab reads the wired
+  `~/.claude`; Cowork reads only plugins installed in Cowork and runs subagents in a
+  cloud container with staged copies (write-back replaces originals) — see
+  LEARNINGS.md ("Claude Desktop surfaces differ...") and `INSTALL.md`.
+- After an upstream history rewrite, `git cherry`/patch-id reports false unmerged
+  commits; count `git rev-list <old-main>..<branch>` from the reflog, match subjects
+  against the new main, then `git reset --hard origin/main` — see LEARNINGS.md
+  ("Reconciling local branches after an upstream history rewrite").

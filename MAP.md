@@ -12,7 +12,10 @@
 | `GUARDRAILS.md` | Must-nots, one per line with an ID and how each is checked | before editing, committing or opening a PR |
 | `BEHAVIOUR.md` | This project's additions to the grid-wide agent defaults | before filing a signal or changing how agents work here |
 | `CLAUDE.md` | Conventions and commands for agents | loaded automatically; conventions |
+| `CONVENTIONS.md` | How we usually do things here: naming, style, git, testing, docs | before writing code, docs or a commit |
+| `DECISIONS.md` | Dated log of decisions with reasons and alternatives | before changing something that looks deliberate |
 | `CHANGELOG.md` | What changed, newest first, grouped Added / Changed / Fixed / Removed | you need to know what changed recently |
+| `DESIGN.md` | How the project is built: structure, key parts, data flow | before changing structure or adding a part |
 | `LEARNINGS.md` | Durable lessons from past work | on demand: debugging, or before repeating a past mistake |
 | `openspec/` | Specs (current truth) and in-flight changes | before implementing: specs and in-flight changes |
 | `SKILLS.md` | Generated index of every skill | choosing a skill |
@@ -58,5 +61,5 @@ No canon entries yet.
 
 ### Memory
 
-- **Always in context:** the learnings summary in CLAUDE.md, up to 6 instincts at session start when `learning: on`, and the canon lines above.
-- **On demand only:** `LEARNINGS.md` and `knowledge/` below canon. Read before relying on them; never present unread material as known.
+- **Always in context:** up to 6 instincts at session start when `learning: on`, and the canon lines above.
+- **On demand only:** `LEARNINGS.md` (the learnings; not loaded automatically) and `knowledge/` below canon. Read before relying on them; never present unread material as known.

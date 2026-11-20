@@ -5,7 +5,7 @@ GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
 @test "public docs do not mention skills-factory" {
   cd "$GRID_ROOT"
-  run grep -n "skills-factory" README.md CLAUDE.md automation-factory/README.md project-factory/README.md agent-factory/README.md
+  run grep -n "skills-factory" README.md CLAUDE.md DESIGN.md CONVENTIONS.md automation-factory/README.md project-factory/README.md agent-factory/README.md
   # grep exits 1 when nothing matches
   [ "$status" -eq 1 ]
 }
@@ -46,7 +46,7 @@ GRID_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 # The paths a reader of the live docs sees. Never _retired/, openspec/, agent-factory/roles, dist/
 # or plugins/: their copies of "do not deploy" are legitimate and the result must not depend on
 # whether _retired/ still exists.
-LIVE_DOC_PATHS="automation-factory scripts tests docs project-factory hooks README.md USAGE.md CLAUDE.md index.html"
+LIVE_DOC_PATHS="automation-factory scripts tests docs project-factory hooks README.md USAGE.md CLAUDE.md DESIGN.md CONVENTIONS.md index.html"
 
 @test "nothing left of the old design: its names appear in no live doc, script or test" {
   cd "$GRID_ROOT"
@@ -74,9 +74,9 @@ LIVE_DOC_PATHS="automation-factory scripts tests docs project-factory hooks READ
 
 # --- WP-071 (R25.qa.F12): count words equal what the tree has -----------------------------------
 
-@test "CLAUDE: the public project count equals agent-factory/examples/*.yaml" {
+@test "DESIGN: the public project count equals agent-factory/examples/*.yaml" {
   cd "$GRID_ROOT"
   n="$(ls agent-factory/examples/*.yaml | wc -l | tr -d ' ')"
   case "$n" in 3) w=three ;; 4) w=four ;; 5) w=five ;; *) w=unknown ;; esac
-  grep -q -i "$w public projects" CLAUDE.md
+  grep -q -i "$w public projects" DESIGN.md
 }

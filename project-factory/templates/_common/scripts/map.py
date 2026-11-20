@@ -352,9 +352,9 @@ def generate(root, tracked=None):
         else:
             out.append("No canon entries yet.")
         out += ["", "### Memory", "",
-                "- **Always in context:** the learnings summary in CLAUDE.md, up to 6 instincts at "
+                "- **Always in context:** up to 6 instincts at "
                 "session start when `learning: on`, and the canon lines above.",
-                "- **On demand only:** `LEARNINGS.md` and `knowledge/` below canon. Read before "
+                "- **On demand only:** `LEARNINGS.md` (the learnings; not loaded automatically) and `knowledge/` below canon. Read before "
                 "relying on them; never present unread material as known."]
 
     text = "\n".join(out) + "\n"
