@@ -96,3 +96,10 @@ full-roster port) and chunked into single-session specialist work:
 ---
 
 Shipped-work history is kept privately; see git log.
+
+## Retrofit follow-ups (from independent QA, 2026-11-20; none lose data)
+
+- `retrofit.py` `scan_item` (~248-276): a fence or raw block opened inside a list item looks for its closer on any later line, including a column-0 line. CommonMark ends the item at the first dedented non-lazy line, so a destination like `- a\n  ```\n  code\n```\n` makes text appended after it render as code or hidden raw HTML while `check` passes (the fence variant predates the raw-kind work). Fix: stop a contained fence or raw block at the first non-blank line with indent <= the item's base; if unclosed there, mark the item block `closed=False` so the apply preflight refuses it. Text is never lost; only its rendering is affected.
+- `retrofit.py`: `<?>` stays an open raw block (false refusal; safe). A source with an unclosed raw block can only be routed `keep`, and pointers placed after it in the slim doc are swallowed.
+- `retrofit.py` archive name: `*.orig` is a common `.gitignore` pattern (found in huginn), so `git add -A` skips the archived original. Consider naming it `<name>.<date>.orig.md`.
+- `docs/SOURCES.md` generator text still says tier is read from `baseline-submodules.txt`; `budget.py` skipped message still names the personal file.
