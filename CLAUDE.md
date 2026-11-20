@@ -67,4 +67,4 @@ Agents and sessions must not leave stale worktrees or local branches behind.
 
 ## Read when
 - `CONVENTIONS.md` before writing code, tests or a commit (gate, tests, machine update, catalogue, sibling repos, reconcile); `DESIGN.md` before changing structure, `wire.sh`, a factory or the key-files list.
-- `LEARNINGS.md` and `DECISIONS.md` before repeating a past mistake or reopening a settled choice; `UNSORTED.md` holds text the retrofit could not place; the original CLAUDE.md is in `docs/archive/`.
+- `LEARNINGS.md` and `DECISIONS.md` before repeating a past mistake or reopening a settled choice; the original CLAUDE.md is in `docs/archive/`.
