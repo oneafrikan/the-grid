@@ -26,7 +26,7 @@ an opt-in extra, off until you enable it) — so every project needs the same
 context-management and handoff shape regardless of stack. That shape lives once, in
 [`templates/_common/`](templates/_common/), not copy-pasted into each template:
 
-- `CONTEXT.md` — domain glossary and architecture decisions.
+- `CONTEXT.md` — cold-start summary (current state, next priority, binding decisions); decisions themselves go in `DECISIONS.md`.
 - `LEARNINGS.md` — empty ledger; target for the `mine-learnings` skill.
 - `SPECS.md` — the OpenSpec convention (see below).
 - `handoffs/` — dated handoff+context docs between agent sessions (`TEMPLATE.md` is the format).
@@ -66,6 +66,26 @@ project learns its purpose, limits and layout from about three short reads:
   copies [`related.md`](related.md) (a short list of neighbouring projects) to `RELATED.md`
   under the same never-overwrite rule. Name only repos at the same or greater privacy; that
   rule is checked by a human, nothing here verifies it.
+
+### Generic core docs (`--generic`) — the part with no grid vocabulary
+
+`cut-project.sh --generic [--with a,b | --all-optional] <target-dir>` skips the stack
+template and `_common`, and lays down only a standard, well-formed documentation set
+(run by the `project-scaffold` skill). Same copy-if-absent rule: a differing file is
+skipped and listed, a second run is a no-op.
+
+- **Core** (`templates/_core/`, plus `PURPOSE.md` and `GUARDRAILS.md` shared with `_common`): `CLAUDE.md`
+  (entry point and read-when table), `PURPOSE.md`, `RULES.md` (operator-owned standing orders),
+  `GUARDRAILS.md`, `CONVENTIONS.md`, `DECISIONS.md`, `DOCS.md` (index of documentation to consult),
+  and a generated `MAP.md` (with `scripts/map.py` so it can be regenerated).
+- **Optional** (`templates/_optional/`, only with `--with` or `--all-optional`): `DESIGN`, `AGENTS`, `LOGS`,
+  `HUMANS`, `CALCULATIONS`, `ASSUMPTIONS`, and `CONTEXT` (the cold-start summary, kept in `_common`).
+  `--with` also works on a stack-template cut.
+- Every file is a short stub: purpose line, a what-goes-here / what-does-not test, `<fill: ...>` markers.
+  Filling them is the next step, not this script's job.
+- **Grid-coupled `_common` content** (not part of the generic set): `SPECS.md`, `signals/`, `knowledge/`,
+  `loop/`, `AGENTS-SETUP.md`, `.grid/`, the `project-review` skill, `.githooks/`, `handoffs/`, `BEHAVIOUR.md`,
+  `LEARNINGS.md`, `scripts/knowledge.py`. Stack-template cuts still lay these down.
 
 ### `SPECS.md` — spec-driven development, on by default
 
@@ -154,13 +174,14 @@ see its own `README.md`.
 ## Usage
 
 ```bash
-bash ~/.the-grid/project-factory/scripts/cut-project.sh [--with-related] <template> <target-dir>
+bash ~/.the-grid/project-factory/scripts/cut-project.sh [--with-related] [--with a,b | --all-optional] <template> <target-dir>
+bash ~/.the-grid/project-factory/scripts/cut-project.sh --generic [--with a,b | --all-optional] <target-dir>
 ```
 
 Mode (seed vs. retrofit) is auto-detected from whether `<target-dir>` already has
 files — no flag to remember. Safe to re-run: re-running after a partial retrofit
-only adds whatever's still missing. The one flag, `--with-related`, is optional and
-may sit anywhere among the arguments (see Charter files above).
+only adds whatever's still missing. Flags are optional and may sit anywhere among the
+arguments (`--with-related`: see Charter files above; `--generic`, `--with`, `--all-optional`: see above).
 
 ## Roadmap
 

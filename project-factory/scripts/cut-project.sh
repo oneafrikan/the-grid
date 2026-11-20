@@ -3,11 +3,18 @@
 # project-factory template.
 #
 # Usage:
-#   cut-project.sh [--with-related] <template> <target-dir>
+#   cut-project.sh [flags] <template> <target-dir>
+#   cut-project.sh --generic [flags] <target-dir>
 #
 #   --with-related   also copy project-factory/related.md to <target>/RELATED.md
 #                    (opt-in neighbour list; same never-overwrite rule). The flag may
 #                    appear anywhere among the arguments.
+#   --generic        no stack template and none of _common: lay down only the generic core
+#                    set (templates/_core/ plus PURPOSE.md, GUARDRAILS.md and scripts/map.py
+#                    from _common) and generate MAP.md. Takes just <target-dir>.
+#   --with a,b       also lay down the named optional files (design, agents, logs, humans,
+#                    context, calculations, assumptions). Works with or without --generic.
+#   --all-optional   shorthand for --with naming all of them.
 #
 # Mode is auto-detected from the target directory, not passed as a flag:
 #   - target doesn't exist, or exists and is empty  -> SEED
@@ -21,6 +28,9 @@
 # additive-only — anything skipped is listed at the end so you can review and
 # merge it by hand. A fresh (seed-mode) target is `git init`'d if it isn't a
 # repo already; an existing target's git history is never touched.
+#
+# Generic mode (--generic): see the flag above. Optional files live in templates/_optional/
+# (CONTEXT.md is the exception: it is already in _common, so it is read from there).
 #
 # Charter files (change `charter-files`): _common also carries PURPOSE.md, GUARDRAILS.md,
 # BEHAVIOUR.md, signals/, knowledge/, scripts/map.py and a .githooks/pre-commit shim.
@@ -39,11 +49,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FACTORY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMPLATES_DIR="$FACTORY_DIR/templates"
 COMMON_DIR="$TEMPLATES_DIR/_common"
+CORE_DIR="$TEMPLATES_DIR/_core"          # generic core set, used only by --generic
+OPTIONAL_DIR="$TEMPLATES_DIR/_optional"  # files laid down only when asked for
+OPTIONAL_ALL="design agents logs humans context calculations assumptions"
 
 usage() {
-  echo "Usage: cut-project.sh [--with-related] <template> <target-dir>"
+  echo "Usage: cut-project.sh [flags] <template> <target-dir>"
+  echo "       cut-project.sh --generic [flags] <target-dir>"
   echo ""
   echo "  --with-related   also write RELATED.md (opt-in list of neighbouring projects)"
+  echo "  --generic        only the generic core docs; no stack template, no _common extras"
+  echo "  --with a,b       also write optional files: $OPTIONAL_ALL"
+  echo "  --all-optional   write every optional file"
   echo ""
   echo "Templates:"
   for t in "$TEMPLATES_DIR"/*/; do
@@ -55,27 +72,49 @@ usage() {
   exit 1
 }
 
-# Pull --with-related out of the argument list first, so the positional checks below
-# (and $1/$2) behave exactly as before wherever the flag was written.
+# Pull the flags out of the argument list first, so the positional checks below
+# (and $1/$2) behave exactly as before wherever a flag was written.
 WITH_RELATED=0
+GENERIC=0
+OPTIONAL_REQ=""   # space-separated optional file names asked for
 POSITIONAL=()
-for arg in "$@"; do
-  if [[ "$arg" == "--with-related" ]]; then
-    WITH_RELATED=1
-  else
-    POSITIONAL+=("$arg")
-  fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --with-related) WITH_RELATED=1 ;;
+    --generic) GENERIC=1 ;;
+    --all-optional) OPTIONAL_REQ="$OPTIONAL_REQ $OPTIONAL_ALL" ;;
+    --with)
+      [[ $# -ge 2 ]] || usage
+      OPTIONAL_REQ="$OPTIONAL_REQ ${2//,/ }"
+      shift
+      ;;
+    *) POSITIONAL+=("$1") ;;
+  esac
+  shift
 done
 # ${arr[@]+...}: an empty array is an unbound variable under `set -u` on bash 3.2.
 set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
 
-[[ $# -lt 2 ]] && usage
+# Reject an unknown optional name before anything is written.
+for n in $OPTIONAL_REQ; do
+  case " $OPTIONAL_ALL " in
+    *" $n "*) ;;
+    *) echo "Error: unknown optional file '$n' (choose from: $OPTIONAL_ALL)"; exit 1 ;;
+  esac
+done
 
-TEMPLATE="$1"
-TARGET_ARG="$2"
-TEMPLATE_DIR="$TEMPLATES_DIR/$TEMPLATE"
-
-[[ -d "$TEMPLATE_DIR" ]] || { echo "Error: unknown template '$TEMPLATE'"; usage; }
+if [[ "$GENERIC" == 1 ]]; then
+  # No stack template: the only positional is the target.
+  [[ $# -eq 1 ]] || usage
+  TEMPLATE="(generic core set)"
+  TARGET_ARG="$1"
+else
+  [[ $# -lt 2 ]] && usage
+  TEMPLATE="$1"
+  TARGET_ARG="$2"
+  TEMPLATE_DIR="$TEMPLATES_DIR/$TEMPLATE"
+  [[ -d "$TEMPLATE_DIR" ]] || { echo "Error: unknown template '$TEMPLATE'"; usage; }
+fi
 
 mkdir -p "$TARGET_ARG"
 TARGET_DIR="$(cd "$TARGET_ARG" && pwd)"
@@ -128,8 +167,28 @@ copy_tree() {
 MAP_EXISTED=0
 if [[ -e "$TARGET_DIR/MAP.md" ]]; then MAP_EXISTED=1; fi
 
-[[ -d "$COMMON_DIR" ]] && copy_tree "$COMMON_DIR"
-copy_tree "$TEMPLATE_DIR"
+if [[ "$GENERIC" == 1 ]]; then
+  # Generic core set only. PURPOSE.md, GUARDRAILS.md and scripts/map.py are shared with
+  # _common, so they are copied from there by name rather than duplicated in _core/.
+  copy_tree "$CORE_DIR"
+  for rel in PURPOSE.md GUARDRAILS.md scripts/map.py; do
+    copy_one "$COMMON_DIR/$rel" "$rel"
+  done
+else
+  [[ -d "$COMMON_DIR" ]] && copy_tree "$COMMON_DIR"
+  copy_tree "$TEMPLATE_DIR"
+fi
+
+# Optional files, only when asked. Same copy rule; a name given twice is copied once.
+SEEN=" "
+for n in $OPTIONAL_REQ; do
+  case "$SEEN" in *" $n "*) continue ;; esac
+  SEEN="$SEEN$n "
+  file="$(printf '%s' "$n" | tr '[:lower:]' '[:upper:]').md"
+  src="$OPTIONAL_DIR/$file"
+  [[ -f "$src" ]] || src="$COMMON_DIR/$file"   # CONTEXT.md already lives in _common
+  copy_one "$src" "$file"
+done
 
 # Opt-in neighbour list. It lives outside templates/ so no default cut can copy it.
 if [[ "$WITH_RELATED" == 1 ]]; then
@@ -166,9 +225,12 @@ if [[ "$MODE" == "seed" ]] && [[ ! -d "$TARGET_DIR/.git" ]]; then
   git -C "$TARGET_DIR" init -q
   echo ""
   echo "  git init'd $TARGET_DIR"
-  # A repo we just created is ours to configure: arm the seeded pre-commit shim.
-  git -C "$TARGET_DIR" config core.hooksPath .githooks
-  echo "  set core.hooksPath=.githooks (the pre-commit shim checks MAP.md)"
+  # A repo we just created is ours to configure: arm the seeded pre-commit shim
+  # (generic mode seeds no shim, so there is nothing to arm).
+  if [[ -f "$TARGET_DIR/.githooks/pre-commit" ]]; then
+    git -C "$TARGET_DIR" config core.hooksPath .githooks
+    echo "  set core.hooksPath=.githooks (the pre-commit shim checks MAP.md)"
+  fi
 fi
 
 echo ""
@@ -195,7 +257,8 @@ fi
 
 # CLAUDE.md is never edited here (it may hold the project's own conventions, and the copy
 # rule cannot merge text). If the target's lacks the trailhead block, print it to paste.
-if [[ -f "$TARGET_DIR/CLAUDE.md" ]] && ! grep -qF '<!-- charter-trailhead -->' "$TARGET_DIR/CLAUDE.md"; then
+# Generic mode seeds its own CLAUDE.md and the trailhead block is not part of it: skip.
+if [[ "$GENERIC" == 0 ]] && [[ -f "$TARGET_DIR/CLAUDE.md" ]] && ! grep -qF '<!-- charter-trailhead -->' "$TARGET_DIR/CLAUDE.md"; then
   echo ""
   echo "CLAUDE.md has no trailhead block (cut-project.sh never edits it); paste at the top of CLAUDE.md:"
   echo ""

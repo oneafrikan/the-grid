@@ -83,6 +83,12 @@ full-roster port) and chunked into single-session specialist work:
 - **Outstanding:** the group 7.0/7.4 `_retired/` decision; the HUMAN proofs on a throwaway repo (groups 8.7-8.9, 10, 12); remaining B3 tests (full doubling table with the 6 h cap, parallel stale-lock race, SIGKILL run).
 - **Gaps to decide:** `instantiate.sh --mode direct` ships no runner and `--cron-every` refuses `direct`, so headless direct is only reachable by setting `MODE=direct` in a `pr` cut's `loop/loop.conf`.
 
+### Project scaffold (3 steps, no issue yet)
+
+- Step 1 (done on this branch): generic core docs via `cut-project.sh --generic`, optional docs via `--with`, `skills/project-scaffold`.
+- Step 2 (bootstrap): an LLM fills the scaffold's `<fill>` markers; move the grid-coupled `_common` files (SPECS.md, signals/, knowledge/, loop/, AGENTS-SETUP.md, `.grid/`, project-review skill, `.githooks`, handoffs/, BEHAVIOUR.md, LEARNINGS.md) into a bootstrap layer.
+- Step 3 (retrofit): migrate old projects onto the scaffold without losing detail.
+
 ### Deferred (no issue yet)
 
 - `karpathy-loop` and `cli-agent-cron` (the unbuilt Phase B of `openspec/changes/loops`, tasks 6 to 8): deferred until the rebuilt issue-loop (`openspec/changes/issue-loop-v2`) is proven. See `openspec/changes/loops/SUPERSEDED.md`.

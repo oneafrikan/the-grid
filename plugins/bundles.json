@@ -12,7 +12,8 @@
     "grill-me": "forked or third-party derived; excluded for v0.1",
     "handoff": "forked or third-party derived; excluded for v0.1",
     "setup-repo-skills": "forked or third-party derived; excluded for v0.1",
-    "skill-scout": "forked or third-party derived; excluded for v0.1"
+    "skill-scout": "forked or third-party derived; excluded for v0.1",
+    "project-scaffold": "new in the scaffold build; the operator decides whether it ships in a bundle"
   },
   "bundles": {
     "grid-core": {

@@ -1,20 +1,26 @@
-# Context
+# CONTEXT.md: Cold-Start Summary
 
-Domain glossary and architecture notes for this project — fill in as the
-codebase and team vocabulary firm up. Seed for the `grill-with-docs` and
-`improve-codebase-architecture` skills.
+Where the project stands right now, so a session with no memory can start in minutes. Target about 3k tokens.
+What goes here: current state, next priority, decisions that still bind. What does not: history (git log), the decision record itself (DECISIONS.md), task lists.
+
+Update it before every session ends. Prune it to current state; move old detail out rather than letting it grow.
+
+## Current state
+
+<fill: what works, what is half-done, what is broken. Name branches or open changes.>
+
+## Next priority
+
+<fill: the one thing to do next, and why it comes first.>
+
+## Decisions that still bind
+
+<fill: one line per decision a newcomer must respect, each pointing at its entry in DECISIONS.md.>
 
 ## Domain terms
 
-(add as they emerge)
+<fill: words with a project-specific meaning, one line each. Add as they emerge.>
 
-## Architecture decisions
+## Gotchas
 
-Put deliberate structural decisions here. See `LEARNINGS.md` for gotchas
-found along the way instead — the two are separate: decisions vs. lessons.
-
-## Planning
-
-This project plans work with OpenSpec — see [`SPECS.md`](SPECS.md). Specs live
-in `openspec/`; proposals get reviewed before code is written. Read `SPECS.md`
-before proposing or implementing a change.
+<fill: traps found so far, one line each.>
