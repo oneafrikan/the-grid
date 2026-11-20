@@ -13,7 +13,8 @@
     "handoff": "forked or third-party derived; excluded for v0.1",
     "setup-repo-skills": "forked or third-party derived; excluded for v0.1",
     "skill-scout": "forked or third-party derived; excluded for v0.1",
-    "project-scaffold": "needs project-factory/scripts/cut-project.sh, which the bundles do not ship"
+    "project-scaffold": "needs project-factory/scripts/cut-project.sh, which the bundles do not ship",
+    "project-bootstrap": "needs project-factory/scripts/cut-project.sh (and agent-factory/deploy.py for the grid extras), which the bundles do not ship"
   },
   "bundles": {
     "grid-core": {

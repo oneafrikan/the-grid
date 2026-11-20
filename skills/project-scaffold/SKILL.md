@@ -7,7 +7,7 @@ description: Lay down a standard set of empty project docs (CLAUDE, PURPOSE, RUL
 
 Runs `cut-project.sh --generic` to lay down empty, well-formed project docs.
 It only copies templates. It never fills them and never overwrites a file that
-already exists and differs.
+already exists and differs. To also fill them from a project description, use `project-bootstrap`.
 
 ## Files
 

@@ -87,6 +87,22 @@ skipped and listed, a second run is a no-op.
   `loop/`, `AGENTS-SETUP.md`, `.grid/`, the `project-review` skill, `.githooks/`, `handoffs/`, `BEHAVIOUR.md`,
   `LEARNINGS.md`, `scripts/knowledge.py`. Stack-template cuts still lay these down.
 
+### Bootstrap — scaffold, then fill, then (optionally) the grid layer
+
+Two layers, one script:
+
+- **Generic layer** (`--generic`): structure that works anywhere. Stubs with `<fill: ...>` markers, no grid vocabulary.
+- **Grid layer** (`--generic --grid`): also copies, by name and under the same never-overwrite rule, the grid-coupled `_common` files:
+  `BEHAVIOUR.md`, `LEARNINGS.md`, `SPECS.md`, `AGENTS-SETUP.md`, `.grid/project.yaml`, `signals/`, `knowledge/` (with
+  `scripts/knowledge.py`), `handoffs/`, `.claude/skills/project-review/`, `.githooks/pre-commit` and the opt-in `loop/` seed.
+  Because `signals/` and `knowledge/` now exist, the generated `MAP.md` shows its Signals and Epistemology sections and
+  `python3 scripts/map.py --check` passes. A seed also gets `core.hooksPath=.githooks`; a retrofit gets the command printed.
+  Without `--grid` nothing changes. With a stack template `--grid` is a no-op (it prints a note): `_common` is already laid down.
+- **Bootstrap** is the `project-bootstrap` skill: it asks the operator one batch of questions, runs the cut, fills the markers
+  from the answers (never inventing a fact: anything not given stays `<fill: ...>` or `<unknown: ask the operator>`),
+  optionally deploys a lean set of agents and hooks, then regenerates and checks the map. Not wired by default; add it to the baseline to use it.
+  It wraps `cut-project.sh --generic [--with a,b] [--grid] <target-dir>`; `tests/test_project_bootstrap.bats` checks the flags it cites exist.
+
 ### `SPECS.md` — spec-driven development, on by default
 
 Every cut project gets [`SPECS.md`](templates/_common/SPECS.md): the
@@ -175,7 +191,7 @@ see its own `README.md`.
 
 ```bash
 bash ~/.the-grid/project-factory/scripts/cut-project.sh [--with-related] [--with a,b | --all-optional] <template> <target-dir>
-bash ~/.the-grid/project-factory/scripts/cut-project.sh --generic [--with a,b | --all-optional] <target-dir>
+bash ~/.the-grid/project-factory/scripts/cut-project.sh --generic [--with a,b | --all-optional] [--grid] <target-dir>
 ```
 
 Mode (seed vs. retrofit) is auto-detected from whether `<target-dir>` already has

@@ -15,6 +15,9 @@
 #   --with a,b       also lay down the named optional files (design, agents, logs, humans,
 #                    context, calculations, assumptions). Works with or without --generic.
 #   --all-optional   shorthand for --with naming all of them.
+#   --grid           with --generic: also lay down the grid-coupled _common files (the
+#                    bootstrap layer, see GRID_FILES below). Without --generic it is a
+#                    no-op: a stack-template cut already carries all of _common.
 #
 # Mode is auto-detected from the target directory, not passed as a flag:
 #   - target doesn't exist, or exists and is empty  -> SEED
@@ -52,6 +55,10 @@ COMMON_DIR="$TEMPLATES_DIR/_common"
 CORE_DIR="$TEMPLATES_DIR/_core"          # generic core set, used only by --generic
 OPTIONAL_DIR="$TEMPLATES_DIR/_optional"  # files laid down only when asked for
 OPTIONAL_ALL="design agents logs humans context calculations assumptions"
+# Grid-coupled _common files, laid down by --grid (only with --generic). Named here, not
+# discovered, so adding a file to _common never changes a --grid cut by accident. A directory
+# entry is copied file by file. loop/ is the opt-in issue-loop seed, as in a stack cut.
+GRID_FILES="BEHAVIOUR.md LEARNINGS.md SPECS.md AGENTS-SETUP.md .grid signals knowledge scripts/knowledge.py handoffs .claude/skills/project-review .githooks/pre-commit loop"
 
 usage() {
   echo "Usage: cut-project.sh [flags] <template> <target-dir>"
@@ -61,6 +68,7 @@ usage() {
   echo "  --generic        only the generic core docs; no stack template, no _common extras"
   echo "  --with a,b       also write optional files: $OPTIONAL_ALL"
   echo "  --all-optional   write every optional file"
+  echo "  --grid           with --generic: also the grid-coupled files (signals, knowledge, SPECS, .grid, ...)"
   echo ""
   echo "Templates:"
   for t in "$TEMPLATES_DIR"/*/; do
@@ -76,12 +84,14 @@ usage() {
 # (and $1/$2) behave exactly as before wherever a flag was written.
 WITH_RELATED=0
 GENERIC=0
+GRID=0
 OPTIONAL_REQ=""   # space-separated optional file names asked for
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --with-related) WITH_RELATED=1 ;;
     --generic) GENERIC=1 ;;
+    --grid) GRID=1 ;;
     --all-optional) OPTIONAL_REQ="$OPTIONAL_REQ $OPTIONAL_ALL" ;;
     --with)
       [[ $# -ge 2 ]] || usage
@@ -174,9 +184,26 @@ if [[ "$GENERIC" == 1 ]]; then
   for rel in PURPOSE.md GUARDRAILS.md scripts/map.py; do
     copy_one "$COMMON_DIR/$rel" "$rel"
   done
+  # Grid layer, only when asked. Same copy rule; directories keep their relative path.
+  if [[ "$GRID" == 1 ]]; then
+    for rel in $GRID_FILES; do
+      if [[ -d "$COMMON_DIR/$rel" ]]; then
+        while IFS= read -r -d '' src; do
+          copy_one "$src" "${src#"$COMMON_DIR"/}"
+        done < <(find "$COMMON_DIR/$rel" -type f -print0)
+      else
+        copy_one "$COMMON_DIR/$rel" "$rel"
+      fi
+    done
+  fi
 else
   [[ -d "$COMMON_DIR" ]] && copy_tree "$COMMON_DIR"
   copy_tree "$TEMPLATE_DIR"
+  # --grid adds nothing here: _common above is already the whole grid layer.
+  if [[ "$GRID" == 1 ]]; then
+    echo "note: --grid has no effect without --generic (a stack-template cut already includes it)"
+    echo ""
+  fi
 fi
 
 # Optional files, only when asked. Same copy rule; a name given twice is copied once.
@@ -226,7 +253,7 @@ if [[ "$MODE" == "seed" ]] && [[ ! -d "$TARGET_DIR/.git" ]]; then
   echo ""
   echo "  git init'd $TARGET_DIR"
   # A repo we just created is ours to configure: arm the seeded pre-commit shim
-  # (generic mode seeds no shim, so there is nothing to arm).
+  # (a bare generic cut seeds no shim, so there is nothing to arm; --grid seeds one).
   if [[ -f "$TARGET_DIR/.githooks/pre-commit" ]]; then
     git -C "$TARGET_DIR" config core.hooksPath .githooks
     echo "  set core.hooksPath=.githooks (the pre-commit shim checks MAP.md)"
