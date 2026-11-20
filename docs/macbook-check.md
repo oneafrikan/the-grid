@@ -9,6 +9,8 @@ One-off check that the project kit (`cut-project.sh`, `retrofit.py`, `map.py` an
 ```bash
 cd ~/.the-grid && git pull --ff-only && git log -1 --format='%h %s'
 git submodule update --init tests/lib/bats-core
+# If your shell wraps grep in a function or alias (ugrep, rg), the grep probe below tests the wrapper, not BSD grep:
+# run this whole document from a clean shell instead: env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/bash
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin:$PATH   # system bash/python3/git first, this shell only
 {
   /bin/bash --version | head -1     # expect: GNU bash, version 3.2.57(1)-release (...apple-darwin...)
@@ -40,9 +42,9 @@ Expected (Linux): `exit=0 notok=0` for every file, with `ok` counts
 |---|---|
 | project_scaffold | 20 |
 | project_bootstrap | 16 |
-| project_retrofit | 63 |
+| project_retrofit | 81 |
 | project_factory | 38 |
-| charter_files | 38 (3 skips) |
+| charter_files | 38 (3 skips on Linux, 4 on a Mac: fine) |
 | map | 39 |
 | map_lint | 52 |
 
