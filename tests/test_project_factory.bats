@@ -3,9 +3,11 @@
 # Cuts only into temp dirs.
 
 load helpers/setup
+load helpers/portable
 
 setup() {
   common_setup
+  isolate_git_config    # cuts git-init and commit here: ignore the operator's global git config
   CUT="$REPO_ROOT/project-factory/scripts/cut-project.sh"
   P=$(mktemp -d)
 }
@@ -170,11 +172,11 @@ stub_python() {
   git -C "$P" config user.email t@t
   git -C "$P" config user.name t
   git -C "$P" add -A
-  git -C "$P" commit -q -m seed
+  git -C "$P" -c commit.gpgsign=false commit -q -m seed
   # a new registry file (RELATED.md) makes the committed MAP.md stale
   echo x > "$P/RELATED.md"
   git -C "$P" add -A
-  run git -C "$P" commit -q -m stale
+  run git -C "$P" -c commit.gpgsign=false commit -q -m stale
   echo "$output"
   [ "$status" -ne 0 ]
   [[ "$output" == *"run: python3 scripts/map.py"* ]] || false
@@ -334,4 +336,45 @@ stub_python() {
   grep -q 'refuses to run' README.md
   # nothing claims every project grinds its backlog unattended
   if grep -rniE 'unattended|grinding it|grind through' README.md templates/*/README.md templates/*/CLAUDE.md; then return 1; fi
+}
+
+# --- Finder junk (.DS_Store, AppleDouble ._*) on macOS ------------------------------------------
+@test "a target holding only .DS_Store and a ._ file is still a seed: git init and hooksPath" {
+  : > "$P/.DS_Store"
+  : > "$P/._ghost"
+  run bash "$CUT" python-agents-base "$P"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Mode:     seed"* ]] || false
+  [ -d "$P/.git" ]
+  [ "$(git -C "$P" config core.hooksPath)" = ".githooks" ]
+}
+
+@test "a target holding a real file next to .DS_Store is still a retrofit" {
+  : > "$P/.DS_Store"
+  echo keep > "$P/README.md"
+  run bash "$CUT" python-agents-base "$P"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Mode:     retrofit"* ]] || false
+  [ ! -d "$P/.git" ]
+}
+
+# Plant Finder junk in a COPY of project-factory (the script finds its templates from its
+# own location), never in the real tree, and check neither walk of templates/ copies it.
+@test "Finder junk planted in the templates is never copied into a project" {
+  cp -R "$REPO_ROOT/project-factory" "$BATS_TEST_TMPDIR/pf"
+  tpl="$BATS_TEST_TMPDIR/pf/templates"
+  mkdir -p "$tpl/_common/.githooks"
+  for d in "$tpl/_common" "$tpl/_core" "$tpl/_common/.githooks" "$tpl/python-agents-base"; do
+    : > "$d/.DS_Store"
+    : > "$d/._x"
+  done
+  # stack cut (copy_tree walk), generic cut (copy_tree), generic --grid (the GRID_FILES walk)
+  Q=$(mktemp -d)
+  run bash "$BATS_TEST_TMPDIR/pf/scripts/cut-project.sh" python-agents-base "$P"
+  [ "$status" -eq 0 ]
+  run bash "$BATS_TEST_TMPDIR/pf/scripts/cut-project.sh" --generic --grid "$Q"
+  [ "$status" -eq 0 ]
+  [ -f "$Q/.githooks/pre-commit" ]
+  [ -z "$(find "$P" "$Q" -name .git -prune -o \( -name .DS_Store -o -name '._*' \) -print)" ]
+  rm -rf "$Q"
 }

@@ -4,9 +4,11 @@
 # is well-formed and cites only commands and flags that exist. Cuts only happen in temp dirs.
 
 load helpers/setup
+load helpers/portable
 
 setup() {
   common_setup
+  isolate_git_config    # the hooksPath asserts must not see the operator's global git config
   CUT="$REPO_ROOT/project-factory/scripts/cut-project.sh"
   SKILL="$REPO_ROOT/skills/project-bootstrap"
   P=$(mktemp_canon)

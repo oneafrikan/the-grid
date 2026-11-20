@@ -8,6 +8,7 @@ load helpers/portable
 
 setup() {
   common_setup
+  isolate_git_config    # commits below must not read the operator's global git config
   RF="$REPO_ROOT/project-factory/scripts/retrofit.py"
   FX="$REPO_ROOT/tests/fixtures/retrofit"
   R=$(mktemp_canon)    # the repo under retrofit
@@ -384,7 +385,7 @@ plan_fails() {
 git_repo() {
   git -C "$R" init -q
   git -C "$R" add -A
-  git -C "$R" -c user.email=t@example.com -c user.name=t commit -q -m init
+  git -C "$R" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q -m init
 }
 
 @test "finalize: refuses while check fails, changing nothing" {
