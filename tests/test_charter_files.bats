@@ -222,7 +222,7 @@ base_section() { awk -v h="## $1" '$0 == h {on=1; next} /^## / {on=0} on' "$REPO
 }
 
 @test "AGENTS_base: the three new headings appear in no role AGENTS.md (merge would unify them)" {
-  run bash -c "grep -l '^## \(Evidence and Stages\|Memory\|Filing a Knowledge Signal\)' '$REPO_ROOT'/agent-factory/roles/*/AGENTS.md"
+  run bash -c "grep -lE '^## (Evidence and Stages|Memory|Filing a Knowledge Signal)' '$REPO_ROOT'/agent-factory/roles/*/AGENTS.md"
   [ "$status" -eq 1 ]
   [ -z "$output" ]
 }

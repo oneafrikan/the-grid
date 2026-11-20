@@ -389,6 +389,32 @@ r = baseline_wired(sys.argv[2]); print(r and [(e["name"], e["repo"]) for e in r]
   [[ "$output" == *"('y', 'x')"* ]] || false
 }
 
+@test "GRID_BASELINE unset: the baseline scope measures the tracked example, not the personal baseline" {
+  make_skill "$MOCK_GRID/repos/pers/skills/p1" "p1"
+  make_skill "$MOCK_GRID/repos/ex/skills/e1" "e1"
+  make_skill "$MOCK_GRID/repos/ex/skills/e2" "e2"
+  printf 'pers\n' > "$MOCK_GRID/baseline-submodules.txt"
+  printf 'ex\n' > "$MOCK_GRID/baseline-submodules.example.txt"
+  budget --json                                   # --json stays machine-readable: no notice
+  [ "$status" -eq 0 ]
+  [ "$(jget "$output" baseline.skills.count)" = "2" ]
+  # the notice goes to stderr only, once, for the human modes
+  GRID_DIR="$MOCK_GRID" python3 "$BUDGET" --report > "$OTHER_DIR/out" 2> "$OTHER_DIR/err"
+  [ "$(cat "$OTHER_DIR/err")" = "budget: using tracked baseline-submodules.example.txt (set GRID_BASELINE to override)" ]
+  # an explicit GRID_BASELINE naming the personal file is honoured exactly
+  GRID_BASELINE="$MOCK_GRID/baseline-submodules.txt" budget --json
+  [ "$(jget "$output" baseline.skills.count)" = "1" ]
+}
+
+@test "GRID_BASELINE unset and no example file: budget.py keeps reading the personal baseline, silently" {
+  make_skill "$MOCK_GRID/repos/pers/skills/p1" "p1"
+  printf 'pers\n' > "$MOCK_GRID/baseline-submodules.txt"
+  GRID_DIR="$MOCK_GRID" python3 "$BUDGET" --report > "$OTHER_DIR/out" 2> "$OTHER_DIR/err"
+  [ ! -s "$OTHER_DIR/err" ]
+  budget --json
+  [ "$(jget "$output" baseline.skills.count)" = "1" ]
+}
+
 @test "baseline is None when a submodule is uninitialised" {
   git -C "$MOCK_GRID" init -q
   printf 'x\n' > "$OTHER_DIR/baseline.txt"; export GRID_BASELINE="$OTHER_DIR/baseline.txt"

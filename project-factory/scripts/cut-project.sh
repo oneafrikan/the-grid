@@ -132,7 +132,9 @@ TARGET_DIR="$(cd "$TARGET_ARG" && pwd)"
 # Mode is only used for the summary/git-init decision below — the copy loop
 # itself behaves identically either way (copy-if-absent, skip+report if
 # present and different).
-if [[ -z "$(ls -A "$TARGET_DIR" 2>/dev/null)" ]]; then
+# Finder junk (.DS_Store, AppleDouble ._* files) does not make a folder "non-empty":
+# a Finder-made new folder holding only that is still a seed (git init, hooksPath).
+if [[ -z "$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name .DS_Store ! -name '._*' -print 2>/dev/null | head -n 1)" ]]; then
   MODE="seed"
 else
   MODE="retrofit"
@@ -169,7 +171,8 @@ copy_tree() {
   local src
   while IFS= read -r -d '' src; do
     copy_one "$src" "${src#"$source_dir"/}"
-  done < <(find "$source_dir" -type f -print0)
+  # Skip Finder junk so it is never copied from a template tree into a project.
+  done < <(find "$source_dir" -type f ! -name .DS_Store ! -name '._*' -print0)
 }
 
 # MAP.md is generated, not copied (project-factory copies files only), and only if it was
@@ -190,7 +193,7 @@ if [[ "$GENERIC" == 1 ]]; then
       if [[ -d "$COMMON_DIR/$rel" ]]; then
         while IFS= read -r -d '' src; do
           copy_one "$src" "${src#"$COMMON_DIR"/}"
-        done < <(find "$COMMON_DIR/$rel" -type f -print0)
+        done < <(find "$COMMON_DIR/$rel" -type f ! -name .DS_Store ! -name '._*' -print0)
       else
         copy_one "$COMMON_DIR/$rel" "$rel"
       fi

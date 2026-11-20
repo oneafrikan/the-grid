@@ -443,7 +443,7 @@ print(rel)
   git -C "$P" commit -q -m handoff
   lint
   [ "$status" -eq 0 ]
-  ! grep -q 'tech-lead\|README' <<<"$output" || false
+  ! grep -qE 'tech-lead|README' <<<"$output" || false
   ! grep -q '^E_' <<<"$output" || false
 }
 
@@ -657,7 +657,15 @@ commit_map() {
   # agent-factory venv (or any other PATH entry) can be picked up.
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
-  ln -s "$(readlink -f "$(command -v python3)")" "$bin/python3"
+  # Resolve python3 portably: `readlink -f` is absent on macOS < 12.3. Follow the leaf link
+  # chain by hand (a venv python is dereferenced to its base, as readlink -f did).
+  local py t
+  py="$(command -v python3)"
+  while [ -L "$py" ]; do
+    t="$(readlink "$py")"
+    case "$t" in /*) py="$t" ;; *) py="$(cd "$(dirname "$py")" && pwd -P)/$t" ;; esac
+  done
+  ln -s "$py" "$bin/python3"
   ln -s "$(command -v git)" "$bin/git"
   PATH="$bin" run python3 "$P/scripts/map.py" --check --root "$P"
   [ "$status" -eq 0 ]

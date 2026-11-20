@@ -12,7 +12,8 @@
 #   bash scripts/catalog.sh /tmp/x.md     # write somewhere else (used by tests)
 #   bash scripts/catalog.sh --check       # write nothing; exit 0 current, 1 stale, 2 the check itself failed
 #   bash scripts/catalog.sh -h | --help   # this usage; writes nothing
-#   GRID_BASELINE=<file> bash scripts/catalog.sh   # render from that baseline (gate.sh and wire.sh pin the tracked example)
+#   GRID_BASELINE=<file> bash scripts/catalog.sh   # render from that baseline instead (default: the tracked
+#                                                  # baseline-submodules.example.txt, never the personal one)
 #
 # A leading dash is always an option: an unknown one is a usage error (exit 2) before any file
 # is touched. A non-dash argument is the output path.
@@ -237,15 +238,26 @@ done
 # composed agent-factory output, not submodules, so they're skipped.
 #
 # GRID_BASELINE pins which baseline file is read (the same override wire.sh, audit.sh and
-# budget.py take). The committed SKILLS.md is rendered from the TRACKED example baseline
-# (gate.sh and wire.sh pin it), so CI and every machine agree; with no pin the personal,
-# gitignored baseline is used as before. A pin that names a missing file is an error, not a
-# silent "wire everything" render.
+# budget.py take). The committed SKILLS.md (and the counts stamped from it) must be a function
+# of tracked inputs only, so CI and every machine agree: with GRID_BASELINE unset or empty the
+# TRACKED baseline-submodules.example.txt is used, NOT the personal gitignored one. Set
+# GRID_BASELINE="$GRID_DIR/baseline-submodules.txt" to render this machine's own set. Only a
+# grid with no example file (a mock grid, an odd checkout) falls back to the personal
+# baseline. A pin that names a missing file is an error, not a silent "wire everything" render.
 if [ -n "${GRID_BASELINE:-}" ] && [ ! -f "$GRID_BASELINE" ]; then
   echo "catalog: GRID_BASELINE names a missing file: $GRID_BASELINE" >&2
   exit 2
 fi
-WIRE_ALLOWLIST_FILE="${GRID_BASELINE:-$GRID_DIR/baseline-submodules.txt}"
+if [ -n "${GRID_BASELINE:-}" ]; then
+  WIRE_ALLOWLIST_FILE="$GRID_BASELINE"
+elif [ -f "$GRID_DIR/baseline-submodules.example.txt" ]; then
+  WIRE_ALLOWLIST_FILE="$GRID_DIR/baseline-submodules.example.txt"
+  # One stderr line, only when it changes the answer (a personal baseline is being ignored).
+  [ ! -f "$GRID_DIR/baseline-submodules.txt" ] ||
+    echo "catalog: using tracked baseline-submodules.example.txt (set GRID_BASELINE to override)" >&2
+else
+  WIRE_ALLOWLIST_FILE="$GRID_DIR/baseline-submodules.txt"
+fi
 WIRED_REPOS=()
 WIRED_SKILLS=()
 DENY_REPOS=()
