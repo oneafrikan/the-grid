@@ -112,9 +112,10 @@ verbatim.** Nobody retypes source text, so nothing can be reworded or dropped on
 1. `survey <repo>` (read-only) lists candidate sources and which standard docs exist. Scaffold the missing docs first
    with `cut-project.sh --generic [--with ...]`.
 2. `blocks <file>` numbers the file's markdown units as `B012-3fa9` (index plus 4 hex of a hash of the normalised text):
-   headings, paragraphs, list items with their nested items, code fences, tables, comments, quotes, front matter.
+   headings, paragraphs, list items with their nested items, code fences, tables, comments, raw HTML blocks, quotes, front matter.
    The file can be rebuilt byte for byte from its blocks (`blocks <file> --rebuild`; also asserted on every parse).
-   It also prints the plan header line `## source: CLAUDE.md sha256:<hash of the whole file>` to paste into the plan.
+   It also prints the plan header line `## source: CLAUDE.md sha256:<hash of the whole file>` to paste into the plan;
+   run it from the repo root with a repo-relative path (an absolute path or one outside the repo is refused, exit 2).
 3. A **plan** maps every block: `B012-3fa9 -> GUARDRAILS.md#Hard constraints`, a range `B004-91c2..B009-00ab -> CONVENTIONS.md`,
    `-> keep` (stays in the source) or `-> unsorted` (goes to `UNSORTED.md`). The parser is strict: no source section or no
    block lines, a source that changed since `blocks` (the whole-file sha256 pins it, so a middle-of-range edit is caught),
@@ -124,15 +125,16 @@ verbatim.** Nobody retypes source text, so nothing can be reworded or dropped on
 4. `apply <plan>` is a dry run; `--yes` appends the blocks verbatim after a blank line and a `<!-- moved from ... -->`
    comment, never touches the source, and a second run adds nothing. Anchors are resolved against the destination as it
    was before the run, and runs into one heading land in plan order. Before writing anything it checks that every
-   destination is writable and ends outside an unclosed fence or comment, and that every block would read back as itself.
+   destination is writable and ends outside an unclosed fence, comment or raw HTML block (`<script>`, `<style>`, `<pre>`,
+   `<textarea>`), and that every block would read back as itself.
    It has no revert command: commit or stash first and undo with git.
 5. `check <plan> [--report]` is the no-judgement proof, **block by block**: the destination is parsed into blocks and each
-   moved block must equal one of them (only CRLF and trailing blanks are ignored; text inside a fence or comment never
+   moved block must equal one of them (only CRLF and trailing blanks are ignored; text inside a fence, comment or raw HTML block never
    counts; one destination block satisfies one source block). Every `keep` block must still be in the live source, every
    `unsorted` block in `UNSORTED.md`. Exit 1 on any missing or altered block, a missing destination file included;
    `--report` writes `docs/archive/retrofit-<source>-<date>-coverage.md`.
-6. `finalize <plan> --replace-with <slim.md>` runs only if `check` passes and every `keep` block is in the slim doc as a
-   block of its own (`keep <plan>` prints them). It archives the original to `docs/archive/<name>.<date>.orig`, refuses an
+6. `finalize <plan> --replace-with <slim.md>` runs only if `check` passes, the slim doc is at most `--max-lines N` lines
+   (default 60, `0` = no limit) and every `keep` block is in it as a block of its own (`keep <plan>` prints them). It archives the original to `docs/archive/<name>.<date>.orig`, refuses an
    existing archive that differs (a byte-identical one from a failed replace is reused), refuses a source that is not
    tracked-and-clean in git without `--allow-dirty`, and prints the undo: `mv <archive> <source>`. Afterwards the same plan
    still checks, because the source text is then read from the archive whose sha256 matches, so a second source can be

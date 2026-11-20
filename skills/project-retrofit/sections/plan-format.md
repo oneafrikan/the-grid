@@ -29,8 +29,10 @@ B011-1234 -> unsorted
 No source section or no block lines, a header without sha256, a source that
 changed since `blocks` (any edit, even in the middle of a range), unknown id,
 stale hash, a block not mentioned or mentioned twice, a bad destination, a path
-that leaves the repo (also through a symlink), a destination ending inside an
-unclosed fence or comment, an unwritable destination (checked before any write).
+that leaves the repo (also through a symlink; `blocks` wants a repo-relative path,
+so an absolute one is refused), a destination ending inside an unclosed fence,
+comment or raw HTML block (`<script>`, `<style>`, `<pre>`, `<textarea>`), an
+unwritable destination (checked before any write).
 
 ## What it guarantees
 
@@ -39,13 +41,14 @@ unclosed fence or comment, an unwritable destination (checked before any write).
   Before writing it re-parses the result and refuses if any block would not read
   back as itself. `apply --yes` twice adds nothing.
 - `check` compares BLOCKS, not lines: each source block must equal a block of its
-  destination (only CRLF and trailing blanks are ignored). Text inside a fence or
-  comment never counts, and one destination block satisfies one source block. Keep
+  destination (only CRLF and trailing blanks are ignored). Text inside a fence,
+  comment or raw HTML block never counts, and one destination block satisfies one source block. Keep
   blocks must be in the live source, unsorted ones in `UNSORTED.md`. A missing
   destination file is a failure (exit 1). `--report` writes
   `docs/archive/retrofit-<source>-<date>-coverage.md`.
 - `finalize` runs only when `check` passes and every `keep` block is in the
-  replacement as a block of its own. It refuses an existing archive that differs
+  replacement as a block of its own and the replacement is at most `--max-lines N`
+  lines (default 60, 0 = no limit). It refuses an existing archive that differs
   (an identical one, left by a failed replace, is reused), refuses a source that
   is not tracked-and-clean in git without `--allow-dirty`, and deletes nothing.
   After it, the same plan still checks (the source text is read from the archive

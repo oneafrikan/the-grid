@@ -96,10 +96,3 @@ full-roster port) and chunked into single-session specialist work:
 ---
 
 Shipped-work history is kept privately; see git log.
-
-## Retrofit follow-ups (from independent QA, 2026-11-20; none lose data)
-
-- `retrofit.py`: moved text under raw HTML (`<script>`, `<style>`, `<pre>`, `<textarea>`) passes `check` but renders hidden. Treat these tags like comments in `scan_block` and add them to the unclosed-block preflight in `apply`.
-- `retrofit.py finalize --replace-with`: enforce the "under 60 lines" limit the skill states (currently wording only).
-- `retrofit.py match_run`: O(n^2) when many altered blocks share a first line (1500 blocks took 21 s). Index by first line.
-- `retrofit.py blocks`: an absolute path gives a header the parser rejects with a confusing message; say "use a relative path from the repo root".

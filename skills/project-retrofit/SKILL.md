@@ -34,7 +34,8 @@ failure, 2 plan error or refusal (nothing written).
    deleting a new UNSORTED.md or newly scaffolded files) is the undo: apply has no
    revert command. Then `apply <plan> --yes` and `check <plan> --report`. If check
    fails: stop, show the MISSING lines, restore via git, fix the plan, re-run.
-6. Write a SLIM replacement entry doc (under 60 lines). Shape: 
+6. Write a SLIM replacement entry doc (under 60 lines; `finalize` refuses more,
+   `--max-lines N` overrides, 0 = none). Shape: 
    `project-factory/templates/_core/CLAUDE.md` (cut-project skips an existing
    CLAUDE.md). Include only pointers, the `keep` text (`retrofit.py keep <plan>`
    prints it) and facts in the archived original; nothing mechanical checks the

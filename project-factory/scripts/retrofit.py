@@ -12,8 +12,9 @@ Subcommands (run from the repo root, or pass --repo DIR):
   apply <plan> [--yes] [--show-text]     dry run by default; --yes appends blocks verbatim
   check <plan> [--report]                coverage check, no judgement; exit 1 on any loss
   keep <plan> [--source S]               print the blocks marked keep, verbatim
-  finalize <plan> --replace-with F [--source S] [--yes] [--allow-dirty]
+  finalize <plan> --replace-with F [--source S] [--max-lines N] [--yes] [--allow-dirty]
                                          archive the original, put the slim doc in its place
+                                         (refused over N lines, default 60; 0 = no limit)
 
 Plan file (strict, one section per source; `blocks` prints the exact header line):
     ## source: CLAUDE.md sha256:<64 hex of the whole file>
@@ -27,8 +28,9 @@ stale. After `finalize` the same plan still works: the source text is then read 
 archive whose sha256 matches.
 
 Matching is block level: a moved block counts as present only when the destination, parsed
-into blocks, holds an equal block (text inside a fence or comment never counts), and one
-destination block satisfies at most one source block.
+into blocks, holds an equal block (text inside a fence, a comment or a raw HTML <script>,
+<style>, <pre> or <textarea> block never counts), and one destination block satisfies at most
+one source block.
 
 Exit codes: 0 ok; 1 check/coverage failure (check, or finalize that would lose text);
 2 usage error, plan error, or a refusal (nothing was written).
@@ -72,7 +74,7 @@ class Fatal(Exception):
 class Block:
     def __init__(self, idx, kind, first, last, text, gap, off, closed=True):
         self.idx = idx            # 1-based
-        self.kind = kind          # frontmatter heading para item fence table comment quote hr
+        self.kind = kind          # frontmatter heading para item fence table comment html quote hr
         self.first = first        # 1-based first line
         self.last = last          # 1-based last line
         self.text = text          # exact source text of the block
@@ -80,7 +82,7 @@ class Block:
         self.off = off            # char offset of text in the file
         self.level = 0            # heading level
         self.htext = ""           # heading text
-        self.closed = closed      # False for a fence or comment that runs to the end of the file
+        self.closed = closed      # False for a fence, comment or raw HTML block that runs to the end of the file
         self.norm = norm(text)    # comparison form (see norm)
         self.hash = hashlib.sha1(self.norm.encode("utf-8", "surrogateescape")).hexdigest()[:4]
 
@@ -144,6 +146,11 @@ RE_ITEM = re.compile(r"^[ \t]*(?:[-*+]|(\d{1,9})[.)])(?:[ \t]|$)")
 RE_SETEXT = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
 RE_TABLE_DELIM = re.compile(r"^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$")
 RE_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
+# CommonMark HTML block type 1: <script>, <style>, <pre>, <textarea> (any case, with attributes)
+# runs until a line holding any of the matching end tags, blank lines included. What sits inside
+# it renders as raw HTML or code, so it must never count as a match.
+RE_RAW_OPEN = re.compile(r"^[ \t]*<(?:script|style|pre|textarea)(?=[ \t>]|$)", re.I)
+RE_RAW_CLOSE = re.compile(r"</(?:script|style|pre|textarea)>", re.I)
 
 
 def fence_open(line, max_indent):
@@ -163,6 +170,21 @@ def fence_end(lines, i, ch, ln):
     for j in range(i + 1, len(lines)):
         s = body(lines[j]).strip()
         if s and set(s) == {ch} and len(s) >= ln:
+            return j, True
+    return len(lines) - 1, False
+
+
+def raw_open(line, max_indent):
+    """True when `line` opens a raw HTML block (see RE_RAW_OPEN) indented <= max_indent."""
+    b = body(line)
+    return RE_RAW_OPEN.match(b) is not None and indent_of(b) <= max_indent
+
+
+def raw_end(lines, i):
+    """(index of the line holding the end tag, True); when never closed the last line and False
+    (the block then runs to the end of the file, as CommonMark does)."""
+    for j in range(i, len(lines)):
+        if RE_RAW_CLOSE.search(body(lines[j])):
             return j, True
     return len(lines) - 1, False
 
@@ -190,7 +212,7 @@ def interrupts_para(line):
     b = body(line)
     if RE_ATX.match(b) or RE_HR.match(b) or RE_QUOTE.match(b) or starts_comment(line):
         return True
-    if fence_open(line, 3):
+    if fence_open(line, 3) or raw_open(line, 3):
         return True
     m = RE_ITEM.match(b)
     return bool(m) and (m.group(1) is None or m.group(1) == "1")
@@ -199,7 +221,7 @@ def interrupts_para(line):
 def starts_block(line):
     b = body(line)
     return bool(RE_ATX.match(b) or RE_HR.match(b) or RE_QUOTE.match(b) or starts_comment(line)
-                or fence_open(line, 3) or RE_ITEM.match(b))
+                or fence_open(line, 3) or raw_open(line, 3) or RE_ITEM.match(b))
 
 
 def scan_item(lines, i):
@@ -222,6 +244,8 @@ def scan_item(lines, i):
             fo = fence_open(lines[j], 10 ** 6)
             if fo:
                 j, _ = fence_end(lines, j, fo[0], fo[1])
+            elif raw_open(lines[j], 10 ** 6):
+                j, _ = raw_end(lines, j)
             last = j
             j += 1
             continue
@@ -251,6 +275,9 @@ def scan_block(lines, i, allow_frontmatter):
         j = comment_end(lines, i)
         after_open = "".join(lines[i:j + 1]).split("<!--", 1)[1]
         return "comment", j, "-->" in after_open
+    if raw_open(lines[i], 3):
+        j, closed = raw_end(lines, i)
+        return "html", j, closed
     if RE_HR.match(b):
         return "hr", i, True
     if RE_QUOTE.match(b):
@@ -366,10 +393,10 @@ def resolve(root, rel):
     if not rel or "\0" in rel:
         return None, "empty or invalid path"
     if os.path.isabs(rel):
-        return None, "path escapes the repo (absolute path): %s" % rel
+        return None, "path escapes the repo (absolute path): %s; use a relative path from the repo root" % rel
     clean = os.path.normpath(rel)
     if clean == ".." or clean.startswith(".." + os.sep):
-        return None, "path escapes the repo: %s" % rel
+        return None, "path escapes the repo: %s; use a relative path from the repo root" % rel
     if ".git" in clean.split(os.sep):
         return None, "path is inside .git: %s" % rel
     real = os.path.realpath(os.path.join(root, clean))
@@ -477,13 +504,14 @@ def parse_plan(root, plan_path, strict_dest=False):
     errs = []
     plan = Plan(root, plan_path)
     cur = None
+    bad_src = False      # the last '## source:' header was rejected: its mapping lines get no second error
     for no, raw in enumerate(read_text(plan_path).split("\n"), 1):
         line = raw.rstrip("\r").strip()
         if not line:
             continue
         m = RE_SRC.match(line)
         if m:
-            cur = None
+            cur, bad_src = None, True
             r, msg = resolve(root, m.group(1))
             if msg:
                 errs.append((no, msg))
@@ -502,8 +530,10 @@ def parse_plan(root, plan_path, strict_dest=False):
             lead, blocks = parse_blocks(text)
             cur = SourcePlan(no, rel, real, m.group(2).lower(), origin, text, lead, blocks)
             plan.sources.append(cur)
+            bad_src = False
             continue
         if line.startswith("## source"):
+            cur, bad_src = None, True
             errs.append((no, "malformed source header (want: ## source: <path> sha256:<64 hex>, "
                          "the line `blocks` prints)"))
             continue
@@ -514,7 +544,8 @@ def parse_plan(root, plan_path, strict_dest=False):
             errs.append((no, "cannot parse line: %s" % line))
             continue
         if cur is None:
-            errs.append((no, "mapping line outside a valid '## source:' section"))
+            if not bad_src:       # a rejected header was already reported once; do not cascade
+                errs.append((no, "mapping line outside a valid '## source:' section"))
             continue
         i1, h1, i2, h2, dest = int(m.group(1)), m.group(2), m.group(3), m.group(4), m.group(5)
         i2 = int(i2) if i2 else i1
@@ -624,25 +655,41 @@ def run_text(src, entry):
 def match_rows(hay, rows):
     """Set row['ok'] for each row {'block': Block}; `hay` is the list of blocks of the text."""
     used = set()
-    firsts = [b.norm.split("\n", 1)[0] for b in hay]
+    runs = {}      # normalised joined text -> deque of (i, j) runs of up to 6 blocks, in (i, j) order
+    built = []     # becomes non-empty once `runs` is filled (lazily: most checks never need it)
 
-    def match_run(r):
-        """Match r to a short run of unused consecutive blocks whose joined text equals it."""
-        target = r["block"].norm
-        first = target.split("\n", 1)[0]
+    def build_runs():
+        """Index every candidate run once (only starts whose first line some row can match), so a
+        lookup costs about one dict hit instead of a scan of all blocks sharing a first line."""
+        wanted = {r["block"].norm.split("\n", 1)[0] for r in rows}
         for i in range(len(hay)):
-            if i in used or firsts[i] != first:
+            if hay[i].norm.split("\n", 1)[0] not in wanted:
                 continue
             parts, j = [hay[i].text], i
             while True:
-                if norm("".join(parts)) == target:
-                    used.update(range(i, j + 1))
-                    r["ok"] = True
-                    return
-                if j + 1 >= len(hay) or j - i >= 5 or (j + 1) in used:
+                runs.setdefault(norm("".join(parts)), collections.deque()).append((i, j))
+                if j + 1 >= len(hay) or j - i >= 5:
                     break
                 parts += [hay[j].gap, hay[j + 1].text]
                 j += 1
+
+    def match_run(r):
+        """Match r to a short run of unused consecutive blocks whose joined text equals it."""
+        if not built:
+            build_runs()
+            built.append(True)
+        q = runs.get(r["block"].norm)
+        # A run with a used block is dead for good (`used` only grows): drop it from the front
+        # while skipping it, so repeated misses never rescan the same dead runs.
+        while q:
+            i, j = q[0]
+            if any(k in used for k in range(i, j + 1)):
+                q.popleft()
+                continue
+            used.update(range(i, j + 1))
+            r["ok"] = True
+            q.popleft()
+            return
 
     # Front matter first: mid-file it re-parses as a rule plus a heading, and the rule must not
     # be taken by a real horizontal rule matched earlier.
@@ -796,7 +843,8 @@ def simulate(plan):
                 continue
             items = groups.setdefault(real, [])
             if blocks and not blocks[-1].closed:
-                raise Fatal("%s ends inside an unclosed code fence or comment; close it first "
+                raise Fatal("%s ends inside an unclosed code fence, comment or raw HTML block "
+                            "(<script>, <style>, <pre>, <textarea>); close it first "
                             "(a run would be appended inside it)" % e.dest)
             if e.anchor:
                 hb = resolve_anchor(blocks, e.anchor, e.line)
@@ -1012,6 +1060,11 @@ def cmd_finalize(args):
         raise Fatal("--replace-with file is empty")
     if os.path.realpath(args.replace_with) == src.real:
         raise Fatal("--replace-with is the source itself")
+    # The slim entry doc must stay slim; --max-lines 0 turns the limit off.
+    nlines = len(split_lines(repl))
+    if args.max_lines and nlines > args.max_lines:
+        raise Fatal("--replace-with has %d lines, over the limit of %d; slim it down, or raise the limit "
+                    "with --max-lines N (0 = no limit)" % (nlines, args.max_lines))
     # Blocks marked keep must survive in the new entry doc, verbatim, as blocks of their own.
     krows = [{"block": b, "ok": False} for b in keep_blocks(src)]
     match_rows(parse_blocks(repl)[1], krows)
@@ -1041,7 +1094,7 @@ def cmd_finalize(args):
     print("%s: %s" % ("FINALIZE" if args.yes else "DRY RUN (nothing written; add --yes)", src.rel))
     print("  check passes; all %d keep block(s) are in the replacement" % len(keep_blocks(src)))
     print("  %s original (%d bytes) -> %s" % ("archive already holds the" if reuse else "archive", len(original), arch_rel))
-    print("  replace %s with %s (%d lines)" % (src.rel, args.replace_with, len(split_lines(repl))))
+    print("  replace %s with %s (%d lines)" % (src.rel, args.replace_with, nlines))
     undo = "mv %s %s" % (shquote(arch_rel), shquote(src.rel))
     if args.yes:
         if not reuse:
@@ -1099,6 +1152,10 @@ def cmd_survey(args):
 
 
 def cmd_blocks(args):
+    # The header this prints is pasted into a plan, whose paths are relative to the repo root.
+    r, msg = resolve(repo_root(None), args.file)
+    if msg:
+        raise Fatal(msg)
     if not os.path.isfile(args.file):
         raise Fatal("file not found: %s" % args.file)
     data = open(args.file, "rb").read()
@@ -1140,6 +1197,8 @@ def main(argv=None):
             p.add_argument("--replace-with", required=True)
             p.add_argument("--yes", action="store_true")
             p.add_argument("--allow-dirty", action="store_true")
+            p.add_argument("--max-lines", type=int, default=60,
+                           help="refuse a replacement longer than N lines (default 60; 0 = no limit)")
     args = ap.parse_args(argv)
     fn = {"survey": cmd_survey, "blocks": cmd_blocks, "apply": cmd_apply, "check": cmd_check,
           "keep": cmd_keep, "finalize": cmd_finalize}[args.cmd]

@@ -29,11 +29,16 @@ teardown() {
 
 rf() { python3 "$RF" "$@"; }
 
+# blk FILE [ARGS]: `blocks` for FILE, run from FILE's directory with its bare name. `blocks` takes a
+# path relative to the repo root (the cwd) and refuses an absolute one, so tests that name files
+# by absolute path go through this.
+blk() { local f="$1"; shift; (cd "$(dirname "$f")" && python3 "$RF" blocks "$(basename "$f")" "$@"); }
+
 # tree_sum DIR: checksum of every file below DIR (not .git).
 tree_sum() { (cd "$1" && find . -name .git -prune -o -type f -exec cksum {} + | sort); }
 
 # bid FILE N: id of the Nth block of FILE.
-bid() { rf blocks "$1" | awk -v n="$2" '/^B[0-9]/ { c++; if (c == n) print $1 }'; }
+bid() { blk "$1" | awk -v n="$2" '/^B[0-9]/ { c++; if (c == n) print $1 }'; }
 
 # repo_docs: minimal destinations with headings to anchor on.
 repo_docs() {
@@ -50,7 +55,7 @@ hdr() { echo "## source: $1 sha256:$(sha_of "$R/$1")"; }
 
 # plan_all SRCFILE REL DEST: a plan sending every block of SRCFILE (named REL in the repo) to DEST.
 plan_all() {
-  { echo "## source: $2 sha256:$(sha_of "$1")"; rf blocks "$1" | awk -v d="$3" '/^B[0-9]/ { print $1 " -> " d }'; } > "$T/plan.txt"
+  { echo "## source: $2 sha256:$(sha_of "$1")"; blk "$1" | awk -v d="$3" '/^B[0-9]/ { print $1 " -> " d }'; } > "$T/plan.txt"
 }
 
 # plain_plan: split plain.md (7 blocks) over keep, unsorted and two destinations.
@@ -73,13 +78,13 @@ EOF
 
 @test "round trip: every fixture rebuilds byte for byte from its blocks" {
   for f in "$FX"/*.md "$T"/*.md; do
-    rf blocks "$f" --rebuild > "$T/rebuilt.out"
+    blk "$f" --rebuild > "$T/rebuilt.out"
     cmp "$f" "$T/rebuilt.out" || { echo "round trip failed: $f"; false; }
   done
 }
 
 @test "blocks: fenced code is atomic and a fake heading inside it is not a heading" {
-  run rf blocks "$FX/mixed.md"
+  run blk "$FX/mixed.md"
   [ "$status" -eq 0 ]
   [[ "$output" == *"fence"* ]] || false
   [[ "$output" != *"fake heading"* ]] || false
@@ -88,14 +93,14 @@ EOF
 }
 
 @test "blocks: nested list items stay inside their parent item" {
-  run rf blocks "$FX/mixed.md"
+  run blk "$FX/mixed.md"
   # "Always back up" item spans its nested items and their continuation paragraph
   [[ "$output" == *"L17-22  item"* ]] || false
   [[ "$output" != *"nested item one"* ]] || false
 }
 
 @test "blocks: front matter, table, comment, quote, rule and setext heading are units" {
-  run rf blocks "$FX/mixed.md"
+  run blk "$FX/mixed.md"
   [[ "$output" == *"L1-4  frontmatter"* ]] || false
   [[ "$output" == *"table"* ]] || false
   [[ "$output" == *"L48-49  comment"* ]] || false
@@ -105,7 +110,7 @@ EOF
 }
 
 @test "blocks: duplicate blocks share a hash but get distinct indexes" {
-  run rf blocks "$FX/dups.md"
+  run blk "$FX/dups.md"
   [ "$status" -eq 0 ]
   a=$(bid "$FX/dups.md" 2); b=$(bid "$FX/dups.md" 4)
   [ "${a#*-}" = "${b#*-}" ]
@@ -113,10 +118,10 @@ EOF
 }
 
 @test "blocks: empty and blank-only files have zero blocks and still round trip" {
-  run rf blocks "$T/empty.md"
+  run blk "$T/empty.md"
   [ "$status" -eq 0 ]
   [[ "$output" == *"0 blocks"* ]] || false
-  run rf blocks "$T/blank.md"
+  run blk "$T/blank.md"
   [[ "$output" == *"0 blocks"* ]] || false
 }
 
@@ -492,7 +497,7 @@ mini() {
   printf '%b' "$1" > "$R/CLAUDE.md"
   printf '%b' "${2:-# D\n}" > "$R/D.md"
   { hdr CLAUDE.md; echo "$(bid "$R/CLAUDE.md" 1) -> keep"
-    rf blocks "$R/CLAUDE.md" | awk '/^B[0-9]/ { c++; if (c > 1) print $1 " -> D.md" }'; } > "$T/plan.txt"
+    blk "$R/CLAUDE.md" | awk '/^B[0-9]/ { c++; if (c > 1) print $1 " -> D.md" }'; } > "$T/plan.txt"
   rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
 }
 
@@ -611,7 +616,7 @@ mini() {
   [[ "$output" == *"the plan file"* ]] || false
   plan_all "$R/CLAUDE.md" CLAUDE.md OTHER.md
   hdr OTHER.md >> "$T/plan.txt"
-  rf blocks "$R/OTHER.md" | awk '/^B[0-9]/ { print $1 " -> keep" }' >> "$T/plan.txt"
+  blk "$R/OTHER.md" | awk '/^B[0-9]/ { print $1 " -> keep" }' >> "$T/plan.txt"
   run rf apply "$T/plan.txt" --repo "$R"
   [ "$status" -eq 2 ]
   [[ "$output" == *"another source of this plan"* ]] || false
@@ -640,7 +645,7 @@ mini() {
   run rf check "$T/plan.txt" --repo "$R"
   [ "$status" -eq 0 ]
   # the existing item is still one block of its own and the provenance comment is a block
-  run rf blocks "$R/D.md"
+  run blk "$R/D.md"
   [[ "$output" == *"item"*"- last item"* ]] || false
   [[ "$output" == *"comment"* ]] || false
   grep -qxF -- '  continues' "$R/D.md"
@@ -701,7 +706,7 @@ mini() {
   [ "$(id -u)" -ne 0 ] || skip "root can read anything"
   printf '# x\n' > "$T/unreadable.md"
   chmod 000 "$T/unreadable.md"
-  run rf blocks "$T/unreadable.md"
+  run blk "$T/unreadable.md"
   chmod 644 "$T/unreadable.md"
   [ "$status" -eq 2 ]
   [[ "$output" == *"retrofit: PermissionError"* ]] || false
@@ -786,4 +791,165 @@ mini() {
   run rf finalize "$T/plan.txt" --repo "$R" --source CLAUDE.md --replace-with "$T/sa.md" --yes
   [ "$status" -eq 2 ]
   [[ "$output" == *"already finalized"* ]] || false
+}
+
+# ======================================================================================
+# QA follow-ups: raw HTML blocks, finalize line limit, speed, path message
+# ======================================================================================
+
+@test "check: text that only sits inside a raw HTML script/style/pre/textarea block does not count" {
+  for open in '<pre>' '<PRE class="x">' '<style>' '<script type="text/x">' '<textarea>'; do
+    close="</$(printf '%s' "$open" | sed 's/^<\([A-Za-z]*\).*/\1/')>"
+    mini '# T\n\nNever delete prod.\n'
+    # blank lines inside the raw block: a paragraph of its own would otherwise match
+    printf '# D\n\n%s\n\nNever delete prod.\n\n%s\n' "$open" "$close" > "$R/D.md"
+    run rf check "$T/plan.txt" --repo "$R"
+    [ "$status" -eq 1 ] || { echo "$open: status $status"; false; }
+    [[ "$output" == *"MISSING"* ]] || false
+  done
+}
+
+@test "check: text after a properly closed raw HTML block still counts" {
+  mini '# T\n\nNever delete prod.\n'
+  printf '# D\n\n<pre>\nx\n</pre>\n\nNever delete prod.\n' > "$R/D.md"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 0 ]
+  # a one-line block closes itself
+  printf '# D\n\n<style>b{}</style>\n\nNever delete prod.\n' > "$R/D.md"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 0 ]
+  # an end tag of another raw kind closes it too (CommonMark)
+  printf '# D\n\n<script>\nx\n</style>\n\nNever delete prod.\n' > "$R/D.md"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 0 ]
+}
+
+@test "check: an unclosed raw HTML block hides everything after it" {
+  mini '# T\n\nNever delete prod.\n'
+  printf '# D\n\n<pre>\nopen\n\nNever delete prod.\n' > "$R/D.md"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 1 ]
+}
+
+@test "apply refuses a destination that ends inside an unclosed raw HTML block" {
+  plain_plan
+  for open in '<style>' '<SCRIPT src=x>' '<pre>' '<textarea>'; do
+    printf '# Design\n\n%s\nbody{}\n' "$open" > "$R/DESIGN.md"
+    before=$(tree_sum "$R")
+    run rf apply "$T/plan.txt" --repo "$R" --yes
+    [ "$status" -eq 2 ] || { echo "$open: status $status"; false; }
+    [[ "$output" == *"unclosed"* ]] || false
+    [[ "$output" == *"<style>"* ]] || false
+    [ "$before" = "$(tree_sum "$R")" ]
+  done
+}
+
+@test "apply: a moved raw HTML block that never closes is refused, not left to swallow what follows" {
+  printf '# S\n\n<style>\nbody{}\n' > "$R/CLAUDE.md"
+  printf '# D\n\n## A\n\nx\n\n## B\n\ny\n' > "$R/D.md"
+  { hdr CLAUDE.md; echo "$(bid "$R/CLAUDE.md" 1) -> keep"; echo "$(bid "$R/CLAUDE.md" 2) -> D.md#A"; } > "$T/plan.txt"
+  before=$(tree_sum "$R")
+  run rf apply "$T/plan.txt" --repo "$R" --yes
+  [ "$status" -eq 2 ]
+  [ "$before" = "$(tree_sum "$R")" ]
+}
+
+@test "blocks --rebuild is byte-identical for raw HTML blocks (closed, unclosed, nested, uppercase, in items)" {
+  printf 'a\n<pre>\nx\n\n</pre>\nb\n\n<STYLE media="x">\n.a{}\n</Style>\n\n<script>\n<pre>\n</script>\nz\n\n- item\n  <textarea>\n\n  t\n  </textarea>\n- two\n\n<pre>\nnever closed\n\ntail' > "$T/raw.md"
+  printf 'x <pre>\n    <pre>\n<prefix>\n<pre/>\n<scripts>\n<styles>\n' > "$T/rawmix.md"
+  for f in raw rawmix; do
+    blk "$T/$f.md" --rebuild > "$T/$f.out"
+    cmp "$T/$f.md" "$T/$f.out"
+  done
+  run blk "$T/raw.md"
+  [[ "$output" == *"html"* ]] || false
+  # a raw-block start line interrupts a paragraph ("a" / "<pre>"); <pre/>, <scripts>, <prefix> do not
+  [[ "$output" == *"L1-1  "*"L2-"*"html"* ]] || { echo "$output"; false; }
+  run blk "$T/rawmix.md"
+  [[ "$output" != *"html"* ]] || { echo "$output"; false; }
+}
+
+@test "finalize: a replacement over the line limit is refused (dry run too); --max-lines overrides" {
+  plain_plan
+  rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
+  git_repo
+  rf keep "$T/plan.txt" --repo "$R" > "$T/slim.md"
+  # pad to exactly 60 lines (allowed), then 61 (refused)
+  while [ "$(wc -l < "$T/slim.md" | tr -d ' ')" -lt 60 ]; do echo "pad" >> "$T/slim.md"; done
+  [ "$(wc -l < "$T/slim.md" | tr -d ' ')" -eq 60 ]
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md"
+  [ "$status" -eq 0 ]
+  echo "pad" >> "$T/slim.md"
+  before=$(tree_sum "$R")
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"61 lines"* ]] || false
+  [[ "$output" == *"--max-lines"* ]] || false
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --yes
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"61 lines"* ]] || false
+  [ "$before" = "$(tree_sum "$R")" ]
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --max-lines 60
+  [ "$status" -eq 2 ]
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --max-lines 61
+  [ "$status" -eq 0 ]
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --max-lines 0 --yes
+  [ "$status" -eq 0 ]
+  cmp "$T/slim.md" "$R/CLAUDE.md"
+}
+
+@test "check: 1500 altered blocks that share a first line finish fast (was quadratic)" {
+  python3 - "$R" <<'PY'
+import sys
+r = sys.argv[1]
+n = 1500
+open(r + "/S.md", "w").write("".join("X\ny%d\n\n" % i for i in range(n)))
+open(r + "/D.md", "w").write("".join("X\nz%d\n\n" % i for i in range(n)))
+PY
+  { hdr S.md; echo "$(bid "$R/S.md" 1)..$(bid "$R/S.md" 1500) -> D.md"; } > "$T/plan.txt"
+  # about 0.2 s now and 20 s before the fix; 5 s leaves slack for a slow machine (timeout exits 124)
+  run timeout 5 python3 "$RF" check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing or altered: 1500"* ]] || false
+}
+
+@test "check: the run matcher pairs a multi-block run once; a second source block needs a second run" {
+  # front matter, mid-file, re-parses as a rule plus a heading: a run of two destination blocks
+  printf -- '---\ntitle: T\n---\n\nBody.\n' > "$R/CLAUDE.md"
+  printf '# D\n\nintro\n\n---\ntitle: T\n---\n\nBody.\n' > "$R/D.md"
+  { hdr CLAUDE.md; blk "$R/CLAUDE.md" | awk '/^B[0-9]/ { print $1 " -> D.md" }'; } > "$T/plan.txt"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 0 ]
+  # two identical source blocks need two destination runs; one copy is not enough
+  printf -- 'title: T\n\n---\ntitle: T\n---\n' > "$R/CLAUDE.md"
+  printf -- '# D\n\n---\ntitle: T\n---\n' > "$R/D.md"
+  { hdr CLAUDE.md; blk "$R/CLAUDE.md" | awk '/^B[0-9]/ { print $1 " -> D.md" }'; } > "$T/plan.txt"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 1 ]
+}
+
+@test "blocks: an absolute path or a path outside the repo is refused with the fix, exit 2" {
+  printf '# A\n\nx\n' > "$R/A.md"
+  printf '# O\n' > "$T/out.md"
+  run python3 "$RF" blocks "$R/A.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"use a relative path from the repo root"* ]] || false
+  [[ "$output" != *"## source"* ]] || false
+  cd "$R"
+  run python3 "$RF" blocks "../$(basename "$T")/out.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"use a relative path from the repo root"* ]] || false
+  run python3 "$RF" blocks A.md
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"## source: A.md sha256:"* ]] || false
+}
+
+@test "plan error: an absolute source path is one clear line, not a cascade" {
+  plain_plan
+  sed "s|^## source: CLAUDE.md|## source: $R/CLAUDE.md|" "$T/plan.txt" > "$T/p2" && mv "$T/p2" "$T/plan.txt"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c 'plan.txt:')" -eq 1 ]
+  [[ "$output" == *"use a relative path from the repo root"* ]] || false
+  [[ "$output" != *"outside a valid"* ]] || false
 }
