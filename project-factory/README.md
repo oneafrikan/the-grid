@@ -103,6 +103,35 @@ Two layers, one script:
   optionally deploys a lean set of agents and hooks, then regenerates and checks the map. Wired by the next `bash scripts/wire.sh`.
   It wraps `cut-project.sh --generic [--with a,b] [--grid] <target-dir>`; `tests/test_project_bootstrap.bats` checks the flags it cites exist.
 
+### Retrofit — move an existing project's docs onto the standard set, losing nothing
+
+[`scripts/retrofit.py`](scripts/retrofit.py) (Python 3.8+, stdlib only) brings a project that already has a big `CLAUDE.md`,
+notes or a TODO into the generic doc set. The design: **the model decides where each block goes, the script moves it
+verbatim.** Nobody retypes source text, so nothing can be reworded or dropped on the way.
+
+1. `survey <repo>` (read-only) lists candidate sources and which standard docs exist. Scaffold the missing docs first
+   with `cut-project.sh --generic [--with ...]`.
+2. `blocks <file>` numbers the file's markdown units as `B012-3fa9` (index plus 4 hex of a hash of the normalised text):
+   headings, paragraphs, list items with their nested items, code fences, tables, comments, quotes, front matter.
+   The file can be rebuilt byte for byte from its blocks (`blocks <file> --rebuild`; also asserted on every parse).
+3. A **plan** maps every block: `B012-3fa9 -> GUARDRAILS.md#Hard constraints`, a range `B004-91c2..B009-00ab -> CONVENTIONS.md`,
+   `-> keep` (stays in the source) or `-> unsorted` (goes to `UNSORTED.md`). The parser is strict: unknown id, stale hash,
+   a block not mentioned or mentioned twice, a missing destination, or a path leaving the repo (also via symlink) is
+   an error with a line number and nothing is written.
+4. `apply <plan>` is a dry run; `--yes` appends the blocks verbatim after a `<!-- moved from ... -->` comment, never
+   touches the source, and a second run adds nothing.
+5. `check <plan> [--report]` is the no-judgement proof: every moved block must appear verbatim in its destination (only CRLF
+   and trailing blanks are ignored), every `keep` block must still be in the source, every `unsorted` block in `UNSORTED.md`.
+   Exit 1 on any missing or altered block; `--report` writes `docs/archive/retrofit-<source>-<date>-coverage.md`.
+6. `finalize <plan> --replace-with <slim.md>` runs only if `check` passes and every `keep` block is in the slim doc
+   (`keep <plan>` prints them). It archives the original to `docs/archive/<name>.<date>.orig`, never overwrites an
+   archive, refuses a source that is not tracked-and-clean in git without `--allow-dirty`, and prints the undo command.
+
+Exit codes: 0 ok, 1 coverage failure, 2 usage or plan error or a refusal. The `project-retrofit` skill drives this flow with
+the operator approving the plan before `apply` and the slim doc before `finalize`; `tests/test_project_retrofit.bats` covers it
+with synthetic fixtures. Known limit: in a range, only the two end ids carry a hash, so a source edited between `blocks`
+and `apply` is caught at the ends (and `check` always compares against the current source).
+
 ### `SPECS.md` — spec-driven development, on by default
 
 Every cut project gets [`SPECS.md`](templates/_common/SPECS.md): the

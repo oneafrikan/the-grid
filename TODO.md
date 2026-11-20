@@ -87,7 +87,7 @@ full-roster port) and chunked into single-session specialist work:
 
 - Step 1 (done on this branch): generic core docs via `cut-project.sh --generic`, optional docs via `--with`, `skills/project-scaffold`.
 - Step 2 (bootstrap, done on this branch): `cut-project.sh --generic --grid` lays down the grid-coupled `_common` files (copied by name, `_common` unchanged); `skills/project-bootstrap` asks one question batch, fills the markers without inventing facts, optionally deploys agents and hooks. Wired by the next `bash scripts/wire.sh`.
-- Step 3 (retrofit): migrate old projects onto the scaffold without losing detail.
+- Step 3 (retrofit, done on this branch): `project-factory/scripts/retrofit.py` (survey, blocks, apply, check, keep, finalize) moves an existing doc's blocks verbatim into the standard docs and proves coverage; `skills/project-retrofit` has the model decide the mapping. Wired by the next `bash scripts/wire.sh`.
 
 ### Deferred (no issue yet)
 
