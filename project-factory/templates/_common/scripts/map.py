@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""map.py - generate MAP.md, the one session-start map of a grid project.
+"""map.py - generate MAP.md, the one session-start map of a project.
 
 Usage:
     map.py [--check] [--include-untracked] [--root DIR]
@@ -9,26 +9,27 @@ Usage:
 Exit codes: 0 ok / current, 1 stale or missing or a knowledge lint finding (--check only),
 2 error (bad argument, unreadable input, over the token budget).
 
---check also lints signals/ and knowledge/ with scripts/knowledge.py (change
-`epistemic-enforcement`, spec `map-lint`); it is skipped with one notice line when
-knowledge.py or both directories are absent.
+--check also lints the project's optional claim files with the knowledge helper that sits
+next to this script; it is skipped with one notice line when the helper or those files
+are absent.
 
-Design rules (change `charter-files`, spec `repo-map`):
+Design rules:
   * Python 3 standard library only, valid on 3.8.
   * Output is a pure function of the files under the root: UTF-8, "\\n" newlines,
     code-point sorting, no timestamps, no locale dependence. So it is the same on every
     machine. The one VCS call is `ls-files` (see tracked_paths): inside a repo the
-    Files and Skills rows list tracked files only, so a local untracked file (say
-    .grid/project.yaml) cannot make the map machine-specific or the gate fail.
-    Outside a repo, or with --include-untracked (cut-project.sh, whose seeded files are
+    Files and Skills rows list tracked files only, so a local untracked file
+    cannot make the map machine-specific or the gate fail.
+    Outside a repo, or with --include-untracked (a seeding script, whose files are
     not committed yet), the filesystem decides.
-  * MAP.md holds NO volatile data (no stage counts, no pending-signal counts). Those
-    come from `status`, which is never checked, so signal and sweep commits cannot
-    make the map stale. Only canon (a human PR) can.
-  * One script serves the-grid and every project: a section whose source directory is
-    absent is omitted (feature detection). The copy under
-    project-factory/templates/_common/scripts/map.py must stay byte-identical.
+  * MAP.md holds NO volatile data (no stage counts, no pending counts). Those
+    come from `status`, which is never checked, so routine commits cannot
+    make the map stale.
+  * One script serves every project: a section or row whose source file or directory is
+    absent is omitted entirely (feature detection), so a map never mentions what the
+    project does not have.
 """
+# Seeded copies of this file must stay byte-identical to it: edit this one, then copy it over.
 import difflib
 import importlib
 import os
@@ -323,34 +324,38 @@ def generate(root, tracked=None):
                 "Entries below canon are not listed here (token cap). "
                 "Counts: `python3 scripts/map.py status`."]
 
-    out += ["", "## Topology", ""]
+    # Topology, Epistemology and their subsections render only when the thing they describe
+    # exists in the root, so a bare project's map says nothing about absent files.
     deleg = []
     for proj in sorted(configs):
         for role in sorted(configs[proj]):
             if configs[proj][role]:
                 deleg.append("- %s -> %s" % (role, ", ".join(sorted(configs[proj][role]))))
-    if deleg:
-        out += ["### Delegation", ""] + sorted(deleg) + [""]
-    out += ["### Signals", "",
-            "- Filing: any agent or human writes one file to `signals/` (see `signals/README.md`).",
-            "- Sweep: %s" % ("`gh-triage knowledge sweep`" if has_sweep(root) else "none configured")]
+    has_signals = os.path.isdir(os.path.join(root, "signals"))
+    if deleg or has_signals:
+        out += ["", "## Topology", ""]
+        if deleg:
+            out += ["### Delegation", ""] + sorted(deleg) + [""]
+        if has_signals:
+            out += ["### Signals", "",
+                    "- Filing: any agent or human writes one file to `signals/` (see `signals/README.md`).",
+                    "- Sweep: %s" % ("`gh-triage knowledge sweep`" if has_sweep(root) else "none configured")]
 
-    out += ["", "## Epistemology", ""]
-    if os.path.isdir(os.path.join(root, "knowledge")):
+    has_knowledge = os.path.isdir(os.path.join(root, "knowledge"))
+    if has_knowledge:
         lines, total = canon_lines(root)
-        out += ["### Canon", ""]
+        out += ["", "## Epistemology", "", "### Canon", ""]
         if lines:
             out += lines
             if total > CANON_MAX:
                 out.append("+%d more: knowledge/canon/" % (total - CANON_MAX))
         else:
             out.append("No canon entries yet.")
-        out.append("")
-    out += ["### Memory", "",
-            "- **Always in context:** the learnings summary in CLAUDE.md, up to 6 instincts at "
-            "session start when `learning: on`, and the canon lines above.",
-            "- **On demand only:** `LEARNINGS.md` and `knowledge/` below canon. Read before "
-            "relying on them; never present unread material as known."]
+        out += ["", "### Memory", "",
+                "- **Always in context:** the learnings summary in CLAUDE.md, up to 6 instincts at "
+                "session start when `learning: on`, and the canon lines above.",
+                "- **On demand only:** `LEARNINGS.md` and `knowledge/` below canon. Read before "
+                "relying on them; never present unread material as known."]
 
     text = "\n".join(out) + "\n"
     n_lines = text.count("\n")

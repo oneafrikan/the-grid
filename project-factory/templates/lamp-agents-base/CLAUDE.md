@@ -48,7 +48,7 @@ composer validate && php -l $(git diff --name-only -- '*.php') && vendor/bin/php
 
 ## Other context files
 
-- `CONTEXT.md` — domain glossary and architecture decisions.
+- `CONTEXT.md` — cold-start summary: current state, next priority, binding decisions (the decision record is `DECISIONS.md` where it exists).
 - `LEARNINGS.md` — gotchas mined from this project's own history.
 - `handoffs/` — read the most recent dated file here before starting work in a
   new session; write one before ending a session that isn't finished.

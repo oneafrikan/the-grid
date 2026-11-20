@@ -17,7 +17,7 @@ Library repos are part of the-grid as an index/hub — browse here or search via
 - **handoff** — Compact the current conversation into a handoff document for another agent to pick up.
 - **mine-learnings** — Mine project history (commits, docs, logs) for durable learnings and write them to LEARNINGS.md and CLAUDE.md, idempotently.
 - **openspec-help** — Quick-reference card for OpenSpec in the-grid (the 12 wired skills, spec format, CLI).
-- **project-scaffold** — Lay down a standard set of empty project docs (CLAUDE, PURPOSE, RULES, GUARDRAILS, CONVENTIONS, DECISIONS, DOCS, MAP) in a folder.
+- **project-scaffold** — Lay down a standard set of empty project docs (CLAUDE, PURPOSE, RULES, GUARDRAILS, CONVENTIONS, DECISIONS, DOCS, CHANGELOG, MAP).
 - **rubber-duck** — Structured rubber duck debugging that guides the user to explain their problem until the solution is obvious.
 - **setup-repo-skills** — Sets up an `## Agent skills` block in AGENTS.md/CLAUDE.md and `docs/agents/` so the engineering skills know this repo's issue tracker (GitHub or local markdown), triage label vocabulary, and domain d…
 - **skill-scout** — Scout public agent-skill directories (ranked by installs) and propose new skills for the-grid, deduped against what is wired.

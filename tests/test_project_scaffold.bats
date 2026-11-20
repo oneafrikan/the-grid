@@ -139,3 +139,36 @@ files_in() { (cd "$1" && find . -name .git -prune -o -type f -print | sed 's|^\.
   head -5 "$f" | grep -q '^description: '
   [ "$(wc -c < "$f" | tr -d ' ')" -lt 4000 ]
 }
+
+# The generic map must say nothing about files or folders the project does not have.
+@test "the generated MAP.md of a bare generic cut has none of the grid vocabulary and no absent-file sections" {
+  bash "$CUT" --generic "$P" >/dev/null
+  run grep -niE '(^|[^[:alnum:]_-])grid([^[:alnum:]_-]|$)|the-grid|agent-factory|signals/|knowledge/|openspec|wire\.sh|learning: on' "$P/MAP.md"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  ! grep -qE '^## (Topology|Epistemology)|^### (Signals|Memory|Canon|Roles|Skills|Knowledge)' "$P/MAP.md" || false
+}
+
+@test "the copied scripts/map.py docstring carries none of the grid vocabulary" {
+  bash "$CUT" --generic "$P" >/dev/null
+  doc=$(python3 -c 'import ast,sys; print(ast.get_docstring(ast.parse(open(sys.argv[1]).read())))' "$P/scripts/map.py")
+  [ -n "$doc" ]
+  run grep -niE '(^|[^[:alnum:]_-])grid([^[:alnum:]_-]|$)|the-grid|agent-factory|signals/|knowledge/|openspec|wire\.sh|learning: on' <<< "$doc"
+  echo "$output"
+  [ "$status" -eq 1 ]
+}
+
+@test "adding signals/ makes the Signals section appear in the regenerated map" {
+  bash "$CUT" --generic "$P" >/dev/null
+  ! grep -q '^### Signals' "$P/MAP.md" || false
+  mkdir "$P/signals"
+  (cd "$P" && python3 scripts/map.py)
+  grep -q '^### Signals' "$P/MAP.md"
+}
+
+@test "a stack-template cut still gets the Signals, Canon and Memory sections" {
+  bash "$CUT" python-agents-base "$P" >/dev/null
+  grep -q '^### Signals' "$P/MAP.md"
+  grep -q '^### Canon' "$P/MAP.md"
+  grep -q '^### Memory' "$P/MAP.md"
+}

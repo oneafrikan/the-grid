@@ -109,6 +109,6 @@ documentation nobody trusts and nothing verifies.
 ## Scope
 
 This convention covers *what gets built and why*. It does not replace
-`CONTEXT.md` (domain glossary, architecture decisions) or `LEARNINGS.md`
+`CONTEXT.md` (cold-start summary: current state, next priority, binding decisions) or `LEARNINGS.md`
 (gotchas found along the way). Specs say what the system must do; those two say
 what you need to know to work on it.
