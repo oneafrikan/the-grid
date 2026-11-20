@@ -954,3 +954,103 @@ PY
   [[ "$output" == *"use a relative path from the repo root"* ]] || false
   [[ "$output" != *"outside a valid"* ]] || false
 }
+
+# ---- the other CommonMark raw HTML kinds (<? ?>, <!LETTER >, <![CDATA[ ]]>), run-end refusal, BOM ----
+
+@test "check: text hidden in a <? ?>, <!DOCTYPE/<!ELEMENT >, or <![CDATA[ ]]> block does not count" {
+  # each row: opener, closer
+  for pair in '<?php|?>' '<![CDATA[|]]>' '<!DOCTYPE html|>' '<!ELEMENT x|>' '  <?xml|?>'; do
+    open="${pair%|*}"; close="${pair##*|}"
+    mini '# T\n\nNever delete prod.\n'
+    printf '# D\n\n%s\n\nNever delete prod.\n\n%s\n' "$open" "$close" > "$R/D.md"
+    run rf check "$T/plan.txt" --repo "$R"
+    [ "$status" -eq 1 ] || { echo "$open: status $status"; false; }
+    # closed on its own line, the text after it counts again
+    printf '# D\n\n%s\nx\n%s\n\nNever delete prod.\n' "$open" "$close" > "$R/D.md"
+    run rf check "$T/plan.txt" --repo "$R"
+    [ "$status" -eq 0 ] || { echo "$open closed: status $status"; false; }
+  done
+  # one-line forms close themselves; <! without a letter (<!-- is a comment, <![x]) is not this kind
+  mini '# T\n\nNever delete prod.\n'
+  for one in '<?php echo 1; ?>' '<!DOCTYPE html>' '<![CDATA[x]]>'; do
+    printf '# D\n\n%s\n\nNever delete prod.\n' "$one" > "$R/D.md"
+    run rf check "$T/plan.txt" --repo "$R"
+    [ "$status" -eq 0 ] || { echo "$one: status $status"; false; }
+  done
+}
+
+@test "apply refuses a destination that ends inside an unclosed <?, <!DOCTYPE or <![CDATA[ block" {
+  plain_plan
+  for open in '<?php' '<!DOCTYPE html' '<!ELEMENT x' '<![CDATA['; do
+    printf '# Design\n\n%s\nbody\n' "$open" > "$R/DESIGN.md"
+    before=$(tree_sum "$R")
+    run rf apply "$T/plan.txt" --repo "$R" --yes
+    [ "$status" -eq 2 ] || { echo "$open: status $status"; false; }
+    [[ "$output" == *"unclosed"* ]] || false
+    [ "$before" = "$(tree_sum "$R")" ]
+  done
+}
+
+@test "blocks --rebuild is byte-identical for the <?, <!LETTER and <![CDATA[ kinds" {
+  printf 'a\n<?php\n\nx\n\n?>\nb\n\n<!DOCTYPE html>\n\n<![CDATA[\ny\n]]>\nz\n\n  <!ELEMENT q\n\n>\n- i\n  <?pi\n\n  ?>\n\n<?never closed\n\ntail' > "$T/raw3.md"
+  printf '<?>\n\n<!>\n\n<!-x\n\n<![CDATA\n\n<!--\nc\n-->\n' > "$T/raw4.md"
+  for f in raw3 raw4; do
+    blk "$T/$f.md" --rebuild > "$T/$f.out"
+    cmp "$T/$f.md" "$T/$f.out"
+  done
+  run blk "$T/raw3.md"
+  [[ "$output" == *"html"* ]] || false
+}
+
+@test "finalize: a keep block hidden inside a raw HTML block of the replacement is refused" {
+  plain_plan
+  rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
+  git_repo
+  rf keep "$T/plan.txt" --repo "$R" > "$T/keep.md"
+  for open in '<?php|?>' '<![CDATA[|]]>' '<!DOCTYPE x|>' '<pre>|</pre>'; do
+    { echo "# Slim"; echo; echo "${open%|*}"; echo; cat "$T/keep.md"; echo "${open##*|}"; } > "$T/slim.md"
+    before=$(tree_sum "$R")
+    run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --yes
+    [ "$status" -eq 1 ] || { echo "$open: status $status"; false; }
+    [[ "$output" == *"KEEP BLOCK NOT IN REPLACEMENT"* ]] || false
+    [ "$before" = "$(tree_sum "$R")" ]
+  done
+}
+
+@test "apply refuses a run whose last block is unclosed (fence, comment, raw HTML), in a dry run too" {
+  for tail in '```\ncode never closed' '<!-- never closed' '<style>\nbody{}' '<?php\nx'; do
+    printf '# S\n\nIntro.\n\n%b\n' "$tail" > "$R/CLAUDE.md"
+    printf '# D\n\n## A\n\nx\n' > "$R/D.md"
+    { hdr CLAUDE.md; echo "$(bid "$R/CLAUDE.md" 1) -> keep"; blk "$R/CLAUDE.md" | awk '/^B[0-9]/ { c++; if (c > 1) print $1 " -> D.md#A" }'; } > "$T/plan.txt"
+    before=$(tree_sum "$R")
+    run rf apply "$T/plan.txt" --repo "$R"
+    [ "$status" -eq 2 ] || { echo "$tail: dry status $status"; false; }
+    [[ "$output" == *"unclosed"* ]] || false
+    [[ "$output" == *"route it keep"* ]] || false
+    run rf apply "$T/plan.txt" --repo "$R" --yes
+    [ "$status" -eq 2 ]
+    [ "$before" = "$(tree_sum "$R")" ]
+    # routing the unclosed block keep is accepted
+    { hdr CLAUDE.md; echo "$(bid "$R/CLAUDE.md" 1)..$(bid "$R/CLAUDE.md" 2) -> D.md#A"; echo "$(bid "$R/CLAUDE.md" 3) -> keep"; } > "$T/plan.txt"
+    run rf apply "$T/plan.txt" --repo "$R" --yes
+    [ "$status" -eq 0 ] || { echo "$tail: keep status $status"; false; }
+  done
+}
+
+@test "plan: a leading BOM is ignored" {
+  plain_plan
+  { printf '\xef\xbb\xbf'; cat "$T/plan.txt"; } > "$T/bom.txt"
+  run rf check "$T/bom.txt" --repo "$R"
+  [ "$status" -eq 1 ]        # nothing applied yet: coverage failure, not "cannot parse line"
+  [[ "$output" != *"cannot parse"* ]] || false
+  run rf apply "$T/bom.txt" --repo "$R"
+  [ "$status" -eq 0 ]
+}
+
+@test "finalize: a negative --max-lines is bad input (exit 2)" {
+  plain_plan
+  printf '# Slim\n' > "$T/slim.md"
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --max-lines -3
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"must be >= 0"* ]] || false
+}

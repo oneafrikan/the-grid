@@ -28,9 +28,10 @@ stale. After `finalize` the same plan still works: the source text is then read 
 archive whose sha256 matches.
 
 Matching is block level: a moved block counts as present only when the destination, parsed
-into blocks, holds an equal block (text inside a fence, a comment or a raw HTML <script>,
-<style>, <pre> or <textarea> block never counts), and one destination block satisfies at most
-one source block.
+into blocks, holds an equal block (text inside a fence, a comment or a raw HTML block never
+counts), and one destination block satisfies at most one source block. Raw HTML blocks are the
+CommonMark kinds whose end can lie past blank lines: <script>/<style>/<pre>/<textarea>, <? ... ?>,
+<!LETTER ... > (doctype, declarations) and <![CDATA[ ... ]]>; comments are their own kind.
 
 Exit codes: 0 ok; 1 check/coverage failure (check, or finalize that would lose text);
 2 usage error, plan error, or a refusal (nothing was written).
@@ -146,11 +147,23 @@ RE_ITEM = re.compile(r"^[ \t]*(?:[-*+]|(\d{1,9})[.)])(?:[ \t]|$)")
 RE_SETEXT = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
 RE_TABLE_DELIM = re.compile(r"^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$")
 RE_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
-# CommonMark HTML block type 1: <script>, <style>, <pre>, <textarea> (any case, with attributes)
-# runs until a line holding any of the matching end tags, blank lines included. What sits inside
-# it renders as raw HTML or code, so it must never count as a match.
-RE_RAW_OPEN = re.compile(r"^[ \t]*<(?:script|style|pre|textarea)(?=[ \t>]|$)", re.I)
-RE_RAW_CLOSE = re.compile(r"</(?:script|style|pre|textarea)>", re.I)
+# CommonMark HTML block types 1, 3, 4 and 5 (type 2, the comment, has its own kind above): they end
+# at an end condition that may sit many blank lines later, so what is inside renders as raw HTML,
+# code or nothing and must never count as a match. Table: (start of the first line, end condition).
+#   1  <script> <style> <pre> <textarea>, any case, with attributes   ->  </script> </style> </pre> </textarea>
+#   3  <?  (processing instruction)                                    ->  ?>
+#   4  <! + an ASCII letter  (<!DOCTYPE, <!ELEMENT, ...)              ->  >
+#   5  <![CDATA[                                                       ->  ]]>
+# The end condition is looked for after the start token (a stricter reading than CommonMark's, which
+# also accepts a closer inside it: `<?>` stays open here), and an unclosed block runs to the end of
+# the file. Only the start line's indent (up to 3 spaces) is limited.
+RAW_KINDS = [
+    (re.compile(r"^[ \t]*<(?:script|style|pre|textarea)(?=[ \t>]|$)", re.I),
+     re.compile(r"</(?:script|style|pre|textarea)>", re.I)),
+    (re.compile(r"^[ \t]*<\?"), re.compile(r"\?>")),
+    (re.compile(r"^[ \t]*<!\[CDATA\["), re.compile(r"\]\]>")),
+    (re.compile(r"^[ \t]*<![A-Za-z]"), re.compile(r">")),
+]
 
 
 def fence_open(line, max_indent):
@@ -175,16 +188,24 @@ def fence_end(lines, i, ch, ln):
 
 
 def raw_open(line, max_indent):
-    """True when `line` opens a raw HTML block (see RE_RAW_OPEN) indented <= max_indent."""
+    """(end regex, offset just after the start token) when `line` opens a raw HTML block (see
+    RAW_KINDS) indented <= max_indent, else None."""
     b = body(line)
-    return RE_RAW_OPEN.match(b) is not None and indent_of(b) <= max_indent
+    if indent_of(b) > max_indent:
+        return None
+    for start, end in RAW_KINDS:
+        m = start.match(b)
+        if m:
+            return end, m.end()
+    return None
 
 
-def raw_end(lines, i):
-    """(index of the line holding the end tag, True); when never closed the last line and False
-    (the block then runs to the end of the file, as CommonMark does)."""
+def raw_end(lines, i, op):
+    """(index of the line holding the end condition, True); when never closed the last line and
+    False (the block then runs to the end of the file, as CommonMark does). `op` is raw_open's result."""
+    end, skip = op
     for j in range(i, len(lines)):
-        if RE_RAW_CLOSE.search(body(lines[j])):
+        if end.search(body(lines[j]), skip if j == i else 0):
             return j, True
     return len(lines) - 1, False
 
@@ -242,10 +263,11 @@ def scan_item(lines, i):
             break
         if indent_of(lines[j]) > base:
             fo = fence_open(lines[j], 10 ** 6)
+            ro = raw_open(lines[j], 10 ** 6)
             if fo:
                 j, _ = fence_end(lines, j, fo[0], fo[1])
-            elif raw_open(lines[j], 10 ** 6):
-                j, _ = raw_end(lines, j)
+            elif ro:
+                j, _ = raw_end(lines, j, ro)
             last = j
             j += 1
             continue
@@ -275,8 +297,9 @@ def scan_block(lines, i, allow_frontmatter):
         j = comment_end(lines, i)
         after_open = "".join(lines[i:j + 1]).split("<!--", 1)[1]
         return "comment", j, "-->" in after_open
-    if raw_open(lines[i], 3):
-        j, closed = raw_end(lines, i)
+    op = raw_open(lines[i], 3)
+    if op:
+        j, closed = raw_end(lines, i, op)
         return "html", j, closed
     if RE_HR.match(b):
         return "hr", i, True
@@ -505,7 +528,10 @@ def parse_plan(root, plan_path, strict_dest=False):
     plan = Plan(root, plan_path)
     cur = None
     bad_src = False      # the last '## source:' header was rejected: its mapping lines get no second error
-    for no, raw in enumerate(read_text(plan_path).split("\n"), 1):
+    plan_text = read_text(plan_path)
+    if plan_text.startswith("\ufeff"):      # a BOM from an editor would break the first header line
+        plan_text = plan_text[1:]
+    for no, raw in enumerate(plan_text.split("\n"), 1):
         line = raw.rstrip("\r").strip()
         if not line:
             continue
@@ -844,8 +870,14 @@ def simulate(plan):
             items = groups.setdefault(real, [])
             if blocks and not blocks[-1].closed:
                 raise Fatal("%s ends inside an unclosed code fence, comment or raw HTML block "
-                            "(<script>, <style>, <pre>, <textarea>); close it first "
+                            "(<script>, <style>, <pre>, <textarea>, <?, <!DOCTYPE, <![CDATA[); close it first "
                             "(a run would be appended inside it)" % e.dest)
+            if not src.blocks[e.last - 1].closed:
+                # Such a block runs to the end of its source; appended to a destination it would hide
+                # everything added after it (or leave the destination unusable for the next apply).
+                raise Fatal("%s ends inside an unclosed code fence, comment or raw HTML block in %s; "
+                            "close it in the source and re-run blocks, or route it keep"
+                            % (src.ids(e), src.rel))
             if e.anchor:
                 hb = resolve_anchor(blocks, e.anchor, e.line)
                 pos = section_end(text, hb, blocks)
@@ -1041,6 +1073,8 @@ def shquote(s):
 
 
 def cmd_finalize(args):
+    if args.max_lines < 0:
+        raise Fatal("--max-lines must be >= 0 (0 = no limit)")
     root = repo_root(args.repo)
     plan = parse_plan(root, args.plan)
     src = pick_source(plan, args.source)

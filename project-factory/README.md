@@ -125,12 +125,13 @@ verbatim.** Nobody retypes source text, so nothing can be reworded or dropped on
 4. `apply <plan>` is a dry run; `--yes` appends the blocks verbatim after a blank line and a `<!-- moved from ... -->`
    comment, never touches the source, and a second run adds nothing. Anchors are resolved against the destination as it
    was before the run, and runs into one heading land in plan order. Before writing anything it checks that every
-   destination is writable and ends outside an unclosed fence, comment or raw HTML block (`<script>`, `<style>`, `<pre>`,
-   `<textarea>`), and that every block would read back as itself.
+   destination is writable and ends outside an unclosed fence, comment or raw HTML block, that no moved run itself ends in one (route such a
+   block `keep`), and that every block would read back as itself.
    It has no revert command: commit or stash first and undo with git.
 5. `check <plan> [--report]` is the no-judgement proof, **block by block**: the destination is parsed into blocks and each
    moved block must equal one of them (only CRLF and trailing blanks are ignored; text inside a fence, comment or raw HTML block never
-   counts; one destination block satisfies one source block). Every `keep` block must still be in the live source, every
+   counts, and all five CommonMark raw kinds are treated as non-matching: `<script>`/`<style>`/`<pre>`/`<textarea>`, `<!-- -->`,
+   `<? ?>`, `<!DOCTYPE ... >` and `<![CDATA[ ]]>`; one destination block satisfies one source block). Every `keep` block must still be in the live source, every
    `unsorted` block in `UNSORTED.md`. Exit 1 on any missing or altered block, a missing destination file included;
    `--report` writes `docs/archive/retrofit-<source>-<date>-coverage.md`.
 6. `finalize <plan> --replace-with <slim.md>` runs only if `check` passes, the slim doc is at most `--max-lines N` lines

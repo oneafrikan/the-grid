@@ -31,7 +31,8 @@ changed since `blocks` (any edit, even in the middle of a range), unknown id,
 stale hash, a block not mentioned or mentioned twice, a bad destination, a path
 that leaves the repo (also through a symlink; `blocks` wants a repo-relative path,
 so an absolute one is refused), a destination ending inside an unclosed fence,
-comment or raw HTML block (`<script>`, `<style>`, `<pre>`, `<textarea>`), an
+comment or raw HTML block (`<script>`/`<style>`/`<pre>`/`<textarea>`, `<?`, `<!DOCTYPE`,
+`<![CDATA[`), a moved run whose last block is itself unclosed (route it `keep`), an
 unwritable destination (checked before any write).
 
 ## What it guarantees
