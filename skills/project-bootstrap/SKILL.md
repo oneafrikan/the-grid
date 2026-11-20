@@ -35,7 +35,8 @@ operator about the project and writes real content into them. The grid layer
    command (deploy.py, deploy_hooks.py, anything writing `.claude/`) first and run it
    only after an explicit yes; an unanswered question never runs them. Run nothing
    that sends data off the machine.
-5. Regenerate the map and verify, from the target directory:
+5. `git add` the new docs first (map.py lists tracked files only, so an untracked
+   tree gives a false pass), then regenerate the map and verify, from the target directory:
 
    ```bash
    python3 scripts/map.py

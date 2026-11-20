@@ -43,7 +43,8 @@ failure, 2 plan error or refusal (nothing written).
    pass `--allow-dirty` without the operator's explicit yes; ask them to commit
    the source instead. It archives the original to `docs/archive/` and prints
    the undo (`mv`).
-7. `python3 scripts/map.py` then `python3 scripts/map.py --check`. Report: coverage
+7. `git add` the new docs first (map.py lists tracked files only, so an untracked
+   tree gives a false pass), then `python3 scripts/map.py` and `python3 scripts/map.py --check`. Report: coverage
    numbers, UNSORTED.md block count, `<fill:` markers left, files changed. Commit
    only if the operator asks.
 
