@@ -86,7 +86,7 @@ full-roster port) and chunked into single-session specialist work:
 ### Project scaffold (3 steps, no issue yet)
 
 - Step 1 (done on this branch): generic core docs via `cut-project.sh --generic`, optional docs via `--with`, `skills/project-scaffold`.
-- Step 2 (bootstrap, done on this branch): `cut-project.sh --generic --grid` lays down the grid-coupled `_common` files (copied by name, `_common` unchanged); `skills/project-bootstrap` asks one question batch, fills the markers without inventing facts, optionally deploys agents and hooks. Not wired yet: the operator adds it to the baseline.
+- Step 2 (bootstrap, done on this branch): `cut-project.sh --generic --grid` lays down the grid-coupled `_common` files (copied by name, `_common` unchanged); `skills/project-bootstrap` asks one question batch, fills the markers without inventing facts, optionally deploys agents and hooks. Wired by the next `bash scripts/wire.sh`.
 - Step 3 (retrofit): migrate old projects onto the scaffold without losing detail.
 
 ### Deferred (no issue yet)

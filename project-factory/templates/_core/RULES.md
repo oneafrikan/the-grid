@@ -12,17 +12,17 @@ What goes here: instructions an agent must follow, with the incident behind them
 ### [<fill: YYYY-MM-DD>] Answer questions as questions
 **Agents:** All
 **Rule:** If the message is a question, answer it. Read-only exploration is fine. Do not create or change anything outside local working files until you have said exactly what you propose and the operator has confirmed that specific change.
-**Why:** A question ("can we do X?") was answered by silently building X.
+**Why:** Prevents a question ("can we do X?") from being answered by silently building X.
 
 ### [<fill: YYYY-MM-DD>] Check you are looking at current files
 **Agents:** All
 **Rule:** At session start run `git fetch` and `git status -sb`. Say so if the checkout is behind its upstream. Never conclude a file does not exist until the upstream branch has been checked.
-**Why:** A stale checkout hid work that was already merged.
+**Why:** Prevents a stale checkout from hiding work that is already merged.
 
 ### [<fill: YYYY-MM-DD>] Never kill processes by pattern
 **Agents:** All
 **Rule:** Stop a process by the exact PID you recorded when you started it. Never use `pkill`, `killall` or `kill $(pgrep ...)`.
-**Why:** A pattern kill with a short word terminated unrelated applications.
+**Why:** Prevents a pattern kill with a short word from terminating unrelated applications.
 
 <!-- Example, remove the comment markers and fill in to enable:
 ### [YYYY-MM-DD] Git actions

@@ -100,7 +100,7 @@ Two layers, one script:
   Without `--grid` nothing changes. With a stack template `--grid` is a no-op (it prints a note): `_common` is already laid down.
 - **Bootstrap** is the `project-bootstrap` skill: it asks the operator one batch of questions, runs the cut, fills the markers
   from the answers (never inventing a fact: anything not given stays `<fill: ...>` or `<unknown: ask the operator>`),
-  optionally deploys a lean set of agents and hooks, then regenerates and checks the map. Not wired by default; add it to the baseline to use it.
+  optionally deploys a lean set of agents and hooks, then regenerates and checks the map. Wired by the next `bash scripts/wire.sh`.
   It wraps `cut-project.sh --generic [--with a,b] [--grid] <target-dir>`; `tests/test_project_bootstrap.bats` checks the flags it cites exist.
 
 ### `SPECS.md` — spec-driven development, on by default

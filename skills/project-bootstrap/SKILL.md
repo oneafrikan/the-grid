@@ -7,15 +7,18 @@ description: Scaffold a project and fill its docs from the operator's answers, t
 
 Scaffold, then fill. `project-scaffold` lays down empty docs; this skill asks the
 operator about the project and writes real content into them. The grid layer
-(`--grid`) is opt-in and defaults to yes inside the grid.
+(`--grid`) is opt-in; "default yes inside the grid" only means you offer it.
 
 **Hard rule: never invent a fact.** Anything the operator did not give stays a
 `<fill: ...>` marker or becomes `<unknown: ask the operator>`. Quote their words.
 
 ## Steps
 
-1. Ask ONE numbered batch of questions, answerable in one reply. Offer to read an
-   existing README or notes instead. Wording: sections/questions.md.
+1. Ask ONE numbered batch of questions, answerable in one reply (wording:
+   sections/questions.md). If there is a README, notes or a partly answered brief,
+   read it first, drop what it already answers and ask only the gaps, still as one
+   batch. Never answer a question from your own guess.
+   Stop. Do not run the scaffold until the operator replies.
 2. Find `project-factory/scripts/cut-project.sh` (beside `skills/`; resolve symlinks
    with `cd -P`). Run it, then report `wrote:` / `SKIPPED` / `unchanged:` and any
    `warning:` or `note:` line verbatim:
@@ -28,8 +31,10 @@ operator about the project and writes real content into them. The grid layer
    Pick them from the answers (formulas or numbers: calculations, assumptions).
 3. Fill every scaffolded file from the answers. Per-file rules: sections/fill-rules.md.
    Never touch a `SKIPPED` file; list it for the operator.
-4. Grid extras, only if chosen: sections/grid-extras.md. State each command before
-   running it. Run nothing that sends data off the machine.
+4. Grid extras, only if chosen: sections/grid-extras.md. State every state-changing
+   command (deploy.py, deploy_hooks.py, anything writing `.claude/`) first and run it
+   only after an explicit yes; an unanswered question never runs them. Run nothing
+   that sends data off the machine.
 5. Regenerate the map and verify, from the target directory:
 
    ```bash

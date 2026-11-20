@@ -12,8 +12,11 @@ target directory already holds a README, offer to read it first and ask only the
 6. Where existing docs or material live (paths or URLs).
 7. Does the project have formulas or numbers that must stay consistent? (If yes,
    scaffold CALCULATIONS and ASSUMPTIONS.)
-8. Use the grid extras? Default yes inside the grid. They add signals, knowledge,
-   specs, hooks and deployable agent roles; none is needed for the docs to work.
+8. Use the grid extras? Default yes inside the grid, meaning only that you offer them.
+   They add signals, knowledge, specs, hooks and deployable agent roles; none is
+   needed for the docs to work. Each state-changing step still waits for its own yes.
+9. Adopt the 3 baseline rules in RULES.md (answer questions as questions; check you
+   are on current files; never kill processes by pattern)?
 
 Record each answer verbatim in your notes before filling anything. An unanswered
 item is `<unknown: ask the operator>` in the file, not a guess.
