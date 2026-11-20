@@ -3,6 +3,8 @@
 
 load helpers/setup
 
+bats_require_minimum_version 1.5.0   # `run --separate-stderr` in the baseline-default tests
+
 setup() {
   common_setup
   make_skill "$MOCK_GRID/skills/skill-alpha" "skill-alpha"
@@ -103,8 +105,8 @@ lacks() {
 
 # --- WP-046: SKILLS.md is rendered from a PINNED baseline -----------------------------------
 # The committed SKILLS.md must be a function of tracked inputs only, so CI and every machine
-# agree. catalog.sh therefore reads ${GRID_BASELINE:-<personal baseline>}; the gate and wire.sh
-# pin it to the tracked example baseline.
+# agree. catalog.sh therefore reads ${GRID_BASELINE:-<tracked example baseline>}; the gate and
+# wire.sh also pass the example explicitly.
 
 # two_baselines — repos pers-repo and ex-repo; the personal file wires one, the example the other
 two_baselines() {
@@ -119,9 +121,30 @@ two_baselines() {
   GRID_DIR="$MOCK_GRID" GRID_BASELINE="$MOCK_GRID/baseline-submodules.example.txt" bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
   grep -q '^## repos/ex-repo (wired)' "$OUT"
   grep -q -- '- \*\*repos/pers-repo\*\* — 1 skills' "$OUT"
-  # without the pin the personal baseline still wins (a developer's own run is unchanged)
-  GRID_DIR="$MOCK_GRID" bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
+  # pointing it at the personal file is honoured exactly (a developer measuring their own set)
+  GRID_DIR="$MOCK_GRID" GRID_BASELINE="$MOCK_GRID/baseline-submodules.txt" bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
   grep -q '^## repos/pers-repo (wired)' "$OUT"
+}
+
+@test "GRID_BASELINE unset: catalog.sh renders the tracked example, ignores the personal baseline, says so once on stderr" {
+  two_baselines
+  GRID_DIR="$MOCK_GRID" run --separate-stderr bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
+  [ "$status" -eq 0 ]
+  grep -q '^## repos/ex-repo (wired)' "$OUT"
+  grep -q -- '- \*\*repos/pers-repo\*\* — 1 skills' "$OUT"
+  [ "$stderr" = "catalog: using tracked baseline-submodules.example.txt (set GRID_BASELINE to override)" ]
+  # an empty GRID_BASELINE (what wire.sh passes a mock grid) counts as unset
+  GRID_DIR="$MOCK_GRID" GRID_BASELINE="" bash "$REPO_ROOT/scripts/catalog.sh" "$MOCK_SKILLS/empty.md" 2>/dev/null
+  diff -q "$OUT" "$MOCK_SKILLS/empty.md"
+}
+
+@test "GRID_BASELINE unset and no example file: catalog.sh falls back to the personal baseline, silently" {
+  two_baselines
+  rm "$MOCK_GRID/baseline-submodules.example.txt"
+  GRID_DIR="$MOCK_GRID" run --separate-stderr bash "$REPO_ROOT/scripts/catalog.sh" "$OUT"
+  [ "$status" -eq 0 ]
+  grep -q '^## repos/pers-repo (wired)' "$OUT"
+  [ -z "$stderr" ]
 }
 
 @test "GRID_BASELINE naming a missing file exits 2 and writes nothing" {
@@ -137,9 +160,12 @@ two_baselines() {
   GRID_DIR="$MOCK_GRID" GRID_BASELINE="$MOCK_GRID/baseline-submodules.example.txt" bash "$REPO_ROOT/scripts/catalog.sh"
   GRID_DIR="$MOCK_GRID" GRID_BASELINE="$MOCK_GRID/baseline-submodules.example.txt" run bash "$REPO_ROOT/scripts/catalog.sh" --check
   [ "$status" -eq 0 ]
-  # the same file is stale against the personal baseline: the pin is what makes the check portable
-  GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/catalog.sh" --check
+  # the same file is stale against the personal baseline when that is requested explicitly
+  GRID_DIR="$MOCK_GRID" GRID_BASELINE="$MOCK_GRID/baseline-submodules.txt" run bash "$REPO_ROOT/scripts/catalog.sh" --check
   [ "$status" -eq 1 ]
+  # and current with no pin at all: the example is the default
+  GRID_DIR="$MOCK_GRID" run bash "$REPO_ROOT/scripts/catalog.sh" --check
+  [ "$status" -eq 0 ]
 }
 
 @test "wire.sh with a personal baseline leaves the tracked SKILLS.md equal to the example render" {
@@ -151,6 +177,14 @@ two_baselines() {
   GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" bash "$REPO_ROOT/scripts/wire.sh"
   [ -f "$MOCK_GRID/SKILLS.md" ]
   diff -q "$MOCK_SKILLS/expected.md" "$MOCK_GRID/SKILLS.md"
+}
+
+@test "wire.sh still WIRES from the personal baseline (only the catalogue is pinned to the example)" {
+  two_baselines
+  GRID_DIR="$MOCK_GRID" SKILLS_DIR="$MOCK_SKILLS" run bash "$REPO_ROOT/scripts/wire.sh"
+  [ "$status" -eq 0 ]
+  [ -L "$MOCK_SKILLS/sk-p" ]
+  [ ! -e "$MOCK_SKILLS/sk-e" ]
 }
 
 @test "real repo: the committed SKILLS.md is current against the example baseline" {

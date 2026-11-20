@@ -14,8 +14,9 @@
 #   bash scripts/sources.sh /tmp/x.md    # write somewhere else (tests)
 #   bash scripts/sources.sh --check      # LINT: HEAD every URL, report failures
 #   bash scripts/sources.sh --check-drift  # is docs/SOURCES.md current? offline, read-only;
-#                                        # exit 0 current, 1 stale, 2 error. Defaults to the
-#                                        # tracked example baseline; GRID_BASELINE pins another.
+#                                        # exit 0 current, 1 stale, 2 error.
+#   GRID_BASELINE=<file> bash scripts/sources.sh ...   # every mode defaults to the tracked example
+#                                        # baseline (baseline-submodules.example.txt); this pins another.
 #   bash scripts/sources.sh -h | --help  # this usage; writes nothing
 #
 # A leading dash is always an option: an unknown one is a usage error (exit 2) before any file
@@ -63,13 +64,20 @@ if [ $((CHECK_MODE + DRIFT_MODE)) -gt 1 ] || { [ $((CHECK_MODE + DRIFT_MODE)) -e
 fi
 
 # Baseline: GRID_BASELINE pins it (same override wire.sh, catalog.sh and budget.py take). The
-# committed SOURCES.md is rendered from the TRACKED example baseline, so --check-drift defaults
-# to that file (the only baseline CI has); plain generation keeps defaulting to the personal one.
-# A pin naming a missing file is an error (exit 2), never a silent "everything wired" render.
+# committed SOURCES.md must be machine-independent, so with GRID_BASELINE unset or empty EVERY
+# mode uses the TRACKED example baseline, never the personal gitignored one (set GRID_BASELINE
+# to the personal file to render this machine's own tiers). Only a grid with no example file
+# falls back to the personal baseline. A pin naming a missing file is an error (exit 2), never
+# a silent "everything wired" render.
 if [ -n "${GRID_BASELINE:-}" ]; then
   BASELINE="$GRID_BASELINE"
-elif [ "$DRIFT_MODE" -eq 1 ]; then
+elif [ -f "$GRID_DIR/baseline-submodules.example.txt" ]; then
   BASELINE="$GRID_DIR/baseline-submodules.example.txt"
+  # One stderr line, only when a personal baseline is being ignored (not for the URL lint,
+  # --check, which never reads the baseline).
+  if [ "$CHECK_MODE" -eq 0 ] && [ -f "$GRID_DIR/baseline-submodules.txt" ]; then
+    echo "sources: using tracked baseline-submodules.example.txt (set GRID_BASELINE to override)" >&2
+  fi
 else
   BASELINE="$GRID_DIR/baseline-submodules.txt"
 fi

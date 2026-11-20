@@ -97,7 +97,7 @@ The env vars `wire.sh` reads:
 | `RULES_DIR` | Claude rules directory (default `~/.claude/rules`); only `$RULES_DIR/grid/` is grid-owned |
 | `CLAUDE_CONFIG_DIR` | Claude config dir whose `settings.json` receives the machine-level hook (default `~/.claude`) |
 | `GRID_HOST` | Machine key for the overlay (default `hostname -s`) |
-| `GRID_BASELINE` | Baseline manifest file (default `$GRID_DIR/baseline-submodules.txt`) |
+| `GRID_BASELINE` | Baseline manifest file (default `$GRID_DIR/baseline-submodules.txt` for `wire.sh`; `catalog.sh`, `sources.sh` and `budget.py`, whose output is committed or ratcheted, default to the tracked `baseline-submodules.example.txt`) |
 | `GRID_HARNESS` | Comma list of non-Claude harnesses for this run only; replaces the manifest's `harness:` set |
 | `GRID_HARNESS_HOME` | Base for every non-Claude harness dir (default `$HOME`) |
 | `GRID_DRY_HOME` | Dry-run home: forces every home-derived target under it and writes nothing to the repo |

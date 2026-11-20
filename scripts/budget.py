@@ -32,7 +32,9 @@ Usage (python3 scripts/budget.py ...):
                    and while any owned file cannot be measured faithfully
   --json           machine-readable output, sorted keys
 Environment: GRID_DIR (repo root; default: parent of scripts/), GRID_BASELINE
-(baseline manifest, passed through to wire.sh).
+(baseline manifest, passed through to wire.sh; default: the tracked
+baseline-submodules.example.txt, so the committed ratchet never depends on a personal
+baseline. Set it to baseline-submodules.txt to measure this machine's own set).
 
 Fail closed: a SKILL.md or role.yaml this reader cannot measure faithfully (UTF-8 BOM,
 invalid UTF-8, quoted top-level key, indented `---` in the frontmatter, duplicate key, no
@@ -602,6 +604,25 @@ def print_report(summary, target):
         print(f"  {e['listing_chars']:>5}  {e['path']}")
 
 
+def default_baseline(grid, quiet=False):
+    """Pin GRID_BASELINE to the TRACKED example baseline when the caller set none.
+
+    The ratchet in docs/budget-target.json is committed, so the baseline scope must be measured
+    from a tracked input, not this machine's personal (gitignored) baseline-submodules.txt.
+    A caller who sets GRID_BASELINE (even to the personal file) is honoured exactly. Setting the
+    variable here is what carries the pin through baseline_wired() into wire.sh. A grid with no
+    example file (a mock grid) keeps the old behaviour. `quiet` suppresses the notice (--json)."""
+    if os.environ.get("GRID_BASELINE"):
+        return
+    example = os.path.join(grid, "baseline-submodules.example.txt")
+    if not os.path.isfile(example):
+        return
+    os.environ["GRID_BASELINE"] = example
+    if not quiet and os.path.isfile(os.path.join(grid, "baseline-submodules.txt")):
+        print("budget: using tracked baseline-submodules.example.txt "
+              "(set GRID_BASELINE to override)", file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Measure and gate the skill listing budget.")
     mode = ap.add_mutually_exclusive_group()
@@ -613,6 +634,7 @@ def main():
     args = ap.parse_args()
 
     grid = os.path.realpath(os.environ.get("GRID_DIR") or os.path.join(HERE, ".."))
+    default_baseline(grid, quiet=args.json)
     target = load_target(grid)
     truncate_at = (target or {}).get("truncate_at", DEFAULT_TRUNCATE)
     try:

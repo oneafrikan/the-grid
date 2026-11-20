@@ -179,6 +179,20 @@ sources_fixture() {
   [ ! -e "$FX/out2.md" ]
 }
 
+@test "sources.sh with GRID_BASELINE unset uses the tracked example, not the personal baseline, in every mode" {
+  sources_fixture
+  # personal baseline that would change every tier if it were read
+  printf 'no-such-repo\n' > "$FX/baseline-submodules.txt"
+  GRID_DIR="$FX" bash "$REPO_ROOT/scripts/sources.sh" "$FX/out.md" 2> "$FX/err"
+  diff -q "$FX/out.md" "$FX/docs/SOURCES.md"
+  [ "$(cat "$FX/err")" = "sources: using tracked baseline-submodules.example.txt (set GRID_BASELINE to override)" ]
+  GRID_DIR="$FX" run bash "$REPO_ROOT/scripts/sources.sh" --check-drift
+  [ "$status" -eq 0 ]
+  # an explicit GRID_BASELINE naming the personal file is honoured exactly: the render differs
+  GRID_DIR="$FX" GRID_BASELINE="$FX/baseline-submodules.txt" bash "$REPO_ROOT/scripts/sources.sh" "$FX/out2.md"
+  ! diff -q "$FX/out2.md" "$FX/docs/SOURCES.md" || false
+}
+
 # --- WP-048: sources.sh option handling and edge behaviour ---------------------------------
 # Any first argument used to be an output path, so `--help` or `--chek` wrote a file of that
 # name. A leading dash is now an option: known ones act, unknown ones are usage (exit 2)

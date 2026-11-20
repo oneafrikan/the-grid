@@ -80,8 +80,9 @@ submodules into two tiers:
 - `scripts/prune-report.sh` (wraps `scripts/usage/prune_report.py`; `scripts/usage/aggregate.py` is the importable per-host summer, no CLI) — read-only report that proposes what to drop from the baseline from the per-host usage files (demote a repo, `name-only` a skill, unused agents); `docs/prune-keep.txt` lists names never proposed. Never reads `tokens`/`hooks`. See `docs/usage.md`.
 - `scripts/catalog.sh` — regenerates `SKILLS.md`: wired skills in full detail, library
   repos as counts, reference (no-skill) repos in a footer. Deterministic output. The committed
-  `SKILLS.md` is rendered from the tracked example baseline (`GRID_BASELINE=baseline-submodules.example.txt
-  bash scripts/catalog.sh`; `wire.sh` and the gate pin it), not a machine's personal one.
+  `SKILLS.md` is rendered from the tracked example baseline by default (`GRID_BASELINE` unset: no pin
+  needed; `wire.sh` and the gate still pass it explicitly), never a machine's personal one. To render the
+  personal set instead: `GRID_BASELINE=baseline-submodules.txt bash scripts/catalog.sh /tmp/x.md`.
 - `SKILLS.md` — generated index of the whole ecosystem. Never edit by hand.
 - `scripts/build-plugins.py` + `plugins/` + `docs/PLUGINS.md` — generates the two Claude Code plugin bundles (`grid-core`, `grid-agents`) and `.claude-plugin/marketplace.json` from `plugins/bundles.json`. `plugins/` is generated output: regenerate with `python3 scripts/build-plugins.py` (needs `agent-factory/.venv`), never hand-edit. `gate.sh` runs `--check` and `claude plugin validate --strict`; `audit.sh --owned` scans `plugins/`.
 - `scripts/translate-readme.sh` + `scripts/check-translations.sh` — README translations (`README.<locale>.md`, locales in `scripts/lib/readme-locales.txt`, prompt in `docs/translation-prompt.md`). After README prose changes: `bash scripts/translate-readme.sh --all`; opt-in, costs tokens (one `claude -p --model sonnet` call per stale locale; `--dry-run` calls nothing, `--switcher-only` rewrites the language switchers with no model call). `check-translations.sh [--strict]` prints `STALE <locale>` (and `MISSING <locale>` with `--strict`); `gate.sh` runs it non-strict and only WARNs. The source hash ignores the switcher and count values (`scripts/lib/readme-hash.sh`). Tests stub the translator via `GRID_CLAUDE`.
@@ -223,7 +224,7 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
   The `bats` job (four shards, `gate.sh --strict --shard <name>`, files listed in `tests/shards.txt`) runs only nightly, on `v*` tags, on published releases and on demand; it is not part of `gate` and never runs per PR or per push to `main`.
   Drift checks (catalog, sources, map, counts, lock, budget, rules, plugins, compose) are not in CI: run their `--check` commands or a local full `bash scripts/gate.sh`. A new `tests/test_*.bats` file
   must be added to `tests/shards.txt`; `tests/test_gate.bats` fails otherwise.
-  `catalog`, `sources` (`sources.sh --check-drift`) and `budget` run against the TRACKED `baseline-submodules.example.txt` (`GRID_BASELINE` pin; `wire.sh` pins it for SKILLS.md too), so SKILLS.md, docs/SOURCES.md and the ratchet are machine-independent; a personal baseline is never gated.
+  `catalog`, `sources` (`sources.sh --check-drift`) and `budget` run against the TRACKED `baseline-submodules.example.txt` BY DEFAULT (`catalog.sh`, `sources.sh` and `budget.py` use it when `GRID_BASELINE` is unset and print one stderr line if a personal baseline is being ignored; `wire.sh` and the gate still pass it explicitly), so SKILLS.md, docs/SOURCES.md and the ratchet are machine-independent; a personal baseline is never gated. To measure the personal set, set `GRID_BASELINE=baseline-submodules.txt` (for example `budget.py --report`); `wire.sh` and `scripts/grid` keep wiring from the personal baseline.
   It runs `check-personal.sh` as the `personal` check; with no private denylist on the
   machine (CI, forks) it passes and prints `gate: PASS (skipped: personal-denylist)`.
   It runs `audit.sh --gate --quiet` as the `audit` check (owned assets + the baseline's
