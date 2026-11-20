@@ -42,9 +42,15 @@ repo_docs() {
   printf '# Design\n' > "$R/DESIGN.md"
 }
 
+# sha_of FILE: sha256 of the whole file (the plan header pins it).
+sha_of() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"; }
+
+# hdr REL: the plan header line for the repo file REL, as `blocks` prints it.
+hdr() { echo "## source: $1 sha256:$(sha_of "$R/$1")"; }
+
 # plan_all SRCFILE REL DEST: a plan sending every block of SRCFILE (named REL in the repo) to DEST.
 plan_all() {
-  { echo "## source: $2"; rf blocks "$1" | awk -v d="$3" '/^B[0-9]/ { print $1 " -> " d }'; } > "$T/plan.txt"
+  { echo "## source: $2 sha256:$(sha_of "$1")"; rf blocks "$1" | awk -v d="$3" '/^B[0-9]/ { print $1 " -> " d }'; } > "$T/plan.txt"
 }
 
 # plain_plan: split plain.md (7 blocks) over keep, unsorted and two destinations.
@@ -54,7 +60,7 @@ plain_plan() {
   local f="$R/CLAUDE.md"
   cat > "$T/plan.txt" <<EOF
 # comment lines are ignored
-## source: CLAUDE.md
+$(hdr CLAUDE.md)
 $(bid "$f" 1)..$(bid "$f" 2) -> keep
 $(bid "$f" 3) -> unsorted
 $(bid "$f" 4)..$(bid "$f" 5) -> CONVENTIONS.md#Naming
@@ -136,7 +142,7 @@ plan_fails() {
 
 @test "plan error: unknown block id" {
   plain_plan
-  printf '## source: CLAUDE.md\nB099-abcd -> keep\n' > "$T/plan.txt"
+  printf '%s\nB099-abcd -> keep\n' "$(hdr CLAUDE.md)" > "$T/plan.txt"
   plan_fails "unknown block id"
 }
 
@@ -405,7 +411,7 @@ git_repo() {
   [ "$before" = "$(tree_sum "$R")" ]
   run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --yes
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Undo: git checkout -- CLAUDE.md"* ]] || false
+  [[ "$output" == *"mv 'docs/archive/CLAUDE.md.2026-01-02.orig' 'CLAUDE.md'"* ]] || false
   [ "$orig" = "$(cksum < "$R/docs/archive/CLAUDE.md.2026-01-02.orig")" ]
   cmp "$T/slim.md" "$R/CLAUDE.md"
 }
@@ -419,7 +425,7 @@ git_repo() {
   rf keep "$T/plan.txt" --repo "$R" > "$T/slim.md"
   run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --yes
   [ "$status" -eq 2 ]
-  [[ "$output" == *"archive already exists"* ]] || false
+  [[ "$output" == *"archive already exists and differs"* ]] || false
   [ "$(cat "$R/docs/archive/CLAUDE.md.2026-01-02.orig")" = precious ]
   cmp "$FX/plain.md" "$R/CLAUDE.md"
 }
@@ -440,8 +446,7 @@ git_repo() {
   rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
   git_repo
   rf keep "$T/plan.txt" --repo "$R" > "$T/slim.md"
-  printf '\n' >> "$R/CLAUDE.md"
-  # the blank line is trailing whitespace of the last block, so the plan is still valid
+  git -C "$R" rm -q --cached CLAUDE.md    # untracked now; the bytes (and so the plan's sha256) are unchanged
   run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --yes
   [ "$status" -eq 2 ]
   [[ "$output" == *"not tracked-and-clean"* ]] || false
@@ -476,4 +481,309 @@ git_repo() {
   run rf apply "$T/nope.txt" --repo "$R"
   [ "$status" -eq 2 ]
   ! grep -E '^(import|from) (yaml|requests|numpy)' "$RF"
+}
+
+# ======================================================================================
+# Hardening: every false pass found in independent QA must now fail (or be refused)
+# ======================================================================================
+
+# mini SRC [DEST]: a source (block 1 -> keep, the rest -> D.md) and a destination; applied.
+mini() {
+  printf '%b' "$1" > "$R/CLAUDE.md"
+  printf '%b' "${2:-# D\n}" > "$R/D.md"
+  { hdr CLAUDE.md; echo "$(bid "$R/CLAUDE.md" 1) -> keep"
+    rf blocks "$R/CLAUDE.md" | awk '/^B[0-9]/ { c++; if (c > 1) print $1 " -> D.md" }'; } > "$T/plan.txt"
+  rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
+}
+
+@test "check: text that only sits inside a fenced block of the destination does not count" {
+  mini '# T\n\n- Never commit secrets.\n'
+  awk '$0 == "- Never commit secrets." { print "```"; print; print "```"; next } { print }' "$R/D.md" > "$T/d" && mv "$T/d" "$R/D.md"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"MISSING"* ]] || false
+}
+
+@test "check: text that only sits inside an HTML comment of the destination does not count" {
+  mini '# T\n\n- Never commit secrets.\n'
+  awk '$0 == "- Never commit secrets." { print "<!--"; print; print "-->"; next } { print }' "$R/D.md" > "$T/d" && mv "$T/d" "$R/D.md"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 1 ]
+}
+
+@test "check: a block that is only a line inside a longer destination block does not count" {
+  mini '# T\n\nAlpha\n\nAlpha\nBeta\n'
+  # drop the standalone Alpha; the Alpha line still sits inside the "Alpha / Beta" block
+  awk '/^Alpha$/ && !done { done = 1; getline; next } { print }' "$R/D.md" > "$T/d" && mv "$T/d" "$R/D.md"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 1 ]
+}
+
+@test "check: one destination block cannot satisfy two source blocks" {
+  mini '# T\n\nSame line.\n\nSame line.\n'
+  awk '/^Same line\.$/ { if (seen++) next } { print }' "$R/D.md" > "$T/d" && mv "$T/d" "$R/D.md"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 1 ]
+}
+
+@test "check: a destination file that was deleted is a coverage failure (exit 1) naming the file" {
+  plain_plan
+  rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
+  rm "$R/DESIGN.md"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DESIGN.md"*"file does not exist"* ]] || false
+}
+
+@test "blocks prints the plan header with the sha256 of the whole file" {
+  cp "$FX/plain.md" "$R/CLAUDE.md"
+  run bash -c "cd '$R' && python3 '$RF' blocks CLAUDE.md"
+  [[ "$output" == *"## source: CLAUDE.md sha256:$(sha_of "$R/CLAUDE.md")"* ]] || false
+}
+
+@test "plan: a header without sha256 is rejected" {
+  plain_plan
+  sed_i 's/ sha256:[0-9a-f]*//' "$T/plan.txt"
+  plan_fails "malformed source header"
+}
+
+@test "stale source: an edit in the MIDDLE of a range is caught before apply (exit 2, nothing written)" {
+  plain_plan
+  sed_i 's/^- a1$/- a1 changed/' "$R/CLAUDE.md"
+  plan_fails "changed since 'blocks'"
+}
+
+@test "stale source: a middle block replaced by a different block (same count, same end ids) is caught" {
+  printf '# T\n\nFirst.\n\nMiddle.\n\nLast.\n' > "$R/CLAUDE.md"
+  repo_docs
+  { hdr CLAUDE.md; echo "$(bid "$R/CLAUDE.md" 1)..$(bid "$R/CLAUDE.md" 4) -> DESIGN.md"; } > "$T/plan.txt"
+  printf '# T\n\nFirst.\n\nSwapped in.\n\nLast.\n' > "$R/CLAUDE.md"
+  plan_fails "changed since 'blocks'"
+}
+
+@test "stale source: an edit after apply makes check exit 2, not pass" {
+  plain_plan
+  rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
+  sed_i 's/^- a1$/- a1 changed/' "$R/CLAUDE.md"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 2 ]
+}
+
+@test "an empty, comment-only or header-less plan is exit 2 for every subcommand" {
+  plain_plan
+  : > "$T/empty.txt"
+  printf '# only a comment\n' > "$T/comment.txt"
+  hdr CLAUDE.md > "$T/headeronly.txt"
+  printf 'B001-aaaa -> keep\n' > "$T/noheader.txt"
+  for p in empty comment headeronly noheader; do
+    for c in apply check keep; do
+      run rf "$c" "$T/$p.txt" --repo "$R"
+      [ "$status" -eq 2 ] || { echo "$c $p: $status"; false; }
+    done
+    run rf finalize "$T/$p.txt" --repo "$R" --replace-with "$T/crlf.md"
+    [ "$status" -eq 2 ] || { echo "finalize $p: $status"; false; }
+  done
+}
+
+@test "destinations: only existing .md or .txt text files; no dotfiles, binaries or hard links to the source" {
+  plain_plan
+  printf 'KEY=1\n' > "$R/.env"
+  printf 'print(1)\n' > "$R/app.py"
+  printf '# bin\n\xff\xfe\n' > "$R/bin.md"
+  ln "$R/CLAUDE.md" "$R/hard.md"
+  for d in .env app.py bin.md hard.md; do
+    plan_all "$R/CLAUDE.md" CLAUDE.md "$d"
+    before=$(tree_sum "$R")
+    run rf apply "$T/plan.txt" --repo "$R" --yes
+    [ "$status" -eq 2 ] || { echo "$d: $output"; false; }
+    [ "$before" = "$(tree_sum "$R")" ] || { echo "$d changed the tree"; false; }
+  done
+}
+
+@test "destinations: the plan file itself and another source of the plan are refused" {
+  plain_plan
+  cp "$FX/plain.md" "$R/OTHER.md"
+  cp "$T/plan.txt" "$R/inrepo-plan.md"
+  plan_all "$R/CLAUDE.md" CLAUDE.md inrepo-plan.md
+  cp "$T/plan.txt" "$R/inrepo-plan.md"
+  run rf apply "$R/inrepo-plan.md" --repo "$R"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"the plan file"* ]] || false
+  plan_all "$R/CLAUDE.md" CLAUDE.md OTHER.md
+  hdr OTHER.md >> "$T/plan.txt"
+  rf blocks "$R/OTHER.md" | awk '/^B[0-9]/ { print $1 " -> keep" }' >> "$T/plan.txt"
+  run rf apply "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"another source of this plan"* ]] || false
+}
+
+@test "apply refuses a destination that ends inside an unclosed fence or comment" {
+  plain_plan
+  printf '# Design\n\n```\nnever closed\n' > "$R/DESIGN.md"
+  before=$(tree_sum "$R")
+  run rf apply "$T/plan.txt" --repo "$R" --yes
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unclosed"* ]] || false
+  [ "$before" = "$(tree_sum "$R")" ]
+  printf '# Design\n\n<!-- todo\n' > "$R/DESIGN.md"
+  run rf apply "$T/plan.txt" --repo "$R" --yes
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unclosed"* ]] || false
+}
+
+@test "apply separates appended text from a trailing list item with a blank line" {
+  printf '# Plain\n\nMoved paragraph.\n' > "$R/CLAUDE.md"
+  printf '# D\n\n- last item\n  continues' > "$R/D.md"    # no trailing newline
+  { hdr CLAUDE.md; echo "$(bid "$R/CLAUDE.md" 1) -> keep"; echo "$(bid "$R/CLAUDE.md" 2) -> D.md#D"; } > "$T/plan.txt"
+  run rf apply "$T/plan.txt" --repo "$R" --yes
+  [ "$status" -eq 0 ]
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 0 ]
+  # the existing item is still one block of its own and the provenance comment is a block
+  run rf blocks "$R/D.md"
+  [[ "$output" == *"item"*"- last item"* ]] || false
+  [[ "$output" == *"comment"* ]] || false
+  grep -qxF -- '  continues' "$R/D.md"
+}
+
+@test "apply: a lookalike provenance comment does not hide a missing block (refused, exit 2)" {
+  plain_plan
+  rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
+  grep -v '^- a2$' "$R/CONVENTIONS.md" > "$T/c" && mv "$T/c" "$R/CONVENTIONS.md"
+  run rf apply "$T/plan.txt" --repo "$R" --yes
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"refusing to apply"* ]] || false
+}
+
+# ---- anchors keep plan order ---------------------------------------------------------
+
+@test "anchors: two runs into one heading land in plan order, a moved heading does not confuse a later anchor" {
+  printf 'First.\n\n## Wellness\n\nSecond.\n\nThird.\n' > "$R/a.md"
+  printf '# D\n\n## Sec\n\nbody\n\n## Wellness\n\nw original\n' > "$R/D.md"
+  f="$R/a.md"
+  { hdr a.md
+    echo "$(bid "$f" 1)..$(bid "$f" 2) -> D.md#Sec"
+    echo "$(bid "$f" 3) -> D.md#Sec"
+    echo "$(bid "$f" 4) -> D.md#Wellness"; } > "$T/plan.txt"
+  run rf apply "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARNING"*"level-2 heading"* ]] || false
+  rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
+  l() { grep -n -- "$1" "$R/D.md" | head -1 | cut -d: -f1; }
+  [ "$(l '^body')" -lt "$(l '^First\.')" ]
+  [ "$(l '^First\.')" -lt "$(l '^Second\.')" ]
+  [ "$(l '^Second\.')" -lt "$(l '^w original')" ]
+  [ "$(l '^w original')" -lt "$(l '^Third\.')" ]
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 0 ]
+}
+
+# ---- preflight, exit codes ------------------------------------------------------------
+
+@test "apply preflight: an unwritable directory stops the run before ANY file is written" {
+  [ "$(id -u)" -ne 0 ] || skip "root ignores directory permissions"
+  plain_plan
+  mkdir "$R/sub"
+  printf '# Sub\n' > "$R/sub/S.md"
+  sed_i 's|-> DESIGN.md|-> sub/S.md|' "$T/plan.txt"
+  chmod 555 "$R/sub"
+  before=$(tree_sum "$R")
+  run rf apply "$T/plan.txt" --repo "$R" --yes
+  chmod 755 "$R/sub"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not writable"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+  [ "$before" = "$(tree_sum "$R")" ]
+  [ ! -e "$R/UNSORTED.md" ]
+}
+
+@test "errors are one line, never a traceback" {
+  [ "$(id -u)" -ne 0 ] || skip "root can read anything"
+  printf '# x\n' > "$T/unreadable.md"
+  chmod 000 "$T/unreadable.md"
+  run rf blocks "$T/unreadable.md"
+  chmod 644 "$T/unreadable.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"retrofit: PermissionError"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+  plain_plan
+  printf '\xff\xfe' > "$T/plan.txt"
+  run rf apply "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]] || false
+}
+
+# ---- finalize: undo, retry, several sources -----------------------------------------------
+
+@test "finalize: the printed undo (mv) restores exactly the original, for a clean and a dirty source" {
+  plain_plan
+  rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
+  git_repo
+  rf keep "$T/plan.txt" --repo "$R" > "$T/slim.md"
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --yes
+  [ "$status" -eq 0 ]
+  cmd=$(printf '%s\n' "$output" | sed -n "s/^done. Undo.*: //p")
+  [[ "$cmd" == "mv "* ]] || false
+  (cd "$R" && eval "$cmd")
+  cmp "$FX/plain.md" "$R/CLAUDE.md"
+  [ ! -e "$R/docs/archive/CLAUDE.md.2026-01-02.orig" ]
+  # dirty: untracked source, --allow-dirty
+  git -C "$R" rm -q --cached CLAUDE.md
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --yes --allow-dirty
+  [ "$status" -eq 0 ]
+  cmd=$(printf '%s\n' "$output" | sed -n "s/^done. Undo.*: //p")
+  (cd "$R" && eval "$cmd")
+  cmp "$FX/plain.md" "$R/CLAUDE.md"
+}
+
+@test "finalize: a retry reuses a byte-identical archive left by a failed replace" {
+  plain_plan
+  rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
+  git_repo
+  rf keep "$T/plan.txt" --repo "$R" > "$T/slim.md"
+  mkdir -p "$R/docs/archive"
+  cp "$R/CLAUDE.md" "$R/docs/archive/CLAUDE.md.2026-01-02.orig"
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"archive already holds"* ]] || false
+  cmp "$T/slim.md" "$R/CLAUDE.md"
+}
+
+@test "finalize: a keep block only inside a fence, or reworded, in the replacement is refused" {
+  plain_plan
+  rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
+  git_repo
+  printf '# Plain\n\n```\nAlpha paragraph.\n```\n' > "$T/slim.md"
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --yes
+  [ "$status" -eq 1 ]
+  printf '# Plain\n\nAlpha paragraph (reworded).\n' > "$T/slim.md"
+  run rf finalize "$T/plan.txt" --repo "$R" --replace-with "$T/slim.md" --yes
+  [ "$status" -eq 1 ]
+  cmp "$FX/plain.md" "$R/CLAUDE.md"
+}
+
+@test "several sources: finalize A, check still passes, then finalize B with the same plan" {
+  printf '# A\n\nOne.\n' > "$R/CLAUDE.md"
+  printf '# N\n\nTwo.\n' > "$R/NOTES.md"
+  printf '# D\n' > "$R/D.md"
+  { hdr CLAUDE.md; echo "$(bid "$R/CLAUDE.md" 1) -> keep"; echo "$(bid "$R/CLAUDE.md" 2) -> D.md"
+    hdr NOTES.md; echo "$(bid "$R/NOTES.md" 1) -> keep"; echo "$(bid "$R/NOTES.md" 2) -> D.md"; } > "$T/plan.txt"
+  rf apply "$T/plan.txt" --repo "$R" --yes >/dev/null
+  git_repo
+  printf '# A\n' > "$T/sa.md"
+  printf '# N\n' > "$T/sn.md"
+  run rf finalize "$T/plan.txt" --repo "$R" --source CLAUDE.md --replace-with "$T/sa.md" --yes
+  [ "$status" -eq 0 ]
+  cmp "$T/sa.md" "$R/CLAUDE.md"
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"read from its archive"* ]] || false
+  run rf finalize "$T/plan.txt" --repo "$R" --source NOTES.md --replace-with "$T/sn.md" --yes
+  [ "$status" -eq 0 ]
+  run rf check "$T/plan.txt" --repo "$R"
+  [ "$status" -eq 0 ]
+  # finalizing A twice is refused, not repeated
+  run rf finalize "$T/plan.txt" --repo "$R" --source CLAUDE.md --replace-with "$T/sa.md" --yes
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"already finalized"* ]] || false
 }

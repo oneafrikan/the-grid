@@ -15,13 +15,20 @@ Subcommands (run from the repo root, or pass --repo DIR):
   finalize <plan> --replace-with F [--source S] [--yes] [--allow-dirty]
                                          archive the original, put the slim doc in its place
 
-Plan file (strict, one section per source):
-    ## source: CLAUDE.md
+Plan file (strict, one section per source; `blocks` prints the exact header line):
+    ## source: CLAUDE.md sha256:<64 hex of the whole file>
     B001-3fa9 -> GUARDRAILS.md#Hard constraints   append at the end of that heading's section
     B004-91c2..B009-00ab -> CONVENTIONS.md        a range; no anchor = under "## Moved from CLAUDE.md"
     B010-ffff -> keep                             stays in the source
     B011-1234 -> unsorted                         goes to UNSORTED.md
 Every block of the source must appear exactly once. Lines starting with # are comments.
+The sha256 pins the whole source: any edit since `blocks` (even in the middle of a range) is
+stale. After `finalize` the same plan still works: the source text is then read from the
+archive whose sha256 matches.
+
+Matching is block level: a moved block counts as present only when the destination, parsed
+into blocks, holds an equal block (text inside a fence or comment never counts), and one
+destination block satisfies at most one source block.
 
 Exit codes: 0 ok; 1 check/coverage failure (check, or finalize that would lose text);
 2 usage error, plan error, or a refusal (nothing was written).
@@ -63,7 +70,7 @@ class Fatal(Exception):
 # ---------------------------------------------------------------------------
 
 class Block:
-    def __init__(self, idx, kind, first, last, text, gap, off):
+    def __init__(self, idx, kind, first, last, text, gap, off, closed=True):
         self.idx = idx            # 1-based
         self.kind = kind          # frontmatter heading para item fence table comment quote hr
         self.first = first        # 1-based first line
@@ -73,7 +80,9 @@ class Block:
         self.off = off            # char offset of text in the file
         self.level = 0            # heading level
         self.htext = ""           # heading text
-        self.hash = hashlib.sha1(norm(text).encode("utf-8", "surrogateescape")).hexdigest()[:4]
+        self.closed = closed      # False for a fence or comment that runs to the end of the file
+        self.norm = norm(text)    # comparison form (see norm)
+        self.hash = hashlib.sha1(self.norm.encode("utf-8", "surrogateescape")).hexdigest()[:4]
 
     @property
     def id(self):
@@ -149,12 +158,13 @@ def fence_open(line, max_indent):
 
 
 def fence_end(lines, i, ch, ln):
-    """Index of the closing fence line (or the last line when never closed, as CommonMark does)."""
+    """(index of the closing fence line, True); when never closed, as CommonMark does: the last
+    line and False."""
     for j in range(i + 1, len(lines)):
         s = body(lines[j]).strip()
         if s and set(s) == {ch} and len(s) >= ln:
-            return j
-    return len(lines) - 1
+            return j, True
+    return len(lines) - 1, False
 
 
 def is_table_start(lines, i):
@@ -211,7 +221,7 @@ def scan_item(lines, i):
         if indent_of(lines[j]) > base:
             fo = fence_open(lines[j], 10 ** 6)
             if fo:
-                j = fence_end(lines, j, fo[0], fo[1])
+                j, _ = fence_end(lines, j, fo[0], fo[1])
             last = j
             j += 1
             continue
@@ -224,42 +234,45 @@ def scan_item(lines, i):
 
 
 def scan_block(lines, i, allow_frontmatter):
-    """(kind, last_line_index) of the block starting at line i."""
+    """(kind, last_line_index, closed) of the block starting at line i."""
     n = len(lines)
     b = body(lines[i])
     if allow_frontmatter and b.rstrip() in ("---", "+++"):
         for j in range(i + 1, n):
             if body(lines[j]).rstrip() in (b.rstrip(), "..."):
-                return "frontmatter", j
+                return "frontmatter", j, True
     fo = fence_open(lines[i], 3)
     if fo:
-        return "fence", fence_end(lines, i, fo[0], fo[1])
+        j, closed = fence_end(lines, i, fo[0], fo[1])
+        return "fence", j, closed
     if RE_ATX.match(b):
-        return "heading", i
+        return "heading", i, True
     if starts_comment(lines[i]):
-        return "comment", comment_end(lines, i)
+        j = comment_end(lines, i)
+        after_open = "".join(lines[i:j + 1]).split("<!--", 1)[1]
+        return "comment", j, "-->" in after_open
     if RE_HR.match(b):
-        return "hr", i
+        return "hr", i, True
     if RE_QUOTE.match(b):
         j = i
         while j + 1 < n and RE_QUOTE.match(body(lines[j + 1])):
             j += 1
-        return "quote", j
+        return "quote", j, True
     if is_table_start(lines, i):
         j = i + 1
         while j + 1 < n and not is_blank(lines[j + 1]) and "|" in lines[j + 1]:
             j += 1
-        return "table", j
+        return "table", j, True
     if RE_ITEM.match(b):
-        return "item", scan_item(lines, i)
+        return "item", scan_item(lines, i), True
     j = i + 1
     while j < n and not is_blank(lines[j]):
         if RE_SETEXT.match(body(lines[j])):            # "Title" / "=====" is a heading
-            return "heading", j
+            return "heading", j, True
         if interrupts_para(lines[j]) or is_table_start(lines, j):
             break
         j += 1
-    return "para", j - 1
+    return "para", j - 1, True
 
 
 def parse_blocks(text):
@@ -274,14 +287,14 @@ def parse_blocks(text):
     off = len(lead)
     first_block = True
     while i < n:
-        kind, last = scan_block(lines, i, first_block and i == 0)
+        kind, last, closed = scan_block(lines, i, first_block and i == 0)
         first_block = False
         btext = "".join(lines[i:last + 1])
         k = last + 1
         while k < n and is_blank(lines[k]):
             k += 1
         gap = "".join(lines[last + 1:k])
-        b = Block(len(blocks) + 1, kind, i + 1, last + 1, btext, gap, off)
+        b = Block(len(blocks) + 1, kind, i + 1, last + 1, btext, gap, off, closed)
         if kind == "heading":
             first = body(lines[i])
             m = RE_ATX.match(first)
@@ -369,8 +382,17 @@ def resolve(root, rel):
 # Plan parser (strict). Every problem is reported with its line number; nothing is written.
 # ---------------------------------------------------------------------------
 
-RE_SRC = re.compile(r"^##\s+source:\s*(.+?)\s*$")
+RE_SRC = re.compile(r"^##\s+source:\s*(.+?)\s+sha256:([0-9a-fA-F]{64})\s*$")
 RE_MAP = re.compile(r"^B(\d{3,})-([0-9a-f]{4})(?:\.\.B(\d{3,})-([0-9a-f]{4}))?\s*->\s*(\S.*?)\s*$")
+
+
+def sha256_bytes(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def source_header(rel, data):
+    """The exact plan header line for a source; `blocks` prints it for pasting."""
+    return "## source: %s sha256:%s" % (rel, sha256_bytes(data))
 
 
 class Entry:
@@ -381,8 +403,9 @@ class Entry:
 
 
 class SourcePlan:
-    def __init__(self, line, rel, real, text, lead, blocks):
-        self.line, self.rel, self.real = line, rel, real
+    def __init__(self, line, rel, real, sha, origin, text, lead, blocks):
+        self.line, self.rel, self.real, self.sha = line, rel, real, sha
+        self.origin = origin        # live: the file on disk is the planned text; archive: finalized
         self.text, self.lead, self.blocks = text, lead, blocks
         self.entries = []
         self.assign = {}            # block idx -> Entry
@@ -397,9 +420,60 @@ class Plan:
         self.root, self.path, self.sources = root, path, []
 
 
-def parse_plan(root, plan_path):
+def load_source(root, rel, real, sha):
+    """(bytes, origin) of the text the plan was made from, or None. The live file counts only
+    if its sha256 matches; otherwise the archive made by finalize, if ITS sha256 matches."""
+    if os.path.isfile(real):
+        data = open(real, "rb").read()
+        if sha256_bytes(data) == sha:
+            return data, "live"
+    name = rel.replace(os.sep, "__")
+    adir = os.path.join(root, "docs", "archive")
+    if os.path.isdir(adir):
+        for f in sorted(os.listdir(adir)):
+            mid = f[len(name) + 1:-5]
+            if f.startswith(name + ".") and f.endswith(".orig") and re.match(r"^\d{4}-\d{2}-\d{2}$", mid):
+                p = os.path.realpath(os.path.join(adir, f))
+                if within(root, p) and os.path.isfile(p):
+                    data = open(p, "rb").read()
+                    if sha256_bytes(data) == sha:
+                        return data, "archive"
+    return None
+
+
+def dest_problem(rel, real, strict):
+    """Why `rel` cannot be a destination, or None. Only existing .md/.txt text files qualify."""
+    if os.path.basename(rel).startswith("."):
+        return "dotfiles are never destinations: %s" % rel
+    if not rel.lower().endswith((".md", ".txt")):
+        return "destination must be a .md or .txt file: %s" % rel
+    if rel == "MAP.md":
+        return "MAP.md is generated; run scripts/map.py instead"
+    if os.path.exists(real):
+        if not os.path.isfile(real):
+            return "destination is not a regular file: %s" % rel
+        if strict:
+            data = open(real, "rb").read()
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError:
+                return "destination is not UTF-8 text: %s" % rel
+            if b"\0" in data:
+                return "destination looks binary (NUL byte): %s" % rel
+    elif strict and rel != UNSORTED:
+        if rel in STANDARD_DOCS:
+            return ("standard doc %s does not exist; scaffold it first (cut-project.sh --generic [--with ...])"
+                    % rel)
+        return "%s is not a standard doc and does not exist" % rel
+    return None
+
+
+def parse_plan(root, plan_path, strict_dest=False):
+    """Parse and validate. strict_dest (apply only) also demands that destinations exist; the
+    other commands tolerate a missing destination so that `check` can report the loss (exit 1)."""
     if not os.path.isfile(plan_path):
         raise Fatal("plan file not found: %s" % plan_path)
+    plan_real = os.path.realpath(plan_path)
     errs = []
     plan = Plan(root, plan_path)
     cur = None
@@ -415,19 +489,23 @@ def parse_plan(root, plan_path):
                 errs.append((no, msg))
                 continue
             rel, real = r
-            if not os.path.isfile(real):
-                errs.append((no, "source does not exist: %s" % rel))
-                continue
             if any(s.rel == rel for s in plan.sources):
                 errs.append((no, "source listed twice: %s" % rel))
                 continue
-            text = read_text(real)
+            loaded = load_source(root, rel, real, m.group(2).lower())
+            if loaded is None:
+                errs.append((no, "source %s is missing or changed since 'blocks' (sha256 differs and no "
+                             "matching archive); re-run blocks and rebuild the plan" % rel))
+                continue
+            data, origin = loaded
+            text = data.decode("utf-8", "surrogateescape")
             lead, blocks = parse_blocks(text)
-            cur = SourcePlan(no, rel, real, text, lead, blocks)
+            cur = SourcePlan(no, rel, real, m.group(2).lower(), origin, text, lead, blocks)
             plan.sources.append(cur)
             continue
         if line.startswith("## source"):
-            errs.append((no, "malformed source header (want: ## source: <path>)"))
+            errs.append((no, "malformed source header (want: ## source: <path> sha256:<64 hex>, "
+                         "the line `blocks` prints)"))
             continue
         if line.startswith("#"):
             continue
@@ -483,20 +561,9 @@ def parse_plan(root, plan_path):
                 ok = False
             else:
                 rel, real = r
-                if rel == "MAP.md":
-                    errs.append((no, "MAP.md is generated; run scripts/map.py instead"))
-                    ok = False
-                elif real == cur.real:
-                    errs.append((no, "destination is the source itself: %s" % rel))
-                    ok = False
-                elif not os.path.exists(real):
-                    hint = ("standard doc %s does not exist; scaffold it first (cut-project.sh --generic [--with ...])"
-                            % rel) if rel in STANDARD_DOCS else (
-                            "%s is not a standard doc and does not exist" % rel)
-                    errs.append((no, hint))
-                    ok = False
-                elif not os.path.isfile(real):
-                    errs.append((no, "destination is not a regular file: %s" % rel))
+                msg = dest_problem(rel, real, strict_dest)
+                if msg:
+                    errs.append((no, msg))
                     ok = False
                 else:
                     entry = Entry(no, i1, i2, "move", rel, real, anchor.strip() or None)
@@ -504,6 +571,22 @@ def parse_plan(root, plan_path):
             cur.entries.append(entry)
             for idx in range(i1, i2 + 1):
                 cur.assign[idx] = entry
+    # A destination may be none of: the plan file, a source of this plan (also via hard link).
+    for s in plan.sources:
+        for e in s.entries:
+            if not e.dest_real:
+                continue
+            for g, what in [(x.real, "the source itself" if x is s else "another source of this plan (%s)" % x.rel)
+                            for x in plan.sources] + [(plan_real, "the plan file")]:
+                same = e.dest_real == g or (os.path.exists(e.dest_real) and os.path.exists(g)
+                                            and os.path.samefile(e.dest_real, g))
+                if same:
+                    errs.append((e.line, "destination is %s" % what))
+                    break
+    if not plan.sources and not errs:
+        errs.append((1, "plan has no '## source: <path> sha256:<hash>' section"))
+    if plan.sources and not errs and not any(s.entries for s in plan.sources):
+        errs.append((1, "plan maps no blocks"))
     for s in plan.sources:
         missing = [b.id for b in s.blocks if b.idx not in s.assign]
         if missing and not errs:       # report unaccounted blocks once the lines themselves are valid
@@ -531,6 +614,95 @@ def run_text(src, entry):
 
 
 # ---------------------------------------------------------------------------
+# Matching: block level. A source block is present in a text only if the text, parsed into
+# blocks, holds an equal block (same kind, same normalised text) or a short run of consecutive
+# blocks whose joined text equals it (front matter re-parses as a rule plus a heading, say).
+# Text inside a fence or comment is part of that fence/comment block, so it never matches.
+# Each destination block satisfies at most ONE source block.
+# ---------------------------------------------------------------------------
+
+def match_rows(hay, rows):
+    """Set row['ok'] for each row {'block': Block}; `hay` is the list of blocks of the text."""
+    used = set()
+    firsts = [b.norm.split("\n", 1)[0] for b in hay]
+
+    def match_run(r):
+        """Match r to a short run of unused consecutive blocks whose joined text equals it."""
+        target = r["block"].norm
+        first = target.split("\n", 1)[0]
+        for i in range(len(hay)):
+            if i in used or firsts[i] != first:
+                continue
+            parts, j = [hay[i].text], i
+            while True:
+                if norm("".join(parts)) == target:
+                    used.update(range(i, j + 1))
+                    r["ok"] = True
+                    return
+                if j + 1 >= len(hay) or j - i >= 5 or (j + 1) in used:
+                    break
+                parts += [hay[j].gap, hay[j + 1].text]
+                j += 1
+
+    # Front matter first: mid-file it re-parses as a rule plus a heading, and the rule must not
+    # be taken by a real horizontal rule matched earlier.
+    for r in rows:
+        if r["block"].kind == "frontmatter":
+            match_run(r)
+    index = collections.defaultdict(collections.deque)
+    for i, b in enumerate(hay):
+        if i not in used:
+            index[(b.kind, b.norm)].append(i)
+    pending = []
+    for r in rows:
+        if r["ok"]:
+            continue
+        sb = r["block"]
+        q = index.get((sb.kind, sb.norm))
+        if q:
+            used.add(q.popleft())
+            r["ok"] = True
+        else:
+            pending.append(r)
+    for r in pending:
+        match_run(r)
+
+
+def run_check(plan, overrides=None):
+    """A row for every block: moved => in its destination; keep => in the live source file;
+    unsorted => in UNSORTED.md. `overrides` maps a real path to the text to use instead of
+    the file (apply uses it to verify before it writes)."""
+    overrides = overrides or {}
+    by_target = collections.OrderedDict()
+    rows = []
+    for src in plan.sources:
+        for b in src.blocks:
+            e = src.assign[b.idx]
+            target = src.real if e.kind == "keep" else e.dest_real
+            row = {"src": src, "block": b, "entry": e, "ok": False, "why": ""}
+            rows.append(row)
+            by_target.setdefault(target, []).append(row)
+    for target, rs in by_target.items():
+        if target in overrides:
+            text = overrides[target]
+        elif os.path.isfile(target):
+            text = read_text(target)
+        else:
+            text = None
+        if text is None:
+            for r in rs:
+                r["why"] = "file does not exist"
+            continue
+        match_rows(parse_blocks(text)[1], rs)
+    return rows
+
+
+def where_of(row):
+    e = row["entry"]
+    return "keep" if e.kind == "keep" else e.dest
+
+
+# ---------------------------------------------------------------------------
 # apply
 # ---------------------------------------------------------------------------
 
@@ -553,89 +725,136 @@ def section_end(text, hb, blocks):
     return len(text)
 
 
-def insert_run(text, anchor, src_rel, run, comment):
-    """New destination text with `run` (preceded by `comment`) appended at the end of the
-    anchored section, or at the end of the file under '## Moved from <src>'."""
+def resolve_anchor(blocks, anchor, line):
+    want = norm_heading(anchor)
+    hits = [b for b in blocks if b.kind == "heading" and norm_heading(b.htext) == want]
+    if not hits:
+        avail = ", ".join(b.htext for b in blocks if b.kind == "heading")[:300]
+        raise Fatal("plan line %d: heading '%s' not found in destination (headings: %s)" % (line, anchor, avail))
+    if len(hits) > 1:
+        raise Fatal("plan line %d: heading '%s' is ambiguous in destination (%d matches)" % (line, anchor, len(hits)))
+    return hits[0]
+
+
+def blank_sep(out, nl):
+    """Make `out` end with a blank line (or be empty) so what follows starts a fresh block."""
+    if out and not out.endswith("\n"):
+        out += nl
+    if out and not re.search(r"\n[ \t\r]*\n$", out):
+        out += nl
+    return out
+
+
+def assemble(text, items):
+    """Splice the new items into the ORIGINAL text. items: (offset, kind, payload) in plan
+    order; items at one offset keep plan order, so a second run lands after the first."""
     nl = nl_of(text)
-    _, blocks = parse_blocks(text)
-    if anchor:
-        want = norm_heading(anchor)
-        hits = [b for b in blocks if b.kind == "heading" and norm_heading(b.htext) == want]
-        if not hits:
-            avail = ", ".join(b.htext for b in blocks if b.kind == "heading")[:300]
-            raise Fatal("heading '%s' not found in destination (headings: %s)" % (anchor, avail))
-        if len(hits) > 1:
-            raise Fatal("heading '%s' is ambiguous in destination (%d matches)" % (anchor, len(hits)))
-        where = 'end of "%s"' % hits[0].htext
-        pos = section_end(text, hits[0], blocks)
-    else:
-        title = "Moved from %s" % src_rel
-        hits = [b for b in blocks if b.kind == "heading" and b.level == 2 and b.htext == title]
-        where = 'end of file, under "## %s"' % title
-        if not hits:
-            if text and not text.endswith("\n"):
-                text += nl
-            if text and not re.search(r"\n[ \t\r]*\n$", text):
-                text += nl
-            text += "## %s%s" % (title, nl)
-        # Always the very end of the file: a moved block may itself be a heading, so the
-        # "Moved from" section cannot be trusted to end where the previous run did.
-        pos = len(text)
-    prefix, suffix = text[:pos], text[pos:]
-    if prefix and not prefix.endswith("\n"):
-        prefix += nl
-    if prefix and not re.search(r"\n[ \t\r]*\n$", prefix):
-        prefix += nl
-    block = comment + nl + run
-    if not block.endswith("\n"):
-        block += nl
-    if suffix:
-        block += nl
-    return prefix + block + suffix, where
+    out, cur = "", 0
+    for pos in sorted({p for p, _, _ in items}):
+        out += text[cur:pos]
+        cur = pos
+        for p, kind, payload in items:
+            if p != pos:
+                continue
+            out = blank_sep(out, nl)
+            if kind == "heading":
+                out += "## %s%s" % (payload, nl)
+            else:
+                comment, run = payload
+                out += comment + nl + run
+                if not out.endswith("\n"):
+                    out += nl
+        if text[pos:]:
+            out += nl             # blank line before the heading that follows
+    return out + text[cur:]
 
 
 def simulate(plan):
-    """Apply the whole plan in memory. Returns (texts, created, runs); runs describe each step."""
-    texts, created, runs = {}, set(), []
+    """Apply the whole plan in memory against the destinations as they are NOW. Anchors are
+    resolved against that original text, so a heading moved by an earlier run cannot make an
+    anchor ambiguous or end its section early. Returns (texts, created, recs)."""
+    orig, parsed, created, groups, recs = {}, {}, set(), collections.OrderedDict(), []
+    emitted = set()
     for src in plan.sources:
         for e in src.entries:
             if e.kind == "keep":
                 continue
             real = e.dest_real
-            if real not in texts:
+            if real not in orig:
                 if os.path.exists(real):
-                    texts[real] = read_text(real)
+                    orig[real] = read_text(real)
                 else:
-                    texts[real] = UNSORTED_HEADER
+                    orig[real] = UNSORTED_HEADER
                     created.add(real)
-            ids = src.ids(e)
-            comment = "<!-- moved from %s %s -->" % (src.rel, ids)
+                parsed[real] = parse_blocks(orig[real])[1]
+            text, blocks = orig[real], parsed[real]
+            comment = "<!-- moved from %s %s -->" % (src.rel, src.ids(e))
             rec = {"dest": e.dest, "real": real, "src": src, "entry": e, "comment": comment,
-                   "done": comment in texts[real], "where": None}
-            if not rec["done"]:
-                try:
-                    texts[real], rec["where"] = insert_run(
-                        texts[real], e.anchor, src.rel, run_text(src, e), comment)
-                except Fatal as ex:
-                    raise Fatal("plan line %d: %s" % (e.line, ex))
-            runs.append(rec)
-    return texts, created, runs
+                   "done": comment in text, "where": None, "warn": None}
+            recs.append(rec)
+            if rec["done"]:
+                continue
+            items = groups.setdefault(real, [])
+            if blocks and not blocks[-1].closed:
+                raise Fatal("%s ends inside an unclosed code fence or comment; close it first "
+                            "(a run would be appended inside it)" % e.dest)
+            if e.anchor:
+                hb = resolve_anchor(blocks, e.anchor, e.line)
+                pos = section_end(text, hb, blocks)
+                rec["where"] = 'end of "%s"' % hb.htext
+                levels = [b.level for b in src.blocks[e.first - 1:e.last] if b.kind == "heading"]
+                if levels and min(levels) <= hb.level:
+                    rec["warn"] = ("run holds a level-%d heading, which ends the section of '%s' (level %d) "
+                                   "for later readers; use a flat anchor or include its children"
+                                   % (min(levels), hb.htext, hb.level))
+            else:
+                title = "Moved from %s" % src.rel
+                pos = len(text)
+                rec["where"] = 'end of file, under "## %s"' % title
+                has = any(b.kind == "heading" and b.level == 2 and b.htext == title for b in blocks)
+                if not has and (real, src.rel) not in emitted:
+                    items.append((pos, "heading", title))
+                    emitted.add((real, src.rel))
+            items.append((pos, "run", (comment, run_text(src, e))))
+    texts = {real: assemble(orig[real], groups.get(real, [])) for real in orig}
+    return texts, created, recs
+
+
+def preflight_fs(texts, created):
+    """Every file that will change must be writable BEFORE the first one is written."""
+    for real, text in texts.items():
+        d = os.path.dirname(real)
+        if real in created:
+            if not (os.path.isdir(d) and os.access(d, os.W_OK | os.X_OK)):
+                raise Fatal("cannot create %s: directory not writable" % os.path.basename(real))
+        elif read_text(real) != text:
+            if not os.access(real, os.W_OK):
+                raise Fatal("destination not writable: %s" % os.path.relpath(real))
+            if not os.access(d, os.W_OK | os.X_OK):
+                raise Fatal("directory not writable (needed for an atomic replace): %s" % os.path.relpath(d))
 
 
 def cmd_apply(args):
     root = repo_root(args.repo)
-    plan = parse_plan(root, args.plan)
+    plan = parse_plan(root, args.plan, strict_dest=True)
     texts, created, runs = simulate(plan)
+    preflight_fs(texts, created)
+    bad = [r for r in run_check(plan, texts) if not r["ok"]]
+    if bad:
+        for r in bad[:20]:
+            sys.stderr.write("would not be found verbatim: %s:%s -> %s (%s)\n"
+                             % (r["src"].rel, r["block"].id, where_of(r), r["block"].preview))
+        raise Fatal("refusing to apply: %d block(s) would not read back as the same block in their "
+                    "destination (merged with neighbouring text, or a comment/provenance line is stale)" % len(bad))
     per = collections.OrderedDict()
     for r in runs:
         d = per.setdefault(r["dest"], {"blocks": 0, "bytes": 0, "new": 0, "done": 0, "real": r["real"]})
         e, src = r["entry"], r["src"]
-        n = e.last - e.first + 1
         if r["done"]:
             d["done"] += 1
         else:
             d["new"] += 1
-            d["blocks"] += n
+            d["blocks"] += e.last - e.first + 1
             d["bytes"] += len(enc(run_text(src, e)))
     print("%s: %s" % ("APPLY" if args.yes else "DRY RUN (nothing written; add --yes to apply)", args.plan))
     for dest, d in per.items():
@@ -648,6 +867,8 @@ def cmd_apply(args):
             print("  skip (already applied): %s" % r["comment"])
             continue
         print("  %s -> %s at %s" % (r["comment"], r["dest"], r["where"]))
+        if r["warn"]:
+            print("  WARNING: %s" % r["warn"])
         for k in range(e.first, e.last + 1):
             b = src.blocks[k - 1]
             print("    %s %-8s %s" % (b.id, b.kind, b.preview))
@@ -667,50 +888,13 @@ def cmd_apply(args):
         write_atomic(real, enc(text), mode)
         written += 1
     print("wrote %d file(s). Next: retrofit.py check %s --report" % (written, args.plan))
+    print("apply has no revert command: undo with git (restore the destinations, delete a new UNSORTED.md)")
     return 0
 
 
 # ---------------------------------------------------------------------------
 # check
 # ---------------------------------------------------------------------------
-
-def count_occurrences(hay, needle):
-    """Non-overlapping occurrences of the line sequence `needle` in the line list `hay`."""
-    m = len(needle)
-    starts = [i for i, ln in enumerate(hay) if ln == needle[0]]
-    cnt, nxt = 0, 0
-    for i in starts:
-        if i >= nxt and hay[i:i + m] == needle:
-            cnt += 1
-            nxt = i + m
-    return cnt
-
-
-def run_check(plan):
-    """Rows (src, block, entry, ok) for every block. Moved => verbatim in the destination;
-    keep => still in the source; unsorted => in UNSORTED.md. Duplicate blocks need that many copies."""
-    need = collections.OrderedDict()
-    rows = []
-    for src in plan.sources:
-        for b in src.blocks:
-            e = src.assign[b.idx]
-            target = src.real if e.kind == "keep" else e.dest_real
-            row = {"src": src, "block": b, "entry": e, "ok": False}
-            rows.append(row)
-            need.setdefault(target, collections.OrderedDict()).setdefault(norm(b.text), []).append(row)
-    for target, by_text in need.items():
-        hay = norm_lines(read_text(target)) if os.path.isfile(target) else []
-        for ntext, rs in by_text.items():
-            occ = count_occurrences(hay, ntext.split("\n")) if hay else 0
-            for k, row in enumerate(rs):
-                row["ok"] = k < occ
-    return rows
-
-
-def where_of(row):
-    e = row["entry"]
-    return "keep" if e.kind == "keep" else e.dest
-
 
 def cmd_check(args):
     root = repo_root(args.repo)
@@ -719,7 +903,7 @@ def cmd_check(args):
     bad = [r for r in rows if not r["ok"]]
     for src in plan.sources:
         mine = [r for r in rows if r["src"] is src]
-        print("source %s: %d block(s)" % (src.rel, len(mine)))
+        print("source %s: %d block(s)%s" % (src.rel, len(mine), " (read from its archive)" if src.origin == "archive" else ""))
         tally = collections.OrderedDict()
         for r in mine:
             t = tally.setdefault(where_of(r), [0, 0])
@@ -728,7 +912,8 @@ def cmd_check(args):
             print("  %-28s ok %4d   missing %4d" % (dest, ok, miss))
     print("accounted: %d/%d   missing or altered: %d" % (len(rows) - len(bad), len(rows), len(bad)))
     for r in bad:
-        print("MISSING %s:%s -> %s  (%s)" % (r["src"].rel, r["block"].id, where_of(r), r["block"].preview))
+        print("MISSING %s:%s -> %s  (%s)%s" % (r["src"].rel, r["block"].id, where_of(r), r["block"].preview,
+                                               "  [%s]" % r["why"] if r["why"] else ""))
     if args.report:
         for src in plan.sources:
             write_report(root, plan, src, [r for r in rows if r["src"] is src])
@@ -745,7 +930,9 @@ def write_report(root, plan, src, rows):
     out = ["# Retrofit coverage: %s" % src.rel, "",
            "- Date: %s" % today(),
            "- Result: %s (%d of %d blocks accounted)" % ("PASS" if not bad else "FAIL", len(rows) - bad, len(rows)),
-           "- Checked by comparing each block with its destination, ignoring only CRLF and trailing blanks.", "",
+           "- Source sha256: %s" % src.sha,
+           "- Checked block by block: each source block must equal a block of its destination, ignoring "
+           "only CRLF and trailing blanks.", "",
            "| Block | Lines | Kind | Preview | Went to | Status |", "|---|---|---|---|---|---|"]
     for x in rows:
         b = x["block"]
@@ -801,10 +988,16 @@ def git_clean(root, rel):
         return False
 
 
+def shquote(s):
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
 def cmd_finalize(args):
     root = repo_root(args.repo)
     plan = parse_plan(root, args.plan)
     src = pick_source(plan, args.source)
+    if src.origin != "live":
+        raise Fatal("%s is already finalized (the live file no longer matches the plan's sha256)" % src.rel)
     rows = run_check(plan)
     bad = [r for r in rows if not r["ok"]]
     if bad:
@@ -819,15 +1012,10 @@ def cmd_finalize(args):
         raise Fatal("--replace-with file is empty")
     if os.path.realpath(args.replace_with) == src.real:
         raise Fatal("--replace-with is the source itself")
-    # Blocks marked keep must survive in the new entry doc, verbatim.
-    hay = norm_lines(repl)
-    need = collections.OrderedDict()
-    for b in keep_blocks(src):
-        need.setdefault(norm(b.text), []).append(b)
-    lost = []
-    for ntext, bs in need.items():
-        occ = count_occurrences(hay, ntext.split("\n"))
-        lost += bs[occ:]
+    # Blocks marked keep must survive in the new entry doc, verbatim, as blocks of their own.
+    krows = [{"block": b, "ok": False} for b in keep_blocks(src)]
+    match_rows(parse_blocks(repl)[1], krows)
+    lost = [r["block"] for r in krows if not r["ok"]]
     if lost:
         for b in lost[:30]:
             print("KEEP BLOCK NOT IN REPLACEMENT %s (%s)" % (b.id, b.preview))
@@ -837,28 +1025,34 @@ def cmd_finalize(args):
     if os.path.islink(os.path.join(root, src.rel)):
         raise Fatal("%s is a symlink; finalize its target instead" % src.rel)
     if not args.allow_dirty and not git_clean(root, src.rel):
-        raise Fatal("%s is not tracked-and-clean in git (commit it first, or pass --allow-dirty)" % src.rel)
+        raise Fatal("%s is not tracked-and-clean in git (commit it first; --allow-dirty only with the "
+                    "operator's explicit yes)" % src.rel)
     arch_rel = os.path.join("docs", "archive", "%s.%s.orig" % (src.rel.replace(os.sep, "__"), today()))
     r, msg = resolve(root, arch_rel)
     if msg:
         raise Fatal(msg)
+    original = open(src.real, "rb").read()
+    reuse = False
     if os.path.lexists(r[1]):
-        raise Fatal("archive already exists, refusing to overwrite: %s" % arch_rel)
+        if os.path.isfile(r[1]) and not os.path.islink(r[1]) and open(r[1], "rb").read() == original:
+            reuse = True      # a retry after a failed replace: the archive is already the original
+        else:
+            raise Fatal("archive already exists and differs, refusing to overwrite: %s" % arch_rel)
     print("%s: %s" % ("FINALIZE" if args.yes else "DRY RUN (nothing written; add --yes)", src.rel))
     print("  check passes; all %d keep block(s) are in the replacement" % len(keep_blocks(src)))
-    print("  archive original (%d bytes) -> %s" % (os.path.getsize(src.real), arch_rel))
+    print("  %s original (%d bytes) -> %s" % ("archive already holds the" if reuse else "archive", len(original), arch_rel))
     print("  replace %s with %s (%d lines)" % (src.rel, args.replace_with, len(split_lines(repl))))
-    undo = "git checkout -- %s && rm %s" % (src.rel, arch_rel)
+    undo = "mv %s %s" % (shquote(arch_rel), shquote(src.rel))
     if args.yes:
-        original = open(src.real, "rb").read()
-        os.makedirs(os.path.dirname(r[1]), exist_ok=True)
-        write_atomic(r[1], original, 0o644)
-        if open(r[1], "rb").read() != original:
-            raise Fatal("archive verification failed; source left untouched")
+        if not reuse:
+            os.makedirs(os.path.dirname(r[1]), exist_ok=True)
+            write_atomic(r[1], original, 0o644)
+            if open(r[1], "rb").read() != original:
+                raise Fatal("archive verification failed; source left untouched")
         write_atomic(src.real, enc(repl), os.stat(src.real).st_mode & 0o777)
-        print("done. Undo: %s" % undo)
+        print("done. Undo, from the repo root (restores exactly what was archived): %s" % undo)
     else:
-        print("  undo later with: %s" % undo)
+        print("  undo later, from the repo root: %s" % undo)
     return 0
 
 
@@ -871,8 +1065,7 @@ def cmd_survey(args):
     cands = []
     for name in sorted(os.listdir(root)):
         low = name.lower()
-        if name in ("CLAUDE.md", "AGENTS.md", "README.md", "TODO.md") or (
-                low.startswith("notes")):
+        if name in ("CLAUDE.md", "AGENTS.md", "README.md", "TODO.md") or low.startswith("notes"):
             cands.append(name)
     docs = os.path.join(root, "docs")
     if os.path.isdir(docs):
@@ -908,13 +1101,15 @@ def cmd_survey(args):
 def cmd_blocks(args):
     if not os.path.isfile(args.file):
         raise Fatal("file not found: %s" % args.file)
-    text = read_text(args.file)
+    data = open(args.file, "rb").read()
+    text = data.decode("utf-8", "surrogateescape")
     lead, blocks = parse_blocks(text)
     if args.rebuild:
         sys.stdout.flush()
         sys.stdout.buffer.write(enc(rebuild(lead, blocks)))
         return 0
-    print("# %s: %d blocks, %d bytes" % (args.file, len(blocks), len(enc(text))))
+    print("# %s: %d blocks, %d bytes" % (args.file, len(blocks), len(data)))
+    print(source_header(os.path.normpath(args.file), data))   # paste this line into the plan
     for b in blocks:
         print("%s  L%d-%d  %-11s %s" % (b.id, b.first, b.last, b.kind, b.preview))
     return 0
@@ -952,6 +1147,13 @@ def main(argv=None):
         return fn(args)
     except Fatal as ex:
         sys.stderr.write("retrofit: %s\n" % ex)
+        return 2
+    except BrokenPipeError:
+        # The reader went away (| head): stop quietly and keep the exit-time flush from complaining.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
+    except (OSError, UnicodeError) as ex:
+        sys.stderr.write("retrofit: %s: %s\n" % (type(ex).__name__, ex))
         return 2
 
 

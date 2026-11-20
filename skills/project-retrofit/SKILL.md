@@ -21,22 +21,28 @@ failure, 2 plan error or refusal (nothing written).
    Stop and wait for the reply.
 2. Scaffold what is missing: `bash <project-factory>/scripts/cut-project.sh --generic [--with a,b] .`
    (existing files are skipped, never overwritten).
-3. `python3 <retrofit.py> blocks <source>`, read the source with line numbers, and
-   write the plan (format and mapping guide: sections/mapping-guide.md). Every
-   block is accounted for exactly once. Ambiguous means `unsorted`. Never guess,
-   never drop.
-4. Run `apply <plan>` (dry run; it validates anchors) and show the operator a
-   SUMMARY TABLE: destination, block count, bytes, first-line previews. Wait for
-   approval or edits. Never apply before approval.
-5. `apply <plan> --yes`, then `check <plan> --report`. If check fails: stop, show
-   the MISSING lines, fix the plan, re-run apply and check.
-6. Write a SLIM replacement entry doc (under 60 lines; the scaffold CLAUDE.md
-   shape: what this is, read-when table, session start) holding only pointers
-   and facts the operator gave or the source states. Blocks marked `keep` must
-   be in it verbatim: `retrofit.py keep <plan>` prints them. Dry-run
-   `finalize <plan> --replace-with <file>`, show the operator, and run it with
-   `--yes` only after approval. It archives the original to `docs/archive/` and
-   prints the undo command.
+3. `python3 <retrofit.py> blocks <source>`; read the source with line numbers.
+   Write the plan to a working file outside every destination, e.g.
+   `.retrofit/plan.md` (tell the operator it is a working file). Its header is the
+   `## source: ... sha256:...` line `blocks` printed, pasted unchanged. Mapping
+   guide and syntax: sections/. Every block is accounted for once. Ambiguous means
+   `unsorted`. Never guess, never drop.
+4. `apply <plan>` (dry run; validates everything) and show the operator a SUMMARY
+   TABLE: destination, block count, bytes, previews, any WARNING. Wait for
+   approval. Never apply before approval.
+5. Ask the operator to commit or stash first, so `git restore <destinations>` (plus
+   deleting a new UNSORTED.md or newly scaffolded files) is the undo: apply has no
+   revert command. Then `apply <plan> --yes` and `check <plan> --report`. If check
+   fails: stop, show the MISSING lines, restore via git, fix the plan, re-run.
+6. Write a SLIM replacement entry doc (under 60 lines). Shape: 
+   `project-factory/templates/_core/CLAUDE.md` (cut-project skips an existing
+   CLAUDE.md). Include only pointers, the `keep` text (`retrofit.py keep <plan>`
+   prints it) and facts in the archived original; nothing mechanical checks the
+   rest, so invent nothing. Show the FULL replacement to the operator; run
+   `finalize <plan> --replace-with <file>` dry, then `--yes` after approval. Never
+   pass `--allow-dirty` without the operator's explicit yes; ask them to commit
+   the source instead. It archives the original to `docs/archive/` and prints
+   the undo (`mv`).
 7. `python3 scripts/map.py` then `python3 scripts/map.py --check`. Report: coverage
    numbers, UNSORTED.md block count, `<fill:` markers left, files changed. Commit
    only if the operator asks.

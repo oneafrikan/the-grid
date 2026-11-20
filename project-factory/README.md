@@ -114,23 +114,34 @@ verbatim.** Nobody retypes source text, so nothing can be reworded or dropped on
 2. `blocks <file>` numbers the file's markdown units as `B012-3fa9` (index plus 4 hex of a hash of the normalised text):
    headings, paragraphs, list items with their nested items, code fences, tables, comments, quotes, front matter.
    The file can be rebuilt byte for byte from its blocks (`blocks <file> --rebuild`; also asserted on every parse).
+   It also prints the plan header line `## source: CLAUDE.md sha256:<hash of the whole file>` to paste into the plan.
 3. A **plan** maps every block: `B012-3fa9 -> GUARDRAILS.md#Hard constraints`, a range `B004-91c2..B009-00ab -> CONVENTIONS.md`,
-   `-> keep` (stays in the source) or `-> unsorted` (goes to `UNSORTED.md`). The parser is strict: unknown id, stale hash,
-   a block not mentioned or mentioned twice, a missing destination, or a path leaving the repo (also via symlink) is
-   an error with a line number and nothing is written.
-4. `apply <plan>` is a dry run; `--yes` appends the blocks verbatim after a `<!-- moved from ... -->` comment, never
-   touches the source, and a second run adds nothing.
-5. `check <plan> [--report]` is the no-judgement proof: every moved block must appear verbatim in its destination (only CRLF
-   and trailing blanks are ignored), every `keep` block must still be in the source, every `unsorted` block in `UNSORTED.md`.
-   Exit 1 on any missing or altered block; `--report` writes `docs/archive/retrofit-<source>-<date>-coverage.md`.
-6. `finalize <plan> --replace-with <slim.md>` runs only if `check` passes and every `keep` block is in the slim doc
-   (`keep <plan>` prints them). It archives the original to `docs/archive/<name>.<date>.orig`, never overwrites an
-   archive, refuses a source that is not tracked-and-clean in git without `--allow-dirty`, and prints the undo command.
+   `-> keep` (stays in the source) or `-> unsorted` (goes to `UNSORTED.md`). The parser is strict: no source section or no
+   block lines, a source that changed since `blocks` (the whole-file sha256 pins it, so a middle-of-range edit is caught),
+   unknown id, stale hash, a block not mentioned or mentioned twice, or a path leaving the repo (also via symlink) is an
+   error with a line number and nothing is written. Destinations are existing `.md`/`.txt` text files: no dotfiles, no
+   binaries, not the plan file, not another source of the plan.
+4. `apply <plan>` is a dry run; `--yes` appends the blocks verbatim after a blank line and a `<!-- moved from ... -->`
+   comment, never touches the source, and a second run adds nothing. Anchors are resolved against the destination as it
+   was before the run, and runs into one heading land in plan order. Before writing anything it checks that every
+   destination is writable and ends outside an unclosed fence or comment, and that every block would read back as itself.
+   It has no revert command: commit or stash first and undo with git.
+5. `check <plan> [--report]` is the no-judgement proof, **block by block**: the destination is parsed into blocks and each
+   moved block must equal one of them (only CRLF and trailing blanks are ignored; text inside a fence or comment never
+   counts; one destination block satisfies one source block). Every `keep` block must still be in the live source, every
+   `unsorted` block in `UNSORTED.md`. Exit 1 on any missing or altered block, a missing destination file included;
+   `--report` writes `docs/archive/retrofit-<source>-<date>-coverage.md`.
+6. `finalize <plan> --replace-with <slim.md>` runs only if `check` passes and every `keep` block is in the slim doc as a
+   block of its own (`keep <plan>` prints them). It archives the original to `docs/archive/<name>.<date>.orig`, refuses an
+   existing archive that differs (a byte-identical one from a failed replace is reused), refuses a source that is not
+   tracked-and-clean in git without `--allow-dirty`, and prints the undo: `mv <archive> <source>`. Afterwards the same plan
+   still checks, because the source text is then read from the archive whose sha256 matches, so a second source can be
+   finalized with the same plan.
 
-Exit codes: 0 ok, 1 coverage failure, 2 usage or plan error or a refusal. The `project-retrofit` skill drives this flow with
-the operator approving the plan before `apply` and the slim doc before `finalize`; `tests/test_project_retrofit.bats` covers it
-with synthetic fixtures. Known limit: in a range, only the two end ids carry a hash, so a source edited between `blocks`
-and `apply` is caught at the ends (and `check` always compares against the current source).
+Exit codes: 0 ok, 1 coverage failure, 2 usage or plan error or a refusal; errors are one line, never a traceback. A hard
+kill can leave a stray `.retrofit-*` temp file next to a destination; delete it. The `project-retrofit` skill drives this
+flow with the operator approving the plan before `apply` and the slim doc before `finalize`;
+`tests/test_project_retrofit.bats` covers it with synthetic fixtures.
 
 ### `SPECS.md` — spec-driven development, on by default
 
