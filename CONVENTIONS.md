@@ -110,6 +110,8 @@ step 5, which needs a human to fill it in — are exactly what `scripts/bootstra
 2. Refresh submodules to match what the pull moved the pointers to:
    `git submodule update --init --recursive`.
 
+Step 3 (recompose agents safely) is in `CLAUDE.md`, under "Recompose agents safely".
+
 <!-- moved from CLAUDE.md B079-bb4b -->
 4. Refresh skills (and agents, and `SKILLS.md`) in one go: `bash scripts/wire.sh`.
    Always safe to run, always run it last.

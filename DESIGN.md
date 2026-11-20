@@ -5,8 +5,6 @@ What goes here: the current design, as built. What does not: why a choice was ma
 
 ## Structure
 
-<fill: top-level directories and what each holds, one line each.>
-
 <!-- moved from CLAUDE.md B011-8441..B063-6658 -->
 `wire.sh` symlinks **skills** into `~/.claude/skills/` so Claude picks them up. It
 also wires **composed agents** from `agent-factory/` (see below): orchestrator
@@ -135,8 +133,6 @@ submodules into two tiers:
 
 ## Key parts
 
-<fill: the main components or modules, what each owns, what each depends on.>
-
 <!-- moved from CLAUDE.md B139-b8b8..B144-265d -->
 ## agent-factory (composed agents)
 
@@ -259,8 +255,6 @@ seeding, as a normal step in the resulting repo — `project-factory` itself sta
 out of that decision. See `project-factory/README.md`.
 
 ## Data flow
-
-<fill: how data moves from input to output, naming each hand-off between parts.>
 
 <!-- moved from CLAUDE.md B116-670f..B138-b3e2 -->
 ## wire.sh contract
