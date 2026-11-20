@@ -10,7 +10,7 @@ setup() {
   CUT="$REPO_ROOT/project-factory/scripts/cut-project.sh"
   TPL="$REPO_ROOT/project-factory/templates"
   P=$(mktemp_canon)
-  CORE="CLAUDE.md CONVENTIONS.md DECISIONS.md DOCS.md GUARDRAILS.md MAP.md PURPOSE.md RULES.md scripts/map.py"
+  CORE="CHANGELOG.md CLAUDE.md CONVENTIONS.md DECISIONS.md DOCS.md GUARDRAILS.md MAP.md PURPOSE.md RULES.md scripts/map.py"
   OPT="ASSUMPTIONS.md CALCULATIONS.md CONTEXT.md DESIGN.md AGENTS.md HUMANS.md LOGS.md"
 }
 
@@ -105,7 +105,7 @@ files_in() { (cd "$1" && find . -name .git -prune -o -type f -print | sed 's|^\.
 
 @test "the generated MAP.md lists the new core docs" {
   bash "$CUT" --generic --with humans "$P" >/dev/null
-  for f in RULES.md CONVENTIONS.md DECISIONS.md DOCS.md HUMANS.md; do
+  for f in RULES.md CONVENTIONS.md DECISIONS.md DOCS.md CHANGELOG.md HUMANS.md; do
     grep -q "\`$f\`" "$P/MAP.md"
   done
 }

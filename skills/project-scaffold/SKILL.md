@@ -11,7 +11,7 @@ already exists and differs.
 
 ## Files
 
-- Core, always: `CLAUDE.md`, `PURPOSE.md`, `RULES.md`, `GUARDRAILS.md`, `CONVENTIONS.md`, `DECISIONS.md`, `DOCS.md`, `MAP.md` (generated), `scripts/map.py`.
+- Core, always: `CLAUDE.md`, `PURPOSE.md`, `RULES.md`, `GUARDRAILS.md`, `CONVENTIONS.md`, `DECISIONS.md`, `DOCS.md`, `CHANGELOG.md`, `MAP.md` (generated), `scripts/map.py`.
 - Optional, only when asked: `design`, `agents`, `logs`, `humans`, `context`, `calculations`, `assumptions` (each becomes `<NAME>.md`).
 
 ## Steps

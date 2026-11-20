@@ -12,6 +12,7 @@
 | `GUARDRAILS.md` | Must-nots, one per line with an ID and how each is checked | before editing, committing or opening a PR |
 | `BEHAVIOUR.md` | This project's additions to the grid-wide agent defaults | before filing a signal or changing how agents work here |
 | `CLAUDE.md` | Conventions and commands for agents | loaded automatically; conventions |
+| `CHANGELOG.md` | What changed, newest first, grouped Added / Changed / Fixed / Removed | you need to know what changed recently |
 | `LEARNINGS.md` | Durable lessons from past work | on demand: debugging, or before repeating a past mistake |
 | `openspec/` | Specs (current truth) and in-flight changes | before implementing: specs and in-flight changes |
 | `SKILLS.md` | Generated index of every skill | choosing a skill |
@@ -27,7 +28,7 @@
 
 ### Skills
 
-- root-owned: caveman, gh-issues-by-severity, grid-help, grill-me, growth-psych, handoff, mine-learnings, openspec-help, rubber-duck, setup-repo-skills, skill-scout, spec-scout, standup, tighten, un-claudish
+- root-owned: caveman, gh-issues-by-severity, grid-help, grill-me, growth-psych, handoff, mine-learnings, openspec-help, project-scaffold, rubber-duck, setup-repo-skills, skill-scout, spec-scout, standup, tighten, un-claudish
 - Full index of every skill: `SKILLS.md`
 
 ### Knowledge

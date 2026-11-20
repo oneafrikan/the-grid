@@ -17,6 +17,7 @@ What goes here: what the project is, what to read when, how a session starts and
 | `CONVENTIONS.md` | Before writing code, docs or a commit |
 | `DECISIONS.md` | Before changing something that looks deliberate |
 | `DOCS.md` | Before guessing how a tool, spec or reference works |
+| `CHANGELOG.md` | You need to know what changed recently (never read `docs/changelog-archive/`) |
 | `MAP.md` | You need to find a file (generated; never hand-edit) |
 | `CONTEXT.md`, `DESIGN.md`, `AGENTS.md`, `HUMANS.md`, `LOGS.md`, `CALCULATIONS.md`, `ASSUMPTIONS.md` | Only if the file exists; `MAP.md` says when to read each |
 
@@ -35,6 +36,6 @@ What goes here: what the project is, what to read when, how a session starts and
 
 ## Keeping docs true
 
-- Before a session ends, update `DECISIONS.md` (new decisions), `CONTEXT.md` and `TODO.md` where they exist.
+- Before a session ends, update `DECISIONS.md` (new decisions), `CHANGELOG.md` (user-visible changes), `CONTEXT.md` and `TODO.md` where they exist.
 - Outdated docs are bugs: fix them in the same change as the code.
 - Regenerate the map after adding or removing a doc: `python3 scripts/map.py`.

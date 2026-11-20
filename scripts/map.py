@@ -71,6 +71,8 @@ REGISTRY = (
      "before writing code, docs or a commit"),
     ("DECISIONS.md", "Dated log of decisions with reasons and alternatives",
      "before changing something that looks deliberate"),
+    ("CHANGELOG.md", "What changed, newest first, grouped Added / Changed / Fixed / Removed",
+     "you need to know what changed recently"),
     ("DOCS.md", "Index of the documentation to consult (vendor, specs, reference)",
      "before guessing how a tool, spec or reference works"),
     ("CONTEXT.md", "Cold-start summary: current state, next priority, binding decisions",

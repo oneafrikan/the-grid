@@ -76,7 +76,7 @@ skipped and listed, a second run is a no-op.
 
 - **Core** (`templates/_core/`, plus `PURPOSE.md` and `GUARDRAILS.md` shared with `_common`): `CLAUDE.md`
   (entry point and read-when table), `PURPOSE.md`, `RULES.md` (operator-owned standing orders),
-  `GUARDRAILS.md`, `CONVENTIONS.md`, `DECISIONS.md`, `DOCS.md` (index of documentation to consult),
+  `GUARDRAILS.md`, `CONVENTIONS.md`, `DECISIONS.md`, `DOCS.md` (index of documentation to consult), `CHANGELOG.md` (what changed, newest first),
   and a generated `MAP.md` (with `scripts/map.py` so it can be regenerated).
 - **Optional** (`templates/_optional/`, only with `--with` or `--all-optional`): `DESIGN`, `AGENTS`, `LOGS`,
   `HUMANS`, `CALCULATIONS`, `ASSUMPTIONS`, and `CONTEXT` (the cold-start summary, kept in `_common`).
