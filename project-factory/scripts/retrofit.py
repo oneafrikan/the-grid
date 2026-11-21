@@ -53,7 +53,7 @@ import tempfile
 STANDARD_DOCS = [
     "CLAUDE.md", "PURPOSE.md", "RULES.md", "GUARDRAILS.md", "CONVENTIONS.md",
     "DECISIONS.md", "DOCS.md", "CHANGELOG.md", "DESIGN.md", "AGENTS.md", "LOGS.md",
-    "HUMANS.md", "CONTEXT.md", "CALCULATIONS.md", "ASSUMPTIONS.md",
+    "HUMANS.md", "CONTEXT.md", "CALCULATIONS.md", "ASSUMPTIONS.md", "LEARNINGS.md", "MEMORY.md",
 ]
 UNSORTED = "UNSORTED.md"
 UNSORTED_HEADER = (

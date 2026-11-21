@@ -1054,3 +1054,23 @@ PY
   [ "$status" -eq 2 ]
   [[ "$output" == *"must be >= 0"* ]] || false
 }
+
+@test "plan: LEARNINGS.md and MEMORY.md are standard docs: refused until scaffolded, accepted after" {
+  plain_plan
+  plan_all "$R/CLAUDE.md" CLAUDE.md LEARNINGS.md
+  plan_fails "scaffold it first"
+  plan_all "$R/CLAUDE.md" CLAUDE.md MEMORY.md
+  plan_fails "scaffold it first"
+  printf '# LEARNINGS.md: What Burned Us\n' > "$R/LEARNINGS.md"
+  printf '# MEMORY.md: What to Remember\n' > "$R/MEMORY.md"
+  plan_all "$R/CLAUDE.md" CLAUDE.md LEARNINGS.md
+  run rf apply "$T/plan.txt" --repo "$R" --yes
+  [ "$status" -eq 0 ]
+  grep -qF -- '<!-- moved from CLAUDE.md' "$R/LEARNINGS.md"
+}
+
+@test "mapping guide: sends lessons to LEARNINGS.md and remember-pointers to MEMORY.md" {
+  g="$REPO_ROOT/skills/project-retrofit/sections/mapping-guide.md"
+  grep -q '`LEARNINGS.md`' "$g"
+  grep -q '`MEMORY.md`' "$g"
+}

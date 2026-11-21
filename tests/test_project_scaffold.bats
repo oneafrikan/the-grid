@@ -11,7 +11,7 @@ setup() {
   TPL="$REPO_ROOT/project-factory/templates"
   P=$(mktemp_canon)
   CORE="CHANGELOG.md CLAUDE.md CONVENTIONS.md DECISIONS.md DOCS.md GUARDRAILS.md MAP.md PURPOSE.md RULES.md scripts/map.py"
-  OPT="ASSUMPTIONS.md CALCULATIONS.md CONTEXT.md DESIGN.md AGENTS.md HUMANS.md LOGS.md"
+  OPT="ASSUMPTIONS.md CALCULATIONS.md CONTEXT.md DESIGN.md AGENTS.md HUMANS.md LOGS.md LEARNINGS.md MEMORY.md"
 }
 
 teardown() {
@@ -50,10 +50,96 @@ files_in() { (cd "$1" && find . -name .git -prune -o -type f -print | sed 's|^\.
   [ ! -e "$P/ASSUMPTIONS.md" ]
 }
 
-@test "--all-optional writes all seven optional files" {
+@test "--all-optional writes all nine optional files" {
   run bash "$CUT" --generic --all-optional "$P"
   [ "$status" -eq 0 ]
   for f in $OPT; do [ -f "$P/$f" ]; done
+}
+
+@test "--with learnings,memory writes exactly those two and they are grid-free" {
+  run bash "$CUT" --generic --with learnings,memory "$P"
+  [ "$status" -eq 0 ]
+  [ -f "$P/LEARNINGS.md" ]
+  [ -f "$P/MEMORY.md" ]
+  [ ! -e "$P/HUMANS.md" ]
+  # the generic LEARNINGS.md is the _optional one, not the grid ledger from _common
+  cmp -s "$TPL/_optional/LEARNINGS.md" "$P/LEARNINGS.md"
+  ! grep -q 'rejected-hashes' "$P/LEARNINGS.md" || false
+}
+
+@test "the generated MAP.md lists LEARNINGS.md and MEMORY.md only when they exist" {
+  bash "$CUT" --generic "$P" >/dev/null
+  ! grep -qE '`(LEARNINGS|MEMORY)\.md`' "$P/MAP.md" || false
+  Q=$(mktemp_canon)
+  bash "$CUT" --generic --with learnings,memory "$Q" >/dev/null
+  grep -q '`LEARNINGS.md`' "$Q/MAP.md"
+  grep -q '`MEMORY.md`' "$Q/MAP.md"
+  # and the generic map stays grid-free with them present
+  run grep -niE '(^|[^[:alnum:]_-])grid([^[:alnum:]_-]|$)|the-grid|agent-factory|signals/|knowledge/|openspec|wire\.sh' "$Q/MAP.md"
+  [ "$status" -eq 1 ]
+  rm -rf "$Q"
+}
+
+@test "MEMORY.md says it is the tracked index, not the personal auto-memory, and stays short" {
+  f="$TPL/_optional/MEMORY.md"
+  grep -q 'not Claude Code.s personal auto-memory' "$f"
+  grep -q '~/.claude/projects/<project>/memory/MEMORY.md' "$f"
+  grep -q 'differs from LEARNINGS.md' "$f"
+  grep -q 'under ~30 lines' "$f"
+  [ "$(wc -l < "$f" | tr -d ' ')" -lt 30 ]
+}
+
+@test "LEARNINGS.md template is one dated entry format with cause and rule, and no ledger hash" {
+  f="$TPL/_optional/LEARNINGS.md"
+  grep -q '^### \[YYYY-MM-DD\]' "$f"
+  grep -q '\*\*Cause:\*\*' "$f"
+  grep -q '\*\*Rule:\*\*' "$f"
+  ! grep -qi 'mine-learnings\|rejected-hashes' "$f" || false
+}
+
+# The LEARNINGS.md rule: the grid ledger in _common supersedes the generic one, in either
+# order, with no SKIPPED noise and no loss (an edited file is still never touched).
+@test "LEARNINGS rule: --with learnings then --grid replaces the unedited generic copy, no SKIPPED" {
+  bash "$CUT" --generic --with learnings "$P" >/dev/null
+  run bash "$CUT" --generic --grid "$P"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"SKIPPED"* ]] || false
+  cmp -s "$TPL/_common/LEARNINGS.md" "$P/LEARNINGS.md"
+}
+
+@test "LEARNINGS rule: --grid then --with learnings leaves the grid copy, counted unchanged, no SKIPPED" {
+  bash "$CUT" --generic --grid "$P" >/dev/null
+  run bash "$CUT" --generic --with learnings "$P"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"SKIPPED"* ]] || false
+  [[ "$output" == *"0 file(s) written, 0 skipped"* ]] || false
+  cmp -s "$TPL/_common/LEARNINGS.md" "$P/LEARNINGS.md"
+}
+
+@test "LEARNINGS rule: --grid and --with learnings in one run, then a rerun, both clean" {
+  run bash "$CUT" --generic --grid --with learnings,memory "$P"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"SKIPPED"* ]] || false
+  cmp -s "$TPL/_common/LEARNINGS.md" "$P/LEARNINGS.md"
+  run bash "$CUT" --generic --grid --with learnings,memory "$P"
+  [[ "$output" == *"0 file(s) written, 0 skipped"* ]] || false
+}
+
+@test "LEARNINGS rule: a stack-template cut with --with learnings keeps the grid copy, no SKIPPED" {
+  run bash "$CUT" --with learnings python-agents-base "$P"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"SKIPPED"* ]] || false
+  cmp -s "$TPL/_common/LEARNINGS.md" "$P/LEARNINGS.md"
+}
+
+@test "LEARNINGS rule: an edited LEARNINGS.md is never replaced, by --grid or by --with learnings" {
+  echo "my lessons" > "$P/LEARNINGS.md"
+  run bash "$CUT" --generic --grid "$P"
+  [ "$(cat "$P/LEARNINGS.md")" = "my lessons" ]
+  [[ "$output" == *"SKIPPED (exists, differs — review manually): LEARNINGS.md"* ]] || false
+  run bash "$CUT" --generic --with learnings "$P"
+  [ "$(cat "$P/LEARNINGS.md")" = "my lessons" ]
+  [[ "$output" == *"SKIPPED (exists, differs — review manually): LEARNINGS.md"* ]] || false
 }
 
 @test "an unknown optional name fails before anything is written" {

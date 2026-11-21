@@ -27,8 +27,9 @@ operator about the project and writes real content into them. The grid layer
    bash <project-factory>/scripts/cut-project.sh --generic [--with a,b | --all-optional] [--grid] <target-dir>
    ```
 
-   `--with` names: design, agents, logs, humans, context, calculations, assumptions.
-   Pick them from the answers (formulas or numbers: calculations, assumptions).
+   `--with` names: design, agents, logs, humans, context, calculations, assumptions, learnings, memory.
+   Pick them from the answers (formulas or numbers: calculations, assumptions;
+   lessons the operator named: learnings; things to remember each session: memory).
 3. Fill every scaffolded file from the answers. Per-file rules: sections/fill-rules.md.
    Never touch a `SKIPPED` file; list it for the operator.
 4. Grid extras, only if chosen: sections/grid-extras.md. State every state-changing

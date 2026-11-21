@@ -378,3 +378,9 @@ stub_python() {
   [ -z "$(find "$P" "$Q" -name .git -prune -o \( -name .DS_Store -o -name '._*' \) -print)" ]
   rm -rf "$Q"
 }
+
+@test "usage lists every optional name, learnings and memory included" {
+  run bash "$CUT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"learnings memory"* ]] || false
+}

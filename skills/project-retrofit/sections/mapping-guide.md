@@ -16,6 +16,8 @@ it. Use ranges (`B004-91c2..B009-00ab`) for runs that go together.
 | Pointers to docs, specs, vendor material | `DOCS.md` |
 | Pointers to logs or handoffs | `LOGS.md` |
 | People, roles, contacts | `HUMANS.md` |
+| A lesson: "gotcha", "never again", "we got burned by ...", with a cause or rule | `LEARNINGS.md` |
+| A pointer to what agents should remember across sessions ("remember to ...", "see X before Y") | `MEMORY.md` |
 | A formula or a worked number | `CALCULATIONS.md` |
 | "We assume ..." | `ASSUMPTIONS.md` |
 | Current state, next steps, open work | `CONTEXT.md` |
@@ -31,7 +33,7 @@ it. Use ranges (`B004-91c2..B009-00ab`) for runs that go together.
   in a short CLAUDE.md (what this is, a read-when pointer). Kept blocks must be
   pasted verbatim into the slim replacement or `finalize` refuses.
 - A destination that does not exist is a plan error: scaffold it in step 2
-  (`--with design,humans,...`), or send the block to `unsorted`.
+  (`--with design,humans,learnings,memory,...`), or send the block to `unsorted`.
 - Use an anchor (`DESIGN.md#Structure`) only for a heading that exists in the
   destination; the block lands at the end of that section. No anchor means the
   end of the file under `## Moved from <source>`.

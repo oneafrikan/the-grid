@@ -19,7 +19,7 @@ What goes here: what the project is, what to read when, how a session starts and
 | `DOCS.md` | Before guessing how a tool, spec or reference works |
 | `CHANGELOG.md` | You need to know what changed recently (never read `docs/changelog-archive/`) |
 | `MAP.md` | You need to find a file (generated; never hand-edit) |
-| `CONTEXT.md`, `DESIGN.md`, `AGENTS.md`, `HUMANS.md`, `LOGS.md`, `CALCULATIONS.md`, `ASSUMPTIONS.md` | Only if the file exists; `MAP.md` says when to read each |
+| `CONTEXT.md`, `DESIGN.md`, `AGENTS.md`, `HUMANS.md`, `LOGS.md`, `CALCULATIONS.md`, `ASSUMPTIONS.md`, `LEARNINGS.md`, `MEMORY.md` | Only if the file exists; `MAP.md` says when to read each |
 
 ## Session start
 

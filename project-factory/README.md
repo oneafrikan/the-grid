@@ -79,7 +79,10 @@ skipped and listed, a second run is a no-op.
   `GUARDRAILS.md`, `CONVENTIONS.md`, `DECISIONS.md`, `DOCS.md` (index of documentation to consult), `CHANGELOG.md` (what changed, newest first),
   and a generated `MAP.md` (with `scripts/map.py` so it can be regenerated).
 - **Optional** (`templates/_optional/`, only with `--with` or `--all-optional`): `DESIGN`, `AGENTS`, `LOGS`,
-  `HUMANS`, `CALCULATIONS`, `ASSUMPTIONS`, and `CONTEXT` (the cold-start summary, kept in `_common`).
+  `HUMANS`, `CALCULATIONS`, `ASSUMPTIONS`, `LEARNINGS` (dated lessons: what burned us, the cause, the rule), `MEMORY` (a tracked index of
+  what agents should remember across sessions; pointers only, not Claude Code's personal auto-memory file), and `CONTEXT` (the cold-start summary, kept in `_common`).
+  Nine in all. `LEARNINGS` also exists in `_common` (grid ledger): the grid one supersedes the generic one in either order, with no
+  `SKIPPED` noise (`--grid` replaces an unedited generic copy; `--with learnings` counts the grid copy as unchanged; an edited file is never touched).
   `--with` also works on a stack-template cut.
 - Every file is a short stub: purpose line, a what-goes-here / what-does-not test, `<fill: ...>` markers.
   Filling them is the next step, not this script's job.

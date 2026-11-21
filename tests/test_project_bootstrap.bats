@@ -173,3 +173,23 @@ sums_in() { (cd "$1" && find . -name .git -prune -o -type f ! -name MAP.md -exec
   grep -q 'never invent a fact' "$SKILL/SKILL.md"
   grep -q '<unknown: ask the operator>' "$SKILL/SKILL.md"
 }
+
+@test "--grid with --with learnings,memory: one run, no SKIPPED, and a second run is a clean no-op" {
+  run bash "$CUT" --generic --grid --with learnings,memory "$P"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"SKIPPED"* ]] || false
+  [ -f "$P/MEMORY.md" ]
+  # the grid ledger wins over the generic LEARNINGS.md
+  cmp -s "$REPO_ROOT/project-factory/templates/_common/LEARNINGS.md" "$P/LEARNINGS.md"
+  run bash "$CUT" --generic --grid --with learnings,memory "$P"
+  [[ "$output" == *"0 file(s) written, 0 skipped"* ]] || false
+}
+
+@test "project-bootstrap: names all nine optional files and fills learnings and memory without inventing" {
+  grep -q 'learnings, memory' "$SKILL/SKILL.md"
+  fr="$SKILL/sections/fill-rules.md"
+  grep -q '^- `LEARNINGS.md`' "$fr"
+  grep -q '^- `MEMORY.md`' "$fr"
+  grep -q 'Never invent or infer a lesson' "$fr"
+  grep -q 'Only list a path that exists' "$fr"
+}

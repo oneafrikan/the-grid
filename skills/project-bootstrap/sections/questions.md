@@ -17,6 +17,8 @@ target directory already holds a README, offer to read it first and ask only the
    needed for the docs to work. Each state-changing step still waits for its own yes.
 9. Adopt the 3 baseline rules in RULES.md (answer questions as questions; check you
    are on current files; never kill processes by pattern)?
+10. Any lessons learned the hard way, or things every session should remember? (If
+   yes, scaffold LEARNINGS and MEMORY; record only what they state.)
 
 Record each answer verbatim in your notes before filling anything. An unanswered
 item is `<unknown: ask the operator>` in the file, not a guess.

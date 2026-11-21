@@ -83,6 +83,8 @@ REGISTRY = (
     ("AGENTS.md", "Which agents work here, what each owns", "before handing work to another agent"),
     ("HUMANS.md", "The people involved and how to work with them", "before asking a person for something"),
     ("LOGS.md", "Index of where process logs, session logs and handoffs live", "looking for a past log"),
+    ("MEMORY.md", "Index of what to remember across sessions: pointers to the detail, no content",
+     "session start"),
     ("CALCULATIONS.md", "Every formula, with inputs, source and a worked example",
      "before using or changing a formula"),
     ("ASSUMPTIONS.md", "Assumptions with owner, review date and what breaks if wrong",

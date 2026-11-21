@@ -8,7 +8,8 @@ never runs them. Run nothing that sends data off the machine.
 `--grid` added: BEHAVIOUR.md, LEARNINGS.md, SPECS.md, AGENTS-SETUP.md, `.grid/project.yaml`,
 `signals/`, `knowledge/` (with `scripts/knowledge.py`), `handoffs/`, the `project-review`
 skill under `.claude/skills/`, `.githooks/pre-commit` and the opt-in `loop/` seed.
-The grid checkout is the directory that holds `project-factory/` and `agent-factory/`.
+If `learnings` was also chosen, the grid `LEARNINGS.md` replaces the unedited generic one (no
+`SKIPPED` line); do not fill it. The grid checkout is the directory that holds `project-factory/` and `agent-factory/`.
 The deploy tools need `agent-factory/.venv`; if it is missing, tell the operator the
 setup command from the grid's CLAUDE.md and wait. Do not build it silently.
 

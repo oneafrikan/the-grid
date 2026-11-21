@@ -13,7 +13,8 @@
 #                    set (templates/_core/ plus PURPOSE.md, GUARDRAILS.md and scripts/map.py
 #                    from _common) and generate MAP.md. Takes just <target-dir>.
 #   --with a,b       also lay down the named optional files (design, agents, logs, humans,
-#                    context, calculations, assumptions). Works with or without --generic.
+#                    context, calculations, assumptions, learnings, memory). Works with or
+#                    without --generic.
 #   --all-optional   shorthand for --with naming all of them.
 #   --grid           with --generic: also lay down the grid-coupled _common files (the
 #                    bootstrap layer, see GRID_FILES below). Without --generic it is a
@@ -35,6 +36,12 @@
 # Generic mode (--generic): see the flag above. Optional files live in templates/_optional/
 # (CONTEXT.md is the exception: it is already in _common, so it is read from there).
 #
+# LEARNINGS.md exists twice: a grid-free one in _optional/ (--with learnings) and the grid
+# one in _common/ (--grid, or any stack cut). RULE: the grid one supersedes the generic one,
+# in either order, with no SKIPPED noise and no loss. --grid replaces a target LEARNINGS.md
+# that is byte-identical to the unedited generic template; --with learnings counts the file
+# as unchanged when it already equals the grid one. An edited file is never touched (SKIPPED).
+#
 # Charter files (change `charter-files`): _common also carries PURPOSE.md, GUARDRAILS.md,
 # BEHAVIOUR.md, signals/, knowledge/, scripts/map.py and a .githooks/pre-commit shim.
 # MAP.md is NOT a template file (it would be wrong the moment any file differs): this
@@ -54,7 +61,7 @@ TEMPLATES_DIR="$FACTORY_DIR/templates"
 COMMON_DIR="$TEMPLATES_DIR/_common"
 CORE_DIR="$TEMPLATES_DIR/_core"          # generic core set, used only by --generic
 OPTIONAL_DIR="$TEMPLATES_DIR/_optional"  # files laid down only when asked for
-OPTIONAL_ALL="design agents logs humans context calculations assumptions"
+OPTIONAL_ALL="design agents logs humans context calculations assumptions learnings memory"
 # Grid-coupled _common files, laid down by --grid (only with --generic). Named here, not
 # discovered, so adding a file to _common never changes a --grid cut by accident. A directory
 # entry is copied file by file. loop/ is the opt-in issue-loop seed, as in a stack cut.
@@ -189,6 +196,11 @@ if [[ "$GENERIC" == 1 ]]; then
   done
   # Grid layer, only when asked. Same copy rule; directories keep their relative path.
   if [[ "$GRID" == 1 ]]; then
+    # LEARNINGS.md rule (see header): an unedited generic LEARNINGS.md is replaced by the
+    # grid one. Guarded by cmp, so only the old, untouched template is ever removed.
+    if [[ -f "$TARGET_DIR/LEARNINGS.md" ]] && cmp -s "$OPTIONAL_DIR/LEARNINGS.md" "$TARGET_DIR/LEARNINGS.md"; then
+      rm -f "$TARGET_DIR/LEARNINGS.md"
+    fi
     for rel in $GRID_FILES; do
       if [[ -d "$COMMON_DIR/$rel" ]]; then
         while IFS= read -r -d '' src; do
@@ -217,6 +229,13 @@ for n in $OPTIONAL_REQ; do
   file="$(printf '%s' "$n" | tr '[:lower:]' '[:upper:]').md"
   src="$OPTIONAL_DIR/$file"
   [[ -f "$src" ]] || src="$COMMON_DIR/$file"   # CONTEXT.md already lives in _common
+  # LEARNINGS.md rule (see header): the grid one in _common wins, so a target that already
+  # holds it is unchanged, not "differs".
+  if [[ "$file" == "LEARNINGS.md" ]] && [[ -f "$TARGET_DIR/$file" ]] \
+     && cmp -s "$COMMON_DIR/$file" "$TARGET_DIR/$file"; then
+    UNCHANGED=$((UNCHANGED + 1))
+    continue
+  fi
   copy_one "$src" "$file"
 done
 
