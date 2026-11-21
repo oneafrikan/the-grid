@@ -104,7 +104,12 @@ files_in() { (cd "$1" && find . -name .git -prune -o -type f -print | sed 's|^\.
   run bash "$CUT" --generic --grid "$P"
   [ "$status" -eq 0 ]
   [[ "$output" != *"SKIPPED"* ]] || false
+  [[ "$output" == *"replaced: LEARNINGS.md (unedited generic template -> grid ledger)"* ]] || false
   cmp -s "$TPL/_common/LEARNINGS.md" "$P/LEARNINGS.md"
+  # the rerun is a clean no-op: nothing replaced, nothing written
+  run bash "$CUT" --generic --grid "$P"
+  [[ "$output" != *"replaced:"* ]] || false
+  [[ "$output" == *"0 file(s) written, 0 skipped"* ]] || false
 }
 
 @test "LEARNINGS rule: --grid then --with learnings leaves the grid copy, counted unchanged, no SKIPPED" {
@@ -140,6 +145,57 @@ files_in() { (cd "$1" && find . -name .git -prune -o -type f -print | sed 's|^\.
   run bash "$CUT" --generic --with learnings "$P"
   [ "$(cat "$P/LEARNINGS.md")" = "my lessons" ]
   [[ "$output" == *"SKIPPED (exists, differs — review manually): LEARNINGS.md"* ]] || false
+}
+
+@test "LEARNINGS rule: an edited file is reported SKIPPED exactly once (grid pass and --with pass)" {
+  bash "$CUT" --generic --with learnings "$P" >/dev/null
+  echo "my lesson" >> "$P/LEARNINGS.md"
+  run bash "$CUT" --generic --grid --with learnings "$P"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'SKIPPED (exists, differs' <<< "$output")" -eq 1 ]
+  [[ "$output" == *"SKIPPED (exists, differs — review manually): LEARNINGS.md"* ]] || false
+  [[ "$output" == *", 1 skipped."* ]] || false
+  grep -q 'my lesson' "$P/LEARNINGS.md"
+}
+
+@test "dedupe is generic: --with context over an edited CONTEXT.md on a stack cut is SKIPPED once" {
+  bash "$CUT" python-agents-base "$P" >/dev/null
+  echo "mine" > "$P/CONTEXT.md"
+  run bash "$CUT" --with context python-agents-base "$P"
+  [ "$(grep -c 'SKIPPED (exists, differs.*CONTEXT.md' <<< "$output")" -eq 1 ]
+}
+
+@test "LEARNINGS rule: a symlink to an identical generic file is SKIPPED and the link survives" {
+  cp "$TPL/_optional/LEARNINGS.md" "$P/real-learnings.md"
+  Q=$(mktemp_canon)
+  ln -s "$P/real-learnings.md" "$Q/LEARNINGS.md"
+  run bash "$CUT" --generic --grid "$Q"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SKIPPED (exists, differs — review manually): LEARNINGS.md"* ]] || false
+  [[ "$output" != *"replaced:"* ]] || false
+  [ -L "$Q/LEARNINGS.md" ]
+  cmp -s "$TPL/_optional/LEARNINGS.md" "$P/real-learnings.md"
+  rm -rf "$Q"
+}
+
+@test "LEARNINGS rule: a directory named LEARNINGS.md is SKIPPED and untouched" {
+  mkdir "$P/LEARNINGS.md"
+  run bash "$CUT" --generic --grid "$P"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SKIPPED (exists, differs — review manually): LEARNINGS.md"* ]] || false
+  [ -d "$P/LEARNINGS.md" ]
+}
+
+@test "LEARNINGS rule: replacing in a read-only directory works (overwrite in place, no delete)" {
+  [ "$(id -u)" -ne 0 ] || skip "root ignores directory permissions"
+  bash "$CUT" --generic --grid "$P" >/dev/null
+  cp "$TPL/_optional/LEARNINGS.md" "$P/LEARNINGS.md"   # back to the unedited generic template
+  chmod a-w "$P"
+  run bash "$CUT" --generic --grid "$P"
+  chmod u+w "$P"                                       # restore before any assert, so teardown can rm
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"replaced: LEARNINGS.md"* ]] || false
+  cmp -s "$TPL/_common/LEARNINGS.md" "$P/LEARNINGS.md"
 }
 
 @test "an unknown optional name fails before anything is written" {

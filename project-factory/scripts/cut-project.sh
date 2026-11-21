@@ -37,10 +37,14 @@
 # (CONTEXT.md is the exception: it is already in _common, so it is read from there).
 #
 # LEARNINGS.md exists twice: a grid-free one in _optional/ (--with learnings) and the grid
-# one in _common/ (--grid, or any stack cut). RULE: the grid one supersedes the generic one,
-# in either order, with no SKIPPED noise and no loss. --grid replaces a target LEARNINGS.md
-# that is byte-identical to the unedited generic template; --with learnings counts the file
-# as unchanged when it already equals the grid one. An edited file is never touched (SKIPPED).
+# one in _common/ (--grid, or any stack cut). RULE, for --generic cuts: the grid one
+# supersedes the generic one, in either order, with no SKIPPED noise and no loss. --grid
+# overwrites IN PLACE (no delete) a target LEARNINGS.md that is a regular file, not a symlink,
+# and byte-identical to the unedited generic template, and prints "replaced: LEARNINGS.md ...";
+# --with learnings counts the file as unchanged when it already equals the grid one. Anything
+# else (edited file, symlink, directory) is never touched and is SKIPPED as usual. A stack-
+# template cut copies _common first, so over an existing unedited generic LEARNINGS.md it
+# reports SKIPPED: the rule does not apply there.
 #
 # Charter files (change `charter-files`): _common also carries PURPOSE.md, GUARDRAILS.md,
 # BEHAVIOUR.md, signals/, knowledge/, scripts/map.py and a .githooks/pre-commit shim.
@@ -153,6 +157,7 @@ echo "Mode:     $MODE (auto-detected)"
 echo ""
 
 WROTE=()
+REPLACED=()   # unedited generic LEARNINGS.md overwritten in place by the grid ledger
 SKIPPED=()
 UNCHANGED=0
 
@@ -196,12 +201,19 @@ if [[ "$GENERIC" == 1 ]]; then
   done
   # Grid layer, only when asked. Same copy rule; directories keep their relative path.
   if [[ "$GRID" == 1 ]]; then
-    # LEARNINGS.md rule (see header): an unedited generic LEARNINGS.md is replaced by the
-    # grid one. Guarded by cmp, so only the old, untouched template is ever removed.
-    if [[ -f "$TARGET_DIR/LEARNINGS.md" ]] && cmp -s "$OPTIONAL_DIR/LEARNINGS.md" "$TARGET_DIR/LEARNINGS.md"; then
-      rm -f "$TARGET_DIR/LEARNINGS.md"
+    # LEARNINGS.md rule (see header): an unedited generic LEARNINGS.md is overwritten in
+    # place by the grid one. No deletion: only a regular, non-symlink file that is
+    # byte-identical to the generic template qualifies, so nothing of the operator's is lost.
+    LEARN_REPLACED=0
+    if [[ -f "$TARGET_DIR/LEARNINGS.md" && ! -L "$TARGET_DIR/LEARNINGS.md" ]] \
+       && cmp -s "$OPTIONAL_DIR/LEARNINGS.md" "$TARGET_DIR/LEARNINGS.md"; then
+      cp "$COMMON_DIR/LEARNINGS.md" "$TARGET_DIR/LEARNINGS.md"
+      REPLACED+=("LEARNINGS.md (unedited generic template -> grid ledger)")
+      LEARN_REPLACED=1
     fi
     for rel in $GRID_FILES; do
+      # Already handled above; copy_one would count it as unchanged a second time.
+      [[ "$rel" == "LEARNINGS.md" && "$LEARN_REPLACED" == 1 ]] && continue
       if [[ -d "$COMMON_DIR/$rel" ]]; then
         while IFS= read -r -d '' src; do
           copy_one "$src" "${src#"$COMMON_DIR"/}"
@@ -227,6 +239,12 @@ for n in $OPTIONAL_REQ; do
   case "$SEEN" in *" $n "*) continue ;; esac
   SEEN="$SEEN$n "
   file="$(printf '%s' "$n" | tr '[:lower:]' '[:upper:]').md"
+  # Already reported SKIPPED by an earlier pass (_common or --grid): do not report it twice.
+  already=0
+  for sk in ${SKIPPED[@]+"${SKIPPED[@]}"}; do
+    [[ "$sk" == "$file" ]] && already=1
+  done
+  [[ "$already" == 1 ]] && continue
   src="$OPTIONAL_DIR/$file"
   [[ -f "$src" ]] || src="$COMMON_DIR/$file"   # CONTEXT.md already lives in _common
   # LEARNINGS.md rule (see header): the grid one in _common wins, so a target that already
@@ -265,6 +283,9 @@ fi
 for f in "${WROTE[@]:-}"; do
   [[ -n "$f" ]] && echo "  wrote:     $f"
 done
+for f in ${REPLACED[@]+"${REPLACED[@]}"}; do
+  echo "  replaced: $f"
+done
 echo "  unchanged: $UNCHANGED file(s) already matched the template"
 for f in "${SKIPPED[@]:-}"; do
   [[ -n "$f" ]] && echo "  SKIPPED (exists, differs — review manually): $f"
@@ -283,7 +304,7 @@ if [[ "$MODE" == "seed" ]] && [[ ! -d "$TARGET_DIR/.git" ]]; then
 fi
 
 echo ""
-echo "Done. ${#WROTE[@]} file(s) written, ${#SKIPPED[@]} skipped."
+echo "Done. $((${#WROTE[@]} + ${#REPLACED[@]})) file(s) written, ${#SKIPPED[@]} skipped."
 # `if`, not `[[ ]] && echo`: the && form made a clean run (nothing skipped) exit 1.
 if [[ ${#SKIPPED[@]} -gt 0 ]]; then
   echo "Review the SKIPPED list above before assuming the retrofit is complete."

@@ -5,7 +5,7 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
-- Added: two optional, grid-free project-kit templates, `LEARNINGS.md` (dated lessons: cause and rule) and `MEMORY.md` (a tracked index of what to remember, pointers only), via `cut-project.sh --with learnings,memory` or `--all-optional` (now nine). With `--grid` the grid `LEARNINGS.md` supersedes the generic one in either order.
+- Added: two optional, grid-free project-kit templates, `LEARNINGS.md` (dated lessons: cause and rule) and `MEMORY.md` (a tracked index of what to remember, pointers only), via `cut-project.sh --with learnings,memory` or `--all-optional` (now nine). In a `--generic` cut, `--grid` overwrites an unedited generic `LEARNINGS.md` in place (printing `replaced:`) and `--with learnings` leaves the grid one alone, in either order; a stack-template cut over an existing unedited generic `LEARNINGS.md` reports it SKIPPED.
 - Added: `scripts/bootstrap-user.sh`, a no-sudo per-user LLM workstation setup (uv, nvm/Node, Claude Code, herdr, gh, claude-rules, openspec, then this repo). Supports `--dry-run` and piped use.
 - Changed: README front door rewritten: hero image and install command first, what the install writes and how to undo it next to the command, a dotfiles mapping and a five-node diagram (the full diagram moved to `docs/architecture.md`), terms, a layers ladder and a "Safe to run" list.
 - Changed: a "Works with" table in the README states what each AI tool gets and whether it is in daily use (Claude Code, Codex CLI, Antigravity CLI) or wired but not yet smoke-tested (Gemini CLI, OpenCode, Pi, OpenClaw); `docs/roadmap.md` updated to match.
