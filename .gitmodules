@@ -26,10 +26,6 @@
 	path = repos/voltagent
 	url = https://github.com/VoltAgent/awesome-openclaw-skills.git
 	shallow = true
-[submodule "repos/clawhub"]
-	path = repos/clawhub
-	url = https://github.com/openclaw/clawhub.git
-	shallow = true
 [submodule "repos/voltagent-agent-skills"]
 	path = repos/voltagent-agent-skills
 	url = https://github.com/VoltAgent/awesome-agent-skills.git
@@ -89,10 +85,6 @@
 [submodule "repos/deanpeters"]
 	path = repos/deanpeters
 	url = https://github.com/deanpeters/Product-Manager-Skills.git
-	shallow = true
-[submodule "repos/paperclip"]
-	path = repos/paperclip
-	url = https://github.com/paperclipai/paperclip.git
 	shallow = true
 [submodule "repos/spillwave-astro"]
 	path = repos/spillwave-astro

@@ -22,7 +22,6 @@ bibliography (not maintained, kept for provenance) see [`reference-resources.md`
 | `repos/automattic` | library | <https://github.com/Automattic/agent-skills> |
 | `repos/automattic-wordpress` | library | <https://github.com/Automattic/wordpress-agent-skills> |
 | `repos/avoid-ai-writing` | library | <https://github.com/conorbronsdon/avoid-ai-writing> |
-| `repos/clawhub` | library | <https://github.com/openclaw/clawhub> |
 | `repos/deanpeters` | library | <https://github.com/deanpeters/Product-Manager-Skills> |
 | `repos/ecc` | library | <https://github.com/affaan-m/ECC> |
 | `repos/gstack` | library | <https://github.com/garrytan/gstack> |
@@ -37,7 +36,6 @@ bibliography (not maintained, kept for provenance) see [`reference-resources.md`
 | `repos/mozilla-bq-etl` | library | <https://github.com/mozilla/bigquery-etl-skills> |
 | `repos/nowork-toprank` | library | <https://github.com/nowork-studio/notfair-plugin> |
 | `repos/openspec` | wired | <https://github.com/Fission-AI/openspec> |
-| `repos/paperclip` | library | <https://github.com/paperclipai/paperclip> |
 | `repos/ponytail` | wired | <https://github.com/DietrichGebert/ponytail> |
 | `repos/quant-zero` | library | <https://github.com/marcohwlam/quant-zero> |
 | `repos/removing-ai-isms` | library | <https://github.com/gvsg-rs/removing-ai-isms> |

@@ -140,8 +140,6 @@ Not enumerated per-skill here (too many) — browse the repo or search with skil
 - **repos/mattberman-meta-ads** — 6 skills
 - **repos/mozilla-bq-etl** — 13 skills
 - **repos/nowork-toprank** — 18 skills
-- **repos/openclaw** — 73 skills
-- **repos/paperclip** — 22 skills
 - **repos/robertbstillwell** — 152 skills
 - **repos/sarai-wp-openclaw** — 2 skills
 - **repos/spillwave-astro** — 1 skills
@@ -151,7 +149,6 @@ Not enumerated per-skill here (too many) — browse the repo or search with skil
 
 Kept for reference — these are indexes/awesome-lists, not skill collections:
 
-- **repos/clawhub**
 - **repos/hesamsheikh**
 - **repos/humanize-writing**
 - **repos/quant-zero**
