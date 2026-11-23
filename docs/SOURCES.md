@@ -36,7 +36,6 @@ bibliography (not maintained, kept for provenance) see [`reference-resources.md`
 | `repos/mattpocock` | partial | <https://github.com/mattpocock/skills> |
 | `repos/mozilla-bq-etl` | library | <https://github.com/mozilla/bigquery-etl-skills> |
 | `repos/nowork-toprank` | library | <https://github.com/nowork-studio/notfair-plugin> |
-| `repos/openclaw` | library | <https://github.com/openclaw/openclaw> |
 | `repos/openspec` | wired | <https://github.com/Fission-AI/openspec> |
 | `repos/paperclip` | library | <https://github.com/paperclipai/paperclip> |
 | `repos/ponytail` | wired | <https://github.com/DietrichGebert/ponytail> |

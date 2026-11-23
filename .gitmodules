@@ -30,10 +30,6 @@
 	path = repos/clawhub
 	url = https://github.com/openclaw/clawhub.git
 	shallow = true
-[submodule "repos/openclaw"]
-	path = repos/openclaw
-	url = https://github.com/openclaw/openclaw.git
-	shallow = true
 [submodule "repos/voltagent-agent-skills"]
 	path = repos/voltagent-agent-skills
 	url = https://github.com/VoltAgent/awesome-agent-skills.git
